@@ -48,6 +48,11 @@ export interface ShopifyStore {
     currency: string;
     country_code: string | null;
     plan_name: string | null;
+    platform: string;
+    environment: 'production' | 'development';
+    connection_status: 'connected' | 'disconnected' | 'error' | 'pending';
+    installed_apps_count: number;
+    last_sync: { status: string; at: string | null } | null;
     created_at: string | null;
     connection: ShopifyConnectionSummary | null;
     app_installations: AppInstallationSummary[];

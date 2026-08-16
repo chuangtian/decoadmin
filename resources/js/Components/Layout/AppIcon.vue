@@ -5,6 +5,12 @@ defineProps<{ name: string; size?: number }>();
 <template>
     <svg :width="size ?? 20" :height="size ?? 20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <template v-if="name === 'dashboard'"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></template>
+        <template v-else-if="name === 'business'"><path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M4 12h16M10 12v2h4v-2"/></template>
+        <template v-else-if="name === 'shopify'"><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/><path d="M10 13c1-1 4-1 4 1s-4 1-4 3 3 2 4 1"/></template>
+        <template v-else-if="name === 'app-center'"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></template>
+        <template v-else-if="name === 'analytics'"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></template>
+        <template v-else-if="name === 'collaboration'"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20a6 6 0 0 1 12 0M13 20a5 5 0 0 1 9 0"/></template>
+        <template v-else-if="name === 'system'"><path d="M4 5h16M4 12h16M4 19h16"/><circle cx="8" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="19" r="2"/></template>
         <template v-else-if="name === 'orders'"><path d="M6 3h12l1 18H5L6 3Z"/><path d="M9 7a3 3 0 0 0 6 0"/></template>
         <template v-else-if="name === 'products'"><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4V7Z"/><path d="M12 11v10"/></template>
         <template v-else-if="name === 'customers' || name === 'users'"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></template>

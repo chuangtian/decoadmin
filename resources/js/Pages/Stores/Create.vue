@@ -4,7 +4,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 
 defineProps<{ callbackUrl: string; configured: boolean }>();
 
-const form = useForm({ name: '', shop_domain: '' });
+const form = useForm({ name: '', shop_domain: '', environment: 'production' });
 const submit = () => form.post('/stores');
 </script>
 
@@ -34,6 +34,14 @@ const submit = () => form.post('/stores');
                             </div>
                             <span v-if="form.errors.shop_domain" class="mt-1.5 block text-xs font-normal text-rose-600">{{ form.errors.shop_domain }}</span>
                             <span v-else class="mt-1.5 block text-xs font-normal text-slate-400">请使用 Shopify 后台显示的永久 myshopify.com 域名。</span>
+                        </label>
+                        <label class="text-sm font-semibold text-slate-800">Environment
+                            <select v-model="form.environment" class="mt-2.5 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-normal outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50">
+                                <option value="production">Production</option>
+                                <option value="development">Development</option>
+                            </select>
+                            <span v-if="form.errors.environment" class="mt-1.5 block text-xs font-normal text-rose-600">{{ form.errors.environment }}</span>
+                            <span v-else class="mt-1.5 block text-xs font-normal text-slate-400">用于区分正式店铺与开发测试店铺。</span>
                         </label>
                     </div>
                 </section>

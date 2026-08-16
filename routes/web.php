@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyOAuthController;
@@ -45,6 +46,9 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::put('/context/organization', [OrganizationContextController::class, 'update'])
+        ->middleware('throttle:30,1')
+        ->name('context.organization.update');
     Route::put('/context/store', [StoreContextController::class, 'update'])
         ->middleware('throttle:30,1')
         ->name('context.store.update');

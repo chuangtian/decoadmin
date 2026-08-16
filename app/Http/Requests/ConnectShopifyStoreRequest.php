@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ConnectShopifyStoreRequest extends FormRequest
 {
@@ -22,6 +23,7 @@ class ConnectShopifyStoreRequest extends FormRequest
                 'max:255',
                 'regex:/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/',
             ],
+            'environment' => ['required', Rule::in(['production', 'development'])],
         ];
     }
 
@@ -39,6 +41,9 @@ class ConnectShopifyStoreRequest extends FormRequest
         $domain = preg_replace('#^https?://#i', '', $domain) ?? $domain;
         $domain = rtrim(explode('/', $domain, 2)[0], '.');
 
-        $this->merge(['shop_domain' => $domain]);
+        $this->merge([
+            'shop_domain' => $domain,
+            'environment' => $this->input('environment', 'production'),
+        ]);
     }
 }

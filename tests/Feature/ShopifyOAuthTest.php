@@ -46,6 +46,7 @@ class ShopifyOAuthTest extends TestCase
             ->post(route('stores.store'), [
                 'name' => 'Macfox US',
                 'shop_domain' => 'macfox-us.myshopify.com',
+                'environment' => 'development',
             ]);
 
         $response->assertRedirect();
@@ -62,7 +63,9 @@ class ShopifyOAuthTest extends TestCase
         $state = OAuthState::query()->sole();
         $this->assertSame(hash('sha256', $query['state']), $state->state_hash);
         $this->assertNotSame($query['state'], $state->state_hash);
-        $this->assertSame('pending', Store::query()->sole()->status);
+        $store = Store::query()->sole();
+        $this->assertSame('pending', $store->status);
+        $this->assertSame('development', data_get($store->settings, 'environment'));
     }
 
     public function test_expired_oauth_state_is_rejected(): void

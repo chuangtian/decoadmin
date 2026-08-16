@@ -13,6 +13,13 @@ class StoreResource extends JsonResource
     {
         $connection = $this->whenLoaded('shopifyConnection');
         $installations = $this->whenLoaded('appInstallations');
+        $latestSync = $this->whenLoaded('latestSyncJob');
+        $connectionStatus = match ($connection instanceof MissingValue ? null : $connection?->status) {
+            'active' => 'connected',
+            'error' => 'error',
+            'inactive', 'disconnected', 'uninstalled' => 'disconnected',
+            default => 'pending',
+        };
 
         return [
             'id' => $this->id,
@@ -23,6 +30,14 @@ class StoreResource extends JsonResource
             'currency' => $this->currency,
             'country_code' => $this->country_code,
             'plan_name' => $this->plan_name,
+            'platform' => 'Shopify',
+            'environment' => data_get($this->settings, 'environment', 'production'),
+            'connection_status' => $connectionStatus,
+            'installed_apps_count' => (int) ($this->installed_apps_count ?? 0),
+            'last_sync' => $latestSync && ! $latestSync instanceof MissingValue ? [
+                'status' => $latestSync->status,
+                'at' => ($latestSync->completed_at ?? $latestSync->failed_at ?? $latestSync->updated_at)?->toIso8601String(),
+            ] : null,
             'created_at' => $this->created_at?->toIso8601String(),
             'connection' => $connection && ! $connection instanceof MissingValue ? [
                 'id' => $connection->id,

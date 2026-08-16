@@ -39,6 +39,11 @@ class Store extends Model
         return $this->hasMany(AppInstallation::class);
     }
 
+    public function latestSyncJob(): HasOne
+    {
+        return $this->hasOne(SyncJob::class)->latestOfMany();
+    }
+
     public function hasMember(User|int $user): bool
     {
         $userId = $user instanceof User ? $user->getKey() : $user;

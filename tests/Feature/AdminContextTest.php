@@ -69,6 +69,42 @@ class AdminContextTest extends TestCase
             ->where('currentStore.id', $asiwoStore->id));
     }
 
+    public function test_organization_switcher_persists_organization_and_selects_an_authorized_store(): void
+    {
+        $user = User::factory()->create();
+        $macfox = $this->organization('Macfox', 'macfox', $user);
+        $asiwo = $this->organization('Asiwo', 'asiwo', $user);
+        $macfoxStore = $this->store($macfox, 'Macfox US', 'macfox-us.myshopify.com');
+        $asiwoStore = $this->store($asiwo, 'Asiwo US', 'asiwo-us.myshopify.com');
+        $macfoxStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $asiwoStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $macfox->id,
+                'current_store_id' => $macfoxStore->id,
+            ])
+            ->from(route('dashboard'))
+            ->put(route('context.organization.update'), ['organization_id' => $asiwo->id])
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHas('current_organization_id', $asiwo->id)
+            ->assertSessionHas('current_store_id', $asiwoStore->id);
+    }
+
+    public function test_organization_switcher_rejects_an_unauthorized_organization(): void
+    {
+        $user = User::factory()->create();
+        $authorized = $this->organization('Macfox', 'macfox', $user);
+        $unauthorized = Organization::query()->create(['name' => 'Other', 'code' => 'other']);
+
+        $this->actingAs($user)
+            ->withSession(['current_organization_id' => $authorized->id])
+            ->put(route('context.organization.update'), ['organization_id' => $unauthorized->id])
+            ->assertForbidden();
+
+        $this->assertSame($authorized->id, session('current_organization_id'));
+    }
+
     private function organization(string $name, string $code, User $user): Organization
     {
         $organization = Organization::query()->create(compact('name', 'code'));

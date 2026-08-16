@@ -31,7 +31,11 @@ class ShopifyStoreAuthorizationTest extends TestCase
                 ->component('Stores/Index')
                 ->has('stores.data', 1)
                 ->where('stores.data.0.id', $authorized->id)
-                ->where('stores.data.0.name', 'Macfox US'));
+                ->where('stores.data.0.name', 'Macfox US')
+                ->where('stores.data.0.platform', 'Shopify')
+                ->where('stores.data.0.connection_status', 'pending')
+                ->where('stores.data.0.installed_apps_count', 0)
+                ->where('stores.data.0.last_sync', null));
 
         $this->assertNotSame($unauthorized->id, session('current_store_id'));
     }

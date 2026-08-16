@@ -73,7 +73,6 @@ class HandleInertiaRequests extends Middleware
                         'status' => $availableStore->status,
                     ])->values()->all(),
                 ])
-                ->filter(fn (array $item) => $item['stores'] !== [])
                 ->values()
                 ->all();
         }

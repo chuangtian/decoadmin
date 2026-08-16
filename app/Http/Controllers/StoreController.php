@@ -28,7 +28,8 @@ class StoreController extends Controller
             ->whereBelongsTo($organization)
             ->when(! $user->isSuperAdmin(), fn ($query) => $query
                 ->whereHas('members', fn ($query) => $query->whereKey($user->getKey())))
-            ->with(['shopifyConnection', 'appInstallations.app'])
+            ->with(['shopifyConnection', 'latestSyncJob'])
+            ->withCount(['appInstallations as installed_apps_count' => fn ($query) => $query->where('status', 'active')])
             ->latest()
             ->paginate(20)
             ->withQueryString();
@@ -63,6 +64,8 @@ class StoreController extends Controller
             return back()->with('error', $exception->getMessage());
         }
 
+        $this->saveEnvironment($authorization['store'], $request->validated('environment'));
+
         return $this->redirectToShopify($authorization);
     }
 
@@ -71,7 +74,9 @@ class StoreController extends Controller
         $this->authorize('view', $store);
 
         return Inertia::render('Stores/Show', [
-            'store' => new StoreResource($store->load(['shopifyConnection', 'appInstallations.app'])),
+            'store' => new StoreResource($store
+                ->load(['shopifyConnection', 'appInstallations.app', 'latestSyncJob'])
+                ->loadCount(['appInstallations as installed_apps_count' => fn ($query) => $query->where('status', 'active')])),
         ]);
     }
 
@@ -89,6 +94,8 @@ class StoreController extends Controller
         } catch (ShopifyOAuthException $exception) {
             return back()->with('error', $exception->getMessage());
         }
+
+        $this->saveEnvironment($authorization['store'], $request->validated('environment'));
 
         return $this->redirectToShopify($authorization);
     }
@@ -110,5 +117,15 @@ class StoreController extends Controller
         );
 
         return Inertia::location($authorization['authorization_url'])->withCookie($cookie);
+    }
+
+    private function saveEnvironment(Store $store, string $environment): void
+    {
+        $store->forceFill([
+            'settings' => [
+                ...($store->settings ?? []),
+                'environment' => $environment,
+            ],
+        ])->save();
     }
 }
