@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 class ShopifyConnectionService
 {
+    public function __construct(private ShopifyConnectionLifecycleService $lifecycle) {}
+
     /**
      * @param  array{access_token: string, scope?: string, expires_in?: int, refresh_token?: string, refresh_token_expires_in?: int}  $token
      */
@@ -29,6 +31,9 @@ class ShopifyConnectionService
             ])->save();
 
             $connection = ShopifyConnection::withTrashed()->firstOrNew(['store_id' => $store->getKey()]);
+            $previousStatus = $connection->exists
+                ? $connection->status
+                : ShopifyConnectionLifecycleService::NEW_CONNECTION;
             $connection->fill([
                 'shop_domain' => $state->shop_domain,
                 'access_token_encrypted' => $token['access_token'],
@@ -39,18 +44,22 @@ class ShopifyConnectionService
                     : null,
                 'scopes' => $scopes,
                 'api_version' => (string) config('shopify.api_version'),
-                'status' => 'connected',
                 'installed_at' => $installedAt,
                 'uninstalled_at' => null,
-                'last_verified_at' => $installedAt,
-                'last_error' => null,
-                'last_error_at' => null,
                 'metadata' => isset($token['refresh_token_expires_in'])
                     ? ['refresh_token_expires_at' => now()->addSeconds((int) $token['refresh_token_expires_in'])->toIso8601String()]
                     : null,
             ]);
             $connection->deleted_at = null;
             $connection->save();
+            $this->lifecycle->markConnected(
+                $connection,
+                $state->user,
+                $previousStatus === ShopifyConnectionLifecycleService::NEW_CONNECTION
+                    ? 'Shopify OAuth 授权完成。'
+                    : 'Shopify OAuth 重新授权完成。',
+                previousStatus: $previousStatus,
+            );
 
             $installation = AppInstallation::withTrashed()->firstOrNew([
                 'app_id' => $state->app_id,

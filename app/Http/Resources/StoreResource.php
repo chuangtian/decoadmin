@@ -44,6 +44,7 @@ class StoreResource extends JsonResource
                 'id' => $connection->id,
                 'status' => $connection->status,
                 'api_version' => $connection->api_version,
+                'last_api_check' => $connection->last_api_check?->toIso8601String(),
                 'scopes' => $connection->scopes,
                 'installed_at' => $connection->installed_at?->toIso8601String(),
                 'last_verified_at' => $connection->last_verified_at?->toIso8601String(),

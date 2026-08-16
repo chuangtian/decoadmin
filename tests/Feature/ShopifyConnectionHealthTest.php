@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
@@ -45,9 +46,14 @@ class ShopifyConnectionHealthTest extends TestCase
         $this->assertSame('connected', $connection->status);
         $this->assertSame(123456, $connection->shopify_shop_id);
         $this->assertNotNull($connection->last_verified_at);
+        $this->assertNotNull($connection->last_api_check);
         $this->assertNull($connection->last_error);
         $this->assertNull($connection->last_error_at);
         $this->assertSame('Macfox US', data_get($connection->metadata, 'health_shop.name'));
+        $audit = AuditLog::query()->where('action', 'shopify_connection_connected')->sole();
+        $this->assertSame($organization->id, $audit->organization_id);
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertSame($user->id, $audit->user_id);
 
         $this->get(route('stores.show', $store))->assertInertia(fn (Assert $page) => $page
             ->where('store.data.connection.status', 'connected')
@@ -80,7 +86,11 @@ class ShopifyConnectionHealthTest extends TestCase
         $this->assertSame('invalid', $connection->status);
         $this->assertSame('Shopify Access Token 无效或已被撤销。', $connection->last_error);
         $this->assertNotNull($connection->last_error_at);
+        $this->assertNotNull($connection->last_api_check);
         $this->assertStringNotContainsString('test-access-token', (string) $connection->last_error);
+        $audit = AuditLog::query()->where('action', 'shopify_connection_invalid')->sole();
+        $this->assertSame('invalid', data_get($audit->new_values, 'status'));
+        $this->assertStringNotContainsString('test-access-token', json_encode($audit->toArray(), JSON_THROW_ON_ERROR));
     }
 
     public function test_user_without_store_management_permission_cannot_verify_connection(): void

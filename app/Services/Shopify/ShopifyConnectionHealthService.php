@@ -3,11 +3,15 @@
 namespace App\Services\Shopify;
 
 use App\Models\ShopifyConnection;
+use App\Models\User;
 use Throwable;
 
 class ShopifyConnectionHealthService
 {
-    public function __construct(private ShopifyGraphQLClient $client) {}
+    public function __construct(
+        private ShopifyGraphQLClient $client,
+        private ShopifyConnectionLifecycleService $lifecycle,
+    ) {}
 
     /**
      * @return array{
@@ -17,16 +21,16 @@ class ShopifyConnectionHealthService
      *     shop: array{id: string, name: string, myshopify_domain: string}|null
      * }
      */
-    public function check(ShopifyConnection $connection): array
+    public function check(ShopifyConnection $connection, ?User $actor = null): array
     {
         if ($connection->trashed() || $connection->uninstalled_at) {
-            return $this->recordFailure($connection, 'disconnected', 'Shopify Connection 已断开。');
+            return $this->recordFailure($connection, 'disconnected', 'Shopify Connection 已断开。', $actor);
         }
 
         try {
             $result = $this->client->checkConnection($connection);
         } catch (Throwable) {
-            return $this->recordFailure($connection, 'warning', 'Shopify API 暂时不可用，请稍后重试。');
+            return $this->recordFailure($connection, 'warning', 'Shopify API 暂时不可用，请稍后重试。', $actor);
         }
 
         if (! $result['success']) {
@@ -36,21 +40,17 @@ class ShopifyConnectionHealthService
                 default => 'warning',
             };
 
-            return $this->recordFailure($connection, $status, $result['message']);
+            return $this->recordFailure($connection, $status, $result['message'], $actor);
         }
 
         $shop = $result['shop'];
-        $metadata = $connection->metadata ?? [];
-        $metadata['health_shop'] = $shop;
-
-        $connection->forceFill([
-            'shopify_shop_id' => $this->numericShopId($shop['id'] ?? null) ?? $connection->shopify_shop_id,
-            'status' => 'connected',
-            'last_verified_at' => now(),
-            'last_error' => null,
-            'last_error_at' => null,
-            'metadata' => $metadata,
-        ])->save();
+        $this->lifecycle->markConnected(
+            $connection,
+            $actor,
+            'Shopify Admin API 验证成功。',
+            apiChecked: true,
+            shop: $shop,
+        );
 
         return [
             'success' => true,
@@ -64,13 +64,13 @@ class ShopifyConnectionHealthService
      * @param  'warning'|'invalid'|'disconnected'  $status
      * @return array{success: false, status: 'warning'|'invalid'|'disconnected', message: string, shop: null}
      */
-    private function recordFailure(ShopifyConnection $connection, string $status, string $message): array
+    private function recordFailure(ShopifyConnection $connection, string $status, string $message, ?User $actor): array
     {
-        $connection->forceFill([
-            'status' => $status,
-            'last_error' => $message,
-            'last_error_at' => now(),
-        ])->save();
+        match ($status) {
+            'invalid' => $this->lifecycle->markInvalid($connection, $message, $actor, apiChecked: true),
+            'disconnected' => $this->lifecycle->markDisconnected($connection, $message, $actor, apiChecked: true),
+            default => $this->lifecycle->markWarning($connection, $message, $actor, apiChecked: true),
+        };
 
         return [
             'success' => false,
@@ -78,14 +78,5 @@ class ShopifyConnectionHealthService
             'message' => $message,
             'shop' => null,
         ];
-    }
-
-    private function numericShopId(?string $shopId): ?int
-    {
-        if (! $shopId || ! preg_match('/\/(\d+)$/', $shopId, $matches)) {
-            return null;
-        }
-
-        return (int) $matches[1];
     }
 }

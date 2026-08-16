@@ -8,6 +8,7 @@ import type { SharedProps, ShopifyStore } from '../../types';
 const props = defineProps<{ store: { data: ShopifyStore } }>();
 const page = usePage<SharedProps>();
 const canConnect = computed(() => page.props.auth.permissions.includes('store.connect'));
+const canReconnect = computed(() => ['invalid', 'disconnected'].includes(props.store.data.connection_status));
 const activeTab = ref('overview');
 const tabs = [
     { id: 'overview', name: '概览', icon: 'stores', description: '', features: [] },
@@ -40,7 +41,7 @@ const connectionHealth = computed(() => connectionStatus[props.store.data.connec
             <Link href="/stores" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回店铺列表</Link>
             <div class="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div class="flex items-center gap-4"><span class="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-xl font-bold text-emerald-700">{{ store.data.name.charAt(0).toUpperCase() }}</span><div><div class="flex flex-wrap items-center gap-2"><h2 class="text-3xl font-semibold tracking-tight text-slate-950">{{ store.data.name }}</h2><span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{{ store.data.environment === 'development' ? 'Development' : 'Production' }}</span></div><p class="mt-1 font-mono text-xs text-slate-500">{{ store.data.shopify_domain }}</p></div></div>
-                <form v-if="canConnect" @submit.prevent="reconnect"><button :disabled="form.processing" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50">{{ form.processing ? '正在跳转…' : (store.data.connection ? '重新授权' : '继续连接') }}</button></form>
+                <form v-if="canConnect && !store.data.connection" @submit.prevent="reconnect"><button :disabled="form.processing" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50">{{ form.processing ? '正在跳转…' : '继续连接' }}</button></form>
             </div>
 
             <div class="mt-7 overflow-x-auto border-b border-slate-200"><nav class="flex min-w-max gap-1" aria-label="店铺详情导航"><button v-for="tab in tabs" :key="tab.id" type="button" class="border-b-2 px-4 py-3 text-sm font-semibold transition" :class="activeTab === tab.id ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'" @click="activeTab = tab.id">{{ tab.name }}</button></nav></div>
@@ -62,17 +63,19 @@ const connectionHealth = computed(() => connectionStatus[props.store.data.connec
                     <div class="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                         <div>
                             <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Shopify Admin API</p>
-                            <h3 class="mt-1 text-xl font-semibold text-slate-950">Connection Health</h3>
-                            <p class="mt-1 text-sm text-slate-500">验证 Access Token 是否仍可访问当前 Shopify 店铺。</p>
+                            <h3 class="mt-1 text-xl font-semibold text-slate-950">Connection Lifecycle</h3>
+                            <p class="mt-1 text-sm text-slate-500">查看授权生命周期、API 连通状态与最近一次异常。</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-3">
                             <span class="inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset" :class="connectionHealth.badge">{{ connectionHealth.label }}</span>
-                            <button v-if="canConnect" type="button" :disabled="healthForm.processing" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-50" @click="verifyConnection">{{ healthForm.processing ? '正在检测…' : 'Verify Connection' }}</button>
+                            <form v-if="canConnect && canReconnect" @submit.prevent="reconnect"><button :disabled="form.processing" class="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-wait disabled:opacity-50">{{ form.processing ? '正在跳转…' : 'Reconnect Shopify' }}</button></form>
+                            <button v-else-if="canConnect" type="button" :disabled="healthForm.processing" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-50" @click="verifyConnection">{{ healthForm.processing ? '正在检测…' : 'Verify Connection' }}</button>
                         </div>
                     </div>
-                    <dl class="grid gap-px bg-slate-100 sm:grid-cols-3">
+                    <dl class="grid gap-px bg-slate-100 sm:grid-cols-2 xl:grid-cols-4">
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Connection Status</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ connectionHealth.label }}</dd></div>
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Last Verified</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.connection.last_verified_at) }}</dd></div>
+                        <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Last API Check</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.connection.last_api_check) }}</dd></div>
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">API Version</dt><dd class="mt-2 font-mono text-sm font-semibold text-slate-900">{{ store.data.connection.api_version }}</dd></div>
                     </dl>
                     <div v-if="store.data.connection.last_error" class="border-t border-rose-100 bg-rose-50 px-5 py-4 text-sm text-rose-800 sm:px-6">

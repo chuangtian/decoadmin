@@ -29,6 +29,7 @@ export interface ShopifyConnectionSummary {
     id: number;
     status: ShopifyConnectionStatus;
     api_version: string;
+    last_api_check: string | null;
     scopes: string[];
     installed_at: string | null;
     last_verified_at: string | null;

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Exceptions\ShopifyOAuthException;
 use App\Models\App;
 use App\Models\AppInstallation;
+use App\Models\AuditLog;
 use App\Models\OAuthState;
 use App\Models\Organization;
 use App\Models\ShopifyConnection;
@@ -137,6 +138,10 @@ class ShopifyOAuthTest extends TestCase
         $this->assertArrayNotHasKey('refresh_token_encrypted', $connection->toArray());
         $this->assertArrayNotHasKey('client_secret_encrypted', $app->toArray());
         $this->assertNotNull($authorization['state_record']->fresh()->consumed_at);
+        $audit = AuditLog::query()->where('action', 'shopify_connection_connected')->sole();
+        $this->assertSame($organization->id, $audit->organization_id);
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertSame($user->id, $audit->user_id);
 
         Http::assertSent(fn ($request) => $request->url() === 'https://macfox-us.myshopify.com/admin/oauth/access_token'
             && $request['client_id'] === 'test-client-id'
