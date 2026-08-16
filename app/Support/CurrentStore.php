@@ -20,7 +20,7 @@ class CurrentStore
 
     public function require(): Store
     {
-        abort_unless($this->store, 422, 'No current store has been selected.');
+        abort_unless($this->store, 422, '尚未选择当前店铺。');
 
         return $this->store;
     }

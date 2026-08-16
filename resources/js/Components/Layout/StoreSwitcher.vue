@@ -19,9 +19,9 @@ const switchStore = (event: Event) => {
 
 <template>
     <label class="relative block min-w-0">
-        <span class="sr-only">Current store</span>
+        <span class="sr-only">当前店铺</span>
         <select :value="page.props.currentStore?.id ?? ''" :disabled="switching || !page.props.availableOrganizations.length" class="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white py-0 pr-9 pl-3 text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 disabled:cursor-wait disabled:opacity-60" @change="switchStore">
-            <option v-if="!page.props.currentStore" value="">No store available</option>
+            <option v-if="!page.props.currentStore" value="">暂无可用店铺</option>
             <optgroup v-for="organization in page.props.availableOrganizations" :key="organization.id" :label="organization.name">
                 <option v-for="store in organization.stores" :key="store.id" :value="store.id">{{ store.name }}</option>
             </optgroup>

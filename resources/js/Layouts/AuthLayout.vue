@@ -15,11 +15,11 @@ defineProps<{ title: string; description: string }>();
                 <div><p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-400">Commerce OS</p><p class="font-semibold">Shopify Commerce Hub</p></div>
             </div>
             <div class="relative max-w-2xl">
-                <p class="mb-6 text-sm font-semibold uppercase tracking-[0.24em] text-emerald-400">One secure workspace</p>
-                <h1 class="text-5xl font-semibold leading-[1.08] tracking-[-0.04em]">Operate every store with clarity and control.</h1>
-                <p class="mt-6 max-w-xl text-lg leading-8 text-slate-400">A unified command center for teams, permissions, and multi-store operations.</p>
+                <p class="mb-6 text-sm font-semibold tracking-[0.24em] text-emerald-400">安全统一的工作空间</p>
+                <h1 class="text-5xl font-semibold leading-[1.15] tracking-[-0.04em]">清晰、高效地管理每一家店铺。</h1>
+                <p class="mt-6 max-w-xl text-lg leading-8 text-slate-400">将团队、权限与多店铺运营集中在一个管理中心。</p>
             </div>
-            <div class="relative flex items-center gap-8 text-xs text-slate-500"><span>Role-based access</span><span>Store isolation</span><span>Secure sessions</span></div>
+            <div class="relative flex items-center gap-8 text-xs text-slate-500"><span>角色权限控制</span><span>店铺数据隔离</span><span>安全会话</span></div>
         </section>
 
         <main class="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-10 sm:px-10 lg:bg-white">

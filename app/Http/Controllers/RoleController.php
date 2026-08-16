@@ -52,7 +52,7 @@ class RoleController extends Controller
 
         return $request->expectsJson()
             ? (new RoleResource($role->load('permissions')))->response()->setStatusCode(201)
-            : to_route('roles.show', $role)->with('success', 'Role created.');
+            : to_route('roles.show', $role)->with('success', '角色创建成功。');
     }
 
     public function show(Request $request, Role $role): Response|JsonResponse
@@ -85,7 +85,7 @@ class RoleController extends Controller
 
         return $request->expectsJson()
             ? (new RoleResource($role->load('permissions')))->response()
-            : back()->with('success', 'Role updated.');
+            : back()->with('success', '角色更新成功。');
     }
 
     public function destroy(Request $request, Role $role): RedirectResponse|JsonResponse
@@ -95,7 +95,7 @@ class RoleController extends Controller
 
         return $request->expectsJson()
             ? response()->json(status: 204)
-            : to_route('roles.index')->with('success', 'Role removed.');
+            : to_route('roles.index')->with('success', '角色已移除。');
     }
 
     public function updatePermissions(UpdateRolePermissionsRequest $request, Role $role): RedirectResponse|JsonResponse
@@ -105,6 +105,6 @@ class RoleController extends Controller
 
         return $request->expectsJson()
             ? (new RoleResource($role->load('permissions')))->response()
-            : back()->with('success', 'Permissions updated.');
+            : back()->with('success', '权限更新成功。');
     }
 }

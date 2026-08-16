@@ -20,7 +20,7 @@ class CurrentOrganization
 
     public function require(): Organization
     {
-        abort_unless($this->organization, 422, 'No current organization has been selected.');
+        abort_unless($this->organization, 422, '尚未选择当前组织。');
 
         return $this->organization;
     }

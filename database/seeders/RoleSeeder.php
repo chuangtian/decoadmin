@@ -15,43 +15,43 @@ class RoleSeeder extends Seeder
     /** @var array<string, array{name: string, description: string, permissions: list<string>}> */
     private array $roles = [
         'super-admin' => [
-            'name' => 'Super Admin',
-            'description' => 'Unrestricted platform administrator.',
+            'name' => '超级管理员',
+            'description' => '拥有平台全部管理权限。',
             'permissions' => ['*'],
         ],
         'organization-admin' => [
-            'name' => 'Organization Admin',
-            'description' => 'Manages users, roles, stores, and organization data.',
+            'name' => '组织管理员',
+            'description' => '管理组织内的用户、角色、店铺及组织资料。',
             'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', '*.view'],
         ],
         'store-admin' => [
-            'name' => 'Store Admin',
-            'description' => 'Manages an assigned store and its commerce operations.',
+            'name' => '店铺管理员',
+            'description' => '管理指定店铺及其日常业务运营。',
             'permissions' => ['store.view', 'store.update', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'sync.*'],
         ],
         'developer' => [
-            'name' => 'Developer',
-            'description' => 'Manages integrations, applications, webhooks, sync, and logs.',
+            'name' => '开发人员',
+            'description' => '管理集成、应用、Webhooks、数据同步和日志。',
             'permissions' => ['store.view', 'apps.*', 'shopify.*', 'webhooks.*', 'sync.*', 'audit.view', 'system.health.view'],
         ],
         'operator' => [
-            'name' => 'Operator',
-            'description' => 'Runs day-to-day store operations.',
+            'name' => '运营人员',
+            'description' => '负责店铺的日常运营工作。',
             'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view'],
         ],
         'marketing' => [
-            'name' => 'Marketing',
-            'description' => 'Reads product, customer, and audit information.',
+            'name' => '营销人员',
+            'description' => '查看商品、客户和审计信息。',
             'permissions' => ['products.view', 'customers.view', 'audit.view'],
         ],
         'customer-service' => [
-            'name' => 'Customer Service',
-            'description' => 'Reads order and customer information.',
+            'name' => '客户服务',
+            'description' => '查看订单和客户信息。',
             'permissions' => ['orders.view', 'customers.view'],
         ],
         'viewer' => [
-            'name' => 'Viewer',
-            'description' => 'Read-only access to assigned resources.',
+            'name' => '只读成员',
+            'description' => '仅可查看已分配的资源。',
             'permissions' => ['*.view'],
         ],
     ];

@@ -22,6 +22,6 @@ class StoreContextController extends Controller
             'current_store_id' => $store->getKey(),
         ]);
 
-        return back()->with('success', "Switched to {$store->name}.");
+        return back()->with('success', "已切换至 {$store->name}。");
     }
 }

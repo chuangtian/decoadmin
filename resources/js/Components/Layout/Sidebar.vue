@@ -23,7 +23,7 @@ const isActive = (route: string) => page.url === route || page.url.startsWith(`$
                 <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h6a4 4 0 0 1 0 8H7V7Z"/><path d="M7 3v18M13 7h4"/></svg>
             </div>
             <div><p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-400">Commerce OS</p><p class="mt-0.5 font-semibold tracking-tight">{{ page.props.appName }}</p></div>
-            <button class="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/8 hover:text-white lg:hidden" aria-label="Close navigation" @click="emit('close')">×</button>
+            <button class="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/8 hover:text-white lg:hidden" aria-label="关闭导航" @click="emit('close')">×</button>
         </div>
 
         <nav class="flex-1 overflow-y-auto px-4 py-6">
@@ -34,8 +34,8 @@ const isActive = (route: string) => page.url === route || page.url.startsWith(`$
                         <Link v-if="!item.comingSoon" :href="item.route" class="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition" :class="isActive(item.route) ? 'bg-emerald-400/12 text-emerald-300 ring-1 ring-inset ring-emerald-400/15' : 'text-slate-400 hover:bg-white/6 hover:text-slate-100'" @click="emit('close')">
                             <AppIcon :name="item.icon" :size="19"/><span>{{ item.label }}</span>
                         </Link>
-                        <div v-else class="group flex cursor-default items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600" :title="`${item.label} is reserved for a later phase`">
-                            <AppIcon :name="item.icon" :size="19"/><span>{{ item.label }}</span><span class="ml-auto rounded-full border border-white/8 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-600">Soon</span>
+                        <div v-else class="group flex cursor-default items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600" :title="`${item.label}将在后续阶段开放`">
+                            <AppIcon :name="item.icon" :size="19"/><span>{{ item.label }}</span><span class="ml-auto rounded-full border border-white/8 px-1.5 py-0.5 text-[9px] tracking-wide text-slate-600">即将开放</span>
                         </div>
                     </template>
                 </div>
@@ -43,7 +43,7 @@ const isActive = (route: string) => page.url === route || page.url.startsWith(`$
         </nav>
 
         <div class="border-t border-white/8 px-6 py-4 text-xs text-slate-500">
-            <div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.7)]"/><span>Platform operational</span></div>
+            <div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.7)]"/><span>平台运行正常</span></div>
         </div>
     </aside>
 </template>

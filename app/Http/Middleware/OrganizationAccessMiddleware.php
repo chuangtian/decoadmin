@@ -35,7 +35,7 @@ class OrganizationAccessMiddleware
             ? Organization::query()->where('status', 'active')->orderBy('name')->first()
             : $user->organizations()->where('organizations.status', 'active')->orderBy('name')->first();
 
-        abort_unless($organization, 422, 'No current organization is available.');
+        abort_unless($organization, 422, '当前没有可用组织。');
         abort_unless($user->isSuperAdmin() || $user->organizations()->whereKey($organization->getKey())->exists(), 403);
 
         $this->currentOrganization->set($organization);

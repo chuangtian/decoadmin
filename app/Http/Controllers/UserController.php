@@ -79,7 +79,7 @@ class UserController extends Controller
             return (new UserResource($user->load(['roles', 'stores'])))->response()->setStatusCode(201);
         }
 
-        return to_route('users.index')->with('success', 'User created.');
+        return to_route('users.index')->with('success', '用户创建成功。');
     }
 
     public function edit(User $user): Response
@@ -140,7 +140,7 @@ class UserController extends Controller
             return (new UserResource($user->fresh()->load(['roles', 'stores'])))->response();
         }
 
-        return to_route('users.index')->with('success', 'User updated.');
+        return to_route('users.index')->with('success', '用户更新成功。');
     }
 
     public function destroy(Request $request, User $user): RedirectResponse|JsonResponse
@@ -169,7 +169,7 @@ class UserController extends Controller
 
         return $request->expectsJson()
             ? response()->json(status: 204)
-            : to_route('users.index')->with('success', 'User removed.');
+            : to_route('users.index')->with('success', '用户已从当前组织移除。');
     }
 
     public function assignRoles(AssignUserRolesRequest $request, User $user): JsonResponse|RedirectResponse
@@ -184,7 +184,7 @@ class UserController extends Controller
 
         return $request->expectsJson()
             ? (new UserResource($user->load('roles')))->response()
-            : back()->with('success', 'Roles updated.');
+            : back()->with('success', '角色更新成功。');
     }
 
     public function assignStores(AssignUserStoresRequest $request, User $user): JsonResponse|RedirectResponse
@@ -194,7 +194,7 @@ class UserController extends Controller
 
         return $request->expectsJson()
             ? (new UserResource($user->load('stores')))->response()
-            : back()->with('success', 'Stores updated.');
+            : back()->with('success', '店铺访问范围更新成功。');
     }
 
     private function options(): array
