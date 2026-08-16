@@ -24,7 +24,7 @@ export const menu: MenuSection[] = [
     {
         label: 'Shopify',
         items: [
-            { label: '店铺', route: '/stores', icon: 'stores', permission: 'store.view', comingSoon: true },
+            { label: '店铺', route: '/stores', icon: 'stores', permission: 'store.view' },
             { label: '应用', route: '/apps', icon: 'apps', permission: 'apps.view', comingSoon: true },
             { label: '数据同步', route: '/sync', icon: 'sync', permission: 'sync.view', comingSoon: true },
             { label: 'Webhooks', route: '/webhooks', icon: 'webhooks', permission: 'webhooks.view', comingSoon: true },

@@ -8,7 +8,9 @@ use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\StoreContextController;
+use App\Http\Controllers\StoreController;
 use App\Http\Controllers\UserController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
@@ -17,6 +19,10 @@ use Inertia\Inertia;
 Route::get('/', fn () => auth()->check()
     ? redirect()->route('dashboard')
     : redirect()->route('login'))->name('home');
+
+Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'])
+    ->middleware('throttle:30,1')
+    ->name('shopify.oauth.callback');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -65,6 +71,12 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions'])->middleware('permission:roles.update')->name('roles.permissions.update');
 
     Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:roles.view')->name('permissions.index');
+
+    Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
+    Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');
+    Route::post('/stores', [StoreController::class, 'store'])->middleware('permission:store.create')->name('stores.store');
+    Route::get('/stores/{store}', [StoreController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.show');
+    Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:store.connect'])->name('stores.connect');
 
     Route::get('/stores/{store}/access-check', fn (Store $store) => response()->json(['data' => ['id' => $store->id]]))
         ->middleware(['store.access', 'permission:store.view'])

@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable(['organization_id', 'name', 'shopify_domain', 'shopify_shop_id', 'status', 'timezone', 'currency', 'country_code', 'plan_name', 'settings', 'created_by'])]
@@ -27,6 +29,16 @@ class Store extends Model
             ->withTimestamps();
     }
 
+    public function shopifyConnection(): HasOne
+    {
+        return $this->hasOne(ShopifyConnection::class);
+    }
+
+    public function appInstallations(): HasMany
+    {
+        return $this->hasMany(AppInstallation::class);
+    }
+
     public function hasMember(User|int $user): bool
     {
         $userId = $user instanceof User ? $user->getKey() : $user;
@@ -36,6 +48,9 @@ class Store extends Model
 
     protected function casts(): array
     {
-        return ['settings' => 'array'];
+        return [
+            'settings' => 'array',
+            'shopify_shop_id' => 'integer',
+        ];
     }
 }

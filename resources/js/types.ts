@@ -23,6 +23,36 @@ export interface StoreOption {
     status: string;
 }
 
+export interface ShopifyConnectionSummary {
+    id: number;
+    status: string;
+    api_version: string;
+    scopes: string[];
+    installed_at: string | null;
+    last_verified_at: string | null;
+}
+
+export interface AppInstallationSummary {
+    id: number;
+    status: string;
+    installed_at: string | null;
+    app: { id: number; name: string; handle: string; status: string } | null;
+}
+
+export interface ShopifyStore {
+    id: number;
+    name: string;
+    shopify_domain: string;
+    status: string;
+    timezone: string;
+    currency: string;
+    country_code: string | null;
+    plan_name: string | null;
+    created_at: string | null;
+    connection: ShopifyConnectionSummary | null;
+    app_installations: AppInstallationSummary[];
+}
+
 export interface OrganizationOption {
     id: number;
     name: string;
