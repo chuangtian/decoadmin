@@ -23,6 +23,13 @@ export interface StoreOption {
     status: string;
 }
 
+export interface OrganizationOption {
+    id: number;
+    name: string;
+    code: string;
+    stores: StoreOption[];
+}
+
 export interface User {
     id: number;
     name: string;
@@ -51,6 +58,8 @@ export interface SharedProps {
         permissions: string[];
     };
     currentOrganization: { id: number; name: string; code: string } | null;
+    currentStore: (StoreOption & { organization_id: number }) | null;
+    availableOrganizations: OrganizationOption[];
     flash: { success?: string; error?: string };
     [key: string]: unknown;
 }

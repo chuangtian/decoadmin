@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Link } from '@inertiajs/vue3';
+
 defineProps<{
     framework: string;
 }>();
@@ -12,6 +14,7 @@ defineProps<{
             <p class="mt-6 text-lg leading-8 text-slate-300">
                 Laravel {{ framework }} · Vue 3 · Inertia 3 · Tailwind CSS 4 · Vite 8
             </p>
+            <Link href="/login" class="mt-8 inline-flex rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">Open admin workspace</Link>
         </section>
     </main>
 </template>

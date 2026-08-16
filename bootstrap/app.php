@@ -3,6 +3,7 @@
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
+use App\Http\Middleware\ResolveCurrentStore;
 use App\Http\Middleware\StoreAccessMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'organization.access' => OrganizationAccessMiddleware::class,
             'permission' => PermissionMiddleware::class,
+            'store.context' => ResolveCurrentStore::class,
             'store.access' => StoreAccessMiddleware::class,
         ]);
 

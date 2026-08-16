@@ -1,7 +1,14 @@
 <?php
 
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\EmailVerificationNotificationController;
+use App\Http\Controllers\Auth\EmailVerificationPromptController;
+use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
+use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\UserController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
@@ -11,7 +18,35 @@ Route::get('/', fn () => Inertia::render('Welcome', [
     'framework' => app()->version(),
 ]))->name('home');
 
-Route::middleware(['auth', 'organization.access'])->group(function (): void {
+Route::middleware('guest')->group(function (): void {
+    Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
+    Route::post('/login', [AuthenticatedSessionController::class, 'store']);
+    Route::get('/forgot-password', [PasswordResetLinkController::class, 'create'])->name('password.request');
+    Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->name('password.email');
+    Route::get('/reset-password/{token}', [NewPasswordController::class, 'create'])->name('password.reset');
+    Route::post('/reset-password', [NewPasswordController::class, 'store'])->name('password.store');
+});
+
+Route::middleware('auth')->group(function (): void {
+    Route::get('/verify-email', EmailVerificationPromptController::class)->name('verification.notice');
+    Route::get('/verify-email/{id}/{hash}', VerifyEmailController::class)
+        ->middleware(['signed', 'throttle:6,1'])
+        ->name('verification.verify');
+    Route::post('/email/verification-notification', [EmailVerificationNotificationController::class, 'store'])
+        ->middleware('throttle:6,1')
+        ->name('verification.send');
+    Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+});
+
+Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::put('/context/store', [StoreContextController::class, 'update'])
+        ->middleware('throttle:30,1')
+        ->name('context.store.update');
+});
+
+Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
+    Route::get('/dashboard', fn () => Inertia::render('Dashboard/Index'))->name('dashboard');
+
     Route::get('/users', [UserController::class, 'index'])->middleware('permission:users.view')->name('users.index');
     Route::get('/users/create', [UserController::class, 'create'])->middleware('permission:users.create')->name('users.create');
     Route::post('/users', [UserController::class, 'store'])->middleware('permission:users.create')->name('users.store');

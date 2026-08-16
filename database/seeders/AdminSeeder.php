@@ -21,6 +21,7 @@ class AdminSeeder extends Seeder
             'status' => 'active',
             'metadata' => $metadata,
         ]);
+        $user->email_verified_at ??= now();
         $user->deleted_at = null;
         $user->save();
 
