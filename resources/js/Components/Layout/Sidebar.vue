@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { menu } from '../../config/menu';
 import type { SharedProps } from '../../types';
 import AppIcon from './AppIcon.vue';
@@ -8,11 +8,25 @@ import AppIcon from './AppIcon.vue';
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const page = usePage<SharedProps>();
+const navigation = ref<HTMLElement | null>(null);
+const scrollStorageKey = 'admin-sidebar-scroll-position';
 const sections = computed(() => menu.map((section) => ({
     ...section,
     items: section.items.filter((item) => !item.permission || page.props.auth.permissions.includes(item.permission)),
 })).filter((section) => section.items.length));
 const isActive = (route: string) => page.url === route || page.url.startsWith(`${route}/`);
+const rememberScrollPosition = () => {
+    if (navigation.value) sessionStorage.setItem(scrollStorageKey, String(navigation.value.scrollTop));
+};
+
+onMounted(() => {
+    const savedPosition = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
+    requestAnimationFrame(() => {
+        if (navigation.value) navigation.value.scrollTop = savedPosition;
+    });
+});
+
+onBeforeUnmount(rememberScrollPosition);
 </script>
 
 <template>
@@ -26,7 +40,7 @@ const isActive = (route: string) => page.url === route || page.url.startsWith(`$
             <button class="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/8 hover:text-white lg:hidden" aria-label="关闭导航" @click="emit('close')">×</button>
         </div>
 
-        <nav class="flex-1 overflow-y-auto px-4 py-6">
+        <nav ref="navigation" class="flex-1 overflow-y-auto px-4 py-6" @scroll.passive="rememberScrollPosition">
             <section v-for="section in sections" :key="section.label" class="mb-7">
                 <p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">{{ section.label }}</p>
                 <div class="space-y-1">
