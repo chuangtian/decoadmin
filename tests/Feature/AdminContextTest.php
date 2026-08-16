@@ -105,6 +105,27 @@ class AdminContextTest extends TestCase
         $this->assertSame($authorized->id, session('current_organization_id'));
     }
 
+    public function test_admin_shell_shares_all_notification_types(): void
+    {
+        $user = User::factory()->create();
+        $organization = $this->organization('Macfox', 'macfox', $user);
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'success' => '保存成功',
+                'error' => '保存失败',
+                'warning' => '请检查配置',
+                'info' => '任务已排队',
+            ])
+            ->get(route('dashboard'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('flash.success', '保存成功')
+                ->where('flash.error', '保存失败')
+                ->where('flash.warning', '请检查配置')
+                ->where('flash.info', '任务已排队'));
+    }
+
     private function organization(string $name, string $code, User $user): Organization
     {
         $organization = Organization::query()->create(compact('name', 'code'));

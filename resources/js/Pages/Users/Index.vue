@@ -16,7 +16,7 @@ const remove = (user: User) => {
 
 <template>
     <Head title="用户管理" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: '协作管理' }, { label: '用户管理' }]">
         <div class="mb-6 flex items-end justify-between gap-4">
             <div>
                 <p class="text-sm font-medium text-emerald-700">访问控制</p>

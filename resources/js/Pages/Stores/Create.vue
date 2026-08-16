@@ -10,7 +10,7 @@ const submit = () => form.post('/stores');
 
 <template>
     <Head title="连接 Shopify 店铺" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '店铺管理', href: '/stores' }, { label: '连接店铺' }]">
         <div class="mx-auto max-w-3xl">
             <Link href="/stores" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回店铺列表</Link>
             <div class="mt-5">

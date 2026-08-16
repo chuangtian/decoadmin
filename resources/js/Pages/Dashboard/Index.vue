@@ -14,7 +14,7 @@ const statusCards = [
 
 <template>
     <Head title="工作台" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: '概览' }]">
         <section class="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
             <div><p class="text-sm font-semibold text-emerald-700">工作空间概览</p><h1 class="mt-1 text-3xl font-semibold tracking-[-0.03em] text-slate-950">你好，{{ page.props.auth.user?.name.split(' ')[0] }}</h1><p class="mt-2 text-sm text-slate-500">当前组织和店铺上下文已准备就绪。</p></div>
             <div class="inline-flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 sm:self-auto"><span class="h-2 w-2 rounded-full bg-emerald-500"/>所有系统运行正常</div>

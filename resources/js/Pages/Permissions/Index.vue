@@ -16,7 +16,7 @@ const groupLabels: Record<string, string> = {
 
 <template>
     <Head title="权限管理" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: '系统管理' }, { label: '角色权限', href: '/roles' }, { label: '权限清单' }]">
         <div><p class="text-sm font-medium text-emerald-700">访问控制</p><h2 class="mt-1 text-2xl font-semibold">权限管理</h2><p class="mt-1 text-sm text-slate-500">查看系统中可分配给角色的能力清单。</p></div>
         <div class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <section v-for="(items, group) in grouped" :key="group" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

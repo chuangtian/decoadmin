@@ -86,6 +86,20 @@ export interface PaginatedResource<T> {
     meta: { current_page: number; last_page: number; total: number };
 }
 
+export interface BreadcrumbItem {
+    label: string;
+    href?: string;
+}
+
+export type ToastType = 'success' | 'error' | 'warning' | 'info';
+
+export interface FlashMessages {
+    success?: string;
+    error?: string;
+    warning?: string;
+    info?: string;
+}
+
 export interface SharedProps {
     appName: string;
     auth: {
@@ -95,6 +109,6 @@ export interface SharedProps {
     currentOrganization: { id: number; name: string; code: string } | null;
     currentStore: (StoreOption & { organization_id: number }) | null;
     availableOrganizations: OrganizationOption[];
-    flash: { success?: string; error?: string };
+    flash: FlashMessages;
     [key: string]: unknown;
 }

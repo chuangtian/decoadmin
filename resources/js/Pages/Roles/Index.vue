@@ -18,7 +18,7 @@ const groupLabels: Record<string, string> = {
 
 <template>
     <Head title="角色管理" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: '系统管理' }, { label: '角色权限' }]">
         <div><p class="text-sm font-medium text-emerald-700">访问控制</p><h2 class="mt-1 text-2xl font-semibold">角色管理</h2><p class="mt-1 text-sm text-slate-500">管理当前组织范围内的权限组合。</p></div>
         <div class="mt-6 grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
             <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, SharedProps, ShopifyStore } from '../../types';
 
@@ -25,14 +26,14 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-
 
 <template>
     <Head title="店铺管理" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '店铺管理' }]">
         <div class="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div><p class="text-sm font-semibold text-emerald-700">Shopify</p><h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">店铺管理</h2><p class="mt-2 text-sm text-slate-500">查看当前组织内已授权店铺、连接状态和应用安装情况。</p></div>
             <Link v-if="canCreate" href="/stores/create" class="inline-flex items-center justify-center rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800">+ 连接 Shopify 店铺</Link>
         </div>
 
         <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div class="overflow-x-auto">
+            <div v-if="stores.data.length" class="overflow-x-auto">
                 <table class="min-w-[1120px] w-full text-left text-sm">
                     <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                         <tr><th class="px-5 py-3.5">店铺名称</th><th class="px-5 py-3.5">Shopify Domain</th><th class="px-5 py-3.5">平台</th><th class="px-5 py-3.5">状态</th><th class="px-5 py-3.5">Connection</th><th class="px-5 py-3.5 text-center">App 数量</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
@@ -48,10 +49,18 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-
                             <td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(store.created_at) }}</td>
                             <td class="px-5 py-4 text-right"><Link :href="`/stores/${store.id}`" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td>
                         </tr>
-                        <tr v-if="!stores.data.length"><td colspan="8" class="px-6 py-16 text-center"><div class="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-lg font-bold text-emerald-700">S</div><p class="mt-4 font-semibold text-slate-900">尚未连接 Shopify 店铺</p><p class="mt-1 text-sm text-slate-500">连接后的真实店铺数据会显示在这里。</p><Link v-if="canCreate" href="/stores/create" class="mt-5 inline-flex rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white">开始连接</Link></td></tr>
                     </tbody>
                 </table>
             </div>
+            <EmptyState
+                v-else
+                class="border-0 shadow-none"
+                title="尚未连接 Shopify 店铺"
+                description="连接成功后，真实店铺数据、授权状态和应用安装情况会显示在这里。"
+                icon="stores"
+                :action-label="canCreate ? '连接 Shopify 店铺' : undefined"
+                :action-href="canCreate ? '/stores/create' : undefined"
+            />
         </div>
 
         <div v-if="stores.links.length > 3" class="mt-6 flex flex-wrap gap-2"><Link v-for="link in stores.links" :key="link.label" :href="link.url ?? ''" class="rounded-lg border px-3 py-2 text-sm" :class="link.active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600'" v-html="link.label" /></div>
