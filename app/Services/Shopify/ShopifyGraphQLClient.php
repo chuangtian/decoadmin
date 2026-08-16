@@ -8,6 +8,16 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 
 class ShopifyGraphQLClient
 {
+    private const CONNECTION_HEALTH_QUERY = <<<'GRAPHQL'
+        query ConnectionHealth {
+          shop {
+            id
+            name
+            myshopifyDomain
+          }
+        }
+        GRAPHQL;
+
     public function __construct(private HttpFactory $http) {}
 
     public function endpoint(string $shopDomain, ?string $apiVersion = null): string
@@ -52,5 +62,51 @@ class ShopifyGraphQLClient
         }
 
         return $payload;
+    }
+
+    /**
+     * @return array{
+     *     success: bool,
+     *     message: string,
+     *     shop: array{id: string, name: string, myshopify_domain: string}|null,
+     *     status_code: int|null
+     * }
+     */
+    public function checkConnection(ShopifyConnection $connection): array
+    {
+        try {
+            $payload = $this->query($connection, self::CONNECTION_HEALTH_QUERY);
+            $shop = data_get($payload, 'data.shop');
+
+            if (! is_array($shop) || ! isset($shop['id'], $shop['name'], $shop['myshopifyDomain'])) {
+                throw new ShopifyApiException('Shopify API 未返回有效店铺信息。');
+            }
+
+            return [
+                'success' => true,
+                'message' => 'Shopify Connection 验证成功。',
+                'shop' => [
+                    'id' => (string) $shop['id'],
+                    'name' => (string) $shop['name'],
+                    'myshopify_domain' => (string) $shop['myshopifyDomain'],
+                ],
+                'status_code' => null,
+            ];
+        } catch (ShopifyApiException $exception) {
+            $statusCode = is_int($exception->context['status'] ?? null)
+                ? $exception->context['status']
+                : null;
+
+            return [
+                'success' => false,
+                'message' => match ($statusCode) {
+                    401, 403 => 'Shopify Access Token 无效或已被撤销。',
+                    429 => 'Shopify API 请求过于频繁，请稍后重试。',
+                    default => 'Shopify API 暂时无法完成连接验证。',
+                },
+                'shop' => null,
+                'status_code' => $statusCode,
+            ];
+        }
     }
 }

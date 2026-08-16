@@ -39,10 +39,12 @@ class ShopifyConnectionService
                     : null,
                 'scopes' => $scopes,
                 'api_version' => (string) config('shopify.api_version'),
-                'status' => 'active',
+                'status' => 'connected',
                 'installed_at' => $installedAt,
                 'uninstalled_at' => null,
                 'last_verified_at' => $installedAt,
+                'last_error' => null,
+                'last_error_at' => null,
                 'metadata' => isset($token['refresh_token_expires_in'])
                     ? ['refresh_token_expires_at' => now()->addSeconds((int) $token['refresh_token_expires_in'])->toIso8601String()]
                     : null,

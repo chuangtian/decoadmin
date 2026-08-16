@@ -15,9 +15,10 @@ class StoreResource extends JsonResource
         $installations = $this->whenLoaded('appInstallations');
         $latestSync = $this->whenLoaded('latestSyncJob');
         $connectionStatus = match ($connection instanceof MissingValue ? null : $connection?->status) {
+            'connected', 'warning', 'invalid', 'disconnected' => $connection->status,
             'active' => 'connected',
-            'error' => 'error',
-            'inactive', 'disconnected', 'uninstalled' => 'disconnected',
+            'error' => 'warning',
+            'inactive', 'uninstalled' => 'disconnected',
             default => 'pending',
         };
 
@@ -46,6 +47,8 @@ class StoreResource extends JsonResource
                 'scopes' => $connection->scopes,
                 'installed_at' => $connection->installed_at?->toIso8601String(),
                 'last_verified_at' => $connection->last_verified_at?->toIso8601String(),
+                'last_error' => $connection->last_error,
+                'last_error_at' => $connection->last_error_at?->toIso8601String(),
             ] : null,
             'app_installations' => $installations && ! $installations instanceof MissingValue
                 ? $installations->map(fn ($installation) => [

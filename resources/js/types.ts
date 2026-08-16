@@ -23,13 +23,17 @@ export interface StoreOption {
     status: string;
 }
 
+export type ShopifyConnectionStatus = 'connected' | 'warning' | 'invalid' | 'disconnected';
+
 export interface ShopifyConnectionSummary {
     id: number;
-    status: string;
+    status: ShopifyConnectionStatus;
     api_version: string;
     scopes: string[];
     installed_at: string | null;
     last_verified_at: string | null;
+    last_error: string | null;
+    last_error_at: string | null;
 }
 
 export interface AppInstallationSummary {
@@ -50,7 +54,7 @@ export interface ShopifyStore {
     plan_name: string | null;
     platform: string;
     environment: 'production' | 'development';
-    connection_status: 'connected' | 'disconnected' | 'error' | 'pending';
+    connection_status: ShopifyConnectionStatus | 'pending';
     installed_apps_count: number;
     last_sync: { status: string; at: string | null } | null;
     created_at: string | null;

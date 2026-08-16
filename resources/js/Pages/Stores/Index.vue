@@ -10,14 +10,16 @@ const page = usePage<SharedProps>();
 const canCreate = computed(() => page.props.auth.permissions.includes('store.create'));
 const connectionLabels: Record<ShopifyStore['connection_status'], string> = {
     connected: 'Connected',
+    warning: 'Warning',
+    invalid: 'Invalid',
     disconnected: 'Disconnected',
-    error: 'Error',
     pending: 'Pending',
 };
 const connectionClasses: Record<ShopifyStore['connection_status'], string> = {
     connected: 'bg-emerald-50 text-emerald-700 ring-emerald-600/15',
+    warning: 'bg-amber-50 text-amber-700 ring-amber-600/15',
+    invalid: 'bg-rose-50 text-rose-700 ring-rose-600/15',
     disconnected: 'bg-slate-100 text-slate-600 ring-slate-500/15',
-    error: 'bg-rose-50 text-rose-700 ring-rose-600/15',
     pending: 'bg-amber-50 text-amber-700 ring-amber-600/15',
 };
 const storeStatusLabel = (status: string) => ({ active: '启用', pending: '待授权', inactive: '停用', error: '异常' }[status] ?? status);

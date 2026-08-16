@@ -44,7 +44,7 @@ class DatabaseFoundationTest extends TestCase
             'stores' => ['shopify_domain', 'settings', 'deleted_at'],
             'roles' => ['slug', 'is_system', 'deleted_at'],
             'apps' => ['client_secret_encrypted', 'scopes', 'redirect_uris', 'deleted_at'],
-            'shopify_connections' => ['access_token_encrypted', 'scopes', 'metadata', 'deleted_at'],
+            'shopify_connections' => ['access_token_encrypted', 'scopes', 'metadata', 'last_verified_at', 'last_error', 'last_error_at', 'deleted_at'],
             'oauth_states' => ['state_hash', 'expires_at', 'consumed_at'],
             'webhook_events' => ['webhook_id', 'headers', 'payload', 'processed_at'],
             'sync_jobs' => ['uuid', 'payload', 'result', 'deleted_at'],
