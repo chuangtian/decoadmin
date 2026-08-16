@@ -24,4 +24,12 @@ class ExampleTest extends TestCase
             ->get('/')
             ->assertRedirect('/dashboard');
     }
+
+    public function test_cloudflare_forwarded_https_is_used_for_redirects(): void
+    {
+        $this->withHeaders([
+            'X-Forwarded-Host' => 'example.trycloudflare.com',
+            'X-Forwarded-Proto' => 'https',
+        ])->get('/')->assertRedirect('https://example.trycloudflare.com/login');
+    }
 }
