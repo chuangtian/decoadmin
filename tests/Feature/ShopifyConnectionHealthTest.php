@@ -63,7 +63,8 @@ class ShopifyConnectionHealthTest extends TestCase
 
         Http::assertSent(fn (Request $request) => $request->url() === $this->graphqlUrl($store)
             && $request->hasHeader('X-Shopify-Access-Token', 'test-access-token')
-            && str_contains((string) $request['query'], 'query ConnectionHealth'));
+            && str_contains((string) $request['query'], 'query ConnectionHealth')
+            && ! isset($request['variables']));
     }
 
     public function test_invalid_api_token_is_marked_invalid_without_leaking_token(): void

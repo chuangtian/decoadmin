@@ -13,7 +13,7 @@ class UseBuiltAssetsForExternalRequests
 
     public function handle(Request $request, Closure $next): Response
     {
-        $configuredHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $configuredHost = parse_url((string) config('shopify.app_url'), PHP_URL_HOST);
         $useBuiltAssets = $request->isSecure()
             && is_string($configuredHost)
             && strtolower($request->getHost()) === strtolower($configuredHost);

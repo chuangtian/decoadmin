@@ -12,7 +12,8 @@ class UseBuiltAssetsForExternalRequestsTest extends TestCase
 {
     public function test_https_external_host_uses_build_while_local_http_uses_vite_hot_file(): void
     {
-        config()->set('app.url', 'https://example.trycloudflare.com');
+        config()->set('app.url', 'http://localhost:8000');
+        config()->set('shopify.app_url', 'https://example.trycloudflare.com');
         $vite = app(Vite::class);
         $middleware = new UseBuiltAssetsForExternalRequests($vite);
         $next = fn () => new Response;

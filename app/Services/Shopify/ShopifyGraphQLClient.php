@@ -33,6 +33,12 @@ class ShopifyGraphQLClient
      */
     public function query(ShopifyConnection $connection, string $query, array $variables = []): array
     {
+        $payload = ['query' => $query];
+
+        if ($variables !== []) {
+            $payload['variables'] = $variables;
+        }
+
         $response = $this->http
             ->acceptJson()
             ->withHeaders([
@@ -40,10 +46,7 @@ class ShopifyGraphQLClient
                 'X-Shopify-Access-Token' => $connection->access_token_encrypted,
             ])
             ->timeout(20)
-            ->post($this->endpoint($connection->shop_domain, $connection->api_version), [
-                'query' => $query,
-                'variables' => $variables,
-            ]);
+            ->post($this->endpoint($connection->shop_domain, $connection->api_version), $payload);
 
         if ($response->failed()) {
             throw new ShopifyApiException('Shopify API 请求失败。', [
