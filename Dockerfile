@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+
+FROM composer:2 AS vendor
+RUN docker-php-ext-install pcntl
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-interaction --prefer-dist --no-progress --no-scripts
+COPY . .
+RUN composer install --no-interaction --prefer-dist --no-progress --optimize-autoloader
+
+FROM node:22-alpine AS frontend
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY --from=vendor /app/vendor ./vendor
+COPY resources ./resources
+COPY vite.config.ts tsconfig.json ./
+RUN npm run build
+
+FROM php:8.4-fpm-bookworm AS app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        default-mysql-client \
+        git \
+        libicu-dev \
+        libzip-dev \
+        procps \
+        unzip \
+    && docker-php-ext-install -j"$(nproc)" bcmath intl opcache pcntl pdo_mysql zip \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && rm -rf /var/lib/apt/lists/* /tmp/pear
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+WORKDIR /var/www/html
+COPY --from=vendor /app /var/www/html
+COPY --from=frontend /app/public/build /opt/app-build
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/99-app.ini
+COPY docker/php/entrypoint.sh /usr/local/bin/app-entrypoint
+
+RUN mkdir -p public/build \
+    && cp -a /opt/app-build/. public/build/ \
+    && chmod +x /usr/local/bin/app-entrypoint \
+    && chown -R www-data:www-data storage bootstrap/cache
+
+ENTRYPOINT ["app-entrypoint"]
+CMD ["php-fpm"]
