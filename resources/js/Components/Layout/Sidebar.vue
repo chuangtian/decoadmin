@@ -10,9 +10,9 @@ defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const page = usePage<SharedProps>();
 const navigation = ref<HTMLElement | null>(null);
-const expandedGroups = ref<Record<string, boolean>>({});
+const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
-const expandedStorageKey = 'admin-sidebar-expanded-groups';
+const openGroupStorageKey = 'sidebar_open_group';
 
 const visibleMenu = computed<MenuItem[]>(() => menu.map((group) => ({
     ...group,
@@ -20,23 +20,24 @@ const visibleMenu = computed<MenuItem[]>(() => menu.map((group) => ({
 })).filter((group) => Boolean(group.children?.length)));
 const groupHasActiveRoute = (group: MenuItem) => group.children?.some((child) => child.route && (page.url === child.route || page.url.startsWith(`${child.route}/`))) ?? false;
 const toggleGroup = (name: string) => {
-    expandedGroups.value[name] = !expandedGroups.value[name];
-    localStorage.setItem(expandedStorageKey, JSON.stringify(expandedGroups.value));
+    openGroup.value = openGroup.value === name ? null : name;
+
+    if (openGroup.value) {
+        localStorage.setItem(openGroupStorageKey, openGroup.value);
+    } else {
+        localStorage.removeItem(openGroupStorageKey);
+    }
 };
 const rememberScrollPosition = () => {
     if (navigation.value) sessionStorage.setItem(scrollStorageKey, String(navigation.value.scrollTop));
 };
 
 onMounted(() => {
-    try {
-        expandedGroups.value = JSON.parse(localStorage.getItem(expandedStorageKey) ?? '{}');
-    } catch {
-        expandedGroups.value = {};
-    }
-
-    for (const group of visibleMenu.value) {
-        if (expandedGroups.value[group.name] === undefined || groupHasActiveRoute(group)) expandedGroups.value[group.name] = true;
-    }
+    const storedGroup = localStorage.getItem(openGroupStorageKey);
+    const storedGroupIsVisible = visibleMenu.value.some((group) => group.name === storedGroup);
+    openGroup.value = storedGroupIsVisible
+        ? storedGroup
+        : (visibleMenu.value.find(groupHasActiveRoute)?.name ?? null);
 
     requestAnimationFrame(() => {
         if (navigation.value) navigation.value.scrollTop = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
@@ -58,7 +59,7 @@ onBeforeUnmount(rememberScrollPosition);
         </div>
 
         <nav ref="navigation" class="flex-1 space-y-1 overflow-y-auto px-3 py-5" aria-label="后台主导航" @scroll.passive="rememberScrollPosition">
-            <SidebarGroup v-for="group in visibleMenu" :key="group.name" :item="group" :expanded="expandedGroups[group.name] ?? false" :current-url="page.url" @toggle="toggleGroup(group.name)" @navigate="emit('close')" />
+            <SidebarGroup v-for="group in visibleMenu" :key="group.name" :item="group" :expanded="openGroup === group.name" :current-url="page.url" @toggle="toggleGroup(group.name)" @navigate="emit('close')" />
         </nav>
 
         <div class="border-t border-white/8 px-6 py-4 text-xs text-slate-500">
