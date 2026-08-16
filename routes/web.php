@@ -14,9 +14,7 @@ use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-Route::get('/', fn () => Inertia::render('Welcome', [
-    'framework' => app()->version(),
-]))->name('home');
+Route::redirect('/', '/login')->name('home');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
