@@ -149,6 +149,19 @@ export interface SyncJobLog {
     at: string;
 }
 
+export interface SyncJobResult {
+    success: boolean;
+    status: string;
+    message: string;
+    records_count: number;
+    errors: Array<{ code: string; message: string }>;
+    metadata: {
+        duration_ms?: number;
+        framework_only?: boolean;
+        [key: string]: unknown;
+    };
+}
+
 export interface SyncJobDetail extends SyncJobSummary {
     direction: string;
     attempts: number;
@@ -158,7 +171,7 @@ export interface SyncJobDetail extends SyncJobSummary {
     failed_items: number;
     error: string | null;
     logs: SyncJobLog[];
-    result: Record<string, unknown> | null;
+    result: SyncJobResult | null;
 }
 
 export interface ShopifyStore {

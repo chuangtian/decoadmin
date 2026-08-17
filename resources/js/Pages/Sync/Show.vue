@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { SyncJobDetail } from '../../types';
@@ -12,7 +13,16 @@ const typeLabel = (type: string) => ({ products: '商品', orders: '订单', cus
 const statusLabel = (status: string) => ({ pending: '待处理', queued: '已入队', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' }[status] ?? status);
 const statusClass = (status: string) => ({ pending: 'bg-slate-50 text-slate-700 ring-slate-200', queued: 'bg-violet-50 text-violet-700 ring-violet-100', running: 'bg-blue-50 text-blue-700 ring-blue-100', completed: 'bg-emerald-50 text-emerald-700 ring-emerald-100', failed: 'bg-rose-50 text-rose-700 ring-rose-100', cancelled: 'bg-slate-100 text-slate-500 ring-slate-200' }[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200');
 const logClass = (level: string) => ({ info: 'bg-blue-500', success: 'bg-emerald-500', warning: 'bg-amber-500', error: 'bg-rose-500' }[level] ?? 'bg-slate-400');
-const formattedResult = JSON.stringify(props.syncJob.data.result, null, 2);
+const result = computed(() => props.syncJob.data.result);
+const formattedResult = computed(() => JSON.stringify(result.value, null, 2));
+const durationLabel = computed(() => {
+    const duration = result.value?.metadata.duration_ms;
+
+    if (typeof duration !== 'number') return '—';
+    if (duration < 1000) return `${duration} ms`;
+
+    return `${(duration / 1000).toFixed(2)} s`;
+});
 </script>
 
 <template>
@@ -29,9 +39,31 @@ const formattedResult = JSON.stringify(props.syncJob.data.result, null, 2);
 
             <section v-if="syncJob.data.error" class="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-5"><h3 class="font-semibold text-rose-900">错误信息</h3><pre class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-rose-800">{{ syncJob.data.error }}</pre></section>
 
+            <section v-if="syncJob.data.type === 'products' && result" class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div>
+                    <p class="text-sm font-semibold text-emerald-700">Product Sync Result</p>
+                    <h3 class="mt-1 text-xl font-semibold text-slate-950">商品同步结果</h3>
+                </div>
+                <div class="mt-5 grid gap-3 sm:grid-cols-3">
+                    <article class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">同步状态</p>
+                        <p class="mt-2 font-semibold" :class="result.success ? 'text-emerald-700' : 'text-rose-700'">{{ result.success ? '成功' : '失败' }}</p>
+                    </article>
+                    <article class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">商品数量</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-950">{{ result.records_count }}</p>
+                    </article>
+                    <article class="rounded-xl bg-slate-50 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">执行耗时</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-950">{{ durationLabel }}</p>
+                    </article>
+                </div>
+                <p class="mt-4 text-sm text-slate-500">{{ result.message }}</p>
+            </section>
+
             <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><h3 class="font-semibold text-slate-950">执行日志</h3><p class="mt-1 text-sm text-slate-500">记录同步任务从创建到完成的生命周期。</p><div v-if="syncJob.data.logs.length" class="mt-5 space-y-4"><article v-for="(log, index) in syncJob.data.logs" :key="`${log.at}-${index}`" class="flex gap-3"><span class="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" :class="logClass(log.level)" /><div class="min-w-0"><p class="text-sm leading-6 text-slate-700">{{ log.message }}</p><p class="mt-0.5 text-xs text-slate-400">{{ dateLabel(log.at) }}</p></div></article></div><EmptyState v-else class="mt-4 border-0 p-4 shadow-none" title="暂无执行日志" description="任务开始执行后，生命周期日志会显示在这里。" icon="sync" /></section>
 
-            <section v-if="syncJob.data.result" class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><h3 class="font-semibold text-slate-950">执行结果</h3><p class="mt-1 text-sm text-slate-500">当前阶段仅返回同步框架执行结果。</p><pre class="mt-5 overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-200">{{ formattedResult }}</pre></section>
+            <section v-if="result" class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><h3 class="font-semibold text-slate-950">执行结果</h3><p class="mt-1 text-sm text-slate-500">同步引擎返回的标准化结果。</p><pre class="mt-5 overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-200">{{ formattedResult }}</pre></section>
         </div>
     </AppLayout>
 </template>

@@ -24,9 +24,19 @@ class SyncJobPolicy
             && $syncJob->organization_id === $this->currentOrganization->get()?->getKey();
     }
 
-    public function create(User $user, Store $store): bool
+    public function create(User $user, Store $store, ?string $type = null): bool
     {
-        return $this->allowsForStore($user, $store, 'sync.run');
+        if (! $this->allowsForStore($user, $store, 'sync.run')) {
+            return false;
+        }
+
+        if ($type === 'products') {
+            $organization = $this->currentOrganization->get();
+
+            return $organization && $user->hasPermission('products.sync', $organization, $store);
+        }
+
+        return true;
     }
 
     private function allowsForStore(User $user, ?Store $store, string $permission): bool

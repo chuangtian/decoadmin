@@ -67,7 +67,7 @@ const hasFilters = () => Boolean(props.filters.type || props.filters.status || p
                     <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">同步任务</h2>
                     <p class="mt-2 text-sm text-slate-500">统一管理 Shopify 数据同步任务、执行状态和运行日志。</p>
                 </div>
-                <span class="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">当前仅运行任务框架，不读取 Shopify 业务数据</span>
+                <span class="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">商品同步已接入 Shopify，其他类型暂为任务框架</span>
             </div>
 
             <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -101,7 +101,7 @@ const hasFilters = () => Boolean(props.filters.type || props.filters.status || p
                     </div>
                     <div class="divide-y divide-slate-100 md:hidden"><article v-for="job in syncJobs.data" :key="job.id" class="p-5"><div class="flex items-start justify-between gap-3"><div><Link :href="`/sync/${job.id}`" class="font-semibold text-slate-900">{{ syncTypeLabel(job.type) }}同步</Link><p class="mt-1 text-xs text-slate-400">{{ job.store.name }}</p></div><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(job.status)">{{ statusLabel(job.status) }}</span></div><dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs"><div><dt class="text-slate-400">开始时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(job.started_at) }}</dd></div><div><dt class="text-slate-400">完成时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(job.finished_at) }}</dd></div></dl><Link :href="`/sync/${job.id}`" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看详情 →</Link></article></div>
                 </div>
-                <EmptyState v-else class="border-0 shadow-none" :title="hasFilters() ? '没有匹配的同步任务' : '尚未创建同步任务'" :description="hasFilters() ? '请调整同步类型、状态或店铺过滤条件。' : '使用上方表单创建第一个同步任务。当前阶段只验证任务生命周期。'" icon="sync" />
+                <EmptyState v-else class="border-0 shadow-none" :title="hasFilters() ? '没有匹配的同步任务' : '尚未创建同步任务'" :description="hasFilters() ? '请调整同步类型、状态或店铺过滤条件。' : '使用上方表单创建第一个同步任务；商品类型会读取并保存 Shopify 真实数据。'" icon="sync" />
             </div>
 
             <div v-if="syncJobs.links.length > 3" class="mt-6 flex flex-wrap gap-2"><Link v-for="link in syncJobs.links" :key="link.label" :href="link.url ?? ''" class="rounded-lg border px-3 py-2 text-sm" :class="link.active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600'" v-html="link.label" /></div>

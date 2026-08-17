@@ -79,7 +79,7 @@ class SyncCenterTest extends TestCase
     public function test_processing_job_uses_framework_without_shopify_data_sync(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
-        $syncJob = $this->syncJob($organization, $store, $installation, 'queued');
+        $syncJob = $this->syncJob($organization, $store, $installation, 'queued', 'orders');
 
         (new ProcessSyncJob($syncJob->id))->handle(app(SyncProcessor::class));
         $syncJob->refresh();
@@ -251,6 +251,7 @@ class SyncCenterTest extends TestCase
         Store $store,
         ?AppInstallation $installation,
         string $status,
+        string $type = 'products',
     ): SyncJob {
         return SyncJob::query()->create([
             'uuid' => (string) Str::uuid(),
@@ -258,7 +259,7 @@ class SyncCenterTest extends TestCase
             'store_id' => $store->id,
             'app_id' => $installation?->app_id,
             'app_installation_id' => $installation?->id,
-            'type' => 'products',
+            'type' => $type,
             'direction' => 'pull',
             'status' => $status,
             'logs' => [],

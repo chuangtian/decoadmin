@@ -26,6 +26,11 @@ class Organization extends Model
         return $this->hasMany(Store::class);
     }
 
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
     public function roles(): HasMany
     {
         return $this->hasMany(Role::class);

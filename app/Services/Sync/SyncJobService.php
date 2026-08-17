@@ -32,7 +32,7 @@ class SyncJobService
                 'payload' => [
                     'source' => 'manual',
                     'requested_by' => $actor->getKey(),
-                    'framework_only' => true,
+                    'framework_only' => $type !== 'products',
                 ],
                 'logs' => [],
                 'available_at' => now(),
@@ -126,6 +126,7 @@ class SyncJobService
             'failed_at' => $finishedAt,
             'last_error' => $safeError,
             'result' => $result?->toArray() ?? $syncJob->result,
+            'failed_items' => $result ? max($syncJob->failed_items, count($result->errors)) : $syncJob->failed_items,
             'logs' => $this->appendLog($syncJob, 'error', $safeError),
         ])->save();
 

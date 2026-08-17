@@ -56,7 +56,7 @@ class ShopifySyncEngineTest extends TestCase
 
     public function test_processor_executes_handler_and_persists_standard_result(): void
     {
-        $syncJob = $this->syncJob('products');
+        $syncJob = $this->syncJob('orders');
 
         $result = app(SyncProcessor::class)->process($syncJob->id);
         $syncJob->refresh();
@@ -68,7 +68,7 @@ class ShopifySyncEngineTest extends TestCase
         $this->assertSame([
             'success', 'status', 'message', 'records_count', 'errors', 'metadata',
         ], array_keys($syncJob->result));
-        $this->assertSame(ProductSyncHandler::class, $syncJob->result['metadata']['handler']);
+        $this->assertSame(OrderSyncHandler::class, $syncJob->result['metadata']['handler']);
         $this->assertTrue($syncJob->result['metadata']['framework_only']);
     }
 

@@ -103,7 +103,8 @@ class SyncJobController extends Controller
     {
         $organization = $this->currentOrganization->require();
         $store = $organization->stores()->findOrFail($request->integer('store_id'));
-        $this->authorize('create', [SyncJob::class, $store]);
+        $type = $request->string('type')->toString();
+        $this->authorize('create', [SyncJob::class, $store, $type]);
 
         $installation = $request->filled('app_installation_id')
             ? AppInstallation::query()
@@ -120,7 +121,7 @@ class SyncJobController extends Controller
 
         $syncJob = $syncJobs->createAndDispatch(
             $store,
-            $request->string('type')->toString(),
+            $type,
             $request->user(),
             $installation,
         );
