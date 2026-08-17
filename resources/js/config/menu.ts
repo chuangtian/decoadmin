@@ -31,7 +31,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: '店铺管理', route: '/stores', icon: 'stores', permission: 'store.view' },
             { name: '应用管理', route: '/apps', icon: 'apps', permission: 'apps.view' },
-            { name: '数据同步', route: '/sync', icon: 'sync', permission: 'sync.view', comingSoon: true },
+            { name: '数据同步', route: '/sync', icon: 'sync', permission: 'sync.view' },
             { name: 'Webhook', route: '/webhooks', icon: 'webhooks', permission: 'webhooks.view' },
             { name: 'API 状态', route: '/system/api-status', icon: 'status', permission: 'system.health.view', comingSoon: true },
         ],

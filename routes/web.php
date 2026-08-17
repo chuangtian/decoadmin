@@ -16,6 +16,7 @@ use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
+use App\Http\Controllers\SyncJobController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WebhookEventController;
 use App\Models\Store;
@@ -91,6 +92,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/webhooks', [WebhookEventController::class, 'index'])->middleware('permission:webhooks.view')->name('webhooks.index');
     Route::get('/webhooks/{webhookEvent}', [WebhookEventController::class, 'show'])->middleware('permission:webhooks.view')->name('webhooks.show');
     Route::post('/webhooks/{webhookEvent}/retry', [WebhookEventController::class, 'retry'])->middleware('permission:webhooks.retry')->name('webhooks.retry');
+
+    Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
+    Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');
+    Route::get('/sync/{syncJob}', [SyncJobController::class, 'show'])->middleware('permission:sync.view')->name('sync.show');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

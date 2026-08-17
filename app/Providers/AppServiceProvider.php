@@ -5,11 +5,13 @@ namespace App\Providers;
 use App\Models\App as ShopifyApp;
 use App\Models\Role;
 use App\Models\Store;
+use App\Models\SyncJob;
 use App\Models\User;
 use App\Models\WebhookEvent;
 use App\Policies\AppPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\StorePolicy;
+use App\Policies\SyncJobPolicy;
 use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
 use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
@@ -42,6 +44,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::before(fn (User $user) => $user->isSuperAdmin() ? true : null);
         Gate::policy(Store::class, StorePolicy::class);
+        Gate::policy(SyncJob::class, SyncJobPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Role::class, RolePolicy::class);
         Gate::policy(ShopifyApp::class, AppPolicy::class);

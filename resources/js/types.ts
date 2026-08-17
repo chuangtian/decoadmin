@@ -110,6 +110,57 @@ export interface WebhookEventDetail extends WebhookEventSummary {
     app: { id: number; name: string; slug: string } | null;
 }
 
+export type SyncJobStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type SyncJobType = 'products' | 'orders' | 'customers' | 'inventory';
+
+export interface SyncJobInstallation {
+    id: number;
+    status: string;
+    app: { id: number; name: string; handle: string } | null;
+}
+
+export interface SyncJobStoreOption {
+    id: number;
+    name: string;
+    shopify_domain: string;
+    can_run: boolean;
+    installations: SyncJobInstallation[];
+}
+
+export interface SyncJobSummary {
+    id: number;
+    uuid: string;
+    type: SyncJobType;
+    status: SyncJobStatus;
+    started_at: string | null;
+    finished_at: string | null;
+    created_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+    };
+    app_installation: SyncJobInstallation | null;
+}
+
+export interface SyncJobLog {
+    level: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+    at: string;
+}
+
+export interface SyncJobDetail extends SyncJobSummary {
+    direction: string;
+    attempts: number;
+    max_attempts: number;
+    total_items: number;
+    processed_items: number;
+    failed_items: number;
+    error: string | null;
+    logs: SyncJobLog[];
+    result: Record<string, unknown> | null;
+}
+
 export interface ShopifyStore {
     id: number;
     name: string;
