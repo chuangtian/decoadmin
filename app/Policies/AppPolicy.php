@@ -54,8 +54,21 @@ class AppPolicy
 
     private function contains(User $user, App $app): bool
     {
-        return $app->organization_id === null
-            ? $user->isSuperAdmin()
-            : $app->organization_id === $this->currentOrganization->get()?->getKey();
+        $organization = $this->currentOrganization->get();
+
+        if (! $organization) {
+            return false;
+        }
+
+        if ($app->organization_id !== null) {
+            return $app->organization_id === $organization->getKey();
+        }
+
+        return $app->installations()
+            ->whereHas('store', fn ($query) => $query
+                ->whereBelongsTo($organization)
+                ->when(! $user->isSuperAdmin(), fn ($query) => $query
+                    ->whereHas('members', fn ($query) => $query->whereKey($user->getKey()))))
+            ->exists();
     }
 }

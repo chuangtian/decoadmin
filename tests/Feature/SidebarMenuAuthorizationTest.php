@@ -46,6 +46,7 @@ class SidebarMenuAuthorizationTest extends TestCase
                 ->where('auth.permissions', fn (Collection $permissions) => $permissions->contains('store.view')
                     && $permissions->contains('organization.view')
                     && ! $permissions->contains('store.create')
+                    && ! $permissions->contains('apps.view')
                     && ! $permissions->contains('apps.install')));
     }
 }

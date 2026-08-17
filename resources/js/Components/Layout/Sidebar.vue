@@ -35,9 +35,10 @@ const rememberScrollPosition = () => {
 onMounted(() => {
     const storedGroup = localStorage.getItem(openGroupStorageKey);
     const storedGroupIsVisible = visibleMenu.value.some((group) => group.name === storedGroup);
-    openGroup.value = storedGroupIsVisible
-        ? storedGroup
-        : (visibleMenu.value.find(groupHasActiveRoute)?.name ?? null);
+    const activeGroup = visibleMenu.value.find(groupHasActiveRoute)?.name ?? null;
+    openGroup.value = activeGroup ?? (storedGroupIsVisible ? storedGroup : null);
+
+    if (activeGroup) localStorage.setItem(openGroupStorageKey, activeGroup);
 
     requestAnimationFrame(() => {
         if (navigation.value) navigation.value.scrollTop = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);

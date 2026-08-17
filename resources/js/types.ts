@@ -54,6 +54,30 @@ export interface AppInstallationSummary {
     app: { id: number; name: string; handle: string; status: string } | null;
 }
 
+export interface ShopifyApp {
+    id: number;
+    name: string;
+    slug: string;
+    type: string;
+    status: string;
+    description: string | null;
+    installations_count: number;
+    created_at: string | null;
+}
+
+export interface AppInstallation {
+    id: number;
+    status: string;
+    installed_at: string | null;
+    uninstalled_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+        status: string;
+    };
+}
+
 export interface ShopifyStore {
     id: number;
     name: string;
