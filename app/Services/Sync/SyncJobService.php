@@ -7,6 +7,7 @@ use App\Models\AppInstallation;
 use App\Models\Store;
 use App\Models\SyncJob;
 use App\Models\User;
+use App\Services\Shopify\Sync\SyncResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -61,7 +62,11 @@ class SyncJobService
         return DB::transaction(function () use ($syncJobId): ?SyncJob {
             $syncJob = SyncJob::query()->lockForUpdate()->find($syncJobId);
 
-            if (! $syncJob || ! in_array($syncJob->status, ['pending', 'queued'], true)) {
+            if (
+                ! $syncJob
+                || ! in_array($syncJob->status, ['pending', 'queued', 'failed'], true)
+                || $syncJob->attempts >= $syncJob->max_attempts
+            ) {
                 return null;
             }
 
@@ -80,17 +85,27 @@ class SyncJobService
         });
     }
 
-    /** @param array<string, mixed> $result */
-    public function markCompleted(SyncJob $syncJob, array $result = []): SyncJob
+    /** @param array<string, mixed>|SyncResult $result */
+    public function markCompleted(SyncJob $syncJob, array|SyncResult $result = []): SyncJob
     {
         $finishedAt = now();
+        $resultPayload = $result instanceof SyncResult
+            ? $result->toArray()
+            : [
+                'success' => true,
+                'status' => 'success',
+                'message' => '同步任务框架执行完成，本阶段未调用 Shopify API。',
+                'records_count' => 0,
+                'errors' => [],
+                'metadata' => ['framework_only' => true],
+                ...$result,
+            ];
+
         $syncJob->forceFill([
             'status' => 'completed',
-            'result' => [
-                'framework_only' => true,
-                'message' => '同步任务框架执行完成，本阶段未调用 Shopify API。',
-                ...$result,
-            ],
+            'result' => $resultPayload,
+            'total_items' => max($syncJob->total_items, (int) ($resultPayload['records_count'] ?? 0)),
+            'processed_items' => max($syncJob->processed_items, (int) ($resultPayload['records_count'] ?? 0)),
             'finished_at' => $finishedAt,
             'completed_at' => $finishedAt,
             'failed_at' => null,
@@ -101,7 +116,7 @@ class SyncJobService
         return $syncJob;
     }
 
-    public function markFailed(SyncJob $syncJob, string $error): SyncJob
+    public function markFailed(SyncJob $syncJob, string $error, ?SyncResult $result = null): SyncJob
     {
         $finishedAt = now();
         $safeError = $this->safeError($error);
@@ -110,6 +125,7 @@ class SyncJobService
             'finished_at' => $finishedAt,
             'failed_at' => $finishedAt,
             'last_error' => $safeError,
+            'result' => $result?->toArray() ?? $syncJob->result,
             'logs' => $this->appendLog($syncJob, 'error', $safeError),
         ])->save();
 

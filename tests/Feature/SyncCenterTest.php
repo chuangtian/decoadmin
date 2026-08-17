@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\Shopify\SyncHandlerInterface;
 use App\Jobs\ProcessSyncJob;
 use App\Models\App;
 use App\Models\AppInstallation;
@@ -11,6 +12,9 @@ use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\SyncJob;
 use App\Models\User;
+use App\Services\Shopify\Sync\SyncHandlerRegistry;
+use App\Services\Shopify\Sync\SyncProcessor;
+use App\Services\Shopify\Sync\SyncResult;
 use App\Services\Sync\SyncJobService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -68,7 +72,7 @@ class SyncCenterTest extends TestCase
         $this->assertNotNull($syncJob->finished_at);
         $this->assertNotNull($syncJob->completed_at);
         $this->assertNull($syncJob->last_error);
-        $this->assertTrue($syncJob->result['framework_only']);
+        $this->assertTrue($syncJob->result['metadata']['framework_only']);
         $this->assertCount(2, $syncJob->logs);
     }
 
@@ -77,7 +81,7 @@ class SyncCenterTest extends TestCase
         [, $organization, $store, $installation] = $this->context('store-admin');
         $syncJob = $this->syncJob($organization, $store, $installation, 'queued');
 
-        (new ProcessSyncJob($syncJob->id))->handle(app(SyncJobService::class));
+        (new ProcessSyncJob($syncJob->id))->handle(app(SyncProcessor::class));
         $syncJob->refresh();
 
         $this->assertSame('completed', $syncJob->status);
@@ -85,24 +89,29 @@ class SyncCenterTest extends TestCase
         $this->assertSame(0, $syncJob->total_items);
         $this->assertSame(0, $syncJob->processed_items);
         $this->assertSame(0, $syncJob->failed_items);
-        $this->assertTrue($syncJob->result['framework_only']);
+        $this->assertTrue($syncJob->result['metadata']['framework_only']);
     }
 
     public function test_processing_failure_marks_job_failed_and_redacts_token_values(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
         $syncJob = $this->syncJob($organization, $store, $installation, 'queued');
-        $service = new class extends SyncJobService
+        $handler = new class implements SyncHandlerInterface
         {
-            /** @param array<string, mixed> $result */
-            public function markCompleted(SyncJob $syncJob, array $result = []): SyncJob
+            public function type(): string
+            {
+                return 'products';
+            }
+
+            public function handle(SyncJob $syncJob): SyncResult
             {
                 throw new RuntimeException('Remote failure access_token=secret-token client_secret=secret-value');
             }
         };
+        $processor = new SyncProcessor(new SyncHandlerRegistry([$handler]), app(SyncJobService::class));
 
         try {
-            (new ProcessSyncJob($syncJob->id))->handle($service);
+            (new ProcessSyncJob($syncJob->id))->handle($processor);
             $this->fail('Expected queue processing to fail.');
         } catch (RuntimeException) {
             // Expected: the job rethrows so Horizon can retry it.

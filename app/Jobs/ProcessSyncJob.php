@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\SyncJob;
+use App\Services\Shopify\Sync\SyncProcessor;
 use App\Services\Sync\SyncJobService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,23 +26,9 @@ class ProcessSyncJob implements ShouldQueue
         $this->onQueue('shopify-sync');
     }
 
-    public function handle(SyncJobService $syncJobs): void
+    public function handle(SyncProcessor $processor): void
     {
-        $syncJob = $syncJobs->markRunning($this->syncJobId);
-
-        if (! $syncJob) {
-            return;
-        }
-
-        try {
-            // Phase one intentionally provides execution lifecycle only.
-            // Shopify products, orders, customers and inventory are not queried here.
-            $syncJobs->markCompleted($syncJob);
-        } catch (Throwable $exception) {
-            $syncJobs->markFailed($syncJob, $exception->getMessage());
-
-            throw $exception;
-        }
+        $processor->process($this->syncJobId);
     }
 
     public function failed(?Throwable $exception): void

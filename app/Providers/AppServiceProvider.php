@@ -14,6 +14,11 @@ use App\Policies\StorePolicy;
 use App\Policies\SyncJobPolicy;
 use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
+use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
+use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
+use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
+use App\Services\Shopify\Sync\Handlers\ProductSyncHandler;
+use App\Services\Shopify\Sync\SyncHandlerRegistry;
 use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
 use App\Services\Shopify\Webhooks\Handlers\ProductsUpdatedHandler;
 use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
@@ -34,6 +39,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(WebhookHandlerRegistry::class, fn ($app) => new WebhookHandlerRegistry([
             $app->make(OrdersCreatedHandler::class),
             $app->make(ProductsUpdatedHandler::class),
+        ]));
+        $this->app->singleton(SyncHandlerRegistry::class, fn ($app) => new SyncHandlerRegistry([
+            $app->make(ProductSyncHandler::class),
+            $app->make(OrderSyncHandler::class),
+            $app->make(CustomerSyncHandler::class),
+            $app->make(InventorySyncHandler::class),
         ]));
     }
 
