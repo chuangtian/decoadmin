@@ -78,13 +78,14 @@ export interface AppInstallation {
     };
 }
 
-export type WebhookEventStatus = 'pending' | 'processing' | 'processed' | 'failed';
+export type WebhookEventStatus = 'received' | 'queued' | 'processing' | 'processed' | 'failed' | 'retrying';
 
 export interface WebhookEventSummary {
     id: number;
     webhook_id: string;
     topic: string;
     status: WebhookEventStatus;
+    processing_result: 'handled' | 'unsupported' | 'failed' | null;
     attempts: number;
     received_at: string | null;
     processed_at: string | null;
@@ -97,6 +98,10 @@ export interface WebhookEventSummary {
 
 export interface WebhookEventDetail extends WebhookEventSummary {
     api_version: string | null;
+    handler: string | null;
+    unsupported_reason: string | null;
+    processing_started_at: string | null;
+    processing_duration_ms: number | null;
     headers: Record<string, string>;
     payload: Record<string, unknown> | unknown[] | null;
     payload_integrity_valid: boolean;

@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\ProcessShopifyWebhook;
+use App\Jobs\ProcessWebhookEventJob;
 use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
@@ -12,6 +12,8 @@ use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\WebhookEvent;
+use App\Services\Shopify\Webhooks\WebhookEventProcessor;
+use App\Services\Shopify\Webhooks\WebhookEventStateService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,11 +51,12 @@ class ShopifyWebhookCenterTest extends TestCase
         $this->assertSame($organization->id, $event->organization_id);
         $this->assertSame($store->id, $event->store_id);
         $this->assertSame('orders/create', $event->topic);
+        $this->assertSame('queued', $event->status);
         $this->assertSame(['id' => 987, 'name' => 'Webhook Test'], $event->decodedPayload());
         $this->assertTrue($event->payloadIntegrityIsValid());
         $this->assertArrayNotHasKey('hmac', $event->headers);
         $this->assertStringNotContainsString($payload, (string) DB::table('webhook_events')->value('payload_encrypted'));
-        Queue::assertPushed(ProcessShopifyWebhook::class, fn (ProcessShopifyWebhook $job) => $job->webhookEventId === $event->id);
+        Queue::assertPushed(ProcessWebhookEventJob::class, fn (ProcessWebhookEventJob $job) => $job->webhookEventId === $event->id);
     }
 
     public function test_invalid_hmac_is_rejected_without_saving_event(): void
@@ -92,7 +95,7 @@ class ShopifyWebhookCenterTest extends TestCase
             ->assertJson(['duplicate' => true]);
 
         $this->assertDatabaseCount('webhook_events', 1);
-        Queue::assertPushed(ProcessShopifyWebhook::class, 1);
+        Queue::assertPushed(ProcessWebhookEventJob::class, 1);
     }
 
     public function test_webhook_list_and_detail_are_isolated_by_organization(): void
@@ -174,8 +177,8 @@ class ShopifyWebhookCenterTest extends TestCase
             ->assertRedirect();
 
         $event->refresh();
-        $this->assertSame('pending', $event->status);
-        $this->assertNull($event->last_error);
+        $this->assertSame('retrying', $event->status);
+        $this->assertSame('Temporary handler failure', $event->last_error);
         $audit = AuditLog::query()->where('action', 'shopify_webhook_retried')->sole();
         $this->assertSame($organization->id, $audit->organization_id);
         $this->assertSame($store->id, $audit->store_id);
@@ -183,21 +186,26 @@ class ShopifyWebhookCenterTest extends TestCase
         $serializedAudit = json_encode($audit->toArray(), JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('webhook-secret', $serializedAudit);
         $this->assertStringNotContainsString('shpat_test_token', $serializedAudit);
-        Queue::assertPushed(ProcessShopifyWebhook::class, fn (ProcessShopifyWebhook $job) => $job->webhookEventId === $event->id);
+        Queue::assertPushed(ProcessWebhookEventJob::class, fn (ProcessWebhookEventJob $job) => $job->webhookEventId === $event->id);
     }
 
     public function test_processing_job_completes_ingestion_without_running_business_sync(): void
     {
         [, $organization, $store, $app, $connection] = $this->installedAppContext('store-admin');
-        $event = $this->event($organization, $store, $app, $connection, 'pending');
+        $event = $this->event($organization, $store, $app, $connection, 'queued');
         $event->forceFill(['attempts' => 0, 'processed_at' => null])->save();
 
-        (new ProcessShopifyWebhook($event->id))->handle();
+        (new ProcessWebhookEventJob($event->id))->handle(
+            app(WebhookEventProcessor::class),
+            app(WebhookEventStateService::class),
+        );
 
         $event->refresh();
         $this->assertSame('processed', $event->status);
         $this->assertSame(1, $event->attempts);
+        $this->assertSame('handled', $event->processing_result);
         $this->assertNotNull($event->processed_at);
+        $this->assertNotNull($event->processing_duration_ms);
         $this->assertDatabaseCount('sync_jobs', 0);
     }
 

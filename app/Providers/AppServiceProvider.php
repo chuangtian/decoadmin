@@ -12,6 +12,9 @@ use App\Policies\RolePolicy;
 use App\Policies\StorePolicy;
 use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
+use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
+use App\Services\Shopify\Webhooks\Handlers\ProductsUpdatedHandler;
+use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Support\Facades\Gate;
@@ -26,6 +29,10 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
+        $this->app->singleton(WebhookHandlerRegistry::class, fn ($app) => new WebhookHandlerRegistry([
+            $app->make(OrdersCreatedHandler::class),
+            $app->make(ProductsUpdatedHandler::class),
+        ]));
     }
 
     /**

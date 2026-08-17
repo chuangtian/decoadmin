@@ -3,17 +3,21 @@
 namespace App\Services\Shopify;
 
 use App\Exceptions\ShopifyWebhookException;
-use App\Jobs\ProcessShopifyWebhook;
+use App\Jobs\ProcessWebhookEventJob;
 use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\WebhookEvent;
+use App\Services\Shopify\Webhooks\WebhookEventStateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use JsonException;
 
 class ShopifyWebhookService
 {
-    public function __construct(private ShopifyWebhookHmacValidator $hmacValidator) {}
+    public function __construct(
+        private ShopifyWebhookHmacValidator $hmacValidator,
+        private WebhookEventStateService $states,
+    ) {}
 
     /**
      * @param  array<string, string|null>  $headers
@@ -95,7 +99,7 @@ class ShopifyWebhookService
                 'payload' => ['storage' => 'encrypted'],
                 'payload_encrypted' => $rawPayload,
                 'payload_sha256' => $payloadHash,
-                'status' => 'pending',
+                'status' => 'received',
                 'attempts' => 0,
                 'received_at' => now(),
             ]);
@@ -104,7 +108,8 @@ class ShopifyWebhookService
         });
 
         if ($created) {
-            ProcessShopifyWebhook::dispatch($event->getKey())->onQueue('shopify-webhook');
+            $this->states->markQueued($event);
+            ProcessWebhookEventJob::dispatch($event->getKey());
         }
 
         return ['event' => $event, 'created' => $created];

@@ -10,7 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'webhook_id', 'organization_id', 'store_id', 'shopify_connection_id', 'app_id',
     'topic', 'api_version', 'headers', 'payload', 'payload_encrypted', 'payload_sha256',
-    'status', 'attempts', 'received_at', 'next_retry_at', 'processed_at', 'last_error',
+    'status', 'processing_result', 'handler', 'unsupported_reason', 'attempts', 'received_at',
+    'processing_started_at', 'next_retry_at', 'processed_at', 'processing_duration_ms', 'last_error',
 ])]
 #[Hidden(['payload_encrypted'])]
 class WebhookEvent extends Model
@@ -66,8 +67,10 @@ class WebhookEvent extends Model
             'payload_encrypted' => 'encrypted',
             'attempts' => 'integer',
             'received_at' => 'datetime',
+            'processing_started_at' => 'datetime',
             'next_retry_at' => 'datetime',
             'processed_at' => 'datetime',
+            'processing_duration_ms' => 'integer',
         ];
     }
 }

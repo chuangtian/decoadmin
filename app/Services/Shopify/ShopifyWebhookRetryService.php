@@ -2,15 +2,18 @@
 
 namespace App\Services\Shopify;
 
-use App\Jobs\ProcessShopifyWebhook;
+use App\Jobs\ProcessWebhookEventJob;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Models\WebhookEvent;
+use App\Services\Shopify\Webhooks\WebhookEventStateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ShopifyWebhookRetryService
 {
+    public function __construct(private WebhookEventStateService $states) {}
+
     public function retry(WebhookEvent $event, User $actor): WebhookEvent
     {
         $event = DB::transaction(function () use ($event, $actor): WebhookEvent {
@@ -23,12 +26,7 @@ class ShopifyWebhookRetryService
             }
 
             $previousStatus = $locked->status;
-            $locked->forceFill([
-                'status' => 'pending',
-                'processed_at' => null,
-                'next_retry_at' => null,
-                'last_error' => null,
-            ])->save();
+            $this->states->markRetrying($locked);
 
             AuditLog::query()->create([
                 'organization_id' => $locked->organization_id,
@@ -38,12 +36,12 @@ class ShopifyWebhookRetryService
                 'subject_type' => $locked->getMorphClass(),
                 'subject_id' => $locked->getKey(),
                 'old_values' => ['status' => $previousStatus],
-                'new_values' => ['status' => 'pending'],
+                'new_values' => ['status' => 'retrying'],
                 'metadata' => [
                     'webhook_id' => $locked->webhook_id,
                     'topic' => $locked->topic,
                     'previous_status' => $previousStatus,
-                    'new_status' => 'pending',
+                    'new_status' => 'retrying',
                     'attempts' => $locked->attempts,
                 ],
             ]);
@@ -51,7 +49,7 @@ class ShopifyWebhookRetryService
             return $locked;
         });
 
-        ProcessShopifyWebhook::dispatch($event->getKey())->onQueue('shopify-webhook');
+        ProcessWebhookEventJob::dispatch($event->getKey());
 
         return $event;
     }

@@ -27,16 +27,20 @@ const dateLabel = (value: string | null) => value
     ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
     : '—';
 const statusLabel = (status: string) => ({
-    pending: '等待处理',
+    received: '已接收',
+    queued: '已入队',
     processing: '处理中',
     processed: '已处理',
     failed: '处理失败',
+    retrying: '重试排队中',
 }[status] ?? status);
 const statusClass = (status: string) => ({
-    pending: 'bg-amber-50 text-amber-700 ring-amber-100',
+    received: 'bg-slate-50 text-slate-700 ring-slate-200',
+    queued: 'bg-violet-50 text-violet-700 ring-violet-100',
     processing: 'bg-blue-50 text-blue-700 ring-blue-100',
     processed: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
     failed: 'bg-rose-50 text-rose-700 ring-rose-100',
+    retrying: 'bg-amber-50 text-amber-700 ring-amber-100',
 }[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200');
 const hasFilters = () => Boolean(props.filters.topic || props.filters.status || props.filters.store_id);
 </script>
@@ -63,10 +67,10 @@ const hasFilters = () => Boolean(props.filters.topic || props.filters.status || 
                     <div class="hidden overflow-x-auto md:block">
                         <table class="w-full min-w-[920px] text-left text-sm">
                             <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500"><tr><th class="px-5 py-3.5">Event Type</th><th class="px-5 py-3.5">Store</th><th class="px-5 py-3.5">Status</th><th class="px-5 py-3.5">Received At</th><th class="px-5 py-3.5">Processed At</th><th class="px-5 py-3.5 text-right">操作</th></tr></thead>
-                            <tbody class="divide-y divide-slate-100"><tr v-for="event in events.data" :key="event.id" class="transition hover:bg-slate-50/70"><td class="px-5 py-4"><Link :href="`/webhooks/${event.id}`" class="font-semibold text-slate-900 hover:text-emerald-700">{{ event.topic }}</Link><p class="mt-1 font-mono text-[11px] text-slate-400">{{ event.webhook_id }}</p></td><td class="px-5 py-4"><p class="font-medium text-slate-800">{{ event.store.name }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ event.store.shopify_domain }}</p></td><td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(event.status)">{{ statusLabel(event.status) }}</span></td><td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(event.received_at) }}</td><td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(event.processed_at) }}</td><td class="px-5 py-4 text-right"><Link :href="`/webhooks/${event.id}`" class="rounded-lg px-3 py-2 font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td></tr></tbody>
+                            <tbody class="divide-y divide-slate-100"><tr v-for="event in events.data" :key="event.id" class="transition hover:bg-slate-50/70"><td class="px-5 py-4"><Link :href="`/webhooks/${event.id}`" class="font-semibold text-slate-900 hover:text-emerald-700">{{ event.topic }}</Link><p class="mt-1 font-mono text-[11px] text-slate-400">{{ event.webhook_id }}</p></td><td class="px-5 py-4"><p class="font-medium text-slate-800">{{ event.store.name }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ event.store.shopify_domain }}</p></td><td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(event.status)">{{ statusLabel(event.status) }}</span><p v-if="event.processing_result === 'unsupported'" class="mt-1.5 text-xs font-medium text-amber-700">Unsupported</p></td><td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(event.received_at) }}</td><td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(event.processed_at) }}</td><td class="px-5 py-4 text-right"><Link :href="`/webhooks/${event.id}`" class="rounded-lg px-3 py-2 font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td></tr></tbody>
                         </table>
                     </div>
-                    <div class="divide-y divide-slate-100 md:hidden"><article v-for="event in events.data" :key="event.id" class="p-5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><Link :href="`/webhooks/${event.id}`" class="block truncate font-semibold text-slate-900">{{ event.topic }}</Link><p class="mt-1 truncate font-mono text-[11px] text-slate-400">{{ event.webhook_id }}</p></div><span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(event.status)">{{ statusLabel(event.status) }}</span></div><div class="mt-4 rounded-xl bg-slate-50 p-3"><p class="font-medium text-slate-800">{{ event.store.name }}</p><p class="mt-1 break-all font-mono text-xs text-slate-400">{{ event.store.shopify_domain }}</p></div><dl class="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500"><div><dt>接收时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(event.received_at) }}</dd></div><div><dt>处理时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(event.processed_at) }}</dd></div></dl><Link :href="`/webhooks/${event.id}`" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看详情 →</Link></article></div>
+                    <div class="divide-y divide-slate-100 md:hidden"><article v-for="event in events.data" :key="event.id" class="p-5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><Link :href="`/webhooks/${event.id}`" class="block truncate font-semibold text-slate-900">{{ event.topic }}</Link><p class="mt-1 truncate font-mono text-[11px] text-slate-400">{{ event.webhook_id }}</p></div><div class="text-right"><span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(event.status)">{{ statusLabel(event.status) }}</span><p v-if="event.processing_result === 'unsupported'" class="mt-1.5 text-xs font-medium text-amber-700">Unsupported</p></div></div><div class="mt-4 rounded-xl bg-slate-50 p-3"><p class="font-medium text-slate-800">{{ event.store.name }}</p><p class="mt-1 break-all font-mono text-xs text-slate-400">{{ event.store.shopify_domain }}</p></div><dl class="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500"><div><dt>接收时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(event.received_at) }}</dd></div><div><dt>处理时间</dt><dd class="mt-1 text-slate-700">{{ dateLabel(event.processed_at) }}</dd></div></dl><Link :href="`/webhooks/${event.id}`" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看详情 →</Link></article></div>
                 </div>
                 <EmptyState v-else class="border-0 shadow-none" :title="hasFilters() ? '没有匹配的 Webhook Event' : '尚未收到 Webhook Event'" :description="hasFilters() ? '请调整 Event Type、状态或店铺过滤条件。' : 'Shopify 推送事件并通过 HMAC 验证后，会安全地显示在这里。'" icon="webhooks" />
             </div>

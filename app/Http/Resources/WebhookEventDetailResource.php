@@ -12,6 +12,10 @@ class WebhookEventDetailResource extends WebhookEventResource
         return [
             ...parent::toArray($request),
             'api_version' => $this->api_version,
+            'handler' => $this->handler,
+            'unsupported_reason' => $this->unsupported_reason,
+            'processing_started_at' => $this->processing_started_at?->toIso8601String(),
+            'processing_duration_ms' => $this->processing_duration_ms,
             'headers' => $this->headers ?? [],
             'payload' => $this->decodedPayload(),
             'payload_integrity_valid' => $this->payloadIntegrityIsValid(),

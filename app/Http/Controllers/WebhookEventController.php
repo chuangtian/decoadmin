@@ -56,7 +56,7 @@ class WebhookEventController extends Controller
             'events' => WebhookEventResource::collection($events),
             'filters' => ['topic' => $topic, 'status' => $status, 'store_id' => $storeId ?: null],
             'stores' => $stores,
-            'statuses' => ['pending', 'processing', 'processed', 'failed'],
+            'statuses' => ['received', 'queued', 'processing', 'processed', 'failed', 'retrying'],
         ]);
     }
 

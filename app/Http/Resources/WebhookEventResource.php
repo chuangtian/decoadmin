@@ -15,6 +15,7 @@ class WebhookEventResource extends JsonResource
             'webhook_id' => $this->webhook_id,
             'topic' => $this->topic,
             'status' => $this->status,
+            'processing_result' => $this->processing_result,
             'attempts' => $this->attempts,
             'received_at' => $this->received_at?->toIso8601String(),
             'processed_at' => $this->processed_at?->toIso8601String(),
