@@ -34,6 +34,7 @@ class SyncJobPolicy
             'products' => 'products.sync',
             'orders' => 'orders.sync',
             'customers' => 'customers.sync',
+            'inventory' => 'inventory.sync',
             default => null,
         };
 

@@ -56,9 +56,28 @@ class ShopifySyncEngineTest extends TestCase
 
     public function test_processor_executes_handler_and_persists_standard_result(): void
     {
-        $syncJob = $this->syncJob('inventory');
+        $syncJob = $this->syncJob('test-resource');
+        $handler = new class implements SyncHandlerInterface
+        {
+            public function type(): string
+            {
+                return 'test-resource';
+            }
 
-        $result = app(SyncProcessor::class)->process($syncJob->id);
+            public function handle(SyncJob $syncJob): SyncResult
+            {
+                return SyncResult::successful('Test completed.', metadata: [
+                    'handler' => self::class,
+                    'framework_only' => true,
+                ]);
+            }
+        };
+        $processor = new SyncProcessor(
+            new SyncHandlerRegistry([$handler]),
+            app(SyncJobService::class),
+        );
+
+        $result = $processor->process($syncJob->id);
         $syncJob->refresh();
 
         $this->assertTrue($result->success);
@@ -68,7 +87,7 @@ class ShopifySyncEngineTest extends TestCase
         $this->assertSame([
             'success', 'status', 'message', 'records_count', 'errors', 'metadata',
         ], array_keys($syncJob->result));
-        $this->assertSame(InventorySyncHandler::class, $syncJob->result['metadata']['handler']);
+        $this->assertSame($handler::class, $syncJob->result['metadata']['handler']);
         $this->assertTrue($syncJob->result['metadata']['framework_only']);
     }
 

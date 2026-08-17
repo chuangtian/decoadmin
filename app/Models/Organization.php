@@ -41,6 +41,16 @@ class Organization extends Model
         return $this->hasMany(Customer::class);
     }
 
+    public function inventoryItems(): HasMany
+    {
+        return $this->hasMany(InventoryItem::class);
+    }
+
+    public function locations(): HasMany
+    {
+        return $this->hasMany(Location::class);
+    }
+
     public function roles(): HasMany
     {
         return $this->hasMany(Role::class);

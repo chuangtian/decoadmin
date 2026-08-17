@@ -67,7 +67,7 @@ const hasFilters = () => Boolean(props.filters.type || props.filters.status || p
                     <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">同步任务</h2>
                     <p class="mt-2 text-sm text-slate-500">统一管理 Shopify 数据同步任务、执行状态和运行日志。</p>
                 </div>
-                <span class="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">商品、订单和客户同步已接入 Shopify，库存暂为任务框架</span>
+                <span class="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">商品、订单、客户和库存同步已接入 Shopify</span>
             </div>
 
             <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">

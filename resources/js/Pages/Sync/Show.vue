@@ -18,6 +18,7 @@ const resultLabels = {
     products: { title: '商品同步结果', eyebrow: 'Product Sync Result', records: '商品数量' },
     orders: { title: '订单同步结果', eyebrow: 'Order Sync Result', records: '订单数量' },
     customers: { title: '客户同步结果', eyebrow: 'Customer Sync Result', records: '客户数量' },
+    inventory: { title: '库存同步结果', eyebrow: 'Inventory Sync Result', records: '库存项目数量' },
 } as const;
 const resultLabel = computed(() => resultLabels[props.syncJob.data.type as keyof typeof resultLabels]);
 const isRealDataSync = computed(() => Boolean(resultLabel.value));

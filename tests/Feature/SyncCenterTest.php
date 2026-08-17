@@ -80,8 +80,26 @@ class SyncCenterTest extends TestCase
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
         $syncJob = $this->syncJob($organization, $store, $installation, 'queued', 'inventory');
+        $handler = new class implements SyncHandlerInterface
+        {
+            public function type(): string
+            {
+                return 'inventory';
+            }
 
-        (new ProcessSyncJob($syncJob->id))->handle(app(SyncProcessor::class));
+            public function handle(SyncJob $syncJob): SyncResult
+            {
+                return SyncResult::successful('Framework test completed.', metadata: [
+                    'framework_only' => true,
+                ]);
+            }
+        };
+        $processor = new SyncProcessor(
+            new SyncHandlerRegistry([$handler]),
+            app(SyncJobService::class),
+        );
+
+        (new ProcessSyncJob($syncJob->id))->handle($processor);
         $syncJob->refresh();
 
         $this->assertSame('completed', $syncJob->status);

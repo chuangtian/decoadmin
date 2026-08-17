@@ -59,6 +59,16 @@ class Store extends Model
         return $this->hasMany(Customer::class);
     }
 
+    public function inventoryItems(): HasMany
+    {
+        return $this->hasMany(InventoryItem::class);
+    }
+
+    public function locations(): HasMany
+    {
+        return $this->hasMany(Location::class);
+    }
+
     public function latestSyncJob(): HasOne
     {
         return $this->hasOne(SyncJob::class)->latestOfMany();
