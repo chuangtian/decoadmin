@@ -49,6 +49,11 @@ class Store extends Model
         return $this->hasMany(Product::class);
     }
 
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
     public function latestSyncJob(): HasOne
     {
         return $this->hasOne(SyncJob::class)->latestOfMany();

@@ -43,6 +43,7 @@ class PermissionSeeder extends Seeder
         'orders.update',
         'orders.cancel',
         'orders.refund',
+        'orders.sync',
         'products.view',
         'products.create',
         'products.update',

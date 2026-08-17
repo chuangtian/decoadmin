@@ -6,7 +6,7 @@ return [
     'api_version' => env('SHOPIFY_API_VERSION', '2026-07'),
     'requested_scopes' => array_values(array_filter(array_map(
         'trim',
-        explode(',', (string) env('SHOPIFY_REQUESTED_SCOPES', 'read_products,read_inventory')),
+        explode(',', (string) env('SHOPIFY_REQUESTED_SCOPES', 'read_products,read_inventory,read_orders')),
     ))),
     'app_name' => env('SHOPIFY_APP_NAME', 'Shopify Commerce Hub'),
     'app_handle' => env('SHOPIFY_APP_HANDLE', 'shopify-commerce-hub'),

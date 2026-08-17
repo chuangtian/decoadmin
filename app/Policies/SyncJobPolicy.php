@@ -30,10 +30,16 @@ class SyncJobPolicy
             return false;
         }
 
-        if ($type === 'products') {
+        $typePermission = match ($type) {
+            'products' => 'products.sync',
+            'orders' => 'orders.sync',
+            default => null,
+        };
+
+        if ($typePermission !== null) {
             $organization = $this->currentOrganization->get();
 
-            return $organization && $user->hasPermission('products.sync', $organization, $store);
+            return $organization && $user->hasPermission($typePermission, $organization, $store);
         }
 
         return true;

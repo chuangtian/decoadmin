@@ -32,7 +32,7 @@ class SyncJobService
                 'payload' => [
                     'source' => 'manual',
                     'requested_by' => $actor->getKey(),
-                    'framework_only' => $type !== 'products',
+                    'framework_only' => ! in_array($type, ['products', 'orders'], true),
                 ],
                 'logs' => [],
                 'available_at' => now(),
