@@ -10,15 +10,25 @@ if [ "${1:-}" = "/usr/local/bin/setup-app" ]; then
         cp -a /opt/app-build/. public/build/
     fi
 
-    if [ ! -f .env ]; then
+    if [ ! -f .env ] && [ -z "${APP_KEY:-}" ]; then
         cp .env.example .env
     fi
 
-    if ! grep -Eq '^APP_KEY=base64:.+' .env; then
+    if [ -f .env ] && ! grep -Eq '^APP_KEY=base64:.+' .env; then
         php artisan key:generate --force --no-interaction
     fi
 
+    if [ ! -f .env ] && [ -z "${APP_KEY:-}" ]; then
+        echo "APP_KEY is required when deploying without a mounted .env file." >&2
+        exit 1
+    fi
+
     php artisan migrate --force --no-interaction
+
+    if [ "${APP_ENV:-}" = "staging" ] || [ "${APP_ENV:-}" = "production" ]; then
+        php artisan optimize --no-interaction
+    fi
+
     exit 0
 fi
 

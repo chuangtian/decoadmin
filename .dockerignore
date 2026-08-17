@@ -1,5 +1,6 @@
 .git
-.env
+.env*
+!.env.example
 .idea
 .vscode
 node_modules

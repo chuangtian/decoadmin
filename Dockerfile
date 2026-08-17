@@ -46,3 +46,24 @@ RUN mkdir -p public/build \
 
 ENTRYPOINT ["app-entrypoint"]
 CMD ["php-fpm"]
+
+FROM app AS app-production
+
+RUN composer install \
+        --no-dev \
+        --no-interaction \
+        --prefer-dist \
+        --no-progress \
+        --optimize-autoloader \
+        --classmap-authoritative \
+    && rm -f public/hot \
+    && ln -s ../storage/app/public public/storage \
+    && chown -h www-data:www-data public/storage
+
+COPY docker/php/php.production.ini /usr/local/etc/php/conf.d/zz-production.ini
+
+FROM nginx:1.28-alpine AS nginx-production
+
+WORKDIR /var/www/html
+COPY --from=app-production /var/www/html/public /var/www/html/public
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf

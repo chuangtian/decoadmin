@@ -7,6 +7,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
@@ -22,6 +23,8 @@ use App\Http\Controllers\WebhookEventController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+
+Route::get('/health', HealthCheckController::class)->name('health');
 
 Route::get('/', fn () => auth()->check()
     ? redirect()->route('dashboard')

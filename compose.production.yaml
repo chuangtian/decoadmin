@@ -1,0 +1,125 @@
+name: ${COMPOSE_PROJECT_NAME:-decoadmin-staging}
+
+x-app: &app
+  build:
+    context: .
+    target: app-production
+  image: ${APP_IMAGE:-decoadmin-app:staging}
+  env_file:
+    - ${APP_ENV_FILE:-.env.staging}
+  environment:
+    DB_HOST: mysql
+    REDIS_HOST: redis
+  restart: unless-stopped
+  working_dir: /var/www/html
+  read_only: true
+  tmpfs:
+    - /tmp
+  volumes:
+    - storage:/var/www/html/storage
+    - bootstrap-cache:/var/www/html/bootstrap/cache
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  setup:
+    <<: *app
+    profiles: ["tools"]
+    restart: "no"
+    command: ["/usr/local/bin/setup-app"]
+
+  app:
+    <<: *app
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(fsockopen(\"127.0.0.1\", 9000) ? 0 : 1);'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  nginx:
+    build:
+      context: .
+      target: nginx-production
+    image: ${NGINX_IMAGE:-decoadmin-nginx:staging}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    volumes:
+      - storage:/var/www/html/storage:ro
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      app:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis-data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  horizon:
+    <<: *app
+    stop_grace_period: 90s
+    command: ["php", "artisan", "horizon"]
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work", "--verbose", "--no-interaction"]
+
+  pulse:
+    <<: *app
+    profiles: ["monitoring"]
+    command: ["php", "artisan", "pulse:check"]
+
+volumes:
+  bootstrap-cache:
+  mysql-data:
+  redis-data:
+  storage:
