@@ -33,6 +33,7 @@ class SyncJobPolicy
         $typePermission = match ($type) {
             'products' => 'products.sync',
             'orders' => 'orders.sync',
+            'customers' => 'customers.sync',
             default => null,
         };
 

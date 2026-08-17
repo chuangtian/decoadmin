@@ -79,7 +79,7 @@ class SyncCenterTest extends TestCase
     public function test_processing_job_uses_framework_without_shopify_data_sync(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
-        $syncJob = $this->syncJob($organization, $store, $installation, 'queued', 'customers');
+        $syncJob = $this->syncJob($organization, $store, $installation, 'queued', 'inventory');
 
         (new ProcessSyncJob($syncJob->id))->handle(app(SyncProcessor::class));
         $syncJob->refresh();

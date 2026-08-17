@@ -36,6 +36,11 @@ class Organization extends Model
         return $this->hasMany(Order::class);
     }
 
+    public function customers(): HasMany
+    {
+        return $this->hasMany(Customer::class);
+    }
+
     public function roles(): HasMany
     {
         return $this->hasMany(Role::class);

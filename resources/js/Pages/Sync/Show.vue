@@ -14,10 +14,13 @@ const statusLabel = (status: string) => ({ pending: '待处理', queued: '已入
 const statusClass = (status: string) => ({ pending: 'bg-slate-50 text-slate-700 ring-slate-200', queued: 'bg-violet-50 text-violet-700 ring-violet-100', running: 'bg-blue-50 text-blue-700 ring-blue-100', completed: 'bg-emerald-50 text-emerald-700 ring-emerald-100', failed: 'bg-rose-50 text-rose-700 ring-rose-100', cancelled: 'bg-slate-100 text-slate-500 ring-slate-200' }[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200');
 const logClass = (level: string) => ({ info: 'bg-blue-500', success: 'bg-emerald-500', warning: 'bg-amber-500', error: 'bg-rose-500' }[level] ?? 'bg-slate-400');
 const result = computed(() => props.syncJob.data.result);
-const isRealDataSync = computed(() => ['products', 'orders'].includes(props.syncJob.data.type));
-const resultTitle = computed(() => props.syncJob.data.type === 'orders' ? '订单同步结果' : '商品同步结果');
-const resultEyebrow = computed(() => props.syncJob.data.type === 'orders' ? 'Order Sync Result' : 'Product Sync Result');
-const recordsLabel = computed(() => props.syncJob.data.type === 'orders' ? '订单数量' : '商品数量');
+const resultLabels = {
+    products: { title: '商品同步结果', eyebrow: 'Product Sync Result', records: '商品数量' },
+    orders: { title: '订单同步结果', eyebrow: 'Order Sync Result', records: '订单数量' },
+    customers: { title: '客户同步结果', eyebrow: 'Customer Sync Result', records: '客户数量' },
+} as const;
+const resultLabel = computed(() => resultLabels[props.syncJob.data.type as keyof typeof resultLabels]);
+const isRealDataSync = computed(() => Boolean(resultLabel.value));
 const formattedResult = computed(() => JSON.stringify(result.value, null, 2));
 const durationLabel = computed(() => {
     const duration = result.value?.metadata.duration_ms;
@@ -45,8 +48,8 @@ const durationLabel = computed(() => {
 
             <section v-if="isRealDataSync && result" class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <div>
-                    <p class="text-sm font-semibold text-emerald-700">{{ resultEyebrow }}</p>
-                    <h3 class="mt-1 text-xl font-semibold text-slate-950">{{ resultTitle }}</h3>
+                    <p class="text-sm font-semibold text-emerald-700">{{ resultLabel?.eyebrow }}</p>
+                    <h3 class="mt-1 text-xl font-semibold text-slate-950">{{ resultLabel?.title }}</h3>
                 </div>
                 <div class="mt-5 grid gap-3 sm:grid-cols-3">
                     <article class="rounded-xl bg-slate-50 p-4">
@@ -54,7 +57,7 @@ const durationLabel = computed(() => {
                         <p class="mt-2 font-semibold" :class="result.success ? 'text-emerald-700' : 'text-rose-700'">{{ result.success ? '成功' : '失败' }}</p>
                     </article>
                     <article class="rounded-xl bg-slate-50 p-4">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">{{ recordsLabel }}</p>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">{{ resultLabel?.records }}</p>
                         <p class="mt-2 text-2xl font-semibold text-slate-950">{{ result.records_count }}</p>
                     </article>
                     <article class="rounded-xl bg-slate-50 p-4">

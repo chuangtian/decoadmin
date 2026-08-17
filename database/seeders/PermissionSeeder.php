@@ -52,6 +52,7 @@ class PermissionSeeder extends Seeder
         'customers.view',
         'customers.export',
         'customers.update',
+        'customers.sync',
         'inventory.view',
         'inventory.update',
         'inventory.sync',
