@@ -37,6 +37,16 @@ export interface ShopifyConnectionSummary {
     last_error_at: string | null;
 }
 
+export interface ShopifyConnectionHistory {
+    id: number;
+    action: string;
+    actor: string;
+    previous_status: ShopifyConnectionStatus | null;
+    new_status: ShopifyConnectionStatus | null;
+    reason: string | null;
+    created_at: string | null;
+}
+
 export interface AppInstallationSummary {
     id: number;
     status: string;

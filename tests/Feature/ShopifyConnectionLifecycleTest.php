@@ -14,6 +14,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class ShopifyConnectionLifecycleTest extends TestCase
@@ -76,6 +77,45 @@ class ShopifyConnectionLifecycleTest extends TestCase
         $this->assertSame($user->id, $audit->user_id);
         $this->assertSame('invalid', data_get($audit->old_values, 'status'));
         $this->assertSame('connected', data_get($audit->new_values, 'status'));
+        $this->assertSame('invalid', data_get($audit->metadata, 'previous_status'));
+        $this->assertSame('connected', data_get($audit->metadata, 'new_status'));
+    }
+
+    public function test_disconnected_connection_can_reconnect_through_existing_oauth_flow(): void
+    {
+        [$user, $organization, $store] = $this->storeContext('store-admin');
+        $connection = $this->connection($store, 'disconnected');
+
+        $response = $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->post(route('stores.connect', $store), $this->connectionPayload($store));
+
+        $response->assertRedirect();
+        parse_str((string) parse_url((string) $response->headers->get('Location'), PHP_URL_QUERY), $authorizationQuery);
+        $this->assertNotEmpty($authorizationQuery['state']);
+
+        Http::fake([
+            "https://{$store->shopify_domain}/admin/oauth/access_token" => Http::response([
+                'access_token' => 'shpat_reconnected_after_disconnect',
+                'scope' => 'read_products',
+            ]),
+        ]);
+
+        app(ShopifyOAuthService::class)->complete(
+            $this->signedCallbackQuery($authorizationQuery['state'], $store->shopify_domain),
+            $authorizationQuery['state'],
+        );
+
+        $connection->refresh();
+        $this->assertSame('connected', $connection->status);
+        $this->assertSame('shpat_reconnected_after_disconnect', $connection->access_token_encrypted);
+
+        $audit = AuditLog::query()->where('action', 'shopify_connection_reconnected')->sole();
+        $this->assertSame('disconnected', data_get($audit->metadata, 'previous_status'));
+        $this->assertSame('connected', data_get($audit->metadata, 'new_status'));
     }
 
     public function test_user_without_store_management_permission_cannot_reconnect(): void
@@ -157,6 +197,95 @@ class ShopifyConnectionLifecycleTest extends TestCase
         $this->assertSame($store->id, $audit->store_id);
         $this->assertSame($user->id, $audit->user_id);
         $this->assertSame('Shopify App 已卸载。', data_get($audit->metadata, 'reason'));
+    }
+
+    public function test_store_admin_can_disconnect_without_deleting_connection(): void
+    {
+        [$user, $organization, $store] = $this->storeContext('store-admin');
+        $connection = $this->connection($store, 'connected');
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->post(route('stores.shopify.disconnect', $store))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $connection->refresh();
+        $this->assertSame('disconnected', $connection->status);
+        $this->assertSame('test-access-token', $connection->access_token_encrypted);
+        $this->assertDatabaseCount('shopify_connections', 1);
+
+        $audit = AuditLog::query()->where('action', 'shopify_connection_disconnected')->sole();
+        $this->assertSame($organization->id, $audit->organization_id);
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertSame($user->id, $audit->user_id);
+        $this->assertSame('管理员主动断开 Shopify 连接。', data_get($audit->metadata, 'reason'));
+        $this->assertSame('connected', data_get($audit->metadata, 'previous_status'));
+        $this->assertSame('disconnected', data_get($audit->metadata, 'new_status'));
+        $this->assertStringNotContainsString('test-access-token', json_encode($audit->toArray(), JSON_THROW_ON_ERROR));
+    }
+
+    public function test_operator_cannot_disconnect_connection(): void
+    {
+        [$user, $organization, $store] = $this->storeContext('operator');
+        $connection = $this->connection($store, 'connected');
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->post(route('stores.shopify.disconnect', $store))
+            ->assertForbidden();
+
+        $this->assertSame('connected', $connection->fresh()->status);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_user_cannot_disconnect_store_from_another_organization(): void
+    {
+        [$user, $organization] = $this->userWithRole('organization-admin', 'Macfox', 'macfox');
+        $otherOrganization = Organization::query()->create(['name' => 'Asiwo', 'code' => 'asiwo']);
+        $store = $this->store($otherOrganization, 'Asiwo US', 'asiwo-us.myshopify.com');
+        $connection = $this->connection($store, 'connected');
+
+        $this->actingAs($user)
+            ->withSession(['current_organization_id' => $organization->id])
+            ->post(route('stores.shopify.disconnect', $store))
+            ->assertForbidden();
+
+        $this->assertSame('connected', $connection->fresh()->status);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_store_detail_only_exposes_connection_history_for_current_store(): void
+    {
+        [$user, $organization, $store] = $this->storeContext('organization-admin');
+        $connection = $this->connection($store, 'connected');
+        app(ShopifyConnectionLifecycleService::class)->markDisconnected($connection, '管理员主动断开 Shopify 连接。', $user);
+
+        $otherStore = $this->store($organization, 'Macfox EU', 'macfox-eu.myshopify.com');
+        $otherStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $otherConnection = $this->connection($otherStore, 'connected');
+        app(ShopifyConnectionLifecycleService::class)->markInvalid($otherConnection, 'Other store token invalid.');
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->get(route('stores.show', $store))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Stores/Show')
+                ->has('connectionHistory', 1)
+                ->where('connectionHistory.0.action', 'shopify_connection_disconnected')
+                ->where('connectionHistory.0.actor', $user->name)
+                ->where('connectionHistory.0.previous_status', 'connected')
+                ->where('connectionHistory.0.new_status', 'disconnected'));
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */

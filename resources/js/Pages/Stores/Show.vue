@@ -2,12 +2,14 @@
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
+import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
-import type { SharedProps, ShopifyStore } from '../../types';
+import type { SharedProps, ShopifyConnectionHistory, ShopifyStore } from '../../types';
 
-const props = defineProps<{ store: { data: ShopifyStore } }>();
+const props = defineProps<{ store: { data: ShopifyStore }; connectionHistory: ShopifyConnectionHistory[] }>();
 const page = usePage<SharedProps>();
 const canConnect = computed(() => page.props.auth.permissions.includes('store.connect'));
+const canDisconnect = computed(() => page.props.auth.permissions.includes('store.disconnect') && props.store.data.connection_status !== 'disconnected');
 const canReconnect = computed(() => ['invalid', 'disconnected'].includes(props.store.data.connection_status));
 const activeTab = ref('overview');
 const tabs = [
@@ -21,17 +23,22 @@ const tabs = [
 const currentTab = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const form = useForm({ name: props.store.data.name, shop_domain: props.store.data.shopify_domain, environment: props.store.data.environment });
 const healthForm = useForm({});
+const disconnectForm = useForm({});
 const reconnect = () => form.post(`/stores/${props.store.data.id}/connect`);
 const verifyConnection = () => healthForm.post(`/stores/${props.store.data.id}/shopify/verify`, { preserveScroll: true });
+const disconnect = () => {
+    if (window.confirm('确定要断开当前 Shopify Connection 吗？连接记录和历史会保留，恢复时需要重新授权。')) {
+        disconnectForm.post(`/stores/${props.store.data.id}/shopify/disconnect`, { preserveScroll: true });
+    }
+};
 const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value)) : '暂无记录';
-const connectionStatus = {
-    connected: { label: 'Connected', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-600/15', dot: 'bg-emerald-500' },
-    warning: { label: 'Warning', badge: 'bg-amber-50 text-amber-700 ring-amber-600/15', dot: 'bg-amber-400' },
-    invalid: { label: 'Invalid', badge: 'bg-rose-50 text-rose-700 ring-rose-600/15', dot: 'bg-rose-500' },
-    disconnected: { label: 'Disconnected', badge: 'bg-slate-100 text-slate-600 ring-slate-500/15', dot: 'bg-slate-400' },
-    pending: { label: 'Pending', badge: 'bg-amber-50 text-amber-700 ring-amber-600/15', dot: 'bg-amber-400' },
-} as const;
-const connectionHealth = computed(() => connectionStatus[props.store.data.connection_status]);
+const eventLabels: Record<string, string> = {
+    shopify_connection_connected: 'Connected',
+    shopify_connection_warning: 'Connection Warning',
+    shopify_connection_invalid: 'Invalid Token',
+    shopify_connection_disconnected: 'Disconnected',
+    shopify_connection_reconnected: 'Reconnected',
+};
 </script>
 
 <template>
@@ -50,7 +57,7 @@ const connectionHealth = computed(() => connectionStatus[props.store.data.connec
                 <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Store Name</p><p class="mt-3 text-lg font-semibold text-slate-900">{{ store.data.name }}</p></section>
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Shopify Domain</p><p class="mt-3 break-all font-mono text-sm font-semibold text-slate-700">{{ store.data.shopify_domain }}</p></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Connection Status</p><div class="mt-3 flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full" :class="connectionHealth.dot" /><p class="font-semibold text-slate-900">{{ connectionHealth.label }}</p></div></section>
+                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Connection Status</p><div class="mt-3"><ShopifyConnectionStatus :status="store.data.connection_status" size="md" /></div></section>
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Installed Apps</p><p class="mt-3 text-2xl font-semibold text-slate-900">{{ store.data.installed_apps_count }}</p></section>
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Last Sync</p><p class="mt-3 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.last_sync?.at ?? null) }}</p><p v-if="store.data.last_sync" class="mt-1 text-xs text-slate-400">状态：{{ store.data.last_sync.status }}</p></section>
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Created Time</p><p class="mt-3 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.created_at) }}</p></section>
@@ -67,13 +74,14 @@ const connectionHealth = computed(() => connectionStatus[props.store.data.connec
                             <p class="mt-1 text-sm text-slate-500">查看授权生命周期、API 连通状态与最近一次异常。</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-3">
-                            <span class="inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset" :class="connectionHealth.badge">{{ connectionHealth.label }}</span>
-                            <form v-if="canConnect && canReconnect" @submit.prevent="reconnect"><button :disabled="form.processing" class="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-wait disabled:opacity-50">{{ form.processing ? '正在跳转…' : 'Reconnect Shopify' }}</button></form>
+                            <ShopifyConnectionStatus :status="store.data.connection_status" size="md" />
+                            <form v-if="canConnect && canReconnect" @submit.prevent="reconnect"><button :disabled="form.processing" class="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50">{{ form.processing ? '正在跳转…' : 'Reconnect Shopify' }}</button></form>
                             <button v-else-if="canConnect" type="button" :disabled="healthForm.processing" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-50" @click="verifyConnection">{{ healthForm.processing ? '正在检测…' : 'Verify Connection' }}</button>
+                            <button v-if="canDisconnect" type="button" :disabled="disconnectForm.processing" class="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50" @click="disconnect">{{ disconnectForm.processing ? '正在断开…' : 'Disconnect Shopify' }}</button>
                         </div>
                     </div>
                     <dl class="grid gap-px bg-slate-100 sm:grid-cols-2 xl:grid-cols-4">
-                        <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Connection Status</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ connectionHealth.label }}</dd></div>
+                        <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Connection Status</dt><dd class="mt-2"><ShopifyConnectionStatus :status="store.data.connection_status" /></dd></div>
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Last Verified</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.connection.last_verified_at) }}</dd></div>
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">Last API Check</dt><dd class="mt-2 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.connection.last_api_check) }}</dd></div>
                         <div class="bg-white px-5 py-5 sm:px-6"><dt class="text-xs font-semibold uppercase tracking-wider text-slate-400">API Version</dt><dd class="mt-2 font-mono text-sm font-semibold text-slate-900">{{ store.data.connection.api_version }}</dd></div>
@@ -85,6 +93,21 @@ const connectionHealth = computed(() => connectionStatus[props.store.data.connec
                     </div>
                 </div>
                 <EmptyState v-else title="尚未建立 Shopify Connection" description="请先完成 Shopify OAuth 授权，再验证连接健康状态。" icon="shopify" />
+
+                <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div class="border-b border-slate-100 px-5 py-5 sm:px-6">
+                        <h3 class="font-semibold text-slate-950">Connection History</h3>
+                        <p class="mt-1 text-sm text-slate-500">最近 20 条 Shopify 连接状态变化，不包含 Token 或 Secret。</p>
+                    </div>
+                    <div v-if="connectionHistory.length" class="divide-y divide-slate-100">
+                        <article v-for="event in connectionHistory" :key="event.id" class="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:px-6">
+                            <div><p class="font-semibold text-slate-900">{{ eventLabels[event.action] ?? event.action }}</p><p v-if="event.reason" class="mt-1 text-xs text-slate-500">{{ event.reason }}</p></div>
+                            <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400">操作人</p><p class="mt-1 text-sm font-medium text-slate-700">{{ event.actor }}</p></div>
+                            <div class="sm:text-right"><p class="text-xs text-slate-400">{{ dateLabel(event.created_at) }}</p><div v-if="event.new_status" class="mt-2 sm:flex sm:justify-end"><ShopifyConnectionStatus :status="event.new_status" /></div></div>
+                        </article>
+                    </div>
+                    <p v-else class="px-6 py-10 text-center text-sm text-slate-500">暂无连接历史。</p>
+                </section>
             </section>
 
             <EmptyState v-else class="mt-6" :title="`${currentTab.name} Center`" :description="currentTab.description" :icon="currentTab.icon">

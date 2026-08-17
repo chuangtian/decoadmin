@@ -2,26 +2,13 @@
 import { Head, Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
+import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, SharedProps, ShopifyStore } from '../../types';
 
 defineProps<{ stores: PaginatedResource<ShopifyStore> }>();
 const page = usePage<SharedProps>();
 const canCreate = computed(() => page.props.auth.permissions.includes('store.create'));
-const connectionLabels: Record<ShopifyStore['connection_status'], string> = {
-    connected: 'Connected',
-    warning: 'Warning',
-    invalid: 'Invalid',
-    disconnected: 'Disconnected',
-    pending: 'Pending',
-};
-const connectionClasses: Record<ShopifyStore['connection_status'], string> = {
-    connected: 'bg-emerald-50 text-emerald-700 ring-emerald-600/15',
-    warning: 'bg-amber-50 text-amber-700 ring-amber-600/15',
-    invalid: 'bg-rose-50 text-rose-700 ring-rose-600/15',
-    disconnected: 'bg-slate-100 text-slate-600 ring-slate-500/15',
-    pending: 'bg-amber-50 text-amber-700 ring-amber-600/15',
-};
 const storeStatusLabel = (status: string) => ({ active: '启用', pending: '待授权', inactive: '停用', error: '异常' }[status] ?? status);
 const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
 </script>
@@ -46,7 +33,7 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-
                             <td class="px-5 py-4 font-mono text-xs text-slate-600">{{ store.shopify_domain }}</td>
                             <td class="px-5 py-4"><span class="font-medium text-slate-700">{{ store.platform }}</span></td>
                             <td class="px-5 py-4"><span class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700"><span class="h-2 w-2 rounded-full" :class="store.status === 'active' ? 'bg-emerald-500' : store.status === 'error' ? 'bg-rose-500' : 'bg-amber-400'" />{{ storeStatusLabel(store.status) }}</span></td>
-                            <td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="connectionClasses[store.connection_status]">{{ connectionLabels[store.connection_status] }}</span></td>
+                            <td class="px-5 py-4"><ShopifyConnectionStatus :status="store.connection_status" /></td>
                             <td class="px-5 py-4 text-center font-semibold text-slate-700">{{ store.installed_apps_count }}</td>
                             <td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(store.created_at) }}</td>
                             <td class="px-5 py-4 text-right"><Link :href="`/stores/${store.id}`" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td>

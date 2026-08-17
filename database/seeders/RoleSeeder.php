@@ -27,7 +27,7 @@ class RoleSeeder extends Seeder
         'store-admin' => [
             'name' => '店铺管理员',
             'description' => '管理指定店铺及其日常业务运营。',
-            'permissions' => ['store.view', 'store.update', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'sync.*'],
+            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'sync.*'],
         ],
         'developer' => [
             'name' => '开发人员',

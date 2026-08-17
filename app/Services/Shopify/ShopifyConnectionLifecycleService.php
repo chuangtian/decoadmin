@@ -141,6 +141,8 @@ class ShopifyConnectionLifecycleService
             'new_values' => ['status' => $status],
             'metadata' => array_filter([
                 'reason' => $reason ? $this->safeReason($connection, $reason) : null,
+                'previous_status' => $previousStatus,
+                'new_status' => $status,
                 'api_version' => $connection->api_version,
             ], fn ($value) => $value !== null),
         ]);

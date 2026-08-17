@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\ShopifyOAuthException;
 use App\Http\Requests\ConnectShopifyStoreRequest;
 use App\Http\Resources\StoreResource;
+use App\Models\AuditLog;
 use App\Models\Store;
 use App\Services\Shopify\ShopifyOAuthService;
 use App\Support\CurrentOrganization;
@@ -73,10 +74,37 @@ class StoreController extends Controller
     {
         $this->authorize('view', $store);
 
+        $connectionHistory = AuditLog::query()
+            ->where('store_id', $store->getKey())
+            ->whereIn('action', [
+                'shopify_connection_connected',
+                'shopify_connection_warning',
+                'shopify_connection_invalid',
+                'shopify_connection_disconnected',
+                'shopify_connection_reconnected',
+            ])
+            ->with('user:id,name')
+            ->latest()
+            ->limit(20)
+            ->get()
+            ->map(fn (AuditLog $audit): array => [
+                'id' => $audit->id,
+                'action' => $audit->action,
+                'actor' => $audit->user?->name ?? 'System',
+                'previous_status' => data_get($audit->metadata, 'previous_status')
+                    ?? data_get($audit->old_values, 'status'),
+                'new_status' => data_get($audit->metadata, 'new_status')
+                    ?? data_get($audit->new_values, 'status'),
+                'reason' => data_get($audit->metadata, 'reason'),
+                'created_at' => $audit->created_at?->toIso8601String(),
+            ])
+            ->values();
+
         return Inertia::render('Stores/Show', [
             'store' => new StoreResource($store
                 ->load(['shopifyConnection', 'appInstallations.app', 'latestSyncJob'])
                 ->loadCount(['appInstallations as installed_apps_count' => fn ($query) => $query->where('status', 'active')])),
+            'connectionHistory' => $connectionHistory,
         ]);
     }
 
