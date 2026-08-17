@@ -25,6 +25,11 @@ class ShopifyConnection extends Model
         return $this->hasMany(AppInstallation::class);
     }
 
+    public function webhookEvents(): HasMany
+    {
+        return $this->hasMany(WebhookEvent::class);
+    }
+
     protected function casts(): array
     {
         return [

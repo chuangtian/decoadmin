@@ -47,6 +47,7 @@ class SidebarMenuAuthorizationTest extends TestCase
                     && $permissions->contains('organization.view')
                     && ! $permissions->contains('store.create')
                     && ! $permissions->contains('apps.view')
-                    && ! $permissions->contains('apps.install')));
+                    && ! $permissions->contains('apps.install')
+                    && ! $permissions->contains('webhooks.view')));
     }
 }

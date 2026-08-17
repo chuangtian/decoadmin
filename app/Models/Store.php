@@ -39,6 +39,11 @@ class Store extends Model
         return $this->hasMany(AppInstallation::class);
     }
 
+    public function webhookEvents(): HasMany
+    {
+        return $this->hasMany(WebhookEvent::class);
+    }
+
     public function latestSyncJob(): HasOne
     {
         return $this->hasOne(SyncJob::class)->latestOfMany();

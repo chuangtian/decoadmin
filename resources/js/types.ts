@@ -78,6 +78,33 @@ export interface AppInstallation {
     };
 }
 
+export type WebhookEventStatus = 'pending' | 'processing' | 'processed' | 'failed';
+
+export interface WebhookEventSummary {
+    id: number;
+    webhook_id: string;
+    topic: string;
+    status: WebhookEventStatus;
+    attempts: number;
+    received_at: string | null;
+    processed_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+    };
+}
+
+export interface WebhookEventDetail extends WebhookEventSummary {
+    api_version: string | null;
+    headers: Record<string, string>;
+    payload: Record<string, unknown> | unknown[] | null;
+    payload_integrity_valid: boolean;
+    last_error: string | null;
+    next_retry_at: string | null;
+    app: { id: number; name: string; slug: string } | null;
+}
+
 export interface ShopifyStore {
     id: number;
     name: string;

@@ -13,9 +13,11 @@ use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyConnectionDisconnectController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyOAuthController;
+use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WebhookEventController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -27,6 +29,10 @@ Route::get('/', fn () => auth()->check()
 Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'])
     ->middleware('throttle:30,1')
     ->name('shopify.oauth.callback');
+
+Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('shopify.webhooks.receive');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -81,6 +87,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
 
     Route::get('/apps', [AppController::class, 'index'])->middleware('permission:apps.view')->name('apps.index');
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
+
+    Route::get('/webhooks', [WebhookEventController::class, 'index'])->middleware('permission:webhooks.view')->name('webhooks.index');
+    Route::get('/webhooks/{webhookEvent}', [WebhookEventController::class, 'show'])->middleware('permission:webhooks.view')->name('webhooks.show');
+    Route::post('/webhooks/{webhookEvent}/retry', [WebhookEventController::class, 'retry'])->middleware('permission:webhooks.retry')->name('webhooks.retry');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

@@ -26,6 +26,11 @@ class App extends Model
         return $this->hasMany(AppInstallation::class);
     }
 
+    public function webhookEvents(): HasMany
+    {
+        return $this->hasMany(WebhookEvent::class);
+    }
+
     /**
      * Keep the App Center vocabulary compatible with the existing OAuth schema.
      */

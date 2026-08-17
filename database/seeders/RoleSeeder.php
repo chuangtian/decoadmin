@@ -22,12 +22,12 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
             'description' => '管理指定店铺及其日常业务运营。',
-            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'sync.*'],
+            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*'],
         ],
         'developer' => [
             'name' => '开发人员',
@@ -54,7 +54,7 @@ class RoleSeeder extends Seeder
             'description' => '仅可查看已分配的资源。',
             'permissions' => [
                 'organization.view', 'store.view', 'shopify.view', 'orders.view', 'products.view',
-                'customers.view', 'inventory.view', 'webhooks.view', 'sync.view', 'users.view',
+                'customers.view', 'inventory.view', 'sync.view', 'users.view',
                 'roles.view', 'audit.view', 'system.settings.view', 'system.health.view',
             ],
         ],
