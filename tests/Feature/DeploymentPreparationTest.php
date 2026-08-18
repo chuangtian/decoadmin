@@ -12,6 +12,17 @@ use Tests\TestCase;
 
 class DeploymentPreparationTest extends TestCase
 {
+    public function test_shared_app_image_is_built_once_per_compose_environment(): void
+    {
+        $productionCompose = file_get_contents(base_path('compose.production.yaml'));
+        $localCompose = file_get_contents(base_path('compose.yaml'));
+
+        $this->assertMatchesRegularExpression('/x-app: &app\n  image:/', $productionCompose);
+        $this->assertMatchesRegularExpression('/  app:\n    <<: \*app\n    build:\n      context: \.\n      target: app-production/', $productionCompose);
+        $this->assertMatchesRegularExpression('/x-app: &app\n  image:/', $localCompose);
+        $this->assertMatchesRegularExpression('/  app:\n    <<: \*app\n    build:\n      context: \.\n      target: app/', $localCompose);
+    }
+
     public function test_production_storage_link_is_not_recreated_during_setup(): void
     {
         $dockerfile = file_get_contents(base_path('Dockerfile'));
