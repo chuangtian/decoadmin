@@ -4,9 +4,12 @@ namespace App\Services\Shopify\Webhooks\Handlers;
 
 use App\Contracts\Shopify\WebhookHandlerInterface;
 use App\Models\WebhookEvent;
+use App\Services\Shopify\Webhooks\ShopifyIncrementalDataService;
 
 class ProductsUpdatedHandler implements WebhookHandlerInterface
 {
+    public function __construct(private ShopifyIncrementalDataService $data) {}
+
     public function topic(): string
     {
         return 'products/update';
@@ -14,6 +17,6 @@ class ProductsUpdatedHandler implements WebhookHandlerInterface
 
     public function handle(WebhookEvent $event): void
     {
-        // Handler scaffold only. Product synchronization is intentionally out of scope.
+        $this->data->handle($event);
     }
 }

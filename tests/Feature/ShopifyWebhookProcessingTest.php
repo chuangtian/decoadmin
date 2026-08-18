@@ -148,7 +148,22 @@ class ShopifyWebhookProcessingTest extends TestCase
             'api_version' => '2026-07',
             'status' => 'connected',
         ]);
-        $rawPayload = json_encode(['id' => 123], JSON_THROW_ON_ERROR);
+        $rawPayload = json_encode($topic === 'products/update' ? [
+            'id' => 123,
+            'title' => 'Webhook Product',
+            'handle' => 'webhook-product',
+            'status' => 'active',
+            'vendor' => 'DecoAdmin',
+            'product_type' => 'Test',
+            'body_html' => '<p>Updated by webhook.</p>',
+            'variants' => [[
+                'id' => 456,
+                'title' => 'Default Title',
+                'sku' => 'WEBHOOK-123',
+                'price' => '19.99',
+                'inventory_item_id' => 789,
+            ]],
+        ] : ['id' => 123], JSON_THROW_ON_ERROR);
         $event = WebhookEvent::query()->create([
             'webhook_id' => (string) Str::uuid(),
             'organization_id' => $organization->id,

@@ -269,7 +269,20 @@ class ShopifyWebhookCenterTest extends TestCase
         ShopifyConnection $connection,
         string $status = 'processed',
     ): WebhookEvent {
-        $rawPayload = json_encode(['id' => random_int(1, 999999)], JSON_THROW_ON_ERROR);
+        $rawPayload = json_encode([
+            'id' => random_int(1, 999999),
+            'name' => '#1001',
+            'email' => 'webhook@example.com',
+            'financial_status' => 'paid',
+            'fulfillment_status' => null,
+            'currency' => 'USD',
+            'total_price' => '25.00',
+            'subtotal_price' => '25.00',
+            'total_tax' => '0.00',
+            'processed_at' => now()->toIso8601String(),
+            'created_at' => now()->toIso8601String(),
+            'line_items' => [],
+        ], JSON_THROW_ON_ERROR);
 
         return WebhookEvent::query()->create([
             'webhook_id' => (string) Str::uuid(),
