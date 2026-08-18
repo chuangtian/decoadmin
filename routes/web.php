@@ -15,6 +15,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyConnectionDisconnectController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
+use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreContextController;
@@ -138,6 +139,15 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
     Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');
     Route::get('/sync/{syncJob}', [SyncJobController::class, 'show'])->middleware('permission:sync.view')->name('sync.show');
+
+    Route::get('/products', [ShopifyDataController::class, 'products'])->middleware('permission:products.view')->name('products.index');
+    Route::get('/products/{product}', [ShopifyDataController::class, 'product'])->whereNumber('product')->middleware('permission:products.view')->name('products.show');
+    Route::get('/orders', [ShopifyDataController::class, 'orders'])->middleware('permission:orders.view')->name('orders.index');
+    Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
+    Route::get('/customers', [ShopifyDataController::class, 'customers'])->middleware('permission:customers.view')->name('customers.index');
+    Route::get('/customers/{customer}', [ShopifyDataController::class, 'customer'])->whereNumber('customer')->middleware('permission:customers.view')->name('customers.show');
+    Route::get('/inventory', [ShopifyDataController::class, 'inventory'])->middleware('permission:inventory.view')->name('inventory.index');
+    Route::get('/inventory/{inventoryItem}', [ShopifyDataController::class, 'inventoryItem'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

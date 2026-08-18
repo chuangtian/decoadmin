@@ -42,11 +42,14 @@ class ShopifyProductDataService
 
             $variantsCreated = 0;
             $variantsUpdated = 0;
+            $seenVariantIds = [];
 
             foreach ($variantNodes as $variantNode) {
+                $shopifyVariantId = $this->numericId($variantNode['id'] ?? null, 'ProductVariant');
+                $seenVariantIds[] = $shopifyVariantId;
                 $variant = ProductVariant::query()->firstOrNew([
                     'product_id' => $product->getKey(),
-                    'shopify_variant_id' => $this->numericId($variantNode['id'] ?? null, 'ProductVariant'),
+                    'shopify_variant_id' => $shopifyVariantId,
                 ]);
 
                 $variant->exists ? $variantsUpdated++ : $variantsCreated++;
@@ -66,6 +69,14 @@ class ShopifyProductDataService
                         : null,
                 ])->save();
             }
+
+            $removedVariants = $product->variants();
+
+            if ($seenVariantIds !== []) {
+                $removedVariants->whereNotIn('shopify_variant_id', $seenVariantIds);
+            }
+
+            $removedVariants->delete();
 
             return [
                 'product' => $product,

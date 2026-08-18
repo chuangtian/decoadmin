@@ -50,8 +50,11 @@ class ShopifyOrderDataService
 
             $itemsCreated = 0;
             $itemsUpdated = 0;
+            $seenLineItemIds = [];
 
             foreach ($lineItemNodes as $lineItemNode) {
+                $shopifyLineItemId = $this->numericId($lineItemNode['id'] ?? null, 'LineItem');
+                $seenLineItemIds[] = $shopifyLineItemId;
                 $shopifyProductId = $this->nullableNumericId(data_get($lineItemNode, 'product.id'), 'Product');
                 $shopifyVariantId = $this->nullableNumericId(data_get($lineItemNode, 'variant.id'), 'ProductVariant');
                 $product = $shopifyProductId
@@ -65,7 +68,7 @@ class ShopifyOrderDataService
                     : null;
                 $item = OrderItem::query()->firstOrNew([
                     'order_id' => $order->getKey(),
-                    'shopify_line_item_id' => $this->numericId($lineItemNode['id'] ?? null, 'LineItem'),
+                    'shopify_line_item_id' => $shopifyLineItemId,
                 ]);
 
                 $item->exists ? $itemsUpdated++ : $itemsCreated++;
@@ -85,6 +88,14 @@ class ShopifyOrderDataService
                     'price' => $this->money($lineItemNode, 'originalUnitPriceSet', $currency),
                 ])->save();
             }
+
+            $removedItems = $order->items();
+
+            if ($seenLineItemIds !== []) {
+                $removedItems->whereNotIn('shopify_line_item_id', $seenLineItemIds);
+            }
+
+            $removedItems->delete();
 
             return [
                 'order' => $order,

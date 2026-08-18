@@ -77,7 +77,7 @@ class ShopifyInventoryDataService
                     'shopify_location_id' => $shopifyLocationId,
                 ]);
                 $location->exists ? $locationsUpdated++ : $locationsCreated++;
-                $active = $locationNode['isActive'] ?? null;
+                $active = $locationNode['isActive'] ?? ($location->exists ? $location->active : true);
 
                 if (! is_bool($active)) {
                     throw new ShopifyApiException('Shopify 地点的启用状态格式无效。');
@@ -85,8 +85,9 @@ class ShopifyInventoryDataService
 
                 $location->fill([
                     'organization_id' => $store->organization_id,
-                    'name' => $this->requiredString($locationNode, 'name'),
-                    'address' => $this->address($locationNode['address'] ?? null),
+                    'name' => $this->nullableString($locationNode['name'] ?? null)
+                        ?? ($location->exists ? $location->name : "Shopify Location {$shopifyLocationId}"),
+                    'address' => $this->address($locationNode['address'] ?? $location->address),
                     'active' => $active,
                     'synced_at' => now(),
                 ])->save();
@@ -133,18 +134,6 @@ class ShopifyInventoryDataService
     private function nullableString(mixed $value): ?string
     {
         return is_string($value) && $value !== '' ? $value : null;
-    }
-
-    /** @param array<string, mixed> $data */
-    private function requiredString(array $data, string $key): string
-    {
-        $value = $data[$key] ?? null;
-
-        if (! is_string($value) || $value === '') {
-            throw new ShopifyApiException("Shopify 地点数据缺少字段 [{$key}]。");
-        }
-
-        return $value;
     }
 
     /** @return array<string, string|null>|null */

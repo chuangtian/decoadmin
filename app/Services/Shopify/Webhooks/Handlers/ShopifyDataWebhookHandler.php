@@ -6,13 +6,16 @@ use App\Contracts\Shopify\WebhookHandlerInterface;
 use App\Models\WebhookEvent;
 use App\Services\Shopify\Webhooks\ShopifyIncrementalDataService;
 
-class OrdersCreatedHandler implements WebhookHandlerInterface
+class ShopifyDataWebhookHandler implements WebhookHandlerInterface
 {
-    public function __construct(private ShopifyIncrementalDataService $data) {}
+    public function __construct(
+        private string $webhookTopic,
+        private ShopifyIncrementalDataService $data,
+    ) {}
 
     public function topic(): string
     {
-        return 'orders/create';
+        return $this->webhookTopic;
     }
 
     public function handle(WebhookEvent $event): void

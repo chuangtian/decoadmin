@@ -19,8 +19,11 @@ use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
 use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
 use App\Services\Shopify\Sync\Handlers\ProductSyncHandler;
 use App\Services\Shopify\Sync\SyncHandlerRegistry;
+use App\Services\Shopify\Webhooks\Handlers\AppUninstalledHandler;
 use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
 use App\Services\Shopify\Webhooks\Handlers\ProductsUpdatedHandler;
+use App\Services\Shopify\Webhooks\Handlers\ShopifyDataWebhookHandler;
+use App\Services\Shopify\Webhooks\ShopifyIncrementalDataService;
 use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
 use App\Services\SystemSettingsService;
 use App\Support\CurrentOrganization;
@@ -39,10 +42,22 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
-        $this->app->singleton(WebhookHandlerRegistry::class, fn ($app) => new WebhookHandlerRegistry([
-            $app->make(OrdersCreatedHandler::class),
-            $app->make(ProductsUpdatedHandler::class),
-        ]));
+        $this->app->singleton(WebhookHandlerRegistry::class, function ($app): WebhookHandlerRegistry {
+            $data = $app->make(ShopifyIncrementalDataService::class);
+            $topics = [
+                'products/create', 'products/delete',
+                'orders/updated', 'orders/cancelled',
+                'customers/create', 'customers/update', 'customers/delete',
+                'inventory_levels/update',
+            ];
+
+            return new WebhookHandlerRegistry([
+                ...array_map(fn (string $topic) => new ShopifyDataWebhookHandler($topic, $data), $topics),
+                $app->make(ProductsUpdatedHandler::class),
+                $app->make(OrdersCreatedHandler::class),
+                $app->make(AppUninstalledHandler::class),
+            ]);
+        });
         $this->app->singleton(SyncHandlerRegistry::class, fn ($app) => new SyncHandlerRegistry([
             $app->make(ProductSyncHandler::class),
             $app->make(OrderSyncHandler::class),

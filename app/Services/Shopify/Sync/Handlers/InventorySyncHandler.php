@@ -17,7 +17,7 @@ class InventorySyncHandler implements SyncHandlerInterface
     private const INVENTORY_LEVEL_PAGE_SIZE = 100;
 
     /** @var list<string> */
-    private const REQUIRED_SCOPES = ['read_inventory', 'read_products', 'read_locations'];
+    private const REQUIRED_SCOPES = ['read_inventory', 'read_products'];
 
     private const INVENTORY_ITEMS_QUERY = <<<'GRAPHQL'
         query SyncInventoryItems($first: Int!, $after: String, $levelsFirst: Int!) {
@@ -33,19 +33,6 @@ class InventorySyncHandler implements SyncHandlerInterface
                 nodes {
                   location {
                     id
-                    name
-                    isActive
-                    address {
-                      address1
-                      address2
-                      city
-                      province
-                      provinceCode
-                      country
-                      countryCode
-                      zip
-                      phone
-                    }
                   }
                   quantities(names: ["available"]) {
                     name
@@ -68,19 +55,6 @@ class InventorySyncHandler implements SyncHandlerInterface
               nodes {
                 location {
                   id
-                  name
-                  isActive
-                  address {
-                    address1
-                    address2
-                    city
-                    province
-                    provinceCode
-                    country
-                    countryCode
-                    zip
-                    phone
-                  }
                 }
                 quantities(names: ["available"]) {
                   name
