@@ -23,10 +23,10 @@ export const menu: MenuItem[] = [
         name: '业务中心',
         icon: 'business',
         children: [
-            { name: '订单管理', route: '/orders', icon: 'orders', permission: 'orders.view', comingSoon: true },
-            { name: '商品管理', route: '/products', icon: 'products', permission: 'products.view', comingSoon: true },
-            { name: '客户管理', route: '/customers', icon: 'customers', permission: 'customers.view', comingSoon: true },
-            { name: '库存管理', route: '/inventory', icon: 'inventory', permission: 'inventory.view', comingSoon: true },
+            { name: '订单管理', route: '/orders', icon: 'orders', permission: 'orders.view' },
+            { name: '商品管理', route: '/products', icon: 'products', permission: 'products.view' },
+            { name: '客户管理', route: '/customers', icon: 'customers', permission: 'customers.view' },
+            { name: '库存管理', route: '/inventory', icon: 'inventory', permission: 'inventory.view' },
         ],
     },
     {

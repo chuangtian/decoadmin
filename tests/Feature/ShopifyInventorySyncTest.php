@@ -68,24 +68,44 @@ class ShopifyInventorySyncTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_inventory_sync_requires_location_access_scope(): void
+    public function test_inventory_sync_works_without_location_details_scope(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
         $installation->shopifyConnection->forceFill([
             'scopes' => ['read_inventory', 'read_products'],
         ])->save();
 
+        Http::fake(['*' => Http::response($this->inventoryItemsPayload([
+            [
+                'id' => 'gid://shopify/InventoryItem/901',
+                'sku' => 'LIMITED-SCOPE',
+                'tracked' => true,
+                'variant' => null,
+                'inventoryLevels' => [
+                    'nodes' => [[
+                        'location' => ['id' => 'gid://shopify/Location/1001'],
+                        'quantities' => [['name' => 'available', 'quantity' => 8]],
+                    ]],
+                    'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+                ],
+            ],
+        ]))]);
+
         $result = app(SyncProcessor::class)->process(
             $this->syncJob($organization, $store, $installation)->id,
         );
 
-        $this->assertFalse($result->success);
-        $this->assertSame('failed', $result->status);
-        $this->assertSame(
-            ['read_inventory', 'read_products', 'read_locations'],
-            $result->metadata['required_scopes'],
-        );
-        $this->assertDatabaseCount('inventory_items', 0);
+        $this->assertTrue($result->success);
+        $this->assertSame('success', $result->status);
+        $this->assertDatabaseHas('locations', [
+            'shopify_location_id' => 1001,
+            'name' => 'Shopify Location 1001',
+            'active' => true,
+        ]);
+        $this->assertDatabaseHas('inventory_levels', [
+            'shopify_location_id' => 1001,
+            'available' => 8,
+        ]);
     }
 
     public function test_inventory_sync_parses_graphql_and_saves_location_item_and_level(): void
