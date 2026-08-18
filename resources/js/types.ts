@@ -1,0 +1,249 @@
+export interface Permission {
+    id: number;
+    name: string;
+    slug: string;
+    group: string;
+    description: string | null;
+}
+
+export interface Role {
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    is_system: boolean;
+    permissions_count?: number;
+    permissions?: Permission[];
+    store_id?: number | null;
+}
+
+export interface StoreOption {
+    id: number;
+    name: string;
+    status: string;
+}
+
+export type ShopifyConnectionStatus = 'connected' | 'warning' | 'invalid' | 'disconnected';
+
+export interface ShopifyConnectionSummary {
+    id: number;
+    status: ShopifyConnectionStatus;
+    api_version: string;
+    last_api_check: string | null;
+    scopes: string[];
+    installed_at: string | null;
+    last_verified_at: string | null;
+    last_error: string | null;
+    last_error_at: string | null;
+}
+
+export interface ShopifyConnectionHistory {
+    id: number;
+    action: string;
+    actor: string;
+    previous_status: ShopifyConnectionStatus | null;
+    new_status: ShopifyConnectionStatus | null;
+    reason: string | null;
+    created_at: string | null;
+}
+
+export interface AppInstallationSummary {
+    id: number;
+    status: string;
+    installed_at: string | null;
+    app: { id: number; name: string; handle: string; status: string } | null;
+}
+
+export interface ShopifyApp {
+    id: number;
+    name: string;
+    slug: string;
+    type: string;
+    status: string;
+    description: string | null;
+    installations_count: number;
+    created_at: string | null;
+}
+
+export interface AppInstallation {
+    id: number;
+    status: string;
+    installed_at: string | null;
+    uninstalled_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+        status: string;
+    };
+}
+
+export type WebhookEventStatus = 'received' | 'queued' | 'processing' | 'processed' | 'failed' | 'retrying';
+
+export interface WebhookEventSummary {
+    id: number;
+    webhook_id: string;
+    topic: string;
+    status: WebhookEventStatus;
+    processing_result: 'handled' | 'unsupported' | 'failed' | null;
+    attempts: number;
+    received_at: string | null;
+    processed_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+    };
+}
+
+export interface WebhookEventDetail extends WebhookEventSummary {
+    api_version: string | null;
+    handler: string | null;
+    unsupported_reason: string | null;
+    processing_started_at: string | null;
+    processing_duration_ms: number | null;
+    headers: Record<string, string>;
+    payload: Record<string, unknown> | unknown[] | null;
+    payload_integrity_valid: boolean;
+    last_error: string | null;
+    next_retry_at: string | null;
+    app: { id: number; name: string; slug: string } | null;
+}
+
+export type SyncJobStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type SyncJobType = 'products' | 'orders' | 'customers' | 'inventory';
+
+export interface SyncJobInstallation {
+    id: number;
+    status: string;
+    app: { id: number; name: string; handle: string } | null;
+}
+
+export interface SyncJobStoreOption {
+    id: number;
+    name: string;
+    shopify_domain: string;
+    can_run: boolean;
+    installations: SyncJobInstallation[];
+}
+
+export interface SyncJobSummary {
+    id: number;
+    uuid: string;
+    type: SyncJobType;
+    status: SyncJobStatus;
+    started_at: string | null;
+    finished_at: string | null;
+    created_at: string | null;
+    store: {
+        id: number;
+        name: string;
+        shopify_domain: string;
+    };
+    app_installation: SyncJobInstallation | null;
+}
+
+export interface SyncJobLog {
+    level: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+    at: string;
+}
+
+export interface SyncJobResult {
+    success: boolean;
+    status: string;
+    message: string;
+    records_count: number;
+    errors: Array<{ code: string; message: string }>;
+    metadata: {
+        duration_ms?: number;
+        framework_only?: boolean;
+        [key: string]: unknown;
+    };
+}
+
+export interface SyncJobDetail extends SyncJobSummary {
+    direction: string;
+    attempts: number;
+    max_attempts: number;
+    total_items: number;
+    processed_items: number;
+    failed_items: number;
+    error: string | null;
+    logs: SyncJobLog[];
+    result: SyncJobResult | null;
+}
+
+export interface ShopifyStore {
+    id: number;
+    name: string;
+    shopify_domain: string;
+    status: string;
+    timezone: string;
+    currency: string;
+    country_code: string | null;
+    plan_name: string | null;
+    platform: string;
+    environment: 'production' | 'development';
+    connection_status: ShopifyConnectionStatus | 'pending';
+    installed_apps_count: number;
+    last_sync: { status: string; at: string | null } | null;
+    created_at: string | null;
+    connection: ShopifyConnectionSummary | null;
+    app_installations: AppInstallationSummary[];
+}
+
+export interface OrganizationOption {
+    id: number;
+    name: string;
+    code: string;
+    stores: StoreOption[];
+}
+
+export interface User {
+    id: number;
+    name: string;
+    email: string;
+    status: string;
+    avatar_url: string | null;
+    roles: Role[];
+    stores: StoreOption[];
+    created_at: string;
+}
+
+export interface ResourceCollection<T> {
+    data: T[];
+}
+
+export interface PaginatedResource<T> {
+    data: T[];
+    links: Array<{ url: string | null; label: string; active: boolean }>;
+    meta: { current_page: number; last_page: number; total: number };
+}
+
+export interface BreadcrumbItem {
+    label: string;
+    href?: string;
+}
+
+export type ToastType = 'success' | 'error' | 'warning' | 'info';
+
+export interface FlashMessages {
+    success?: string;
+    error?: string;
+    warning?: string;
+    info?: string;
+}
+
+export interface SharedProps {
+    appName: string;
+    auth: {
+        user: { id: number; name: string; email: string } | null;
+        permissions: string[];
+    };
+    currentOrganization: { id: number; name: string; code: string } | null;
+    currentStore: (StoreOption & { organization_id: number }) | null;
+    availableOrganizations: OrganizationOption[];
+    flash: FlashMessages;
+    [key: string]: unknown;
+}

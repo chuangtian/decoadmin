@@ -17,9 +17,8 @@ class ObservabilityConfigurationTest extends TestCase
         $this->assertSame($supervisor['processes'], $supervisor['minProcesses']);
         $this->assertSame([
             'shopify-webhook',
-            'shopify-high',
-            'default',
             'shopify-sync',
+            'default',
             'notifications',
         ], $supervisor['queue']);
         $this->assertLessThan(

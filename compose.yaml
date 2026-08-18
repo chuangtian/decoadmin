@@ -59,6 +59,15 @@ services:
         condition: service_healthy
         restart: true
 
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.2
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on:
+      nginx:
+        condition: service_started
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://nginx:80"]
+
   mysql:
     image: mysql:8.4
     restart: unless-stopped

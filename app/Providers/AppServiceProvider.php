@@ -2,6 +2,29 @@
 
 namespace App\Providers;
 
+use App\Models\App as ShopifyApp;
+use App\Models\Role;
+use App\Models\Store;
+use App\Models\SyncJob;
+use App\Models\User;
+use App\Models\WebhookEvent;
+use App\Policies\AppPolicy;
+use App\Policies\RolePolicy;
+use App\Policies\StorePolicy;
+use App\Policies\SyncJobPolicy;
+use App\Policies\UserPolicy;
+use App\Policies\WebhookEventPolicy;
+use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
+use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
+use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
+use App\Services\Shopify\Sync\Handlers\ProductSyncHandler;
+use App\Services\Shopify\Sync\SyncHandlerRegistry;
+use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
+use App\Services\Shopify\Webhooks\Handlers\ProductsUpdatedHandler;
+use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
+use App\Support\CurrentOrganization;
+use App\Support\CurrentStore;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +34,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->scoped(CurrentOrganization::class);
+        $this->app->scoped(CurrentStore::class);
+        $this->app->singleton(WebhookHandlerRegistry::class, fn ($app) => new WebhookHandlerRegistry([
+            $app->make(OrdersCreatedHandler::class),
+            $app->make(ProductsUpdatedHandler::class),
+        ]));
+        $this->app->singleton(SyncHandlerRegistry::class, fn ($app) => new SyncHandlerRegistry([
+            $app->make(ProductSyncHandler::class),
+            $app->make(OrderSyncHandler::class),
+            $app->make(CustomerSyncHandler::class),
+            $app->make(InventorySyncHandler::class),
+        ]));
     }
 
     /**
@@ -19,6 +53,20 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::before(fn (User $user) => $user->isSuperAdmin() ? true : null);
+        Gate::policy(Store::class, StorePolicy::class);
+        Gate::policy(SyncJob::class, SyncJobPolicy::class);
+        Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(Role::class, RolePolicy::class);
+        Gate::policy(ShopifyApp::class, AppPolicy::class);
+        Gate::policy(WebhookEvent::class, WebhookEventPolicy::class);
+
+        Gate::define('permission', function (User $user, string $permission): bool {
+            return $user->hasPermission(
+                $permission,
+                app(CurrentOrganization::class)->get(),
+                app(CurrentStore::class)->get(),
+            );
+        });
     }
 }

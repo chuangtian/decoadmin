@@ -98,7 +98,6 @@ return [
 
     'waits' => [
         'redis:shopify-webhook' => 10,
-        'redis:shopify-high' => 20,
         'redis:default' => 60,
         'redis:shopify-sync' => 120,
         'redis:notifications' => 180,
@@ -174,7 +173,7 @@ return [
     |
     */
 
-    'fast_termination' => false,
+    'fast_termination' => (bool) env('HORIZON_FAST_TERMINATION', false),
 
     /*
     |--------------------------------------------------------------------------
@@ -205,9 +204,8 @@ return [
             'connection' => 'redis',
             'queue' => [
                 'shopify-webhook',
-                'shopify-high',
-                'default',
                 'shopify-sync',
+                'default',
                 'notifications',
             ],
             'balance' => false,
@@ -228,8 +226,15 @@ return [
     'environments' => [
         'production' => [
             'supervisor-shopify' => [
-                'processes' => 10,
-                'minProcesses' => 10,
+                'processes' => (int) env('HORIZON_PROCESSES', 10),
+                'minProcesses' => (int) env('HORIZON_PROCESSES', 10),
+            ],
+        ],
+
+        'staging' => [
+            'supervisor-shopify' => [
+                'processes' => (int) env('HORIZON_PROCESSES', 5),
+                'minProcesses' => (int) env('HORIZON_PROCESSES', 5),
             ],
         ],
 
