@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AppController;
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
@@ -19,6 +20,8 @@ use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\SyncJobController;
+use App\Http\Controllers\SystemSettingsController;
+use App\Http\Controllers\SystemStatusController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WebhookEventController;
 use App\Models\Store;
@@ -75,6 +78,34 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', fn () => Inertia::render('Dashboard/Index'))->name('dashboard');
+    Route::get('/system/status', SystemStatusController::class)
+        ->middleware('permission:system.health.view')
+        ->name('system.status');
+    Route::get('/settings', [SystemSettingsController::class, 'index'])
+        ->middleware('permission:system.settings.view')
+        ->name('system.settings.index');
+    Route::get('/settings/mail', [SystemSettingsController::class, 'mail'])
+        ->middleware('permission:system.settings.view')
+        ->name('system.settings.mail');
+    Route::get('/settings/feishu', [SystemSettingsController::class, 'feishu'])
+        ->middleware('permission:system.settings.view')
+        ->name('system.settings.feishu');
+    Route::put('/settings/general', [SystemSettingsController::class, 'updateGeneral'])
+        ->middleware('permission:system.settings.update')
+        ->name('system.settings.general.update');
+    Route::put('/settings/mail', [SystemSettingsController::class, 'updateMail'])
+        ->middleware('permission:system.settings.update')
+        ->name('system.settings.mail.update');
+    Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
+        ->middleware('permission:system.settings.update')
+        ->name('system.settings.feishu.update');
+    Route::get('/audit-logs', [AuditLogController::class, 'index'])
+        ->middleware('permission:audit.view')
+        ->name('audit-logs.index');
+    Route::get('/audit-logs/{auditLog}', [AuditLogController::class, 'show'])
+        ->whereNumber('auditLog')
+        ->middleware('permission:audit.view')
+        ->name('audit-logs.show');
 
     Route::get('/users', [UserController::class, 'index'])->middleware('permission:users.view')->name('users.index');
     Route::get('/users/create', [UserController::class, 'create'])->middleware('permission:users.create')->name('users.create');

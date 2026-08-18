@@ -22,10 +22,13 @@ use App\Services\Shopify\Sync\SyncHandlerRegistry;
 use App\Services\Shopify\Webhooks\Handlers\OrdersCreatedHandler;
 use App\Services\Shopify\Webhooks\Handlers\ProductsUpdatedHandler;
 use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
+use App\Services\SystemSettingsService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -53,6 +56,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        try {
+            if (Schema::hasTable('system_settings')) {
+                app(SystemSettingsService::class)->applyRuntimeConfiguration();
+            }
+        } catch (Throwable) {
+            // The application must remain bootable while the database is unavailable or migrating.
+        }
+
         Gate::before(fn (User $user) => $user->isSuperAdmin() ? true : null);
         Gate::policy(Store::class, StorePolicy::class);
         Gate::policy(SyncJob::class, SyncJobPolicy::class);

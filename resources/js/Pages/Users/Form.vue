@@ -66,7 +66,7 @@ const submit = () => {
 
 <template>
     <Head :title="editing ? '编辑用户' : '添加用户'" />
-    <AppLayout :breadcrumbs="[{ label: '协作管理' }, { label: '用户管理', href: '/users' }, { label: editing ? '编辑用户' : '添加用户' }]">
+    <AppLayout :breadcrumbs="[{ label: '用户管理', href: '/users' }, { label: editing ? '编辑用户' : '添加用户' }]">
         <div class="mx-auto max-w-4xl">
             <Link href="/users" class="text-sm font-medium text-slate-500 hover:text-slate-900">← 返回用户列表</Link>
             <div class="mt-4"><h2 class="text-2xl font-semibold">{{ editing ? '编辑用户' : '添加用户' }}</h2><p class="mt-1 text-sm text-slate-500">统一管理用户身份、组织角色和店铺访问范围。</p></div>

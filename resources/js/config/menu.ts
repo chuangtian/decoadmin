@@ -7,6 +7,7 @@ export interface MenuItem {
     permission?: string;
     children?: MenuItem[];
     comingSoon?: boolean;
+    hidden?: boolean;
 }
 
 export const menu: MenuItem[] = [
@@ -61,8 +62,15 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '用户管理',
+        route: '/users',
+        icon: 'users',
+        permission: 'users.view',
+    },
+    {
         name: '协作管理',
         icon: 'collaboration',
+        hidden: true,
         children: [
             { name: '用户管理', route: '/users', icon: 'users', permission: 'users.view' },
             { name: '团队成员', route: '/team', icon: 'team', permission: 'users.view', comingSoon: true },
@@ -73,9 +81,11 @@ export const menu: MenuItem[] = [
         icon: 'system',
         children: [
             { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
-            { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view', comingSoon: true },
-            { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view', comingSoon: true },
-            { name: '系统设置', route: '/settings', icon: 'settings', permission: 'system.settings.view', comingSoon: true },
+            { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
+            { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },
+            { name: '飞书设置', route: '/settings/feishu', icon: 'settings', permission: 'system.settings.view' },
+            { name: '邮箱设置', route: '/settings/mail', icon: 'settings', permission: 'system.settings.view' },
+            { name: '系统设置', route: '/settings', icon: 'settings', permission: 'system.settings.view' },
         ],
     },
 ];
