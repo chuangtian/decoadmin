@@ -116,7 +116,7 @@ class InventorySyncHandler implements SyncHandlerInterface
             ?? $store?->shopifyConnection;
 
         if (! $store || ! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return SyncResult::failed('当前店铺没有可用的 Shopify Connection。', [
+            return SyncResult::failed('当前店铺没有可用的 Shopify 连接。', [
                 ['code' => 'shopify_connection_unavailable', 'message' => '请先连接或重新授权 Shopify 店铺。'],
             ]);
         }
@@ -124,7 +124,7 @@ class InventorySyncHandler implements SyncHandlerInterface
         $missingScopes = array_values(array_diff(self::REQUIRED_SCOPES, $connection->scopes ?? []));
 
         if ($missingScopes !== []) {
-            return SyncResult::failed('Shopify Connection 缺少库存同步权限，请重新授权。', [
+            return SyncResult::failed('Shopify 连接缺少库存同步权限，请重新授权。', [
                 ['code' => 'missing_shopify_scopes', 'message' => '缺少权限：'.implode(', ', $missingScopes)],
             ], ['required_scopes' => self::REQUIRED_SCOPES]);
         }
@@ -149,7 +149,7 @@ class InventorySyncHandler implements SyncHandlerInterface
             $inventoryItems = data_get($payload, 'data.inventoryItems');
 
             if (! is_array($inventoryItems)) {
-                throw new ShopifyApiException('Shopify InventoryItems API 未返回有效列表。');
+                throw new ShopifyApiException('Shopify 库存项目 API 未返回有效列表。');
             }
 
             $nodes = $this->nodes($inventoryItems);
@@ -209,7 +209,7 @@ class InventorySyncHandler implements SyncHandlerInterface
         $levels = $inventoryItemNode['inventoryLevels'] ?? null;
 
         if (! is_array($levels)) {
-            throw new ShopifyApiException('Shopify InventoryItem 缺少 InventoryLevels Connection。');
+            throw new ShopifyApiException('Shopify 库存项目缺少库存级别连接结构。');
         }
 
         $nodes = $this->nodes($levels);
@@ -225,7 +225,7 @@ class InventorySyncHandler implements SyncHandlerInterface
             $levels = data_get($payload, 'data.inventoryItem.inventoryLevels');
 
             if (! is_array($levels)) {
-                throw new ShopifyApiException('Shopify InventoryLevels API 未返回有效数据。');
+                throw new ShopifyApiException('Shopify 库存级别 API 未返回有效数据。');
             }
 
             array_push($nodes, ...$this->nodes($levels));
@@ -245,7 +245,7 @@ class InventorySyncHandler implements SyncHandlerInterface
         $nodes = $connection['nodes'] ?? null;
 
         if (! is_array($nodes) || collect($nodes)->contains(fn ($node) => ! is_array($node))) {
-            throw new ShopifyApiException('Shopify GraphQL Connection Nodes 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 连接节点格式无效。');
         }
 
         return array_values($nodes);
@@ -260,13 +260,13 @@ class InventorySyncHandler implements SyncHandlerInterface
         $pageInfo = $connection['pageInfo'] ?? null;
 
         if (! is_array($pageInfo) || ! is_bool($pageInfo['hasNextPage'] ?? null)) {
-            throw new ShopifyApiException('Shopify GraphQL Connection PageInfo 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 分页信息格式无效。');
         }
 
         $endCursor = $pageInfo['endCursor'] ?? null;
 
         if ($pageInfo['hasNextPage'] && (! is_string($endCursor) || $endCursor === '')) {
-            throw new ShopifyApiException('Shopify GraphQL 分页缺少 End Cursor。');
+            throw new ShopifyApiException('Shopify GraphQL 分页缺少结束游标。');
         }
 
         return [

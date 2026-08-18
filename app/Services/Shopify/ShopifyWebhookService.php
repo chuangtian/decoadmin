@@ -26,7 +26,7 @@ class ShopifyWebhookService
     public function receive(App $app, string $rawPayload, array $headers): array
     {
         if (strlen($rawPayload) > 10 * 1024 * 1024) {
-            throw new ShopifyWebhookException('Webhook Payload 超过允许大小。', 413);
+            throw new ShopifyWebhookException('Webhook 事件载荷超过允许大小。', 413);
         }
 
         $secret = is_string($app->client_secret_encrypted) ? $app->client_secret_encrypted : '';
@@ -45,17 +45,17 @@ class ShopifyWebhookService
             || mb_strlen($topic) > 160
             || mb_strlen($apiVersion) > 20
             || ! preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $shopDomain)) {
-            throw new ShopifyWebhookException('Webhook 请求缺少有效的事件标识、Topic 或店铺域名。', 422);
+            throw new ShopifyWebhookException('Webhook 请求缺少有效的事件标识、主题或店铺域名。', 422);
         }
 
         try {
             $payload = json_decode($rawPayload, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            throw new ShopifyWebhookException('Webhook Payload 不是有效 JSON。', 422);
+            throw new ShopifyWebhookException('Webhook 事件载荷不是有效 JSON。', 422);
         }
 
         if (! is_array($payload)) {
-            throw new ShopifyWebhookException('Webhook Payload 格式无效。', 422);
+            throw new ShopifyWebhookException('Webhook 事件载荷格式无效。', 422);
         }
 
         $installation = AppInstallation::query()
@@ -66,7 +66,7 @@ class ShopifyWebhookService
             ->first();
 
         if (! $installation || ! $installation->store || ! $installation->shopifyConnection) {
-            throw new ShopifyWebhookException('Webhook 店铺尚未安装当前 App。', 404);
+            throw new ShopifyWebhookException('Webhook 店铺尚未安装当前应用。', 404);
         }
 
         $payloadHash = hash('sha256', $rawPayload);
@@ -75,7 +75,7 @@ class ShopifyWebhookService
 
             if ($event) {
                 if ($event->app_id !== $app->getKey() || ! hash_equals((string) $event->payload_sha256, $payloadHash)) {
-                    throw new ShopifyWebhookException('Webhook Event ID 与已保存事件冲突。', 409);
+                    throw new ShopifyWebhookException('Webhook 事件 ID 与已保存事件冲突。', 409);
                 }
 
                 return [$event, false];

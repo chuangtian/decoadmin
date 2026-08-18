@@ -8,7 +8,7 @@ const page = usePage<SharedProps>();
 const statusCards = [
     { label: '应用服务', value: '运行正常', detail: '核心服务当前可用', color: 'emerald' },
     { label: '数据同步', value: '尚未配置', detail: '连接 Shopify 后开放', color: 'slate' },
-    { label: 'Webhooks', value: '尚未配置', detail: '连接 Shopify 后开放', color: 'slate' },
+    { label: 'Webhook 服务', value: '尚未配置', detail: '连接 Shopify 后开放', color: 'slate' },
 ];
 </script>
 

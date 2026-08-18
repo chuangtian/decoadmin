@@ -12,7 +12,7 @@ defineProps<{ title: string; description: string }>();
                 <div class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-teal-400 to-emerald-600 shadow-xl shadow-emerald-950/40">
                     <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h6a4 4 0 0 1 0 8H7V7Z"/><path d="M7 3v18M13 7h4"/></svg>
                 </div>
-                <div><p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-400">Commerce OS</p><p class="font-semibold">Shopify Commerce Hub</p></div>
+                <div><p class="text-[11px] font-semibold tracking-[0.24em] text-emerald-400">电商运营系统</p><p class="font-semibold">Shopify 运营中台</p></div>
             </div>
             <div class="relative max-w-2xl">
                 <p class="mb-6 text-sm font-semibold tracking-[0.24em] text-emerald-400">安全统一的工作空间</p>
@@ -24,7 +24,7 @@ defineProps<{ title: string; description: string }>();
 
         <main class="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-10 sm:px-10 lg:bg-white">
             <div class="w-full max-w-md">
-                <Link href="/" class="mb-10 inline-flex items-center gap-2 text-sm font-semibold text-slate-800 lg:hidden"><span class="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white">C</span>Commerce Hub</Link>
+                <Link href="/" class="mb-10 inline-flex items-center gap-2 text-sm font-semibold text-slate-800 lg:hidden"><span class="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white">D</span>运营中台</Link>
                 <div class="mb-8"><h2 class="text-3xl font-semibold tracking-[-0.03em] text-slate-950">{{ title }}</h2><p class="mt-2 leading-7 text-slate-500">{{ description }}</p></div>
                 <slot />
             </div>

@@ -18,11 +18,11 @@ class ShopifyConnectionDisconnectController extends Controller
         $connection = $store->shopifyConnection;
 
         if (! $connection) {
-            return back()->with('error', '当前店铺尚未建立 Shopify Connection。');
+            return back()->with('error', '当前店铺尚未建立 Shopify 连接。');
         }
 
         if ($connection->status === 'disconnected') {
-            return back()->with('info', '当前 Shopify Connection 已处于断开状态。');
+            return back()->with('info', '当前 Shopify 连接已处于断开状态。');
         }
 
         $lifecycle->markDisconnected(
@@ -31,6 +31,6 @@ class ShopifyConnectionDisconnectController extends Controller
             $request->user(),
         );
 
-        return back()->with('success', 'Shopify Connection 已断开，历史记录和授权信息已保留。');
+        return back()->with('success', 'Shopify 连接已断开，历史记录和授权信息已保留。');
     }
 }

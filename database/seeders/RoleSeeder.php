@@ -31,7 +31,7 @@ class RoleSeeder extends Seeder
         ],
         'developer' => [
             'name' => '开发人员',
-            'description' => '管理集成、应用、Webhooks、数据同步和日志。',
+            'description' => '管理集成、应用、Webhook、数据同步和日志。',
             'permissions' => ['store.view', 'apps.*', 'shopify.*', 'webhooks.*', 'sync.*', 'audit.view', 'system.health.view'],
         ],
         'operator' => [

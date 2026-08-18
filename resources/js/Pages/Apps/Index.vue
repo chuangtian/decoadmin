@@ -20,8 +20,8 @@ const clearFilters = () => {
 const dateLabel = (value: string | null) => value
     ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
     : '—';
-const typeLabel = (type: string) => ({ custom: 'Custom App', public: 'Public App', private: 'Private App' }[type] ?? type);
-const statusLabel = (status: string) => ({ active: 'Active', inactive: 'Inactive', draft: 'Draft', disabled: 'Disabled' }[status] ?? status);
+const typeLabel = (type: string) => ({ custom: '自定义应用', public: '公开应用', private: '私有应用' }[type] ?? type);
+const statusLabel = (status: string) => ({ active: '启用', inactive: '停用', draft: '草稿', disabled: '已禁用' }[status] ?? status);
 const statusClass = (status: string) => status === 'active'
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
     : status === 'disabled'
@@ -34,9 +34,9 @@ const statusClass = (status: string) => status === 'active'
     <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '应用管理' }]">
         <div class="mx-auto max-w-7xl">
             <div class="mb-7">
-                <p class="text-sm font-semibold text-emerald-700">App Registry</p>
+                <p class="text-sm font-semibold text-emerald-700">应用注册中心</p>
                 <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">应用管理</h2>
-                <p class="mt-2 text-sm text-slate-500">管理当前组织的 Shopify App Registry，并查看授权店铺中的安装状态。</p>
+                <p class="mt-2 text-sm text-slate-500">管理当前组织的 Shopify 应用，并查看授权店铺中的安装状态。</p>
             </div>
 
             <form class="mb-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_220px_auto]" @submit.prevent="search">
@@ -62,7 +62,7 @@ const statusClass = (status: string) => status === 'active'
                     <div class="hidden overflow-x-auto md:block">
                         <table class="w-full min-w-[880px] text-left text-sm">
                             <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                                <tr><th class="px-5 py-3.5">App Name</th><th class="px-5 py-3.5">Type</th><th class="px-5 py-3.5">Status</th><th class="px-5 py-3.5 text-center">Installations</th><th class="px-5 py-3.5">Created At</th><th class="px-5 py-3.5 text-right">操作</th></tr>
+                                <tr><th class="px-5 py-3.5">应用名称</th><th class="px-5 py-3.5">类型</th><th class="px-5 py-3.5">状态</th><th class="px-5 py-3.5 text-center">安装数量</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 <tr v-for="app in apps.data" :key="app.id" class="transition hover:bg-slate-50/70">
@@ -80,12 +80,12 @@ const statusClass = (status: string) => status === 'active'
                     <div class="divide-y divide-slate-100 md:hidden">
                         <article v-for="app in apps.data" :key="app.id" class="p-5">
                             <div class="flex items-start justify-between gap-3"><div class="flex min-w-0 items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-sm font-bold text-emerald-700">{{ app.name.charAt(0).toUpperCase() }}</span><div class="min-w-0"><Link :href="`/apps/${app.id}`" class="block truncate font-semibold text-slate-900">{{ app.name }}</Link><p class="mt-0.5 truncate font-mono text-xs text-slate-400">{{ app.slug }}</p></div></div><span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(app.status)">{{ statusLabel(app.status) }}</span></div>
-                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">Type</dt><dd class="mt-1 font-medium text-slate-700">{{ typeLabel(app.type) }}</dd></div><div><dt class="text-xs text-slate-400">Installations</dt><dd class="mt-1 font-semibold text-slate-900">{{ app.installations_count }}</dd></div></dl>
+                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">类型</dt><dd class="mt-1 font-medium text-slate-700">{{ typeLabel(app.type) }}</dd></div><div><dt class="text-xs text-slate-400">安装数量</dt><dd class="mt-1 font-semibold text-slate-900">{{ app.installations_count }}</dd></div></dl>
                             <Link :href="`/apps/${app.id}`" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看详情 →</Link>
                         </article>
                     </div>
                 </div>
-                <EmptyState v-else class="border-0 shadow-none" :title="filters.search || filters.status ? '没有匹配的应用' : 'App Registry 暂无应用'" :description="filters.search || filters.status ? '请调整搜索关键词或状态过滤条件。' : '完成 Shopify OAuth 后，真实 App Registry 和安装信息会显示在这里。'" icon="apps" />
+                <EmptyState v-else class="border-0 shadow-none" :title="filters.search || filters.status ? '没有匹配的应用' : '应用注册中心暂无应用'" :description="filters.search || filters.status ? '请调整搜索关键词或状态过滤条件。' : '完成 Shopify OAuth 后，真实应用和安装信息会显示在这里。'" icon="apps" />
             </div>
 
             <div v-if="apps.links.length > 3" class="mt-6 flex flex-wrap gap-2"><Link v-for="link in apps.links" :key="link.label" :href="link.url ?? ''" class="rounded-lg border px-3 py-2 text-sm" :class="link.active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600'" v-html="link.label" /></div>

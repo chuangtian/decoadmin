@@ -115,7 +115,7 @@ class SyncJobController extends Controller
 
         if ($request->filled('app_installation_id') && ! $installation) {
             throw ValidationException::withMessages([
-                'app_installation_id' => '请选择当前店铺的有效 App Installation。',
+                'app_installation_id' => '请选择当前店铺的有效应用安装记录。',
             ]);
         }
 

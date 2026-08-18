@@ -21,7 +21,7 @@ class ShopifyWebhookRetryService
 
             if ($locked->status !== 'failed') {
                 throw ValidationException::withMessages([
-                    'webhook' => '只有处理失败的 Webhook Event 可以重试。',
+                    'webhook' => '只有处理失败的 Webhook 事件可以重试。',
                 ]);
             }
 

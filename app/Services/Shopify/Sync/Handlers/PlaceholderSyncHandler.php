@@ -13,7 +13,7 @@ abstract class PlaceholderSyncHandler implements SyncHandlerInterface
     public function handle(SyncJob $syncJob): SyncResult
     {
         return SyncResult::successful(
-            $this->label().'同步 Handler 基础结构执行完成，本阶段未读取 Shopify 数据。',
+            $this->label().'同步处理器基础结构执行完成，本阶段未读取 Shopify 数据。',
             metadata: [
                 'framework_only' => true,
                 'handler' => static::class,
