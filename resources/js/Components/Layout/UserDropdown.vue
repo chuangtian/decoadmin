@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
 import type { SharedProps } from '../../types';
+import UserAvatar from '../Users/UserAvatar.vue';
 
 const page = usePage<SharedProps>();
-const initials = computed(() => page.props.auth.user?.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() ?? '?');
 </script>
 
 <template>
     <details class="group relative">
         <summary class="flex cursor-pointer list-none items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-slate-100">
-            <span class="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-xs font-semibold text-white">{{ initials }}</span>
+            <UserAvatar :name="page.props.auth.user?.name" :url="page.props.auth.user?.avatar_url" size="md" />
             <span class="hidden min-w-0 text-left sm:block"><span class="block max-w-36 truncate text-sm font-semibold text-slate-800">{{ page.props.auth.user?.name }}</span><span class="block max-w-36 truncate text-xs text-slate-500">{{ page.props.auth.user?.email }}</span></span>
             <svg class="hidden h-4 w-4 text-slate-400 transition group-open:rotate-180 sm:block" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clip-rule="evenodd"/></svg>
         </summary>

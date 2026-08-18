@@ -83,7 +83,20 @@ onBeforeUnmount(rememberScrollPosition);
         </div>
 
         <nav ref="navigation" class="flex-1 space-y-1 overflow-y-auto px-3 py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="后台主导航" @scroll.passive="rememberScrollPosition">
-            <SidebarGroup v-for="group in visibleMenu" :key="group.name" :item="group" :expanded="openGroup === group.name" :collapsed="collapsed" :current-url="page.url" @toggle="handleGroupToggle(group.name)" @navigate="emit('close')" />
+            <template v-for="group in visibleMenu" :key="group.name">
+                <div
+                    v-if="group.section"
+                    class="px-3 pt-2 pb-2 text-[10px] font-semibold tracking-[0.2em] text-slate-600"
+                    :class="[
+                        group.sectionDivider ? 'mt-4 border-t border-white/10 pt-5' : '',
+                        collapsed ? 'lg:px-2' : '',
+                    ]"
+                >
+                    <span :class="collapsed ? 'lg:hidden' : ''">{{ group.section }}</span>
+                    <span v-if="group.sectionDivider" class="hidden h-px bg-white/10" :class="collapsed ? 'lg:block' : ''" />
+                </div>
+                <SidebarGroup :item="group" :expanded="openGroup === group.name" :collapsed="collapsed" :current-url="page.url" @toggle="handleGroupToggle(group.name)" @navigate="emit('close')" />
+            </template>
         </nav>
 
         <div class="border-t border-white/8 px-6 py-4 text-xs text-slate-500" :class="collapsed ? 'lg:px-0' : ''">

@@ -238,7 +238,7 @@ export interface FlashMessages {
 export interface SharedProps {
     appName: string;
     auth: {
-        user: { id: number; name: string; email: string } | null;
+        user: { id: number; name: string; email: string; avatar_url: string | null } | null;
         permissions: string[];
     };
     currentOrganization: { id: number; name: string; code: string } | null;
