@@ -12,6 +12,18 @@ use Tests\TestCase;
 
 class DeploymentPreparationTest extends TestCase
 {
+    public function test_nginx_compresses_responses_and_caches_versioned_build_assets(): void
+    {
+        $config = file_get_contents(base_path('docker/nginx/default.conf'));
+
+        $this->assertIsString($config);
+        $this->assertStringContainsString('gzip on;', $config);
+        $this->assertStringContainsString('gzip_vary on;', $config);
+        $this->assertStringContainsString('location ^~ /build/assets/', $config);
+        $this->assertStringContainsString('Cache-Control "public, max-age=31536000, immutable"', $config);
+        $this->assertStringContainsString('try_files $uri =404;', $config);
+    }
+
     public function test_health_endpoint_checks_application_database_and_redis(): void
     {
         $this->getJson(route('health'))
