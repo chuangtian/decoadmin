@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import AvatarUploader from '../../Components/Users/AvatarUploader.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { ResourceCollection, Role, StoreOption, User } from '../../types';
 
@@ -10,10 +12,56 @@ const form = useForm({
     email: props.user?.data.email ?? '',
     password: '',
     status: props.user?.data.status ?? 'active',
+    avatar: null as File | null,
+    remove_avatar: false,
     role_ids: props.user?.data.roles.map((role) => role.id) ?? [],
     store_ids: props.user?.data.stores.map((store) => store.id) ?? [],
 });
-const submit = () => editing ? form.put(`/users/${props.user!.data.id}`) : form.post('/users');
+const avatarForm = useForm({ avatar: null as File | null });
+const removeAvatarForm = useForm({});
+const avatarSaving = computed(() => avatarForm.processing || removeAvatarForm.processing);
+const avatarError = computed(() => avatarForm.errors.avatar);
+
+const saveAvatar = (avatar: File | null) => {
+    if (editing && avatar) {
+        avatarForm.avatar = avatar;
+        avatarForm.clearErrors();
+        avatarForm.post(`/users/${props.user!.data.id}/avatar`, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => avatarForm.reset(),
+        });
+        return;
+    }
+
+    form.avatar = avatar;
+    form.clearErrors('avatar');
+};
+const removeAvatar = (remove: boolean) => {
+    if (editing && remove) {
+        removeAvatarForm.delete(`/users/${props.user!.data.id}/avatar`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                form.avatar = null;
+                form.remove_avatar = false;
+            },
+        });
+        return;
+    }
+
+    form.remove_avatar = remove;
+};
+const submit = () => {
+    const url = editing ? `/users/${props.user!.data.id}` : '/users';
+    form.transform((data) => {
+        if (!editing) return data;
+
+        const { avatar: _avatar, remove_avatar: _removeAvatar, ...profile } = data;
+
+        return { ...profile, _method: 'put' };
+    })
+        .post(url, { forceFormData: true });
+};
 </script>
 
 <template>
@@ -24,7 +72,11 @@ const submit = () => editing ? form.put(`/users/${props.user!.data.id}`) : form.
             <div class="mt-4"><h2 class="text-2xl font-semibold">{{ editing ? '编辑用户' : '添加用户' }}</h2><p class="mt-1 text-sm text-slate-500">统一管理用户身份、组织角色和店铺访问范围。</p></div>
             <form class="mt-6 space-y-6" @submit.prevent="submit">
                 <section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 class="font-semibold">基本信息</h3>
+                    <div><h3 class="font-semibold">个人资料</h3><p class="mt-1 text-sm text-slate-500">设置用户的头像和基础身份信息。</p></div>
+                    <AvatarUploader class="mt-5" :name="form.name" :current-url="props.user?.data.avatar_url" :error="avatarError || form.errors.avatar" :saving="avatarSaving" :immediate="editing" @update:file="saveAvatar" @update:remove="removeAvatar" />
+                    <div class="mt-6 border-t border-slate-100 pt-6">
+                        <h4 class="text-sm font-semibold text-slate-900">基本信息</h4>
+                    </div>
                     <div class="mt-4 grid gap-5 sm:grid-cols-2">
                         <label class="text-sm font-medium">姓名<input v-model="form.name" required class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-indigo-500" /><span class="mt-1 block text-xs text-red-600">{{ form.errors.name }}</span></label>
                         <label class="text-sm font-medium">邮箱<input v-model="form.email" required type="email" class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-indigo-500" /><span class="mt-1 block text-xs text-red-600">{{ form.errors.email }}</span></label>

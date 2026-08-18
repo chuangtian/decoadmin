@@ -23,6 +23,7 @@ if [ "${1:-}" = "/usr/local/bin/setup-app" ]; then
         exit 1
     fi
 
+    php artisan storage:link --force --no-interaction
     php artisan migrate --force --no-interaction
 
     if [ "${APP_ENV:-}" = "staging" ] || [ "${APP_ENV:-}" = "production" ]; then
