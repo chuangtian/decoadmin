@@ -36,7 +36,21 @@ const groupLabels: Record<string, string> = {
                     <label class="block text-sm font-medium">名称<input v-model="form.name" required class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2" /></label>
                     <label class="block text-sm font-medium">标识 Slug<input v-model="form.slug" required pattern="[a-z0-9-]+" class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="warehouse-manager" /></label>
                     <label class="block text-sm font-medium">说明<textarea v-model="form.description" rows="3" class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2" /></label>
-                    <details class="rounded-lg border border-slate-200"><summary class="cursor-pointer px-3 py-2 text-sm font-medium">选择权限</summary><div class="max-h-56 space-y-4 overflow-y-auto border-t p-3"><div v-for="(items, group) in grouped" :key="group"><p class="mb-2 text-xs font-semibold text-slate-400">{{ groupLabels[group] ?? group }}</p><label v-for="permission in items" :key="permission.id" class="mb-2 flex items-center gap-2 text-sm"><input v-model="form.permission_ids" :value="permission.id" type="checkbox" />{{ permission.slug }}</label></div></div></details>
+                    <details class="rounded-lg border border-slate-200">
+                        <summary class="cursor-pointer px-3 py-2 text-sm font-medium">选择权限</summary>
+                        <div class="max-h-72 space-y-5 overflow-y-auto border-t p-3">
+                            <div v-for="(items, group) in grouped" :key="group">
+                                <p class="mb-3 text-xs font-semibold text-slate-400">{{ groupLabels[group] ?? group }}</p>
+                                <label v-for="permission in items" :key="permission.id" class="mb-3 flex cursor-pointer items-start gap-3 text-sm">
+                                    <input v-model="form.permission_ids" :value="permission.id" type="checkbox" class="mt-1" />
+                                    <span>
+                                        <span class="block font-medium text-slate-800">{{ permission.slug }}</span>
+                                        <span class="mt-0.5 block text-xs text-slate-400">{{ permission.name }}</span>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </details>
                     <button :disabled="form.processing" class="w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">创建角色</button>
                 </form>
             </section>
