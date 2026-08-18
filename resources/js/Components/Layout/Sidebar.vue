@@ -14,10 +14,15 @@ const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
 
-const visibleMenu = computed<MenuItem[]>(() => menu.map((group) => ({
-    ...group,
-    children: group.children?.filter((item) => Boolean(item.permission && page.props.auth.permissions.includes(item.permission))),
-})).filter((group) => Boolean(group.children?.length)));
+const visibleMenu = computed<MenuItem[]>(() => menu
+    .filter((item) => !item.hidden)
+    .map((item) => ({
+        ...item,
+        children: item.children?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission))),
+    }))
+    .filter((item) => item.route
+        ? Boolean(item.permission && page.props.auth.permissions.includes(item.permission))
+        : Boolean(item.children?.length)));
 const groupHasActiveRoute = (group: MenuItem) => group.children?.some((child) => child.route && (page.url === child.route || page.url.startsWith(`${child.route}/`))) ?? false;
 const toggleGroup = (name: string) => {
     openGroup.value = openGroup.value === name ? null : name;

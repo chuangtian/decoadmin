@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Link } from '@inertiajs/vue3';
 import type { MenuItem } from '../../config/menu';
 import AppIcon from './AppIcon.vue';
 import SidebarItem from './SidebarItem.vue';
@@ -10,7 +11,24 @@ const isActive = (route?: string) => Boolean(route && (props.currentUrl === rout
 
 <template>
     <section>
+        <Link
+            v-if="item.route && !item.comingSoon"
+            :href="item.route"
+            class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition"
+            :class="[
+                isActive(item.route) ? 'bg-emerald-400/12 text-emerald-300 ring-1 ring-inset ring-emerald-400/15' : 'text-slate-300 hover:bg-white/6 hover:text-white',
+                collapsed ? 'lg:justify-center lg:px-0' : '',
+            ]"
+            :title="collapsed ? item.name : undefined"
+            @click="emit('navigate')"
+        >
+            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg" :class="isActive(item.route) ? 'bg-emerald-400/12 text-emerald-300' : 'bg-white/4 text-slate-500'">
+                <AppIcon :name="item.icon" :size="18" />
+            </span>
+            <span class="truncate" :class="collapsed ? 'lg:hidden' : ''">{{ item.name }}</span>
+        </Link>
         <button
+            v-else
             type="button"
             class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition"
             :class="[
