@@ -14,3 +14,12 @@ Schedule::call([SystemStatusService::class, 'recordSchedulerHeartbeat'])
     ->name('system:scheduler-heartbeat')
     ->everyMinute()
     ->withoutOverlapping();
+
+if (config('shopify.scheduled_sync.enabled')) {
+    Schedule::command('shopify:sync-reconcile')
+        ->name('shopify:daily-sync-reconciliation')
+        ->dailyAt((string) config('shopify.scheduled_sync.time', '03:00'))
+        ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
+        ->onOneServer()
+        ->withoutOverlapping(180);
+}

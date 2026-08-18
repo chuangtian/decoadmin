@@ -19,7 +19,36 @@ class SyncJobService
         User $actor,
         ?AppInstallation $installation = null,
     ): SyncJob {
-        $syncJob = DB::transaction(function () use ($store, $type, $actor, $installation): SyncJob {
+        return $this->createAndDispatchForSource(
+            $store,
+            $type,
+            $installation,
+            'manual',
+            $actor->getKey(),
+        );
+    }
+
+    public function createScheduledAndDispatch(
+        Store $store,
+        string $type,
+        AppInstallation $installation,
+    ): SyncJob {
+        return $this->createAndDispatchForSource(
+            $store,
+            $type,
+            $installation,
+            'scheduled',
+        );
+    }
+
+    private function createAndDispatchForSource(
+        Store $store,
+        string $type,
+        ?AppInstallation $installation,
+        string $source,
+        ?int $requestedBy = null,
+    ): SyncJob {
+        $syncJob = DB::transaction(function () use ($store, $type, $installation, $source, $requestedBy): SyncJob {
             $syncJob = SyncJob::query()->create([
                 'uuid' => (string) Str::uuid(),
                 'organization_id' => $store->organization_id,
@@ -30,8 +59,8 @@ class SyncJobService
                 'direction' => 'pull',
                 'status' => 'pending',
                 'payload' => [
-                    'source' => 'manual',
-                    'requested_by' => $actor->getKey(),
+                    'source' => $source,
+                    'requested_by' => $requestedBy,
                     'framework_only' => ! in_array($type, ['products', 'orders', 'customers', 'inventory'], true),
                 ],
                 'logs' => [],
