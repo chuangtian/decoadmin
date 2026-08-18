@@ -85,7 +85,7 @@ class ProductSyncHandler implements SyncHandlerInterface
             ?? $store?->shopifyConnection;
 
         if (! $store || ! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return SyncResult::failed('当前店铺没有可用的 Shopify Connection。', [
+            return SyncResult::failed('当前店铺没有可用的 Shopify 连接。', [
                 ['code' => 'shopify_connection_unavailable', 'message' => '请先连接或重新授权 Shopify 店铺。'],
             ]);
         }
@@ -93,7 +93,7 @@ class ProductSyncHandler implements SyncHandlerInterface
         $missingScopes = array_values(array_diff(self::REQUIRED_SCOPES, $connection->scopes ?? []));
 
         if ($missingScopes !== []) {
-            return SyncResult::failed('Shopify Connection 缺少商品同步权限，请重新授权。', [
+            return SyncResult::failed('Shopify 连接缺少商品同步权限，请重新授权。', [
                 ['code' => 'missing_shopify_scopes', 'message' => '缺少权限：'.implode(', ', $missingScopes)],
             ], ['required_scopes' => self::REQUIRED_SCOPES]);
         }
@@ -117,7 +117,7 @@ class ProductSyncHandler implements SyncHandlerInterface
             $products = data_get($payload, 'data.products');
 
             if (! is_array($products)) {
-                throw new ShopifyApiException('Shopify Products API 未返回有效商品列表。');
+                throw new ShopifyApiException('Shopify 商品 API 未返回有效商品列表。');
             }
 
             $nodes = $this->nodes($products);
@@ -175,7 +175,7 @@ class ProductSyncHandler implements SyncHandlerInterface
         $variants = $productNode['variants'] ?? null;
 
         if (! is_array($variants)) {
-            throw new ShopifyApiException('Shopify Product 数据缺少 Variants Connection。');
+            throw new ShopifyApiException('Shopify 商品数据缺少变体连接结构。');
         }
 
         $nodes = $this->nodes($variants);
@@ -191,7 +191,7 @@ class ProductSyncHandler implements SyncHandlerInterface
             $variants = data_get($payload, 'data.product.variants');
 
             if (! is_array($variants)) {
-                throw new ShopifyApiException('Shopify Product Variants API 未返回有效数据。');
+                throw new ShopifyApiException('Shopify 商品变体 API 未返回有效数据。');
             }
 
             array_push($nodes, ...$this->nodes($variants));
@@ -211,7 +211,7 @@ class ProductSyncHandler implements SyncHandlerInterface
         $nodes = $connection['nodes'] ?? null;
 
         if (! is_array($nodes) || collect($nodes)->contains(fn ($node) => ! is_array($node))) {
-            throw new ShopifyApiException('Shopify GraphQL Connection Nodes 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 连接节点格式无效。');
         }
 
         return array_values($nodes);
@@ -226,13 +226,13 @@ class ProductSyncHandler implements SyncHandlerInterface
         $pageInfo = $connection['pageInfo'] ?? null;
 
         if (! is_array($pageInfo) || ! is_bool($pageInfo['hasNextPage'] ?? null)) {
-            throw new ShopifyApiException('Shopify GraphQL Connection PageInfo 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 分页信息格式无效。');
         }
 
         $endCursor = $pageInfo['endCursor'] ?? null;
 
         if ($pageInfo['hasNextPage'] && (! is_string($endCursor) || $endCursor === '')) {
-            throw new ShopifyApiException('Shopify GraphQL 分页缺少 End Cursor。');
+            throw new ShopifyApiException('Shopify GraphQL 分页缺少结束游标。');
         }
 
         return [

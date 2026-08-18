@@ -15,7 +15,7 @@ class WebhookHandlerRegistry
     {
         foreach ($handlers as $handler) {
             if (isset($this->handlers[$handler->topic()])) {
-                throw new InvalidArgumentException("Webhook topic [{$handler->topic()}] 已注册多个 Handler。");
+                throw new InvalidArgumentException("Webhook 主题 [{$handler->topic()}] 已注册多个处理器。");
             }
 
             $this->handlers[$handler->topic()] = $handler;

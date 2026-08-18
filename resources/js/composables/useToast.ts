@@ -29,7 +29,7 @@ const dismiss = (id: number) => {
     toasts.value = toasts.value.filter((toast) => toast.id !== id);
 };
 
-const add = ({ type, title, message, duration = 5000 }: ToastOptions) => {
+const add = ({ type, title, message, duration = 2000 }: ToastOptions) => {
     const toast: ToastMessage = {
         id: nextToastId++,
         type,

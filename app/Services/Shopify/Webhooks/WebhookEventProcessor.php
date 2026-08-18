@@ -14,7 +14,7 @@ class WebhookEventProcessor
 
         if (! $handler) {
             return WebhookProcessingResult::unsupported(
-                "Topic [{$event->topic}] 暂未注册处理 Handler。",
+                "主题 [{$event->topic}] 暂未注册事件处理器。",
             );
         }
 

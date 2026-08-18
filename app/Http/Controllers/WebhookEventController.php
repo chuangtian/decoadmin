@@ -81,7 +81,7 @@ class WebhookEventController extends Controller
         $this->authorize('retry', $webhookEvent);
         $retryService->retry($webhookEvent, $request->user());
 
-        return back()->with('success', 'Webhook Event 已重新加入处理队列。');
+        return back()->with('success', 'Webhook 事件已重新加入处理队列。');
     }
 
     /** @return list<int> */

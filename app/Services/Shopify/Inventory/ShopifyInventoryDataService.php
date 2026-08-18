@@ -47,7 +47,7 @@ class ShopifyInventoryDataService
             $tracked = $inventoryItemNode['tracked'] ?? null;
 
             if (! is_bool($tracked)) {
-                throw new ShopifyApiException('Shopify InventoryItem Tracked 格式无效。');
+                throw new ShopifyApiException('Shopify 库存项目的跟踪状态格式无效。');
             }
 
             $inventoryItem->fill([
@@ -68,7 +68,7 @@ class ShopifyInventoryDataService
                 $locationNode = $levelNode['location'] ?? null;
 
                 if (! is_array($locationNode)) {
-                    throw new ShopifyApiException('Shopify InventoryLevel 缺少 Location。');
+                    throw new ShopifyApiException('Shopify 库存级别缺少地点信息。');
                 }
 
                 $shopifyLocationId = $this->numericId($locationNode['id'] ?? null, 'Location');
@@ -80,7 +80,7 @@ class ShopifyInventoryDataService
                 $active = $locationNode['isActive'] ?? null;
 
                 if (! is_bool($active)) {
-                    throw new ShopifyApiException('Shopify Location Active 格式无效。');
+                    throw new ShopifyApiException('Shopify 地点的启用状态格式无效。');
                 }
 
                 $location->fill([
@@ -141,7 +141,7 @@ class ShopifyInventoryDataService
         $value = $data[$key] ?? null;
 
         if (! is_string($value) || $value === '') {
-            throw new ShopifyApiException("Shopify Location 数据缺少字段 [{$key}]。");
+            throw new ShopifyApiException("Shopify 地点数据缺少字段 [{$key}]。");
         }
 
         return $value;
@@ -155,7 +155,7 @@ class ShopifyInventoryDataService
         }
 
         if (! is_array($address)) {
-            throw new ShopifyApiException('Shopify Location Address 格式无效。');
+            throw new ShopifyApiException('Shopify 地点地址格式无效。');
         }
 
         return [
@@ -180,7 +180,7 @@ class ShopifyInventoryDataService
         $quantities = $levelNode['quantities'] ?? null;
 
         if (! is_array($quantities)) {
-            throw new ShopifyApiException('Shopify InventoryLevel Quantities 格式无效。');
+            throw new ShopifyApiException('Shopify 库存级别数量格式无效。');
         }
 
         $available = collect($quantities)->first(
@@ -188,7 +188,7 @@ class ShopifyInventoryDataService
         );
 
         if (! is_array($available) || ! is_int($available['quantity'] ?? null)) {
-            throw new ShopifyApiException('Shopify InventoryLevel 缺少 Available Quantity。');
+            throw new ShopifyApiException('Shopify 库存级别缺少可用数量。');
         }
 
         return $available;
@@ -201,7 +201,7 @@ class ShopifyInventoryDataService
         }
 
         if (! is_string($value) || strtotime($value) === false) {
-            throw new ShopifyApiException('Shopify InventoryQuantity Updated At 格式无效。');
+            throw new ShopifyApiException('Shopify 库存数量更新时间格式无效。');
         }
 
         return $value;

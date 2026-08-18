@@ -53,7 +53,7 @@ class ShopifyProductDataService
                 $price = $variantNode['price'] ?? null;
 
                 if (! is_scalar($price) || ! is_numeric((string) $price)) {
-                    throw new ShopifyApiException('Shopify Product Variant 缺少有效价格。');
+                    throw new ShopifyApiException('Shopify 商品变体缺少有效价格。');
                 }
 
                 $inventoryItem = $variantNode['inventoryItem'] ?? null;
@@ -91,7 +91,7 @@ class ShopifyProductDataService
         $value = $data[$key] ?? null;
 
         if (! is_string($value) || $value === '') {
-            throw new ShopifyApiException("Shopify Product 数据缺少字段 [{$key}]。");
+            throw new ShopifyApiException("Shopify 商品数据缺少字段 [{$key}]。");
         }
 
         return $value;

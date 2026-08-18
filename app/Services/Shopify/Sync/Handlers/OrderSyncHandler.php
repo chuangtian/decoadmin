@@ -93,7 +93,7 @@ class OrderSyncHandler implements SyncHandlerInterface
             ?? $store?->shopifyConnection;
 
         if (! $store || ! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return SyncResult::failed('当前店铺没有可用的 Shopify Connection。', [
+            return SyncResult::failed('当前店铺没有可用的 Shopify 连接。', [
                 ['code' => 'shopify_connection_unavailable', 'message' => '请先连接或重新授权 Shopify 店铺。'],
             ]);
         }
@@ -101,7 +101,7 @@ class OrderSyncHandler implements SyncHandlerInterface
         $missingScopes = array_values(array_diff(self::REQUIRED_SCOPES, $connection->scopes ?? []));
 
         if ($missingScopes !== []) {
-            return SyncResult::failed('Shopify Connection 缺少订单同步权限，请重新授权。', [
+            return SyncResult::failed('Shopify 连接缺少订单同步权限，请重新授权。', [
                 ['code' => 'missing_shopify_scopes', 'message' => '缺少权限：'.implode(', ', $missingScopes)],
             ], ['required_scopes' => self::REQUIRED_SCOPES]);
         }
@@ -127,7 +127,7 @@ class OrderSyncHandler implements SyncHandlerInterface
             $orders = data_get($payload, 'data.orders');
 
             if (! is_array($orders)) {
-                throw new ShopifyApiException('Shopify Orders API 未返回有效订单列表。');
+                throw new ShopifyApiException('Shopify 订单 API 未返回有效订单列表。');
             }
 
             $nodes = $this->nodes($orders);
@@ -186,7 +186,7 @@ class OrderSyncHandler implements SyncHandlerInterface
         $lineItems = $orderNode['lineItems'] ?? null;
 
         if (! is_array($lineItems)) {
-            throw new ShopifyApiException('Shopify Order 数据缺少 LineItems Connection。');
+            throw new ShopifyApiException('Shopify 订单数据缺少行项目连接结构。');
         }
 
         $nodes = $this->nodes($lineItems);
@@ -202,7 +202,7 @@ class OrderSyncHandler implements SyncHandlerInterface
             $lineItems = data_get($payload, 'data.order.lineItems');
 
             if (! is_array($lineItems)) {
-                throw new ShopifyApiException('Shopify Order LineItems API 未返回有效数据。');
+                throw new ShopifyApiException('Shopify 订单行项目 API 未返回有效数据。');
             }
 
             array_push($nodes, ...$this->nodes($lineItems));
@@ -249,7 +249,7 @@ class OrderSyncHandler implements SyncHandlerInterface
         $nodes = $connection['nodes'] ?? null;
 
         if (! is_array($nodes) || collect($nodes)->contains(fn ($node) => ! is_array($node))) {
-            throw new ShopifyApiException('Shopify GraphQL Connection Nodes 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 连接节点格式无效。');
         }
 
         return array_values($nodes);
@@ -264,13 +264,13 @@ class OrderSyncHandler implements SyncHandlerInterface
         $pageInfo = $connection['pageInfo'] ?? null;
 
         if (! is_array($pageInfo) || ! is_bool($pageInfo['hasNextPage'] ?? null)) {
-            throw new ShopifyApiException('Shopify GraphQL Connection PageInfo 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 分页信息格式无效。');
         }
 
         $endCursor = $pageInfo['endCursor'] ?? null;
 
         if ($pageInfo['hasNextPage'] && (! is_string($endCursor) || $endCursor === '')) {
-            throw new ShopifyApiException('Shopify GraphQL 分页缺少 End Cursor。');
+            throw new ShopifyApiException('Shopify GraphQL 分页缺少结束游标。');
         }
 
         return [

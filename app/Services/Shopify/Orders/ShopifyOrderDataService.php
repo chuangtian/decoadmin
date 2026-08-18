@@ -72,7 +72,7 @@ class ShopifyOrderDataService
                 $quantity = $lineItemNode['quantity'] ?? null;
 
                 if (! is_int($quantity) || $quantity < 0) {
-                    throw new ShopifyApiException('Shopify LineItem 缺少有效数量。');
+                    throw new ShopifyApiException('Shopify 订单行项目缺少有效数量。');
                 }
 
                 $item->fill([
@@ -115,7 +115,7 @@ class ShopifyOrderDataService
         $value = $data[$key] ?? null;
 
         if (! is_string($value) || $value === '') {
-            throw new ShopifyApiException("Shopify Order 数据缺少字段 [{$key}]。");
+            throw new ShopifyApiException("Shopify 订单数据缺少字段 [{$key}]。");
         }
 
         return $value;
@@ -138,11 +138,11 @@ class ShopifyOrderDataService
         $currency = data_get($node, "{$field}.shopMoney.currencyCode");
 
         if (! is_scalar($amount) || ! is_numeric((string) $amount)) {
-            throw new ShopifyApiException("Shopify Order 数据缺少有效金额 [{$field}]。");
+            throw new ShopifyApiException("Shopify 订单数据缺少有效金额 [{$field}]。");
         }
 
         if (! is_string($currency) || strtoupper($currency) !== strtoupper($expectedCurrency)) {
-            throw new ShopifyApiException("Shopify Order 金额币种 [{$field}] 不一致。");
+            throw new ShopifyApiException("Shopify 订单金额币种 [{$field}] 不一致。");
         }
 
         return (string) $amount;
@@ -153,7 +153,7 @@ class ShopifyOrderDataService
         $date = $this->nullableDate($value, $field);
 
         if ($date === null) {
-            throw new ShopifyApiException("Shopify Order 数据缺少日期 [{$field}]。");
+            throw new ShopifyApiException("Shopify 订单数据缺少日期 [{$field}]。");
         }
 
         return $date;
@@ -166,7 +166,7 @@ class ShopifyOrderDataService
         }
 
         if (! is_string($value) || strtotime($value) === false) {
-            throw new ShopifyApiException("Shopify Order 日期 [{$field}] 格式无效。");
+            throw new ShopifyApiException("Shopify 订单日期 [{$field}] 格式无效。");
         }
 
         return $value;

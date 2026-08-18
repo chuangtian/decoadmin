@@ -90,7 +90,7 @@ class StoreController extends Controller
             ->map(fn (AuditLog $audit): array => [
                 'id' => $audit->id,
                 'action' => $audit->action,
-                'actor' => $audit->user?->name ?? 'System',
+                'actor' => $audit->user?->name ?? '系统',
                 'previous_status' => data_get($audit->metadata, 'previous_status')
                     ?? data_get($audit->old_values, 'status'),
                 'new_status' => data_get($audit->metadata, 'new_status')

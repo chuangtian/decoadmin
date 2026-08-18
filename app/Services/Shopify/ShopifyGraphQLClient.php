@@ -141,7 +141,7 @@ class ShopifyGraphQLClient
 
             return [
                 'success' => true,
-                'message' => 'Shopify Connection 验证成功。',
+                'message' => 'Shopify 连接验证成功。',
                 'shop' => [
                     'id' => (string) $shop['id'],
                     'name' => (string) $shop['name'],
@@ -157,7 +157,7 @@ class ShopifyGraphQLClient
             return [
                 'success' => false,
                 'message' => match ($statusCode) {
-                    401, 403 => 'Shopify Access Token 无效或已被撤销。',
+                    401, 403 => 'Shopify 访问令牌无效或已被撤销。',
                     429 => 'Shopify API 请求过于频繁，请稍后重试。',
                     default => 'Shopify API 暂时无法完成连接验证。',
                 },

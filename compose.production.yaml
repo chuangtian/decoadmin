@@ -1,9 +1,6 @@
 name: ${COMPOSE_PROJECT_NAME:-decoadmin-staging}
 
 x-app: &app
-  build:
-    context: .
-    target: app-production
   image: ${APP_IMAGE:-decoadmin-app:staging}
   env_file:
     - ${APP_ENV_FILE:-.env.staging}
@@ -35,6 +32,9 @@ services:
 
   app:
     <<: *app
+    build:
+      context: .
+      target: app-production
     healthcheck:
       test: ["CMD-SHELL", "php -r 'exit(fsockopen(\"127.0.0.1\", 9000) ? 0 : 1);'"]
       interval: 10s

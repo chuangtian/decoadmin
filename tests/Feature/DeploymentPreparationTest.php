@@ -12,6 +12,28 @@ use Tests\TestCase;
 
 class DeploymentPreparationTest extends TestCase
 {
+    public function test_shared_app_image_is_built_once_per_compose_environment(): void
+    {
+        $productionCompose = file_get_contents(base_path('compose.production.yaml'));
+        $localCompose = file_get_contents(base_path('compose.yaml'));
+
+        $this->assertMatchesRegularExpression('/x-app: &app\n  image:/', $productionCompose);
+        $this->assertMatchesRegularExpression('/  app:\n    <<: \*app\n    build:\n      context: \.\n      target: app-production/', $productionCompose);
+        $this->assertMatchesRegularExpression('/x-app: &app\n  image:/', $localCompose);
+        $this->assertMatchesRegularExpression('/  app:\n    <<: \*app\n    build:\n      context: \.\n      target: app/', $localCompose);
+    }
+
+    public function test_production_storage_link_is_not_recreated_during_setup(): void
+    {
+        $dockerfile = file_get_contents(base_path('Dockerfile'));
+        $entrypoint = file_get_contents(base_path('docker/php/entrypoint.sh'));
+
+        $this->assertStringContainsString('ln -s ../storage/app/public public/storage', $dockerfile);
+        $this->assertStringContainsString('if [ ! -e public/storage ] && [ ! -L public/storage ]; then', $entrypoint);
+        $this->assertStringContainsString('php artisan storage:link --no-interaction', $entrypoint);
+        $this->assertStringNotContainsString('storage:link --force', $entrypoint);
+    }
+
     public function test_nginx_compresses_responses_and_caches_versioned_build_assets(): void
     {
         $config = file_get_contents(base_path('docker/nginx/default.conf'));

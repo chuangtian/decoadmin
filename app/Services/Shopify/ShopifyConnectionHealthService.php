@@ -24,7 +24,7 @@ class ShopifyConnectionHealthService
     public function check(ShopifyConnection $connection, ?User $actor = null): array
     {
         if ($connection->trashed() || $connection->uninstalled_at) {
-            return $this->recordFailure($connection, 'disconnected', 'Shopify Connection 已断开。', $actor);
+            return $this->recordFailure($connection, 'disconnected', 'Shopify 连接已断开。', $actor);
         }
 
         try {
@@ -47,7 +47,7 @@ class ShopifyConnectionHealthService
         $this->lifecycle->markConnected(
             $connection,
             $actor,
-            'Shopify Admin API 验证成功。',
+            'Shopify 管理 API 验证成功。',
             apiChecked: true,
             shop: $shop,
         );

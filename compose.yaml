@@ -1,9 +1,6 @@
 name: shopify-commerce-hub
 
 x-app: &app
-  build:
-    context: .
-    target: app
   image: shopify-commerce-hub-app:local
   restart: unless-stopped
   working_dir: /var/www/html
@@ -38,6 +35,9 @@ services:
 
   app:
     <<: *app
+    build:
+      context: .
+      target: app
     healthcheck:
       test: ["CMD-SHELL", "php -r 'exit(fsockopen(\"127.0.0.1\", 9000) ? 0 : 1);'"]
       interval: 10s

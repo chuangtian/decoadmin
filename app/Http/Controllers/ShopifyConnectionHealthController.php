@@ -15,7 +15,7 @@ class ShopifyConnectionHealthController extends Controller
         $connection = $store->shopifyConnection;
 
         if (! $connection) {
-            return back()->with('error', '当前店铺尚未建立 Shopify Connection。');
+            return back()->with('error', '当前店铺尚未建立 Shopify 连接。');
         }
 
         $result = $health->check($connection, $request->user());

@@ -40,7 +40,7 @@ class ShopifyConnectionHealthTest extends TestCase
             ->from(route('stores.show', $store))
             ->post(route('stores.shopify.verify', $store))
             ->assertRedirect(route('stores.show', $store))
-            ->assertSessionHas('success', 'Shopify Connection 验证成功。');
+            ->assertSessionHas('success', 'Shopify 连接验证成功。');
 
         $connection->refresh();
         $this->assertSame('connected', $connection->status);
@@ -81,11 +81,11 @@ class ShopifyConnectionHealthTest extends TestCase
             ->from(route('stores.show', $store))
             ->post(route('stores.shopify.verify', $store))
             ->assertRedirect(route('stores.show', $store))
-            ->assertSessionHas('error', 'Shopify Access Token 无效或已被撤销。');
+            ->assertSessionHas('error', 'Shopify 访问令牌无效或已被撤销。');
 
         $connection->refresh();
         $this->assertSame('invalid', $connection->status);
-        $this->assertSame('Shopify Access Token 无效或已被撤销。', $connection->last_error);
+        $this->assertSame('Shopify 访问令牌无效或已被撤销。', $connection->last_error);
         $this->assertNotNull($connection->last_error_at);
         $this->assertNotNull($connection->last_api_check);
         $this->assertStringNotContainsString('test-access-token', (string) $connection->last_error);
@@ -143,7 +143,7 @@ class ShopifyConnectionHealthTest extends TestCase
         ]);
 
         $this->artisan('shopify:check-connections')
-            ->expectsOutputToContain('Checked 1 connection(s): 1 connected, 0 require attention.')
+            ->expectsOutputToContain('已检查 1 个连接：1 个正常，0 个需要处理。')
             ->assertSuccessful();
 
         $this->assertSame('connected', $connection->fresh()->status);

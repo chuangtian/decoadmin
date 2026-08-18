@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
+import UserAvatar from '../../Components/Users/UserAvatar.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, ResourceCollection, Role, StoreOption, User } from '../../types';
 
@@ -33,7 +34,7 @@ const remove = (user: User) => {
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <tr v-for="user in users.data" :key="user.id" class="hover:bg-slate-50/70">
-                        <td class="px-5 py-4"><p class="font-medium">{{ user.name }}</p><p class="text-xs text-slate-500">{{ user.email }}</p></td>
+                        <td class="px-5 py-4"><div class="flex items-center gap-3"><UserAvatar :name="user.name" :url="user.avatar_url" size="md" tone="emerald" /><div class="min-w-0"><p class="truncate font-medium">{{ user.name }}</p><p class="truncate text-xs text-slate-500">{{ user.email }}</p></div></div></td>
                         <td class="px-5 py-4"><div class="flex flex-wrap gap-1"><span v-for="role in user.roles" :key="role.id" class="rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{{ role.name }}</span><span v-if="!user.roles.length" class="text-slate-400">无</span></div></td>
                         <td class="px-5 py-4 text-slate-600">{{ user.stores.map((store) => store.name).join('、') || '通过组织角色访问' }}</td>
                         <td class="px-5 py-4"><span class="rounded-full px-2 py-1 text-xs" :class="user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ user.status === 'active' ? '启用' : '停用' }}</span></td>

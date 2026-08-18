@@ -4,7 +4,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        <title inertia>{{ config('app.name', 'Shopify Commerce Hub') }}</title>
+        <title inertia>{{ config('app.name', 'DecoAdmin 运营中台') }}</title>
 
         @vite('resources/js/app.ts')
         @inertiaHead

@@ -34,7 +34,7 @@ class SyncResult
 
     public static function unsupported(string $type): self
     {
-        $message = "Sync Type [{$type}] 暂未注册 Handler。";
+        $message = "同步类型 [{$type}] 暂未注册处理器。";
 
         return new self(false, 'unsupported', $message, 0, [
             ['code' => 'unsupported_sync_type', 'message' => $message],

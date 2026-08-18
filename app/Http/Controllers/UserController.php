@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Requests\AssignUserRolesRequest;
 use App\Http\Requests\AssignUserStoresRequest;
 use App\Http\Requests\SaveUserRequest;
+use App\Http\Requests\UpdateUserAvatarRequest;
 use App\Http\Resources\RoleResource;
 use App\Http\Resources\UserResource;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\UserAvatarService;
 use App\Support\CurrentOrganization;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -17,10 +19,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 class UserController extends Controller
 {
-    public function __construct(private CurrentOrganization $currentOrganization) {}
+    public function __construct(
+        private CurrentOrganization $currentOrganization,
+        private UserAvatarService $avatars,
+    ) {}
 
     public function index(Request $request): Response|JsonResponse
     {
@@ -57,23 +63,33 @@ class UserController extends Controller
         $this->authorize('create', User::class);
         $organization = $this->currentOrganization->require();
         $validated = $request->validated();
+        $avatarUrl = $request->hasFile('avatar')
+            ? $this->avatars->store($request->file('avatar'))
+            : null;
 
-        $user = DB::transaction(function () use ($validated, $organization): User {
-            $user = User::query()->create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'password' => $validated['password'],
-                'status' => $validated['status'] ?? 'active',
-            ]);
-            $organization->users()->attach($user, [
-                'status' => 'active',
-                'joined_at' => now(),
-            ]);
-            $this->syncRoles($user, $validated['role_ids'] ?? []);
-            $this->syncStores($user, $validated['store_ids'] ?? []);
+        try {
+            $user = DB::transaction(function () use ($validated, $organization, $avatarUrl): User {
+                $user = User::query()->create([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'password' => $validated['password'],
+                    'status' => $validated['status'] ?? 'active',
+                    'avatar_url' => $avatarUrl,
+                ]);
+                $organization->users()->attach($user, [
+                    'status' => 'active',
+                    'joined_at' => now(),
+                ]);
+                $this->syncRoles($user, $validated['role_ids'] ?? []);
+                $this->syncStores($user, $validated['store_ids'] ?? []);
 
-            return $user;
-        });
+                return $user;
+            });
+        } catch (Throwable $exception) {
+            $this->avatars->delete($avatarUrl);
+
+            throw $exception;
+        }
 
         if ($request->expectsJson()) {
             return (new UserResource($user->load(['roles', 'stores'])))->response()->setStatusCode(201);
@@ -116,31 +132,72 @@ class UserController extends Controller
     {
         $this->authorize('update', $user);
         $validated = $request->validated();
+        $previousAvatarUrl = $user->avatar_url;
+        $newAvatarUrl = $request->hasFile('avatar')
+            ? $this->avatars->store($request->file('avatar'))
+            : null;
+        $shouldRemoveAvatar = (bool) ($validated['remove_avatar'] ?? false);
 
-        DB::transaction(function () use ($user, $validated): void {
-            $user->fill([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'status' => $validated['status'] ?? $user->status,
-            ]);
-            if (! empty($validated['password'])) {
-                $user->password = $validated['password'];
-            }
-            $user->save();
+        try {
+            DB::transaction(function () use ($user, $validated, $newAvatarUrl, $shouldRemoveAvatar): void {
+                $user->fill([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'status' => $validated['status'] ?? $user->status,
+                ]);
+                if ($newAvatarUrl) {
+                    $user->avatar_url = $newAvatarUrl;
+                } elseif ($shouldRemoveAvatar) {
+                    $user->avatar_url = null;
+                }
+                if (! empty($validated['password'])) {
+                    $user->password = $validated['password'];
+                }
+                $user->save();
 
-            if (array_key_exists('role_ids', $validated)) {
-                $this->syncRoles($user, $validated['role_ids']);
-            }
-            if (array_key_exists('store_ids', $validated)) {
-                $this->syncStores($user, $validated['store_ids']);
-            }
-        });
+                if (array_key_exists('role_ids', $validated)) {
+                    $this->syncRoles($user, $validated['role_ids']);
+                }
+                if (array_key_exists('store_ids', $validated)) {
+                    $this->syncStores($user, $validated['store_ids']);
+                }
+            });
+        } catch (Throwable $exception) {
+            $this->avatars->delete($newAvatarUrl);
+
+            throw $exception;
+        }
+
+        if (($newAvatarUrl || $shouldRemoveAvatar) && $previousAvatarUrl !== $newAvatarUrl) {
+            $this->avatars->delete($previousAvatarUrl);
+        }
 
         if ($request->expectsJson()) {
             return (new UserResource($user->fresh()->load(['roles', 'stores'])))->response();
         }
 
         return to_route('users.index')->with('success', '用户更新成功。');
+    }
+
+    public function updateAvatar(UpdateUserAvatarRequest $request, User $user): RedirectResponse|JsonResponse
+    {
+        $this->authorize('update', $user);
+        $this->avatars->replace($user, $request->file('avatar'));
+        $user->refresh();
+
+        return $request->expectsJson()
+            ? (new UserResource($user))->response()
+            : back()->with('success', '头像已自动保存。');
+    }
+
+    public function destroyAvatar(Request $request, User $user): RedirectResponse|JsonResponse
+    {
+        $this->authorize('update', $user);
+        $this->avatars->remove($user);
+
+        return $request->expectsJson()
+            ? response()->json(['data' => ['id' => $user->getKey(), 'avatar_url' => null]])
+            : back()->with('success', '头像已移除。');
     }
 
     public function destroy(Request $request, User $user): RedirectResponse|JsonResponse

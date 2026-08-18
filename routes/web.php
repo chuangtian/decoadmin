@@ -10,6 +10,7 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyConnectionDisconnectController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
@@ -59,6 +60,11 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar'])->name('profile.avatar.update');
+    Route::delete('/profile/avatar', [ProfileController::class, 'destroyAvatar'])->name('profile.avatar.destroy');
+
     Route::put('/context/organization', [OrganizationContextController::class, 'update'])
         ->middleware('throttle:30,1')
         ->name('context.organization.update');
@@ -76,6 +82,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/users/{user}/edit', [UserController::class, 'edit'])->middleware('permission:users.update')->name('users.edit');
     Route::get('/users/{user}', [UserController::class, 'show'])->middleware('permission:users.view')->name('users.show');
     Route::put('/users/{user}', [UserController::class, 'update'])->middleware('permission:users.update')->name('users.update');
+    Route::post('/users/{user}/avatar', [UserController::class, 'updateAvatar'])->middleware('permission:users.update')->name('users.avatar.update');
+    Route::delete('/users/{user}/avatar', [UserController::class, 'destroyAvatar'])->middleware('permission:users.update')->name('users.avatar.destroy');
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->middleware('permission:users.delete')->name('users.destroy');
     Route::put('/users/{user}/roles', [UserController::class, 'assignRoles'])->middleware('permission:users.assign_role')->name('users.roles.update');
     Route::put('/users/{user}/stores', [UserController::class, 'assignStores'])->middleware('permission:users.update')->name('users.stores.update');
