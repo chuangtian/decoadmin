@@ -12,6 +12,17 @@ use Tests\TestCase;
 
 class DeploymentPreparationTest extends TestCase
 {
+    public function test_production_storage_link_is_not_recreated_during_setup(): void
+    {
+        $dockerfile = file_get_contents(base_path('Dockerfile'));
+        $entrypoint = file_get_contents(base_path('docker/php/entrypoint.sh'));
+
+        $this->assertStringContainsString('ln -s ../storage/app/public public/storage', $dockerfile);
+        $this->assertStringContainsString('if [ ! -e public/storage ] && [ ! -L public/storage ]; then', $entrypoint);
+        $this->assertStringContainsString('php artisan storage:link --no-interaction', $entrypoint);
+        $this->assertStringNotContainsString('storage:link --force', $entrypoint);
+    }
+
     public function test_nginx_compresses_responses_and_caches_versioned_build_assets(): void
     {
         $config = file_get_contents(base_path('docker/nginx/default.conf'));
