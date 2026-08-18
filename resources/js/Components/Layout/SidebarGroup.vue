@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import type { MenuItem } from '../../config/menu';
 import AppIcon from './AppIcon.vue';
 import SidebarItem from './SidebarItem.vue';
 
 const props = defineProps<{ item: MenuItem; expanded: boolean; collapsed: boolean; currentUrl: string }>();
 const emit = defineEmits<{ toggle: []; navigate: [] }>();
-const isActive = (route?: string) => Boolean(route && (props.currentUrl === route || props.currentUrl.startsWith(`${route}/`)));
+const activeRoute = computed(() => {
+    const currentPath = props.currentUrl.split(/[?#]/, 1)[0];
+    const routes = [props.item.route, ...(props.item.children?.map((child) => child.route) ?? [])]
+        .filter((route): route is string => Boolean(route))
+        .filter((route) => currentPath === route || currentPath.startsWith(`${route}/`));
+
+    return routes.sort((left, right) => right.length - left.length)[0];
+});
+const isActive = (route?: string) => Boolean(route && route === activeRoute.value);
 </script>
 
 <template>
