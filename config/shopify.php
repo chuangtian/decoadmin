@@ -13,4 +13,9 @@ return [
     'app_url' => env('SHOPIFY_APP_URL', env('APP_URL', 'http://localhost:8000')),
     'redirect_uri' => env('SHOPIFY_REDIRECT_URI'),
     'state_ttl_minutes' => (int) env('SHOPIFY_OAUTH_STATE_TTL', 10),
+    'scheduled_sync' => [
+        'enabled' => (bool) env('SHOPIFY_SCHEDULED_SYNC_ENABLED', false),
+        'time' => env('SHOPIFY_SCHEDULED_SYNC_TIME', '03:00'),
+        'timezone' => env('SHOPIFY_SCHEDULED_SYNC_TIMEZONE', 'America/New_York'),
+    ],
 ];
