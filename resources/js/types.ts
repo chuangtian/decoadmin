@@ -174,6 +174,29 @@ export interface SyncJobDetail extends SyncJobSummary {
     result: SyncJobResult | null;
 }
 
+export type AuditLogResult = 'success' | 'warning' | 'error' | 'info';
+
+export interface AuditLogSummary {
+    id: number;
+    uuid: string;
+    action: string;
+    action_label: string;
+    category: string;
+    result: AuditLogResult;
+    actor: { id: number; name: string; email: string } | null;
+    store: { id: number; name: string; shopify_domain: string } | null;
+    subject: { type: string; id: number | null } | null;
+    created_at: string | null;
+}
+
+export interface AuditLogDetail extends AuditLogSummary {
+    ip_address: string | null;
+    user_agent: string | null;
+    old_values: Record<string, unknown> | unknown[] | null;
+    new_values: Record<string, unknown> | unknown[] | null;
+    metadata: Record<string, unknown> | unknown[] | null;
+}
+
 export interface ShopifyStore {
     id: number;
     name: string;
