@@ -10,7 +10,7 @@ class CheckShopifyConnections extends Command
 {
     protected $signature = 'shopify:check-connections';
 
-    protected $description = 'Check active Shopify connections and update their health status';
+    protected $description = '检查有效的 Shopify 连接并更新健康状态';
 
     public function handle(ShopifyConnectionHealthService $health): int
     {
@@ -30,7 +30,7 @@ class CheckShopifyConnections extends Command
                 }
             });
 
-        $this->components->info("Checked {$checked} connection(s): {$healthy} connected, {$unhealthy} require attention.");
+        $this->components->info("已检查 {$checked} 个连接：{$healthy} 个正常，{$unhealthy} 个需要处理。");
 
         return self::SUCCESS;
     }

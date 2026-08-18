@@ -15,7 +15,7 @@ class SyncHandlerRegistry
     {
         foreach ($handlers as $handler) {
             if (isset($this->handlers[$handler->type()])) {
-                throw new InvalidArgumentException("Sync Type [{$handler->type()}] 已注册多个 Handler。");
+                throw new InvalidArgumentException("同步类型 [{$handler->type()}] 已注册多个处理器。");
             }
 
             $this->handlers[$handler->type()] = $handler;

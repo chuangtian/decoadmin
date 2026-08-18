@@ -100,7 +100,7 @@ class ShopifyOAuthService
         $code = is_string($query['code'] ?? null) ? $query['code'] : '';
 
         if ($plainState === '' || $code === '' || ! is_string($stateCookie) || ! hash_equals($plainState, $stateCookie)) {
-            throw new ShopifyOAuthException('Shopify OAuth state 验证失败。');
+            throw new ShopifyOAuthException('Shopify OAuth 状态令牌验证失败。');
         }
 
         $state = OAuthState::query()
@@ -109,7 +109,7 @@ class ShopifyOAuthService
             ->first();
 
         if (! $state || ! $state->app || ! is_string($state->app->client_secret_encrypted)) {
-            throw new ShopifyOAuthException('Shopify OAuth state 无效。');
+            throw new ShopifyOAuthException('Shopify OAuth 状态令牌无效。');
         }
 
         $domain = $this->normalizeShopDomain((string) ($query['shop'] ?? ''));
@@ -123,7 +123,7 @@ class ShopifyOAuthService
             $lockedState = OAuthState::query()->lockForUpdate()->find($state->getKey());
 
             if (! $lockedState || $lockedState->consumed_at || $lockedState->expires_at->isPast()) {
-                throw new ShopifyOAuthException('Shopify OAuth state 已过期或已使用。');
+                throw new ShopifyOAuthException('Shopify OAuth 状态令牌已过期或已使用。');
             }
 
             $lockedState->forceFill(['consumed_at' => now()])->save();
@@ -179,7 +179,7 @@ class ShopifyOAuthService
 
         if (! filter_var($redirectUri, FILTER_VALIDATE_URL)
             || ! in_array($parts['scheme'] ?? null, $isLocal ? ['http', 'https'] : ['https'], true)) {
-            throw new ShopifyOAuthException('Shopify OAuth callback URL 配置无效；远程地址必须使用 HTTPS。');
+            throw new ShopifyOAuthException('Shopify OAuth 回调地址配置无效；远程地址必须使用 HTTPS。');
         }
 
         return $redirectUri;
@@ -189,7 +189,7 @@ class ShopifyOAuthService
     {
         if (! is_string(config('shopify.client_id')) || config('shopify.client_id') === ''
             || ! is_string(config('shopify.client_secret')) || config('shopify.client_secret') === '') {
-            throw new ShopifyOAuthException('Shopify App client_id 或 client_secret 尚未配置。');
+            throw new ShopifyOAuthException('Shopify 应用的 Client ID 或 Client Secret 尚未配置。');
         }
     }
 
@@ -211,7 +211,7 @@ class ShopifyOAuthService
         $payload = $response->json();
 
         if ($response->failed() || ! is_array($payload) || ! is_string($payload['access_token'] ?? null)) {
-            throw new ShopifyOAuthException('Shopify Access Token 交换失败。');
+            throw new ShopifyOAuthException('Shopify 访问令牌交换失败。');
         }
 
         return $payload;

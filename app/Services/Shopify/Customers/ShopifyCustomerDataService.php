@@ -28,24 +28,24 @@ class ShopifyCustomerDataService
         $amountSpent = $customerNode['amountSpent'] ?? null;
 
         if (! is_array($amountSpent)) {
-            throw new ShopifyApiException('Shopify Customer 数据缺少 Amount Spent。');
+            throw new ShopifyApiException('Shopify 客户数据缺少累计消费金额。');
         }
 
         $amount = $amountSpent['amount'] ?? null;
         $currency = $amountSpent['currencyCode'] ?? null;
 
         if (! is_scalar($amount) || ! is_numeric((string) $amount)) {
-            throw new ShopifyApiException('Shopify Customer 缺少有效累计消费金额。');
+            throw new ShopifyApiException('Shopify 客户缺少有效累计消费金额。');
         }
 
         if (! is_string($currency) || $currency === '') {
-            throw new ShopifyApiException('Shopify Customer 缺少累计消费币种。');
+            throw new ShopifyApiException('Shopify 客户缺少累计消费币种。');
         }
 
         $verifiedEmail = $customerNode['verifiedEmail'] ?? null;
 
         if (! is_bool($verifiedEmail)) {
-            throw new ShopifyApiException('Shopify Customer Verified Email 格式无效。');
+            throw new ShopifyApiException('Shopify 客户的邮箱验证状态格式无效。');
         }
 
         $customer->fill([
@@ -73,7 +73,7 @@ class ShopifyCustomerDataService
     private function numericId(mixed $gid): string
     {
         if (! is_string($gid) || preg_match('#^gid://shopify/Customer/([0-9]+)$#', $gid, $matches) !== 1) {
-            throw new ShopifyApiException('Shopify Customer ID 格式无效。');
+            throw new ShopifyApiException('Shopify 客户 ID 格式无效。');
         }
 
         return $matches[1];
@@ -91,7 +91,7 @@ class ShopifyCustomerDataService
         }
 
         if (! is_array($value)) {
-            throw new ShopifyApiException("Shopify Customer 字段 [{$key}] 格式无效。");
+            throw new ShopifyApiException("Shopify 客户字段 [{$key}] 格式无效。");
         }
 
         return $this->nullableString($value[$key] ?? null);
@@ -105,13 +105,13 @@ class ShopifyCustomerDataService
     private function unsignedInteger(mixed $value): string
     {
         if (! is_int($value) && ! is_string($value)) {
-            throw new ShopifyApiException('Shopify Customer Number Of Orders 格式无效。');
+            throw new ShopifyApiException('Shopify 客户订单数量格式无效。');
         }
 
         $normalized = (string) $value;
 
         if (preg_match('/^[0-9]+$/', $normalized) !== 1) {
-            throw new ShopifyApiException('Shopify Customer Number Of Orders 格式无效。');
+            throw new ShopifyApiException('Shopify 客户订单数量格式无效。');
         }
 
         return $normalized;
@@ -120,7 +120,7 @@ class ShopifyCustomerDataService
     private function requiredDate(mixed $value, string $field): string
     {
         if (! is_string($value) || strtotime($value) === false) {
-            throw new ShopifyApiException("Shopify Customer 日期 [{$field}] 格式无效。");
+            throw new ShopifyApiException("Shopify 客户日期 [{$field}] 格式无效。");
         }
 
         return $value;

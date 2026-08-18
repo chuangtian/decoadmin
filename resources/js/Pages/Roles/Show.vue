@@ -13,7 +13,7 @@ const grouped = computed(() => props.permissions.data.reduce<Record<string, Perm
 }, {}));
 const submit = () => form.put(`/roles/${props.role.data.id}/permissions`);
 const groupLabels: Record<string, string> = {
-    apps: '应用', audit: '审计', customers: '客户', inventory: '库存', orders: '订单', organization: '组织', products: '商品', roles: '角色', shopify: 'Shopify', store: '店铺', sync: '数据同步', system: '系统', users: '用户', webhooks: 'Webhooks',
+    apps: '应用', audit: '审计', customers: '客户', inventory: '库存', orders: '订单', organization: '组织', products: '商品', roles: '角色', shopify: 'Shopify', store: '店铺', sync: '数据同步', system: '系统', users: '用户', webhooks: 'Webhook',
 };
 </script>
 

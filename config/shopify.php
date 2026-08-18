@@ -8,7 +8,7 @@ return [
         'trim',
         explode(',', (string) env('SHOPIFY_REQUESTED_SCOPES', 'read_products,read_inventory,read_orders,read_customers,read_locations')),
     ))),
-    'app_name' => env('SHOPIFY_APP_NAME', 'Shopify Commerce Hub'),
+    'app_name' => env('SHOPIFY_APP_NAME', 'DecoAdmin Shopify 应用'),
     'app_handle' => env('SHOPIFY_APP_HANDLE', 'shopify-commerce-hub'),
     'app_url' => env('SHOPIFY_APP_URL', env('APP_URL', 'http://localhost:8000')),
     'redirect_uri' => env('SHOPIFY_REDIRECT_URI'),

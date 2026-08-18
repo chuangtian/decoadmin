@@ -61,7 +61,7 @@ class CustomerSyncHandler implements SyncHandlerInterface
             ?? $store?->shopifyConnection;
 
         if (! $store || ! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return SyncResult::failed('当前店铺没有可用的 Shopify Connection。', [
+            return SyncResult::failed('当前店铺没有可用的 Shopify 连接。', [
                 ['code' => 'shopify_connection_unavailable', 'message' => '请先连接或重新授权 Shopify 店铺。'],
             ]);
         }
@@ -69,7 +69,7 @@ class CustomerSyncHandler implements SyncHandlerInterface
         $missingScopes = array_values(array_diff(self::REQUIRED_SCOPES, $connection->scopes ?? []));
 
         if ($missingScopes !== []) {
-            return SyncResult::failed('Shopify Connection 缺少客户同步权限，请重新授权。', [
+            return SyncResult::failed('Shopify 连接缺少客户同步权限，请重新授权。', [
                 ['code' => 'missing_shopify_scopes', 'message' => '缺少权限：'.implode(', ', $missingScopes)],
             ], ['required_scopes' => self::REQUIRED_SCOPES]);
         }
@@ -91,7 +91,7 @@ class CustomerSyncHandler implements SyncHandlerInterface
             $customers = data_get($payload, 'data.customers');
 
             if (! is_array($customers)) {
-                throw new ShopifyApiException('Shopify Customers API 未返回有效客户列表。');
+                throw new ShopifyApiException('Shopify 客户 API 未返回有效客户列表。');
             }
 
             $nodes = $this->nodes($customers);
@@ -168,7 +168,7 @@ class CustomerSyncHandler implements SyncHandlerInterface
         $nodes = $connection['nodes'] ?? null;
 
         if (! is_array($nodes) || collect($nodes)->contains(fn ($node) => ! is_array($node))) {
-            throw new ShopifyApiException('Shopify GraphQL Connection Nodes 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 连接节点格式无效。');
         }
 
         return array_values($nodes);
@@ -183,13 +183,13 @@ class CustomerSyncHandler implements SyncHandlerInterface
         $pageInfo = $connection['pageInfo'] ?? null;
 
         if (! is_array($pageInfo) || ! is_bool($pageInfo['hasNextPage'] ?? null)) {
-            throw new ShopifyApiException('Shopify GraphQL Connection PageInfo 格式无效。');
+            throw new ShopifyApiException('Shopify GraphQL 分页信息格式无效。');
         }
 
         $endCursor = $pageInfo['endCursor'] ?? null;
 
         if ($pageInfo['hasNextPage'] && (! is_string($endCursor) || $endCursor === '')) {
-            throw new ShopifyApiException('Shopify GraphQL 分页缺少 End Cursor。');
+            throw new ShopifyApiException('Shopify GraphQL 分页缺少结束游标。');
         }
 
         return [

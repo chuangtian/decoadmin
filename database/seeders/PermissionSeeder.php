@@ -11,7 +11,7 @@ class PermissionSeeder extends Seeder
     private array $groups = [
         'organization' => '组织', 'store' => '店铺', 'shopify' => 'Shopify', 'orders' => '订单',
         'products' => '商品', 'customers' => '客户', 'inventory' => '库存', 'apps' => '应用',
-        'webhooks' => 'Webhooks', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
+        'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
         'audit' => '审计日志', 'system' => '系统',
     ];
 

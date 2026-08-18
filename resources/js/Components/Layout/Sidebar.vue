@@ -55,7 +55,7 @@ onBeforeUnmount(rememberScrollPosition);
             <div class="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 shadow-lg shadow-emerald-950/40">
                 <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h6a4 4 0 0 1 0 8H7V7Z"/><path d="M7 3v18M13 7h4"/></svg>
             </div>
-            <div class="min-w-0"><p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-400">Commerce OS</p><p class="mt-0.5 truncate font-semibold tracking-tight">{{ page.props.appName }}</p></div>
+            <div class="min-w-0"><p class="text-[11px] font-semibold tracking-[0.22em] text-emerald-400">电商运营系统</p><p class="mt-0.5 truncate font-semibold tracking-tight">{{ page.props.appName }}</p></div>
             <button class="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/8 hover:text-white lg:hidden" aria-label="关闭导航" @click="emit('close')">×</button>
         </div>
 

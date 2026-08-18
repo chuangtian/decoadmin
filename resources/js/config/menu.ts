@@ -12,7 +12,7 @@ export const menu: MenuItem[] = [
         name: '工作台',
         icon: 'dashboard',
         children: [
-            { name: 'Dashboard', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
+            { name: '概览', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
         ],
     },
     {
