@@ -20,6 +20,13 @@ interface TrendPoint {
 interface ComparisonMetric { current: number; baseline: number; change: number; change_percent: number | null }
 interface RankingItem { product_id: number | null; name: string; vendor: string; product_type: string; units: number; net_sales: number }
 interface InventoryItem { id: number; sku: string; available: number; units_sold: number; estimated_days_cover: number | null; risk: string }
+interface AcquisitionInsight { key: string; label: string; detail: string; sessions: number; visitors: number; converted_sessions: number; conversion_rate: number }
+interface DeviceInsight { key: string; label: string; sessions: number; share: number; pageviews: number; bounce_rate: number; conversion_rate: number }
+interface LocationInsight { key: string; label: string; country: string; sessions: number; visitors: number; conversion_rate: number }
+interface CustomerInsight { key: string; label: string; value: number }
+interface PosLocationInsight { id: string; name: string; orders: number; net_sales: number; total_sales: number }
+interface PosStaffInsight { id: string; name: string; orders: number; units: number; attributed_sales: number }
+interface ReportInsight<T> { available: boolean; source: 'shopifyql'; items: T[]; error: string | null }
 
 const props = defineProps<{
     store: { id: number; name: string; currency: string; timezone: string };
@@ -35,6 +42,16 @@ const props = defineProps<{
         inventory: { summary: { out_of_stock: number; low_stock: number; slow_moving: number }; items: InventoryItem[] };
         order_statuses: { financial: { status: string; total: number }[]; fulfillment: { status: string; total: number }[] };
         traffic: { available: boolean; reason_code: string; message: string };
+        generated_at: string;
+    };
+    insights: {
+        schema: 'analytics-overview-insights-v1';
+        acquisition: ReportInsight<AcquisitionInsight>;
+        devices: ReportInsight<DeviceInsight>;
+        locations: ReportInsight<LocationInsight>;
+        customers: { available: boolean; source: 'local_sync'; items: CustomerInsight[]; repeat_rate: number; error: null };
+        pos: { available: boolean; source: 'shopifyql' | 'local_sync'; locations: PosLocationInsight[]; staff: PosStaffInsight[]; error: string | null };
+        integration: { report_scope_granted: boolean; shopifyql_available: boolean };
         generated_at: string;
     };
 }>();
@@ -91,6 +108,8 @@ const linePoints = computed(() => chartValues.value.map((value, index) => {
 const productMax = computed(() => Math.max(...props.overview.rankings.products.slice(0, 7).map((item) => item.net_sales), 1));
 const customerTotal = computed(() => Math.max(props.overview.customers.new + props.overview.customers.returning, 1));
 const newCustomerDegrees = computed(() => `${(props.overview.customers.new / customerTotal.value) * 360}deg`);
+const acquisitionMax = computed(() => Math.max(...props.insights.acquisition.items.map((item) => item.sessions), 1));
+const locationMax = computed(() => Math.max(...props.insights.locations.items.map((item) => item.sessions), 1));
 
 const cards = computed(() => [
     { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), note: '扣除退款后的商品销售额' },
@@ -196,14 +215,65 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
             </section>
 
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <div class="border-b border-slate-100 px-6 py-5"><h2 class="font-semibold text-slate-950">访问与转化分析</h2><p class="mt-1 text-sm text-slate-500">保留 Shopify 分析布局；在有真实采集源前不生成模拟数据。</p></div>
+                <div class="flex flex-col gap-3 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div><h2 class="font-semibold text-slate-950">访问与转化分析</h2><p class="mt-1 text-sm text-slate-500">ShopifyQL 原生报表与已同步订单数据；不生成模拟数据。</p></div>
+                    <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold" :class="insights.integration.shopifyql_available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.integration.shopifyql_available ? 'ShopifyQL 已接入' : (insights.integration.report_scope_granted ? 'ShopifyQL 暂不可用' : '需重新授权 read_reports') }}</span>
+                </div>
                 <div class="grid md:grid-cols-2 xl:grid-cols-3">
-                    <article v-for="item in [
-                        ['访问来源','推荐人、销售渠道和搜索转化'], ['设备类型','桌面、移动设备和平板占比'], ['访问地点','国家、地区和城市分布'],
-                        ['客户群组','按首次购买月份分析复购'], ['POS 分析','POS 地点和员工销售额'], ['实时访客','当前在线访客及购物行为'],
-                    ]" :key="item[0]" class="min-h-56 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">{{ item[0] }}</h3><p class="mt-1 text-sm text-slate-400">{{ item[1] }}</p></div><span class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">待接入</span></div>
-                        <div class="mt-10 grid place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ overview.traffic.message }}</p></div>
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问来源</h3><p class="mt-1 text-sm text-slate-400">推荐人与访问转化</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.acquisition.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.acquisition.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div v-if="insights.acquisition.available && insights.acquisition.items.length" class="mt-7 space-y-4">
+                            <div v-for="item in insights.acquisition.items.slice(0, 5)" :key="item.key">
+                                <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.detail }} · 转化 {{ item.conversion_rate }}%</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
+                                <div class="h-1.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-sky-400" :style="{ width: `${Math.max(3, item.sessions / acquisitionMax * 100)}%` }" /></div>
+                            </div>
+                        </div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.acquisition.available ? '此日期范围内没有访问来源数据。' : (insights.acquisition.error || '重新授权 read_reports 后显示访问来源。') }}</p></div>
+                    </article>
+
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">设备类型</h3><p class="mt-1 text-sm text-slate-400">桌面、移动设备和平板占比</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.devices.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.devices.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div v-if="insights.devices.available && insights.devices.items.length" class="mt-7 space-y-4">
+                            <div v-for="item in insights.devices.items.slice(0, 5)" :key="item.key" class="rounded-2xl bg-slate-50 p-4">
+                                <div class="flex items-center justify-between"><strong class="text-sm text-slate-800">{{ item.label }}</strong><span class="text-lg font-semibold text-slate-950">{{ item.share }}%</span></div>
+                                <div class="mt-3 h-2 overflow-hidden rounded-full bg-white"><div class="h-full rounded-full bg-emerald-400" :style="{ width: `${item.share}%` }" /></div>
+                                <p class="mt-2 text-xs text-slate-400">{{ number(item.sessions) }} 次访问 · 跳出率 {{ item.bounce_rate }}%</p>
+                            </div>
+                        </div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.devices.available ? '此日期范围内没有设备数据。' : (insights.devices.error || '重新授权 read_reports 后显示设备分布。') }}</p></div>
+                    </article>
+
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问地点</h3><p class="mt-1 text-sm text-slate-400">国家和地区分布</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.locations.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.locations.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div v-if="insights.locations.available && insights.locations.items.length" class="mt-7 space-y-4">
+                            <div v-for="item in insights.locations.items.slice(0, 5)" :key="item.key">
+                                <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.country }} · {{ item.visitors }} 位访客</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
+                                <div class="h-1.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-violet-400" :style="{ width: `${Math.max(3, item.sessions / locationMax * 100)}%` }" /></div>
+                            </div>
+                        </div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.locations.available ? '此日期范围内没有地点数据。' : (insights.locations.error || '重新授权 read_reports 后显示访问地点。') }}</p></div>
+                    </article>
+
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">客户群组</h3><p class="mt-1 text-sm text-slate-400">新客户、回头客与复购客户</p></div><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">已同步</span></div>
+                        <div class="mt-8 grid grid-cols-3 gap-3">
+                            <div v-for="item in insights.customers.items" :key="item.key" class="rounded-2xl bg-slate-50 p-4 text-center"><p class="text-xs text-slate-500">{{ item.label }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ number(item.value) }}</p></div>
+                        </div>
+                        <div class="mt-5 rounded-2xl bg-emerald-50 p-5"><div class="flex items-center justify-between"><span class="text-sm font-semibold text-emerald-800">周期复购率</span><strong class="text-2xl text-emerald-900">{{ insights.customers.repeat_rate }}%</strong></div><p class="mt-2 text-xs leading-5 text-emerald-700">根据当前店铺已同步客户与订单计算。</p></div>
+                    </article>
+
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">POS 分析</h3><p class="mt-1 text-sm text-slate-400">POS 地点和员工销售额</p></div><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">{{ insights.pos.source === 'shopifyql' ? 'ShopifyQL' : '本地同步' }}</span></div>
+                        <div v-if="insights.pos.locations.length || insights.pos.staff.length" class="mt-7 space-y-5">
+                            <div><p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">地点</p><div class="space-y-2"><div v-for="item in insights.pos.locations.slice(0, 3)" :key="item.id" class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.name }}</p><p class="text-xs text-slate-400">{{ item.orders }} 单</p></div><strong class="shrink-0">{{ money(item.total_sales) }}</strong></div></div></div>
+                            <div v-if="insights.pos.staff.length"><p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">员工</p><div class="flex flex-wrap gap-2"><span v-for="item in insights.pos.staff.slice(0, 4)" :key="item.id" class="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600">{{ item.name }} · {{ money(item.attributed_sales) }}</span></div></div>
+                        </div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">当前日期范围没有 POS 订单；数据接入状态正常。</p></div>
+                    </article>
+
+                    <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">实时访客</h3><p class="mt-1 text-sm text-slate-400">当前在线访客及购物行为</p></div><span class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">待接入</span></div>
+                        <div class="mt-8 grid min-h-48 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><div><p class="max-w-xs text-sm leading-6 text-slate-500">{{ overview.traffic.message }}</p><Link href="/analytics/live" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看实时视图</Link></div></div>
                     </article>
                 </div>
             </section>

@@ -20,6 +20,7 @@ class StoreSyncJobRequest extends FormRequest
             'app_installation_id' => ['nullable', 'integer', 'exists:app_installations,id'],
             'type' => ['required', 'string', Rule::in(['products', 'orders', 'customers', 'inventory'])],
             'mode' => ['sometimes', 'string', Rule::in(['full', 'incremental'])],
+            'return_to_store' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -186,6 +186,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
     Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');
     Route::get('/sync/{syncJob}', [SyncJobController::class, 'show'])->middleware('permission:sync.view')->name('sync.show');
+    Route::post('/sync/{syncJob}/retry', [SyncJobController::class, 'retry'])->middleware('permission:sync.retry')->name('sync.retry');
 
     Route::get('/products', [ShopifyDataController::class, 'products'])->middleware('permission:products.view')->name('products.index');
     Route::get('/products/{product}', [ShopifyDataController::class, 'product'])->whereNumber('product')->middleware('permission:products.view')->name('products.show');

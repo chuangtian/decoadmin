@@ -229,6 +229,52 @@ export interface AuditLogDetail extends AuditLogSummary {
     metadata: Record<string, unknown> | unknown[] | null;
 }
 
+export interface StoreOperations {
+    capabilities: {
+        sync_view: boolean;
+        sync_run: boolean;
+        sync_retry: boolean;
+        webhooks_view: boolean;
+        webhooks_retry: boolean;
+        audit_view: boolean;
+    };
+    sync: {
+        summary: { total: number; running: number; completed: number; failed: number };
+        runnable_types: SyncJobType[];
+        installations: SyncJobInstallation[];
+        jobs: Array<{
+            id: number;
+            uuid: string;
+            type: SyncJobType;
+            mode: SyncJobMode;
+            status: SyncJobStatus;
+            processed_items: number;
+            failed_items: number;
+            error_code: string | null;
+            started_at: string | null;
+            finished_at: string | null;
+            created_at: string | null;
+            can_retry: boolean;
+        }>;
+    };
+    webhooks: {
+        summary: { total: number; processed: number; active: number; failed: number };
+        events: Array<Omit<WebhookEventSummary, 'store'> & { can_retry: boolean }>;
+    };
+    logs: {
+        summary: { operations: number; integrations: number; exceptions: number };
+        items: Array<{
+            key: string;
+            source: 'audit' | 'sync' | 'webhook';
+            title: string;
+            description: string;
+            status: AuditLogResult;
+            occurred_at: string | null;
+            href: string;
+        }>;
+    };
+}
+
 export interface ShopifyStore {
     id: number;
     name: string;

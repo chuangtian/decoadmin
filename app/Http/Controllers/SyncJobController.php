@@ -137,8 +137,11 @@ class SyncJobController extends Controller
             $request->filled('mode') ? $request->string('mode')->toString() : 'full',
         );
 
-        return redirect()->route('sync.show', $syncJob)
-            ->with('success', '同步任务已创建并加入执行队列。');
+        $redirect = $request->boolean('return_to_store')
+            ? redirect()->route('stores.show', ['store' => $store, 'tab' => 'sync'])
+            : redirect()->route('sync.show', $syncJob);
+
+        return $redirect->with('success', '同步任务已创建并加入执行队列。');
     }
 
     public function show(SyncJob $syncJob): Response
@@ -152,6 +155,15 @@ class SyncJobController extends Controller
                 'appInstallation.app:id,name,handle',
             ])),
         ]);
+    }
+
+    public function retry(Request $request, SyncJob $syncJob, SyncJobService $syncJobs): RedirectResponse
+    {
+        $this->authorize('retry', $syncJob);
+        $retryJob = $syncJobs->retryAndDispatch($syncJob, $request->user());
+
+        return redirect()->route('stores.show', ['store' => $syncJob->store_id, 'tab' => 'sync'])
+            ->with('success', "同步重试任务 #{$retryJob->id} 已创建并加入执行队列。");
     }
 
     /** @return list<int> */

@@ -16,6 +16,8 @@ class ShopifyAnalyticsReportService
         'acquisition-by-source' => "FROM sessions SHOW sessions, online_store_visitors, sessions_that_completed_checkout, conversion_rate WHERE human_or_bot_session = 'human' GROUP BY referrer_source, referrer_name {range} ORDER BY sessions DESC LIMIT 100",
         'acquisition-by-location' => "FROM sessions SHOW sessions, online_store_visitors, sessions_that_completed_checkout, conversion_rate WHERE human_or_bot_session = 'human' GROUP BY session_country, session_region {range} ORDER BY sessions DESC LIMIT 100",
         'behavior-by-device' => "FROM sessions SHOW sessions, pageviews, pageviews_per_session, average_session_duration, bounce_rate, conversion_rate WHERE human_or_bot_session = 'human' GROUP BY session_device_type {range} ORDER BY sessions DESC LIMIT 50",
+        'pos-sales-by-location' => "FROM sales SHOW net_sales, total_sales, orders WHERE sales_channel = 'Point of Sale' GROUP BY pos_location_id, pos_location_name {range} ORDER BY total_sales DESC LIMIT 100",
+        'pos-sales-by-staff' => "FROM sales SHOW net_sales, total_sales, orders, net_items_sold WHERE sales_channel = 'Point of Sale' GROUP BY staff_id, staff_member_name {range} ORDER BY total_sales DESC LIMIT 100",
         'behavior-by-landing-page' => "FROM sessions SHOW sessions, pageviews, sessions_with_cart_additions, sessions_that_completed_checkout, conversion_rate WHERE human_or_bot_session = 'human' GROUP BY landing_page_type, landing_page_path {range} ORDER BY sessions DESC LIMIT 100",
         'performance-by-page' => 'FROM web_performance SHOW page_loads, lcp_p75_ms, inp_p75_ms, p75_cls, cls_poor_view_count GROUP BY page_type, page_path {range} ORDER BY page_loads DESC LIMIT 100',
         'performance-by-device' => 'FROM web_performance SHOW page_loads, lcp_p75_ms, inp_p75_ms, p75_cls GROUP BY device_type, browser_family {range} ORDER BY page_loads DESC LIMIT 50',
@@ -33,6 +35,22 @@ class ShopifyAnalyticsReportService
             }
             parseErrors
           }
+        }
+        GRAPHQL;
+
+    private const ANALYTICS_OVERVIEW_QUERY = <<<'GRAPHQL'
+        query AnalyticsOverviewReports(
+          $acquisition: String!
+          $devices: String!
+          $locations: String!
+          $posLocations: String!
+          $posStaff: String!
+        ) {
+          acquisition: shopifyqlQuery(query: $acquisition) { tableData { rows } parseErrors }
+          devices: shopifyqlQuery(query: $devices) { tableData { rows } parseErrors }
+          locations: shopifyqlQuery(query: $locations) { tableData { rows } parseErrors }
+          posLocations: shopifyqlQuery(query: $posLocations) { tableData { rows } parseErrors }
+          posStaff: shopifyqlQuery(query: $posStaff) { tableData { rows } parseErrors }
         }
         GRAPHQL;
 
@@ -130,6 +148,51 @@ class ShopifyAnalyticsReportService
         });
     }
 
+    /** @return array<string, array{scope_granted: bool, available: bool, source: string, rows: list<array<string, mixed>>, error: string|null}> */
+    public function analyticsOverview(Store $store, string $from, string $to): array
+    {
+        $connection = $store->shopifyConnection;
+        $scopes = $connection?->scopes ?? [];
+        $keys = ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff'];
+
+        if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
+            return $this->unavailableReports($keys, false, 'Shopify 连接不可用。');
+        }
+
+        if (! in_array('read_reports', $scopes, true)) {
+            return $this->unavailableReports($keys, false, '缺少 read_reports，请重新授权店铺。');
+        }
+
+        $cacheKey = "shopify-analytics-overview:{$store->getKey()}:{$from}:{$to}:v1";
+
+        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($connection, $from, $to, $keys): array {
+            $range = "SINCE {$from} UNTIL {$to}";
+            $variables = [
+                'acquisition' => str_replace('{range}', $range, self::REPORT_QUERIES['acquisition-by-source']),
+                'devices' => str_replace('{range}', $range, self::REPORT_QUERIES['behavior-by-device']),
+                'locations' => str_replace('{range}', $range, self::REPORT_QUERIES['acquisition-by-location']),
+                'posLocations' => str_replace('{range}', $range, self::REPORT_QUERIES['pos-sales-by-location']),
+                'posStaff' => str_replace('{range}', $range, self::REPORT_QUERIES['pos-sales-by-staff']),
+            ];
+
+            try {
+                $payload = $this->client->query($connection, self::ANALYTICS_OVERVIEW_QUERY, $variables, 30);
+
+                return [
+                    'acquisition' => $this->tableReport($payload, 'acquisition'),
+                    'devices' => $this->tableReport($payload, 'devices'),
+                    'locations' => $this->tableReport($payload, 'locations'),
+                    'pos_locations' => $this->tableReport($payload, 'posLocations'),
+                    'pos_staff' => $this->tableReport($payload, 'posStaff'),
+                ];
+            } catch (ShopifyApiException $exception) {
+                return $this->unavailableReports($keys, true, $exception->getMessage());
+            } catch (Throwable) {
+                return $this->unavailableReports($keys, true, 'Shopify 报表暂时不可用。');
+            }
+        });
+    }
+
     /** @return array{scope_granted: bool, available: bool, source: string, rows: array<never, never>, error: string} */
     private function unavailableReport(bool $scopeGranted, string $message): array
     {
@@ -139,6 +202,35 @@ class ShopifyAnalyticsReportService
             'source' => 'shopifyql',
             'rows' => [],
             'error' => $message,
+        ];
+    }
+
+    /** @param list<string> $keys */
+    private function unavailableReports(array $keys, bool $scopeGranted, string $message): array
+    {
+        return collect($keys)->mapWithKeys(
+            fn (string $key): array => [$key => $this->unavailableReport($scopeGranted, $message)],
+        )->all();
+    }
+
+    /** @return array{scope_granted: bool, available: bool, source: string, rows: list<array<string, mixed>>, error: string|null} */
+    private function tableReport(array $payload, string $alias): array
+    {
+        $result = data_get($payload, "data.{$alias}");
+        $parseErrors = is_array($result['parseErrors'] ?? null) ? $result['parseErrors'] : [];
+
+        if ($parseErrors !== []) {
+            return $this->unavailableReport(true, implode('; ', array_map('strval', $parseErrors)));
+        }
+
+        $rows = data_get($result, 'tableData.rows', []);
+
+        return [
+            'scope_granted' => true,
+            'available' => is_array($rows),
+            'source' => 'shopifyql',
+            'rows' => is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [],
+            'error' => is_array($rows) ? null : 'ShopifyQL 未返回表格数据。',
         ];
     }
 

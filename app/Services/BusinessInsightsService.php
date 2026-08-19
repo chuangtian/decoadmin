@@ -60,6 +60,18 @@ class BusinessInsightsService
         ];
     }
 
+    /** @param array<string, mixed> $filters */
+    public function localPosOverview(Store $store, array $filters = []): array
+    {
+        $period = $this->period($store, $filters);
+        $orders = $this->orders($store, $period);
+
+        return [
+            'locations' => $this->posLocations(clone $orders),
+            'staff' => $this->posStaff($store, $period),
+        ];
+    }
+
     private function channels(Builder $orders): array
     {
         return $orders

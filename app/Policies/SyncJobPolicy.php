@@ -47,6 +47,12 @@ class SyncJobPolicy
         return true;
     }
 
+    public function retry(User $user, SyncJob $syncJob): bool
+    {
+        return $this->allowsForStore($user, $syncJob->store, 'sync.retry')
+            && $syncJob->organization_id === $this->currentOrganization->get()?->getKey();
+    }
+
     private function allowsForStore(User $user, ?Store $store, string $permission): bool
     {
         $organization = $this->currentOrganization->get();

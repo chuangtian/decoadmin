@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AuditLog;
 use App\Models\Organization;
+use App\Models\Store;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,6 +20,7 @@ class AuditLogQueryService
         'shopify_connection_invalid' => 'Shopify 连接失效',
         'shopify_connection_warning' => 'Shopify 连接警告',
         'shopify_webhook_retried' => 'Webhook 重新处理',
+        'shopify_sync_retried' => '同步任务重新执行',
         'system_settings_updated' => '系统设置已更新',
     ];
 
@@ -46,6 +48,22 @@ class AuditLogQueryService
         return $this->scopedQuery($user, $organization)
             ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain'])
             ->findOrFail($id);
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function recentForStore(User $user, Organization $organization, Store $store, int $limit = 20): array
+    {
+        abort_unless($store->organization_id === $organization->getKey() && $user->canAccessStore($store), 403);
+
+        return $this->scopedQuery($user, $organization)
+            ->where('store_id', $store->getKey())
+            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain'])
+            ->latest('created_at')
+            ->limit(min(50, max(1, $limit)))
+            ->get()
+            ->map(fn (AuditLog $audit): array => $this->summaryItem($audit))
+            ->values()
+            ->all();
     }
 
     /** @return array<string, mixed> */

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AnalyticsFilterRequest;
+use App\Services\AnalyticsOverviewInsightsService;
 use App\Services\AnalyticsQueryService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
@@ -11,10 +12,16 @@ use Inertia\Response;
 
 class AnalyticsController extends Controller
 {
-    public function overview(AnalyticsFilterRequest $request, CurrentStore $currentStore, AnalyticsQueryService $analytics): Response
-    {
+    public function overview(
+        AnalyticsFilterRequest $request,
+        CurrentStore $currentStore,
+        AnalyticsQueryService $analytics,
+        AnalyticsOverviewInsightsService $insights,
+    ): Response {
         $store = $currentStore->require();
         $this->authorize('view', $store);
+        $filters = $request->filters();
+        $overview = $analytics->operationsOverview($store, $filters);
 
         return Inertia::render('Analytics/Overview', [
             'store' => [
@@ -23,7 +30,8 @@ class AnalyticsController extends Controller
                 'currency' => $store->currency ?: 'USD',
                 'timezone' => $store->timezone ?: 'UTC',
             ],
-            'overview' => $analytics->operationsOverview($store, $request->filters()),
+            'overview' => $overview,
+            'insights' => $insights->forStore($store, $overview['period'], $overview['customers'], $filters),
         ]);
     }
 

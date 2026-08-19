@@ -8,6 +8,7 @@ use App\Http\Resources\StoreResource;
 use App\Models\AuditLog;
 use App\Models\Store;
 use App\Services\Shopify\ShopifyOAuthService;
+use App\Services\StoreOperationsQueryService;
 use App\Support\CurrentOrganization;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -70,7 +71,7 @@ class StoreController extends Controller
         return $this->redirectToShopify($authorization);
     }
 
-    public function show(Store $store): InertiaResponse
+    public function show(Store $store, StoreOperationsQueryService $operations): InertiaResponse
     {
         $this->authorize('view', $store);
 
@@ -100,11 +101,17 @@ class StoreController extends Controller
             ])
             ->values();
 
+        $store->load(['shopifyConnection', 'appInstallations.app', 'latestSyncJob']);
+
         return Inertia::render('Stores/Show', [
             'store' => new StoreResource($store
-                ->load(['shopifyConnection', 'appInstallations.app', 'latestSyncJob'])
                 ->loadCount(['appInstallations as installed_apps_count' => fn ($query) => $query->where('status', 'active')])),
             'connectionHistory' => $connectionHistory,
+            'operations' => $operations->forStore(
+                request()->user(),
+                $this->currentOrganization->require(),
+                $store,
+            ),
         ]);
     }
 

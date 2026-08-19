@@ -81,8 +81,85 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('overview.summary.orders', 1)
             ->where('overview.traffic.available', false)
             ->where('overview.traffic.reason_code', 'web_pixel_not_connected')
+            ->where('insights.schema', 'analytics-overview-insights-v1')
+            ->where('insights.acquisition.available', false)
+            ->where('insights.devices.available', false)
+            ->where('insights.locations.available', false)
+            ->where('insights.customers.available', true)
+            ->where('insights.pos.available', true)
+            ->where('insights.pos.source', 'local_sync')
             ->has('overview.sales_breakdown', 7)
             ->has('overview.order_statuses.financial'));
+    }
+
+    public function test_operations_overview_connects_shopifyql_acquisition_device_location_and_pos_data(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders', 'read_locations', 'read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+        $this->order($organization, $store, 'overview-customer', now(), ['net_sales' => 40]);
+
+        Http::fake(function (Request $request) {
+            $variables = data_get($request->data(), 'variables', []);
+            $this->assertStringContainsString('GROUP BY referrer_source', (string) ($variables['acquisition'] ?? ''));
+            $this->assertStringContainsString('GROUP BY session_device_type', (string) ($variables['devices'] ?? ''));
+            $this->assertStringContainsString('GROUP BY session_country', (string) ($variables['locations'] ?? ''));
+
+            return Http::response(['data' => [
+                'acquisition' => ['tableData' => ['rows' => [[
+                    'referrer_source' => 'Social', 'referrer_name' => 'Instagram', 'sessions' => '20',
+                    'online_store_visitors' => '15', 'sessions_that_completed_checkout' => '4', 'conversion_rate' => '0.2',
+                ]]], 'parseErrors' => []],
+                'devices' => ['tableData' => ['rows' => [[
+                    'session_device_type' => 'mobile', 'sessions' => '16', 'pageviews' => '30',
+                    'bounce_rate' => '0.25', 'conversion_rate' => '0.2',
+                ], [
+                    'session_device_type' => 'desktop', 'sessions' => '4', 'pageviews' => '8',
+                    'bounce_rate' => '0.5', 'conversion_rate' => '0.1',
+                ]]], 'parseErrors' => []],
+                'locations' => ['tableData' => ['rows' => [[
+                    'session_country' => 'Germany', 'session_region' => 'Berlin', 'sessions' => '12',
+                    'online_store_visitors' => '10', 'conversion_rate' => '0.25',
+                ]]], 'parseErrors' => []],
+                'posLocations' => ['tableData' => ['rows' => [[
+                    'pos_location_id' => '501', 'pos_location_name' => 'Berlin Store', 'orders' => '3',
+                    'net_sales' => '270', 'total_sales' => '300',
+                ]]], 'parseErrors' => []],
+                'posStaff' => ['tableData' => ['rows' => [[
+                    'staff_id' => '601', 'staff_member_name' => 'Alex', 'orders' => '2',
+                    'net_items_sold' => '5', 'net_sales' => '180', 'total_sales' => '200',
+                ]]], 'parseErrors' => []],
+            ]]);
+        });
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview'))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('insights.integration.report_scope_granted', true)
+            ->where('insights.integration.shopifyql_available', true)
+            ->where('insights.acquisition.available', true)
+            ->where('insights.acquisition.items.0.label', 'Instagram')
+            ->where('insights.acquisition.items.0.sessions', 20)
+            ->where('insights.devices.items.0.label', '移动设备')
+            ->where('insights.devices.items.0.share', 80)
+            ->where('insights.locations.items.0.label', 'Berlin')
+            ->where('insights.locations.items.0.country', 'Germany')
+            ->where('insights.customers.source', 'local_sync')
+            ->where('insights.pos.source', 'shopifyql')
+            ->where('insights.pos.locations.0.name', 'Berlin Store')
+            ->where('insights.pos.staff.0.name', 'Alex'));
+
+        $shopifyQlRequests = collect(Http::recorded())->filter(
+            fn (array $exchange): bool => str_contains((string) data_get($exchange[0]->data(), 'query'), 'shopifyqlQuery'),
+        );
+        $this->assertCount(1, $shopifyQlRequests);
     }
 
     public function test_report_center_is_store_scoped_and_exports_csv_and_excel(): void

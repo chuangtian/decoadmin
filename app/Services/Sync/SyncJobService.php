@@ -4,6 +4,7 @@ namespace App\Services\Sync;
 
 use App\Jobs\ProcessSyncJob;
 use App\Models\AppInstallation;
+use App\Models\AuditLog;
 use App\Models\Store;
 use App\Models\SyncJob;
 use App\Models\User;
@@ -14,6 +15,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class SyncJobService
 {
@@ -40,6 +42,77 @@ class SyncJobService
             $window['since_at'],
             $window['until_at'],
         );
+
+        ProcessSyncJob::dispatch($syncJob->getKey())->afterCommit();
+
+        return $syncJob;
+    }
+
+    public function retryAndDispatch(SyncJob $failedJob, User $actor): SyncJob
+    {
+        $syncJob = DB::transaction(function () use ($failedJob, $actor): SyncJob {
+            $locked = SyncJob::query()
+                ->with(['store', 'appInstallation'])
+                ->lockForUpdate()
+                ->findOrFail($failedJob->getKey());
+
+            if ($locked->status !== 'failed') {
+                throw ValidationException::withMessages([
+                    'sync_job' => '只有执行失败的同步任务可以重试。',
+                ]);
+            }
+
+            if (data_get($locked->payload, 'retry_job_id')) {
+                throw ValidationException::withMessages([
+                    'sync_job' => '该同步任务已经创建了重试任务。',
+                ]);
+            }
+
+            $retryJob = $this->createForSource(
+                $locked->store,
+                $locked->type,
+                $locked->appInstallation?->status === 'active' ? $locked->appInstallation : null,
+                'manual_retry',
+                $actor->getKey(),
+                $locked->mode ?: 'full',
+                $locked->since_at,
+                $locked->until_at ?? now(),
+            );
+            $retryJob->forceFill([
+                'payload' => [
+                    ...($retryJob->payload ?? []),
+                    'retry_of_job_id' => $locked->getKey(),
+                    'retry_of_uuid' => $locked->uuid,
+                ],
+            ])->save();
+            $locked->forceFill([
+                'payload' => [
+                    ...($locked->payload ?? []),
+                    'retry_job_id' => $retryJob->getKey(),
+                    'retried_by' => $actor->getKey(),
+                    'retried_at' => now()->toIso8601String(),
+                ],
+            ])->save();
+
+            AuditLog::query()->create([
+                'organization_id' => $locked->organization_id,
+                'store_id' => $locked->store_id,
+                'user_id' => $actor->getKey(),
+                'action' => 'shopify_sync_retried',
+                'subject_type' => $locked->getMorphClass(),
+                'subject_id' => $locked->getKey(),
+                'old_values' => ['status' => $locked->status],
+                'new_values' => ['retry_job_id' => $retryJob->getKey(), 'status' => $retryJob->status],
+                'metadata' => [
+                    'sync_type' => $locked->type,
+                    'mode' => $locked->mode,
+                    'previous_job_uuid' => $locked->uuid,
+                    'retry_job_uuid' => $retryJob->uuid,
+                ],
+            ]);
+
+            return $retryJob;
+        });
 
         ProcessSyncJob::dispatch($syncJob->getKey())->afterCommit();
 
