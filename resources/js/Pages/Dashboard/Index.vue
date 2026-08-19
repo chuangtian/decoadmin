@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import TrendChart from '../../Components/Analytics/TrendChart.vue';
 import AppIcon from '../../Components/Layout/AppIcon.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -34,6 +35,13 @@ interface DashboardData {
         currency: string;
         processed_at: string | null;
     }>;
+    analytics_30d: {
+        summary: { sales: string; orders: number; average_order_value: string };
+        trend: Array<{ date: string; label: string; sales: number; orders: number }>;
+        top_products: Array<{ product_id: number | null; title: string; units: number; revenue: number }>;
+        low_stock: Array<{ id: number; sku: string; available: number }>;
+    };
+    store_comparison: { stores: Array<{ id: number; name: string; currency: string; orders: number; sales: number }> };
 }
 
 const props = defineProps<{ dashboard: DashboardData }>();
@@ -123,6 +131,23 @@ const financialLabel = (status: string | null) => ({
                     </div>
                     <p class="mt-4 text-xs text-slate-500">最近同步：{{ dateTime(dashboard.operations.last_sync_at) }}</p>
                 </article>
+            </section>
+
+            <section class="mt-5 grid gap-5 xl:grid-cols-2">
+                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="flex items-start justify-between"><div><p class="text-xs font-semibold tracking-wider text-slate-400">最近 30 天</p><h2 class="mt-1 text-lg font-semibold text-slate-900">订单趋势</h2></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">完整分析</Link></div>
+                    <TrendChart class="mt-6" :points="dashboard.analytics_30d.trend" metric="orders" color="bg-blue-500" />
+                </article>
+                <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                    <div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><h2 class="font-semibold text-slate-900">热销商品</h2><p class="mt-1 text-xs text-slate-400">最近 30 天</p></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">查看全部</Link></div>
+                    <div v-if="dashboard.analytics_30d.top_products.length" class="divide-y divide-slate-100"><div v-for="(product,index) in dashboard.analytics_30d.top_products.slice(0,5)" :key="`${product.product_id}-${product.title}`" class="flex items-center gap-4 px-6 py-4"><span class="grid h-8 w-8 place-items-center rounded-xl bg-emerald-50 text-xs font-semibold text-emerald-700">{{index+1}}</span><div class="min-w-0 flex-1"><Link v-if="product.product_id" :href="`/products/${product.product_id}`" class="block truncate font-semibold text-slate-900">{{product.title}}</Link><p v-else class="truncate font-semibold text-slate-900">{{product.title}}</p></div><span class="text-sm font-semibold text-slate-600">{{product.units}} 件</span></div></div>
+                    <p v-else class="px-6 py-10 text-center text-sm text-slate-400">暂无商品销量数据。</p>
+                </article>
+            </section>
+
+            <section class="mt-5 grid gap-5 xl:grid-cols-2">
+                <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><h2 class="font-semibold text-slate-900">库存预警</h2><p class="mt-1 text-xs text-slate-400">可用库存不高于 10</p></div><Link href="/inventory" class="text-sm font-semibold text-emerald-700">库存管理</Link></div><div v-if="dashboard.analytics_30d.low_stock.length" class="divide-y divide-slate-100"><div v-for="item in dashboard.analytics_30d.low_stock.slice(0,5)" :key="item.id" class="flex items-center justify-between px-6 py-4"><Link :href="`/inventory/${item.id}`" class="font-mono text-sm font-semibold text-slate-900">{{item.sku}}</Link><span class="rounded-full px-3 py-1 text-xs font-semibold" :class="item.available<=0?'bg-rose-50 text-rose-700':'bg-amber-50 text-amber-700'">{{item.available}} 可用</span></div></div><p v-else class="px-6 py-10 text-center text-sm text-slate-400">当前库存充足。</p></article>
+                <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><h2 class="font-semibold text-slate-900">店铺对比</h2><p class="mt-1 text-xs text-slate-400">授权店铺 30 天销售额</p></div><Link href="/analytics/stores" class="text-sm font-semibold text-emerald-700">详细对比</Link></div><div class="divide-y divide-slate-100"><div v-for="store in dashboard.store_comparison.stores.slice(0,5)" :key="store.id" class="flex items-center justify-between px-6 py-4"><div><p class="font-semibold text-slate-900">{{store.name}}</p><p class="mt-1 text-xs text-slate-400">{{store.orders}} 单</p></div><strong>{{money(store.sales,store.currency)}}</strong></div></div></article>
             </section>
 
             <section class="mt-5 rounded-3xl border border-slate-200 bg-white shadow-sm">

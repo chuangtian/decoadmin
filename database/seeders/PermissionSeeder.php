@@ -12,7 +12,7 @@ class PermissionSeeder extends Seeder
         'organization' => '组织', 'store' => '店铺', 'shopify' => 'Shopify', 'orders' => '订单',
         'products' => '商品', 'customers' => '客户', 'inventory' => '库存', 'apps' => '应用',
         'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
-        'audit' => '审计日志', 'alerts' => '异常告警', 'system' => '系统',
+        'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'system' => '系统',
     ];
 
     /** @var array<string, string> */
@@ -81,6 +81,8 @@ class PermissionSeeder extends Seeder
         'audit.view',
         'alerts.view',
         'alerts.manage',
+        'finance.view',
+        'finance.manage',
         'system.settings.view',
         'system.settings.update',
         'system.health.view',

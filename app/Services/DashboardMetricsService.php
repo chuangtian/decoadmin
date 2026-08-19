@@ -5,16 +5,20 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\InventoryItem;
 use App\Models\Order;
+use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Store;
 use App\Models\StoreAlert;
 use App\Models\SyncJob;
+use App\Models\User;
 use App\Models\WebhookEvent;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 class DashboardMetricsService
 {
+    public function __construct(private AnalyticsQueryService $analytics) {}
+
     /** @return array<string, mixed> */
     public function empty(): array
     {
@@ -30,11 +34,13 @@ class DashboardMetricsService
             ],
             'sales_trend' => [],
             'recent_orders' => [],
+            'analytics_30d' => ['summary' => ['sales' => '0', 'orders' => 0, 'average_order_value' => '0.00'], 'trend' => [], 'top_products' => [], 'low_stock' => []],
+            'store_comparison' => ['stores' => []],
         ];
     }
 
     /** @return array<string, mixed> */
-    public function forStore(Store $store): array
+    public function forStore(Store $store, ?Organization $organization = null, ?User $user = null): array
     {
         $today = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfDay()->utc();
         $weekStart = $today->subDays(6);
@@ -47,6 +53,8 @@ class DashboardMetricsService
             ->orderBy('day')
             ->get()
             ->keyBy('day');
+
+        $analytics = $this->analytics->sales($store, 30);
 
         return [
             'store' => [
@@ -92,6 +100,10 @@ class DashboardMetricsService
                     'total_price' => (string) $order->total_price,
                     'processed_at' => $order->processed_at?->toIso8601String() ?? $order->created_at_shopify?->toIso8601String(),
                 ])->values(),
+            'analytics_30d' => $analytics,
+            'store_comparison' => $organization && $user
+                ? $this->analytics->storeComparison($organization, $user, 30)
+                : ['stores' => []],
         ];
     }
 
