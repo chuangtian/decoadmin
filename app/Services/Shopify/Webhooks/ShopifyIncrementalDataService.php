@@ -85,14 +85,31 @@ class ShopifyIncrementalDataService
                 && ($transaction['kind'] ?? null) === 'refund'
                 && in_array($transaction['status'] ?? null, ['success', null], true))
             ->sum(fn (array $transaction): float => (float) ($transaction['amount'] ?? 0));
-        $items = collect($payload['line_items'] ?? [])->filter(fn ($item) => is_array($item))->map(fn (array $item) => [
-            'id' => $this->gid('LineItem', $item['id'] ?? null),
-            'title' => (string) ($item['title'] ?? ''),
-            'quantity' => (int) ($item['quantity'] ?? 0),
-            'originalUnitPriceSet' => $money($item['price'] ?? '0'),
-            'product' => isset($item['product_id']) ? ['id' => $this->gid('Product', $item['product_id'])] : null,
-            'variant' => isset($item['variant_id']) ? ['id' => $this->gid('ProductVariant', $item['variant_id'])] : null,
-        ])->values()->all();
+        $items = collect($payload['line_items'] ?? [])->filter(fn ($item) => is_array($item))->map(function (array $item) use ($money): array {
+            $quantity = (int) ($item['quantity'] ?? 0);
+            $currentQuantity = (int) ($item['current_quantity'] ?? $quantity);
+            $discount = (float) ($item['total_discount'] ?? 0);
+            $attributedSales = max(0, (float) ($item['price'] ?? 0) * $currentQuantity - $discount);
+            $staffId = data_get($item, 'staff_member.id') ?? $item['staff_member_id'] ?? null;
+
+            return [
+                'id' => $this->gid('LineItem', $item['id'] ?? null),
+                'title' => (string) ($item['title'] ?? ''),
+                'quantity' => $quantity,
+                'currentQuantity' => $currentQuantity,
+                'originalUnitPriceSet' => $money($item['price'] ?? '0'),
+                'priceAfterAllDiscountsBeforeTaxesSet' => $money($attributedSales),
+                'staffMember' => $staffId ? [
+                    'id' => $this->gid('StaffMember', $staffId),
+                    'name' => data_get($item, 'staff_member.name'),
+                ] : null,
+                'product' => isset($item['product_id']) ? ['id' => $this->gid('Product', $item['product_id'])] : null,
+                'variant' => isset($item['variant_id']) ? ['id' => $this->gid('ProductVariant', $item['variant_id'])] : null,
+            ];
+        })->values()->all();
+        $appId = $payload['app_id'] ?? null;
+        $locationId = $payload['location_id'] ?? null;
+        $staffId = $payload['user_id'] ?? null;
 
         $this->orders->upsert($store, [
             'id' => $this->gid('Order', $payload['id'] ?? null),
@@ -100,6 +117,10 @@ class ShopifyIncrementalDataService
             'email' => $payload['email'] ?? null,
             'displayFinancialStatus' => $payload['financial_status'] ?? null,
             'displayFulfillmentStatus' => $payload['fulfillment_status'] ?? null,
+            'sourceName' => $payload['source_name'] ?? null,
+            'app' => $appId ? ['id' => $this->gid('App', $appId), 'name' => $payload['source_name'] ?? null] : null,
+            'retailLocation' => $locationId ? ['id' => $this->gid('Location', $locationId), 'name' => null] : null,
+            'staffMember' => $staffId ? ['id' => $this->gid('StaffMember', $staffId), 'name' => null] : null,
             'currencyCode' => $currency,
             'totalPriceSet' => $money($payload['total_price'] ?? '0'),
             'currentTotalPriceSet' => $money($payload['current_total_price'] ?? $payload['total_price'] ?? '0'),

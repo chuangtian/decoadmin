@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 
 #[Fillable(['organization_id', 'name', 'shopify_domain', 'shopify_shop_id', 'status', 'timezone', 'currency', 'country_code', 'plan_name', 'settings', 'created_by'])]
 class Store extends Model
@@ -94,6 +95,11 @@ class Store extends Model
         return $this->hasMany(StoreAlert::class);
     }
 
+    public function storefrontEvents(): HasMany
+    {
+        return $this->hasMany(StorefrontEvent::class);
+    }
+
     public function financeEntries(): HasMany
     {
         return $this->hasMany(FinanceEntry::class);
@@ -112,5 +118,12 @@ class Store extends Model
             'settings' => 'array',
             'shopify_shop_id' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Store $store): void {
+            $store->analytics_ingest_key ??= (string) Str::uuid();
+        });
     }
 }

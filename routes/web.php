@@ -9,9 +9,11 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthCheckController;
+use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
@@ -26,6 +28,7 @@ use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreAlertController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
+use App\Http\Controllers\StorefrontEventController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\SyncJobController;
 use App\Http\Controllers\SystemSettingsController;
@@ -48,6 +51,15 @@ Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'
 Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('shopify.webhooks.receive');
+
+Route::post('/shopify/pixels/{store:analytics_ingest_key}', StorefrontEventController::class)
+    ->middleware('throttle:300,1')
+    ->name('shopify.pixels.receive');
+Route::options('/shopify/pixels/{store:analytics_ingest_key}', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Content-Type',
+]))->name('shopify.pixels.options');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -85,10 +97,15 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/business/insights', BusinessInsightsController::class)->middleware('permission:reports.view')->name('business.insights');
+    Route::get('/analytics/overview', [AnalyticsController::class, 'overview'])->middleware('permission:orders.view')->name('analytics.overview');
     Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
     Route::get('/analytics/stores', [AnalyticsController::class, 'stores'])->middleware('permission:store.view')->name('analytics.stores');
+    Route::get('/analytics/live', [LiveViewController::class, 'index'])->middleware('permission:orders.view')->name('analytics.live');
+    Route::get('/analytics/live/data', [LiveViewController::class, 'data'])->middleware('permission:orders.view')->name('analytics.live.data');
     Route::get('/reports', [ReportController::class, 'index'])->middleware('permission:reports.view')->name('reports.index');
-    Route::get('/reports/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
+    Route::get('/reports/{report}', [ReportController::class, 'show'])->middleware('permission:reports.view')->name('reports.show');
+    Route::get('/reports/{report}/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
     Route::get('/system/status', SystemStatusController::class)
         ->middleware('permission:system.health.view')
         ->name('system.status');

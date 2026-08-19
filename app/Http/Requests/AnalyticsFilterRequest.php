@@ -23,6 +23,9 @@ class AnalyticsFilterRequest extends FormRequest
             'include_test' => ['nullable', 'boolean'],
             'include_cancelled' => ['nullable', 'boolean'],
             'report_type' => ['nullable', 'in:sales,products,customers,inventory'],
+            'metric' => ['nullable', 'string', 'max:64', 'regex:/^[a-z0-9_]+$/'],
+            'dimension' => ['nullable', 'string', 'max:64', 'regex:/^[a-z0-9_]+$/'],
+            'visualization' => ['nullable', 'in:line,bar,donut,table'],
         ];
     }
 
@@ -42,6 +45,9 @@ class AnalyticsFilterRequest extends FormRequest
     /** @return array<string, mixed> */
     public function filters(): array
     {
-        return $this->safe()->only(['days', 'date_from', 'date_to', 'include_test', 'include_cancelled', 'report_type']);
+        return $this->safe()->only([
+            'days', 'date_from', 'date_to', 'include_test', 'include_cancelled',
+            'report_type', 'metric', 'dimension', 'visualization',
+        ]);
     }
 }

@@ -46,6 +46,29 @@ class ShopifyOperationsDashboardAlertsTest extends TestCase
             ->has('dashboard.sales_trend', 7));
     }
 
+    public function test_dashboard_returns_selectable_metrics_and_comparison_trends_for_requested_period(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $this->order($organization, $store, '1001', '125.50');
+        $previous = $this->order($organization, $store, '1000', '75.00');
+        $previous->update([
+            'processed_at' => now()->subDays(10),
+            'created_at_shopify' => now()->subDays(10),
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('dashboard', ['days' => 7]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Dashboard/Index')
+                ->where('dashboard.analytics.period.days', 7)
+                ->where('dashboard.analytics.summary.net_sales', 125.5)
+                ->has('dashboard.analytics.trend', 7)
+                ->has('dashboard.analytics.comparison_trend.previous', 7)
+                ->has('dashboard.metric_definitions', 9)
+                ->where('dashboard.metric_definitions.0.key', 'net_sales'));
+    }
+
     public function test_order_fulfillment_filter_and_locations_are_store_scoped(): void
     {
         [$user, $organization, $store] = $this->context('organization-admin');

@@ -75,7 +75,7 @@ class ShopifyOrderSyncTest extends TestCase
             $this->orderNode(101, '#1001', [
                 $this->lineItemNode(201, 'Macfox X1', 2, '1299.00', 701, 801),
                 $this->lineItemNode(202, 'Warranty', 1, '99.50'),
-            ]),
+            ], sourceName: 'pos', locationId: 501),
         ]))]);
 
         $syncJob = $this->syncJob($organization, $store, $installation);
@@ -95,6 +95,11 @@ class ShopifyOrderSyncTest extends TestCase
             'email' => 'customer@example.com',
             'financial_status' => 'paid',
             'fulfillment_status' => 'unfulfilled',
+            'sales_channel' => 'pos',
+            'shopify_order_app_id' => 902,
+            'sales_channel_name' => 'Point of Sale',
+            'pos_location_id' => 501,
+            'pos_location_name' => 'Downtown',
             'currency' => 'USD',
             'total_price' => '2697.5000',
             'subtotal_price' => '2697.5000',
@@ -110,7 +115,9 @@ class ShopifyOrderSyncTest extends TestCase
             'shopify_product_id' => 701,
             'shopify_variant_id' => 801,
             'quantity' => 2,
+            'current_quantity' => 2,
             'price' => '1299.0000',
+            'attributed_sales' => '2598.0000',
         ]);
         $this->assertDatabaseCount('order_items', 2);
     }
@@ -189,6 +196,9 @@ class ShopifyOrderSyncTest extends TestCase
                 ], total: '37.50', financialStatus: 'PARTIALLY_REFUNDED'),
             ]));
         app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
+        $existingOrder = Order::query()->sole();
+        $existingOrder->forceFill(['pos_staff_id' => 601, 'pos_staff_name' => 'Alex Chen'])->save();
+        $existingOrder->items()->sole()->forceFill(['shopify_staff_id' => 601, 'staff_name' => 'Alex Chen'])->save();
 
         $result = app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
 
@@ -198,12 +208,16 @@ class ShopifyOrderSyncTest extends TestCase
             'shopify_order_id' => 101,
             'financial_status' => 'partially_refunded',
             'total_price' => '37.5000',
+            'pos_staff_id' => 601,
+            'pos_staff_name' => 'Alex Chen',
         ]);
         $this->assertDatabaseHas('order_items', [
             'shopify_line_item_id' => 201,
             'title' => 'Updated title',
             'quantity' => 3,
             'price' => '12.5000',
+            'shopify_staff_id' => 601,
+            'staff_name' => 'Alex Chen',
         ]);
         $this->assertSame(0, $result->metadata['orders_created']);
         $this->assertSame(1, $result->metadata['orders_updated']);
@@ -300,7 +314,7 @@ class ShopifyOrderSyncTest extends TestCase
             'shop_domain' => $store->shopify_domain,
             'access_token_encrypted' => 'order-sync-token',
             'token_type' => 'offline',
-            'scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers'],
+            'scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers', 'read_locations', 'read_reports'],
             'api_version' => '2026-07',
             'status' => 'connected',
         ]);
@@ -310,7 +324,7 @@ class ShopifyOrderSyncTest extends TestCase
             'shopify_connection_id' => $connection->id,
             'installed_by' => $user->id,
             'status' => 'active',
-            'granted_scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers'],
+            'granted_scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers', 'read_locations', 'read_reports'],
             'installed_at' => now(),
         ]);
 
@@ -415,6 +429,8 @@ class ShopifyOrderSyncTest extends TestCase
         ?string $lineItemCursor = null,
         string $total = '2697.50',
         string $financialStatus = 'PAID',
+        string $sourceName = 'web',
+        ?int $locationId = null,
     ): array {
         return [
             'id' => "gid://shopify/Order/{$id}",
@@ -422,6 +438,9 @@ class ShopifyOrderSyncTest extends TestCase
             'email' => 'customer@example.com',
             'displayFinancialStatus' => $financialStatus,
             'displayFulfillmentStatus' => 'UNFULFILLED',
+            'sourceName' => $sourceName,
+            'app' => ['id' => 'gid://shopify/App/902', 'name' => $sourceName === 'pos' ? 'Point of Sale' : 'Online Store'],
+            'retailLocation' => $locationId ? ['id' => "gid://shopify/Location/{$locationId}", 'name' => 'Downtown'] : null,
             'currencyCode' => 'USD',
             'totalPriceSet' => $this->moneyBag($total),
             'subtotalPriceSet' => $this->moneyBag($total),
@@ -448,7 +467,9 @@ class ShopifyOrderSyncTest extends TestCase
             'id' => "gid://shopify/LineItem/{$id}",
             'title' => $title,
             'quantity' => $quantity,
+            'currentQuantity' => $quantity,
             'originalUnitPriceSet' => $this->moneyBag($price),
+            'priceAfterAllDiscountsBeforeTaxesSet' => $this->moneyBag((string) ($quantity * (float) $price)),
             'product' => $productId ? ['id' => "gid://shopify/Product/{$productId}"] : null,
             'variant' => $variantId ? ['id' => "gid://shopify/ProductVariant/{$variantId}"] : null,
         ];
