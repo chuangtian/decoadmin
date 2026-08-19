@@ -1,0 +1,212 @@
+<script setup lang="ts">
+import { Head, Link, router } from '@inertiajs/vue3';
+import { computed, reactive, ref } from 'vue';
+import AppLayout from '../../Layouts/AppLayout.vue';
+
+interface TrendPoint {
+    date: string;
+    label: string;
+    net_sales: number;
+    gross_sales: number;
+    total_sales: number;
+    refunds: number;
+    discounts: number;
+    taxes: number;
+    shipping: number;
+    orders: number;
+    average_order_value: number;
+}
+
+interface ComparisonMetric { current: number; baseline: number; change: number; change_percent: number | null }
+interface RankingItem { product_id: number | null; name: string; vendor: string; product_type: string; units: number; net_sales: number }
+interface InventoryItem { id: number; sku: string; available: number; units_sold: number; estimated_days_cover: number | null; risk: string }
+
+const props = defineProps<{
+    store: { id: number; name: string; currency: string; timezone: string };
+    overview: {
+        period: { days: number; from: string; to: string; timezone: string; include_test: boolean; include_cancelled: boolean };
+        summary: Record<string, number>;
+        comparisons: { previous: Record<string, ComparisonMetric>; year_over_year: Record<string, ComparisonMetric> };
+        trend: TrendPoint[];
+        comparison_trend: { previous: TrendPoint[] };
+        sales_breakdown: { key: string; label: string; value: number }[];
+        customers: { active: number; new: number; returning: number; repeat_customers: number; repeat_rate: number; average_lifetime_value: number };
+        rankings: { products: RankingItem[]; vendors: { vendor: string; units: number; net_sales: number }[]; product_types: { product_type: string; units: number; net_sales: number }[] };
+        inventory: { summary: { out_of_stock: number; low_stock: number; slow_moving: number }; items: InventoryItem[] };
+        order_statuses: { financial: { status: string; total: number }[]; fulfillment: { status: string; total: number }[] };
+        traffic: { available: boolean; reason_code: string; message: string };
+        generated_at: string;
+    };
+}>();
+
+const filters = reactive({
+    days: props.overview.period.days,
+    date_from: props.overview.period.from,
+    date_to: props.overview.period.to,
+    include_test: props.overview.period.include_test,
+    include_cancelled: props.overview.period.include_cancelled,
+});
+const showFilters = ref(false);
+const selectedMetric = ref<keyof TrendPoint>('net_sales');
+
+const money = (value: number) => new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: props.store.currency || 'USD', maximumFractionDigits: 2,
+}).format(Number(value || 0));
+const number = (value: number) => Number(value || 0).toLocaleString('zh-CN');
+const changeText = (metric: string) => {
+    const value = props.overview.comparisons.previous[metric]?.change_percent;
+    return value === null || value === undefined ? '暂无对比' : `${value >= 0 ? '↑' : '↓'} ${Math.abs(value)}%`;
+};
+const changeClass = (metric: string) => {
+    const value = props.overview.comparisons.previous[metric]?.change_percent;
+    return value === null || value === undefined ? 'text-slate-400' : value >= 0 ? 'text-emerald-600' : 'text-rose-600';
+};
+const applyFilters = () => router.get('/analytics/overview', { ...filters }, { preserveState: true, replace: true });
+const preset = (days: number) => {
+    filters.days = days;
+    filters.date_from = '';
+    filters.date_to = '';
+    applyFilters();
+};
+
+const metricOptions: { key: keyof TrendPoint; label: string; money: boolean }[] = [
+    { key: 'net_sales', label: '净销售额', money: true },
+    { key: 'gross_sales', label: '毛销售额', money: true },
+    { key: 'total_sales', label: '总销售额', money: true },
+    { key: 'orders', label: '订单数', money: false },
+    { key: 'average_order_value', label: '平均订单金额', money: true },
+    { key: 'refunds', label: '退款金额', money: true },
+    { key: 'discounts', label: '折扣金额', money: true },
+    { key: 'taxes', label: '税费', money: true },
+    { key: 'shipping', label: '运费', money: true },
+];
+const metricDefinition = computed(() => metricOptions.find((item) => item.key === selectedMetric.value) ?? metricOptions[0]);
+const chartValues = computed(() => props.overview.trend.map((point) => Number(point[selectedMetric.value]) || 0));
+const maxChart = computed(() => Math.max(...chartValues.value, 1));
+const linePoints = computed(() => chartValues.value.map((value, index) => {
+    const x = props.overview.trend.length <= 1 ? 0 : index * (100 / (props.overview.trend.length - 1));
+    const y = 92 - (value / maxChart.value) * 76;
+    return `${x},${y}`;
+}).join(' '));
+const productMax = computed(() => Math.max(...props.overview.rankings.products.slice(0, 7).map((item) => item.net_sales), 1));
+const customerTotal = computed(() => Math.max(props.overview.customers.new + props.overview.customers.returning, 1));
+const newCustomerDegrees = computed(() => `${(props.overview.customers.new / customerTotal.value) * 360}deg`);
+
+const cards = computed(() => [
+    { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), note: '扣除退款后的商品销售额' },
+    { key: 'orders', label: '订单数', value: number(props.overview.summary.orders), note: '有效 Shopify 订单' },
+    { key: 'average_order_value', label: '平均订单金额', value: money(props.overview.summary.average_order_value), note: '净销售额 ÷ 订单数' },
+    { key: 'refunds', label: '退款金额', value: money(props.overview.summary.refunds), note: '统计周期内退款' },
+]);
+
+const statusLabel: Record<string, string> = {
+    paid: '已付款', pending: '待付款', refunded: '已退款', partially_refunded: '部分退款',
+    fulfilled: '已发货', partial: '部分发货', unfulfilled: '未发货', unknown: '未设置',
+};
+const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock: '低库存', slow_moving: '滞销风险', healthy: '健康' };
+</script>
+
+<template>
+    <Head title="经营分析" />
+    <AppLayout :breadcrumbs="[{ label: '工作台', href: '/dashboard' }, { label: '数据分析' }, { label: '经营分析' }]">
+        <div class="mx-auto max-w-[1600px] space-y-5">
+            <header class="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-3xl font-semibold tracking-tight text-slate-950">经营分析</h1>
+                        <span class="flex items-center gap-1.5 text-xs font-medium text-slate-400"><i class="h-2 w-2 rounded-full bg-sky-400" />更新于 {{ new Date(overview.generated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
+                    </div>
+                    <p class="mt-2 text-sm text-slate-500">{{ store.name }} · {{ store.timezone }} · {{ store.currency }}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button v-for="days in [1, 7, 30, 90]" :key="days" type="button" class="rounded-xl border px-3.5 py-2 text-sm font-semibold transition" :class="filters.days === days && !filters.date_from ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="preset(days)">{{ days === 1 ? '今天' : `${days} 天` }}</button>
+                    <button type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700" @click="showFilters = !showFilters">{{ overview.period.from }} — {{ overview.period.to }}</button>
+                </div>
+            </header>
+
+            <form v-if="showFilters" class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 xl:grid-cols-[1fr_1fr_auto_auto_auto] xl:items-end" @submit.prevent="applyFilters">
+                <label class="text-xs font-semibold text-slate-500">开始日期<input v-model="filters.date_from" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"></label>
+                <label class="text-xs font-semibold text-slate-500">结束日期<input v-model="filters.date_to" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"></label>
+                <label class="flex items-center gap-2 pb-2 text-sm text-slate-600"><input v-model="filters.include_test" type="checkbox" class="rounded border-slate-300 text-emerald-600">测试订单</label>
+                <label class="flex items-center gap-2 pb-2 text-sm text-slate-600"><input v-model="filters.include_cancelled" type="checkbox" class="rounded border-slate-300 text-emerald-600">取消订单</label>
+                <button class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white">应用</button>
+            </form>
+
+            <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div class="grid sm:grid-cols-2 xl:grid-cols-4">
+                    <article v-for="(card,index) in cards" :key="card.key" class="relative min-h-44 p-6" :class="[index ? 'border-t border-slate-100 sm:border-l sm:border-t-0' : '', index === 3 ? 'bg-emerald-50/60' : '']">
+                        <p class="text-sm font-semibold text-slate-500">{{ card.label }}</p>
+                        <p class="mt-8 text-3xl font-semibold tracking-tight text-slate-950">{{ card.value }}</p>
+                        <div class="mt-3 flex items-center justify-between gap-2 text-xs"><span :class="changeClass(card.key)">环比 {{ changeText(card.key) }}</span><span class="text-slate-400">{{ card.note }}</span></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="grid gap-5 xl:grid-cols-[1.35fr_.85fr]">
+                <article class="relative min-h-[430px] overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div><p class="text-xs font-semibold uppercase tracking-[.18em] text-slate-400">{{ overview.period.days }} 天趋势</p><h2 class="mt-2 text-xl font-semibold text-slate-950">{{ metricDefinition.label }}随时间变化</h2><p class="mt-2 text-3xl font-semibold text-slate-950">{{ metricDefinition.money ? money(overview.summary[String(selectedMetric)] ?? 0) : number(overview.summary[String(selectedMetric)] ?? 0) }}</p></div>
+                        <select v-model="selectedMetric" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700"><option v-for="option in metricOptions" :key="option.key" :value="option.key">{{ option.label }}</option></select>
+                    </div>
+                    <div class="mt-8 h-64 border-b border-l border-slate-200 bg-[linear-gradient(to_bottom,transparent_24%,#e2e8f0_25%,transparent_26%,transparent_49%,#e2e8f0_50%,transparent_51%,transparent_74%,#e2e8f0_75%,transparent_76%)] p-2">
+                        <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="h-full w-full overflow-visible"><polyline :points="linePoints" fill="none" stroke="#0ea5e9" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    </div>
+                    <div class="mt-3 flex justify-between text-[11px] text-slate-400"><span>{{ overview.trend[0]?.label }}</span><span>{{ overview.trend[Math.floor(overview.trend.length / 2)]?.label }}</span><span>{{ overview.trend.at(-1)?.label }}</span></div>
+                </article>
+
+                <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                    <div class="border-b border-slate-100 px-6 py-5"><h2 class="font-semibold text-slate-950">总销售额细分</h2><p class="mt-1 text-sm text-slate-500">与 Shopify 财务口径分项展示</p></div>
+                    <div class="divide-y divide-slate-100 px-6">
+                        <div v-for="item in overview.sales_breakdown" :key="item.key" class="flex items-center justify-between py-4 text-sm"><span class="font-medium text-slate-600">{{ item.label }}</span><strong :class="item.value < 0 ? 'text-rose-600' : 'text-slate-950'">{{ money(item.value) }}</strong></div>
+                    </div>
+                </article>
+            </section>
+
+            <section class="grid gap-5 xl:grid-cols-3">
+                <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
+                    <div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><h2 class="font-semibold text-slate-950">按商品统计的销售额</h2><p class="mt-1 text-sm text-slate-500">真实订单明细，按净销售额排序</p></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">详细分析</Link></div>
+                    <div v-if="overview.rankings.products.length" class="space-y-5 p-6">
+                        <div v-for="product in overview.rankings.products.slice(0, 7)" :key="`${product.product_id}-${product.name}`">
+                            <div class="mb-2 flex items-center justify-between gap-4 text-sm"><span class="min-w-0 truncate font-medium text-slate-700">{{ product.name }}</span><strong class="shrink-0 text-slate-950">{{ money(product.net_sales) }}</strong></div>
+                            <div class="h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-sky-400" :style="{ width: `${Math.max(3, product.net_sales / productMax * 100)}%` }" /></div>
+                        </div>
+                    </div>
+                    <div v-else class="grid min-h-64 place-items-center p-8 text-center"><div><p class="font-semibold text-slate-700">此日期范围内无商品销售</p><p class="mt-2 text-sm text-slate-400">同步订单后将展示真实排行。</p></div></div>
+                </article>
+
+                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 class="font-semibold text-slate-950">客户构成</h2><p class="mt-1 text-sm text-slate-500">新客户与回头客户</p>
+                    <div class="mx-auto mt-8 grid h-52 w-52 place-items-center rounded-full" :style="{ background: `conic-gradient(#10b981 0 ${newCustomerDegrees}, #e2e8f0 ${newCustomerDegrees} 360deg)` }"><div class="grid h-36 w-36 place-items-center rounded-full bg-white text-center"><div><p class="text-3xl font-semibold text-slate-950">{{ overview.customers.active }}</p><p class="text-xs text-slate-400">活跃客户</p></div></div></div>
+                    <div class="mt-7 grid grid-cols-2 gap-3 text-center"><div class="rounded-2xl bg-emerald-50 p-3"><p class="text-xs text-emerald-700">新客户</p><p class="mt-1 text-xl font-semibold text-slate-950">{{ overview.customers.new }}</p></div><div class="rounded-2xl bg-slate-100 p-3"><p class="text-xs text-slate-500">回头客户</p><p class="mt-1 text-xl font-semibold text-slate-950">{{ overview.customers.returning }}</p></div></div>
+                    <p class="mt-4 text-center text-sm text-slate-500">复购率 {{ overview.customers.repeat_rate }}% · 客户价值 {{ money(overview.customers.average_lifetime_value) }}</p>
+                </article>
+            </section>
+
+            <section class="grid gap-5 xl:grid-cols-3">
+                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 class="font-semibold text-slate-950">订单状态</h2><p class="mt-1 text-sm text-slate-500">付款与发货处理进度</p>
+                    <div class="mt-6 space-y-3"><div v-for="item in overview.order_statuses.financial" :key="`f-${item.status}`" class="flex justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span>{{ statusLabel[item.status] ?? item.status }}</span><strong>{{ item.total }}</strong></div></div>
+                    <div class="mt-4 space-y-3"><div v-for="item in overview.order_statuses.fulfillment" :key="`u-${item.status}`" class="flex justify-between rounded-xl bg-blue-50/60 px-4 py-3 text-sm"><span>{{ statusLabel[item.status] ?? item.status }}</span><strong>{{ item.total }}</strong></div></div>
+                </article>
+                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
+                    <div class="flex items-start justify-between"><div><h2 class="font-semibold text-slate-950">库存与售罄风险</h2><p class="mt-1 text-sm text-slate-500">结合当前可售库存和周期销量</p></div><Link href="/inventory" class="text-sm font-semibold text-emerald-700">查看库存</Link></div>
+                    <div class="mt-6 grid gap-3 sm:grid-cols-3"><div v-for="item in [['已缺货',overview.inventory.summary.out_of_stock],['低库存',overview.inventory.summary.low_stock],['滞销风险',overview.inventory.summary.slow_moving]]" :key="String(item[0])" class="rounded-2xl bg-slate-50 p-4"><p class="text-xs text-slate-500">{{ item[0] }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ item[1] }}</p></div></div>
+                    <div class="mt-4 grid gap-2 sm:grid-cols-2"><div v-for="item in overview.inventory.items.slice(0, 6)" :key="item.id" class="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3 text-sm"><div><p class="font-mono font-semibold text-slate-700">{{ item.sku }}</p><p class="mt-1 text-xs text-slate-400">可用 {{ item.available }} · 售出 {{ item.units_sold }}</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="item.risk === 'out_of_stock' ? 'bg-rose-50 text-rose-700' : item.risk === 'low_stock' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'">{{ riskLabel[item.risk] }}</span></div></div>
+                </article>
+            </section>
+
+            <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div class="border-b border-slate-100 px-6 py-5"><h2 class="font-semibold text-slate-950">访问与转化分析</h2><p class="mt-1 text-sm text-slate-500">保留 Shopify 分析布局；在有真实采集源前不生成模拟数据。</p></div>
+                <div class="grid md:grid-cols-2 xl:grid-cols-3">
+                    <article v-for="item in [
+                        ['访问来源','推荐人、销售渠道和搜索转化'], ['设备类型','桌面、移动设备和平板占比'], ['访问地点','国家、地区和城市分布'],
+                        ['客户群组','按首次购买月份分析复购'], ['POS 分析','POS 地点和员工销售额'], ['实时访客','当前在线访客及购物行为'],
+                    ]" :key="item[0]" class="min-h-56 border-b border-slate-100 p-6 md:border-r">
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">{{ item[0] }}</h3><p class="mt-1 text-sm text-slate-400">{{ item[1] }}</p></div><span class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">待接入</span></div>
+                        <div class="mt-10 grid place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ overview.traffic.message }}</p></div>
+                    </article>
+                </div>
+            </section>
+        </div>
+    </AppLayout>
+</template>

@@ -31,6 +31,64 @@ class AnalyticsQueryService
         return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildSales($store, $period));
     }
 
+    /**
+     * Shopify-style operating overview backed only by data that DecoAdmin has
+     * actually synchronized. Traffic metrics stay explicitly unavailable until
+     * Web Pixel/customer-event collection is introduced.
+     *
+     * @param  int|array<string, mixed>  $filters
+     */
+    public function operationsOverview(Store $store, int|array $filters = 30): array
+    {
+        $sales = $this->sales($store, $filters);
+        $period = $this->period($store, $filters);
+        $orders = $this->orders($store, $period);
+
+        $statusGroups = function (string $column) use ($orders): array {
+            return (clone $orders)
+                ->selectRaw("COALESCE(NULLIF({$column}, ''), 'unknown') as status, COUNT(*) as total")
+                ->groupBy($column)
+                ->orderByDesc('total')
+                ->get()
+                ->map(fn (object $row): array => [
+                    'status' => (string) $row->status,
+                    'total' => (int) $row->total,
+                ])->all();
+        };
+
+        return [
+            'schema' => 'operations-overview-v1',
+            'period' => $sales['period'],
+            'summary' => $sales['summary'],
+            'comparisons' => $sales['comparisons'],
+            'trend' => $sales['trend'],
+            'comparison_trend' => $sales['comparison_trend'],
+            'sales_breakdown' => [
+                ['key' => 'gross_sales', 'label' => '毛销售额', 'value' => $sales['summary']['gross_sales']],
+                ['key' => 'discounts', 'label' => '折扣', 'value' => -abs($sales['summary']['discounts'])],
+                ['key' => 'refunds', 'label' => '退款', 'value' => -abs($sales['summary']['refunds'])],
+                ['key' => 'net_sales', 'label' => '净销售额', 'value' => $sales['summary']['net_sales']],
+                ['key' => 'shipping', 'label' => '运费', 'value' => $sales['summary']['shipping']],
+                ['key' => 'taxes', 'label' => '税费', 'value' => $sales['summary']['taxes']],
+                ['key' => 'total_sales', 'label' => '总销售额', 'value' => $sales['summary']['total_sales']],
+            ],
+            'customers' => $sales['customers'],
+            'rankings' => $sales['rankings'],
+            'inventory' => $sales['inventory'],
+            'order_statuses' => [
+                'financial' => $statusGroups('financial_status'),
+                'fulfillment' => $statusGroups('fulfillment_status'),
+            ],
+            'traffic' => [
+                'available' => false,
+                'source' => null,
+                'reason_code' => 'web_pixel_not_connected',
+                'message' => '接入 Shopify Web Pixel 后可展示访问、设备、地点、推荐来源和转化率。',
+            ],
+            'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
     /** @param int|array<string, mixed> $filters */
     public function storeComparison(Organization $organization, User $user, int|array $filters = 30): array
     {

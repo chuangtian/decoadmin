@@ -55,6 +55,33 @@ class AnalyticsReportsCenterTest extends TestCase
             ->has('analytics.comparisons.year_over_year.taxes'));
     }
 
+    public function test_operations_overview_uses_real_store_scoped_data_and_marks_unavailable_traffic_metrics(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $other = $organization->stores()->create([
+            'name' => 'Other Store', 'shopify_domain' => strtolower(fake()->unique()->lexify('????????')).'.myshopify.com',
+            'status' => 'active', 'currency' => 'USD', 'timezone' => 'UTC',
+        ]);
+        $this->order($organization, $store, 'overview-visible', now(), [
+            'net_sales' => 75, 'subtotal_price' => 90, 'discount_total' => 15,
+            'refund_total' => 5, 'shipping_total' => 8, 'total_tax' => 7, 'total_price' => 90,
+        ]);
+        $this->order($organization, $other, 'overview-hidden', now(), ['net_sales' => 999]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview'))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Analytics/Overview')
+            ->where('store.id', $store->id)
+            ->where('overview.schema', 'operations-overview-v1')
+            ->where('overview.summary.net_sales', 75)
+            ->where('overview.summary.orders', 1)
+            ->where('overview.traffic.available', false)
+            ->where('overview.traffic.reason_code', 'web_pixel_not_connected')
+            ->has('overview.sales_breakdown', 7)
+            ->has('overview.order_statuses.financial'));
+    }
+
     public function test_report_center_is_store_scoped_and_exports_csv_and_excel(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');

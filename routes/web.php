@@ -85,6 +85,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/analytics/overview', [AnalyticsController::class, 'overview'])->middleware('permission:orders.view')->name('analytics.overview');
     Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
     Route::get('/analytics/stores', [AnalyticsController::class, 'stores'])->middleware('permission:store.view')->name('analytics.stores');
     Route::get('/reports', [ReportController::class, 'index'])->middleware('permission:reports.view')->name('reports.index');

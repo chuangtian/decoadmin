@@ -44,6 +44,7 @@ export const menu: MenuItem[] = [
         name: '数据分析',
         icon: 'analytics',
         children: [
+            { name: '经营分析', route: '/analytics/overview', icon: 'analytics', permission: 'orders.view' },
             { name: '销售分析', route: '/analytics/sales', icon: 'analytics', permission: 'orders.view' },
             { name: '报表中心', route: '/reports', icon: 'reports', permission: 'reports.view' },
         ],
