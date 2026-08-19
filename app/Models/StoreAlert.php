@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 #[Fillable([
     'uuid', 'organization_id', 'store_id', 'fingerprint', 'type', 'severity', 'source_type',
     'source_id', 'code', 'title', 'message', 'context', 'status', 'delivery_status',
-    'delivery_error', 'occurred_at', 'notified_at',
+    'delivery_error', 'delivery_attempts', 'occurred_at', 'notified_at', 'last_delivery_at',
     'acknowledged_at', 'acknowledged_by',
     'resolved_at',
 ])]
@@ -44,6 +44,8 @@ class StoreAlert extends Model
             'context' => 'array',
             'occurred_at' => 'datetime',
             'notified_at' => 'datetime',
+            'last_delivery_at' => 'datetime',
+            'delivery_attempts' => 'integer',
             'acknowledged_at' => 'datetime',
             'resolved_at' => 'datetime',
         ];

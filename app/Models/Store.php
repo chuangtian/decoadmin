@@ -94,6 +94,11 @@ class Store extends Model
         return $this->hasMany(StoreAlert::class);
     }
 
+    public function financeEntries(): HasMany
+    {
+        return $this->hasMany(FinanceEntry::class);
+    }
+
     public function hasMember(User|int $user): bool
     {
         $userId = $user instanceof User ? $user->getKey() : $user;

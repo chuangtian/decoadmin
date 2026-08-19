@@ -7,9 +7,45 @@ use App\Models\Store;
 use App\Models\StoreNotificationSetting;
 use App\Models\User;
 use Illuminate\Support\Arr;
+use Illuminate\Validation\ValidationException;
 
 class StoreNotificationSettingsService
 {
+    public function mailForFrontend(Store $store, bool $includeSecrets): array
+    {
+        $values = $this->forFrontend($store, $includeSecrets);
+
+        return Arr::only([
+            ...$values,
+            'notification_email' => $values['mail_recipients'][0] ?? '',
+        ], [
+            'mail_enabled', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username',
+            'mail_password', 'mail_password_configured', 'mail_from_address', 'mail_from_name',
+            'notification_email',
+        ]);
+    }
+
+    public function feishuForFrontend(Store $store, bool $includeSecrets): array
+    {
+        return Arr::only($this->forFrontend($store, $includeSecrets), [
+            'feishu_enabled', 'feishu_webhook_url', 'feishu_webhook_configured',
+            'feishu_secret', 'feishu_secret_configured',
+        ]);
+    }
+
+    public function feishuTableForFrontend(Store $store, bool $includeSecrets): array
+    {
+        $appId = (string) config('services.feishu_table.app_id', '');
+        $appSecret = (string) config('services.feishu_table.app_secret', '');
+
+        return [
+            'feishu_table_app_id' => $appId,
+            'feishu_table_app_secret' => $includeSecrets ? $appSecret : '',
+            'feishu_table_app_secret_configured' => filled($appSecret),
+            'feishu_table_configured' => filled($appId) && filled($appSecret),
+        ];
+    }
+
     public function forFrontend(Store $store, bool $includeSecrets): array
     {
         $setting = $store->notificationSetting;
@@ -32,6 +68,45 @@ class StoreNotificationSettingsService
 
     public function update(Store $store, array $values, User $actor): StoreNotificationSetting
     {
+        return $this->persist($store, $values, $actor, 'store_notification_settings_updated');
+    }
+
+    public function updateMail(Store $store, array $values, User $actor): StoreNotificationSetting
+    {
+        $notificationEmail = trim((string) ($values['notification_email'] ?? ''));
+        unset($values['notification_email']);
+        $values['mail_recipients'] = $notificationEmail === '' ? [] : [$notificationEmail];
+
+        return $this->persist($store, $values, $actor, 'store_mail_settings_updated');
+    }
+
+    public function updateFeishu(Store $store, array $values, User $actor): StoreNotificationSetting
+    {
+        return $this->persist($store, $values, $actor, 'store_feishu_settings_updated');
+    }
+
+    public function toggleMail(Store $store, bool $enabled, User $actor): StoreNotificationSetting
+    {
+        $setting = $store->notificationSetting;
+        if ($enabled && (! $setting || blank($setting->mail_host) || blank($setting->mail_password) || blank($setting->mail_from_address) || $setting->mail_recipients === [])) {
+            throw ValidationException::withMessages(['enabled' => '请先完整配置 SMTP、邮箱密码、发件邮箱和通知邮箱。']);
+        }
+
+        return $this->persist($store, ['mail_enabled' => $enabled], $actor, 'store_mail_channel_toggled');
+    }
+
+    public function toggleFeishu(Store $store, bool $enabled, User $actor): StoreNotificationSetting
+    {
+        $setting = $store->notificationSetting;
+        if ($enabled && (! $setting || blank($setting->feishu_webhook_url))) {
+            throw ValidationException::withMessages(['enabled' => '请先配置飞书机器人 Webhook 地址。']);
+        }
+
+        return $this->persist($store, ['feishu_enabled' => $enabled], $actor, 'store_feishu_channel_toggled');
+    }
+
+    private function persist(Store $store, array $values, User $actor, string $action): StoreNotificationSetting
+    {
         $setting = $store->notificationSetting()->firstOrNew(['organization_id' => $store->organization_id]);
         $before = $setting->exists ? $this->safeSnapshot($setting) : [];
         foreach (['mail_password', 'feishu_webhook_url', 'feishu_secret'] as $secret) {
@@ -43,7 +118,7 @@ class StoreNotificationSettingsService
         $setting->save();
         AuditLog::query()->create([
             'organization_id' => $store->organization_id, 'store_id' => $store->id,
-            'user_id' => $actor->id, 'action' => 'store_notification_settings_updated',
+            'user_id' => $actor->id, 'action' => $action,
             'subject_type' => Store::class, 'subject_id' => $store->id,
             'old_values' => $before, 'new_values' => $this->safeSnapshot($setting),
             'metadata' => ['scope' => 'store', 'changed_keys' => array_keys($setting->getChanges())],

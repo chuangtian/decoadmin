@@ -56,6 +56,16 @@ class Organization extends Model
         return $this->hasMany(Role::class);
     }
 
+    public function financeCategories(): HasMany
+    {
+        return $this->hasMany(FinanceCategory::class);
+    }
+
+    public function financeEntries(): HasMany
+    {
+        return $this->hasMany(FinanceEntry::class);
+    }
+
     protected function casts(): array
     {
         return ['settings' => 'array'];

@@ -17,35 +17,47 @@ class StoreAlertNotificationService
     {
         $alert->loadMissing('store.notificationSetting');
         $settings = $alert->store->notificationSetting;
+        $alert->increment('delivery_attempts');
+        $alert->forceFill(['last_delivery_at' => now()])->save();
         if (! $settings || ! $this->enabledForType($settings, $alert->type)) {
             $alert->update(['delivery_status' => 'skipped', 'delivery_error' => null]);
 
             return;
         }
-        $channels = [];
+        $context = $alert->context ?? [];
+        $statuses = data_get($context, 'notification_channel_statuses', []);
+        $channels = collect($statuses)->filter(fn (string $status): bool => $status === 'sent')->keys()->all();
         $errors = [];
-        if ($settings->mail_enabled && $settings->mail_recipients !== []) {
+        if ($settings->mail_enabled && $settings->mail_recipients !== [] && ($statuses['mail'] ?? null) !== 'sent') {
             try {
                 $this->sendMail($settings, $alert);
                 $channels[] = 'mail';
+                $statuses['mail'] = 'sent';
             } catch (Throwable $exception) {
                 $errors[] = 'mail: '.$this->safeError($exception);
+                $statuses['mail'] = 'failed';
             }
         }
-        if ($settings->feishu_enabled && filled($settings->feishu_webhook_url)) {
+        if ($settings->feishu_enabled && filled($settings->feishu_webhook_url) && ($statuses['feishu'] ?? null) !== 'sent') {
             try {
                 $this->sendFeishu($settings, $alert);
                 $channels[] = 'feishu';
+                $statuses['feishu'] = 'sent';
             } catch (Throwable $exception) {
                 $errors[] = 'feishu: '.$this->safeError($exception);
+                $statuses['feishu'] = 'failed';
             }
         }
         $alert->update([
             'delivery_status' => $errors === [] ? ($channels === [] ? 'skipped' : 'sent') : 'failed',
             'delivery_error' => $errors === [] ? null : implode('; ', $errors),
             'notified_at' => $channels === [] ? null : now(),
-            'context' => [...($alert->context ?? []), 'notification_channels' => $channels],
+            'context' => [...$context, 'notification_channels' => array_values(array_unique($channels)), 'notification_channel_statuses' => $statuses],
         ]);
+
+        if ($errors !== []) {
+            throw new RuntimeException('店铺异常通知发送失败。');
+        }
     }
 
     private function sendMail(StoreNotificationSetting $settings, StoreAlert $alert): void
