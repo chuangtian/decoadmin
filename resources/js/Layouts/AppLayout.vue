@@ -30,7 +30,7 @@ onMounted(() => {
         <Sidebar :open="sidebarOpen" :collapsed="sidebarCollapsed" @close="sidebarOpen = false" @toggle-collapsed="toggleSidebarCollapsed" />
         <div class="min-h-screen transition-[padding] duration-200" :class="sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'">
             <Header @menu="sidebarOpen = true" />
-            <main class="p-4 sm:p-6 lg:p-8">
+            <main class="px-4 pt-3 pb-4 sm:px-6 sm:pt-4 sm:pb-6 lg:px-8 lg:pt-4 lg:pb-8">
                 <Breadcrumb v-if="breadcrumbs.length" :items="breadcrumbs" class="mb-5" />
                 <slot />
             </main>

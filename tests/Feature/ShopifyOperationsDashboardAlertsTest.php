@@ -124,7 +124,7 @@ class ShopifyOperationsDashboardAlertsTest extends TestCase
 
     private function order(Organization $organization, Store $store, string $id, string $total, ?string $fulfillment = null): Order
     {
-        return Order::query()->create(['organization_id' => $organization->id, 'store_id' => $store->id, 'shopify_order_id' => $id, 'order_number' => "#{$id}", 'financial_status' => 'paid', 'fulfillment_status' => $fulfillment, 'currency' => 'USD', 'total_price' => $total, 'subtotal_price' => $total, 'total_tax' => '0', 'processed_at' => now(), 'created_at_shopify' => now(), 'synced_at' => now()]);
+        return Order::query()->create(['organization_id' => $organization->id, 'store_id' => $store->id, 'shopify_order_id' => $id, 'order_number' => "#{$id}", 'financial_status' => 'paid', 'fulfillment_status' => $fulfillment, 'currency' => 'USD', 'total_price' => $total, 'subtotal_price' => $total, 'net_sales' => $total, 'total_tax' => '0', 'processed_at' => now(), 'created_at_shopify' => now(), 'synced_at' => now()]);
     }
 
     private function alert(Organization $organization, Store $store): StoreAlert

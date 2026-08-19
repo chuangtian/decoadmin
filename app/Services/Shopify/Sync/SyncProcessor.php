@@ -2,6 +2,7 @@
 
 namespace App\Services\Shopify\Sync;
 
+use App\Services\AnalyticsCacheVersionService;
 use App\Services\Sync\SyncJobService;
 use Throwable;
 
@@ -12,6 +13,7 @@ class SyncProcessor
         private SyncJobService $syncJobs,
         private ?SyncDataConsistencyService $consistency = null,
         private ?SyncErrorClassifier $errors = null,
+        private ?AnalyticsCacheVersionService $analyticsCache = null,
     ) {}
 
     public function process(int $syncJobId): SyncResult
@@ -39,6 +41,7 @@ class SyncProcessor
             if ($result->success) {
                 $result = $this->consistency?->inspect($syncJob, $result) ?? $result;
                 $this->syncJobs->markCompleted($syncJob, $result);
+                $this->analyticsCache?->bump((int) $syncJob->store_id);
             } else {
                 $this->syncJobs->markFailed(
                     $syncJob,

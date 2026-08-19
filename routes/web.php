@@ -16,6 +16,7 @@ use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyConnectionDisconnectController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
@@ -86,6 +87,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
     Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
     Route::get('/analytics/stores', [AnalyticsController::class, 'stores'])->middleware('permission:store.view')->name('analytics.stores');
+    Route::get('/reports', [ReportController::class, 'index'])->middleware('permission:reports.view')->name('reports.index');
+    Route::get('/reports/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
     Route::get('/system/status', SystemStatusController::class)
         ->middleware('permission:system.health.view')
         ->name('system.status');
