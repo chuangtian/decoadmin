@@ -277,7 +277,7 @@ class AnalyticsQueryService
     private function compare(array $summary, array $baseline): array
     {
         $metrics = [];
-        foreach (['net_sales', 'orders', 'average_order_value', 'refunds'] as $metric) {
+        foreach (['net_sales', 'orders', 'average_order_value', 'refunds', 'discounts', 'taxes'] as $metric) {
             $current = (float) $summary[$metric];
             $before = (float) $baseline[$metric];
             $change = $current - $before;

@@ -44,7 +44,15 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('analytics.summary.refunds', 20)
             ->where('analytics.summary.taxes', 8)
             ->where('analytics.summary.shipping', 5)
-            ->where('analytics.summary.average_order_value', 80));
+            ->where('analytics.summary.average_order_value', 80)
+            ->has('analytics.comparisons.previous.net_sales')
+            ->has('analytics.comparisons.previous.orders')
+            ->has('analytics.comparisons.previous.average_order_value')
+            ->has('analytics.comparisons.previous.refunds')
+            ->has('analytics.comparisons.previous.discounts')
+            ->has('analytics.comparisons.previous.taxes')
+            ->has('analytics.comparisons.year_over_year.discounts')
+            ->has('analytics.comparisons.year_over_year.taxes'));
     }
 
     public function test_report_center_is_store_scoped_and_exports_csv_and_excel(): void
