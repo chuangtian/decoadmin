@@ -11,6 +11,22 @@ use Inertia\Response;
 
 class AnalyticsController extends Controller
 {
+    public function overview(AnalyticsFilterRequest $request, CurrentStore $currentStore, AnalyticsQueryService $analytics): Response
+    {
+        $store = $currentStore->require();
+        $this->authorize('view', $store);
+
+        return Inertia::render('Analytics/Overview', [
+            'store' => [
+                'id' => $store->id,
+                'name' => $store->name,
+                'currency' => $store->currency ?: 'USD',
+                'timezone' => $store->timezone ?: 'UTC',
+            ],
+            'overview' => $analytics->operationsOverview($store, $request->filters()),
+        ]);
+    }
+
     public function sales(AnalyticsFilterRequest $request, CurrentStore $currentStore, AnalyticsQueryService $analytics): Response
     {
         $store = $currentStore->require();

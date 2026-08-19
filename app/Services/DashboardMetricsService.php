@@ -35,12 +35,17 @@ class DashboardMetricsService
             'sales_trend' => [],
             'recent_orders' => [],
             'analytics_30d' => ['summary' => ['sales' => '0', 'orders' => 0, 'average_order_value' => '0.00'], 'trend' => [], 'top_products' => [], 'low_stock' => []],
+            'analytics' => [
+                'period' => ['days' => 30, 'from' => now()->subDays(29)->toDateString(), 'to' => now()->toDateString(), 'timezone' => 'UTC', 'include_test' => false, 'include_cancelled' => false],
+                'summary' => [], 'comparisons' => ['previous' => []], 'trend' => [], 'comparison_trend' => ['previous' => []],
+            ],
+            'metric_definitions' => $this->metricDefinitions(),
             'store_comparison' => ['stores' => []],
         ];
     }
 
     /** @return array<string, mixed> */
-    public function forStore(Store $store, ?Organization $organization = null, ?User $user = null): array
+    public function forStore(Store $store, ?Organization $organization = null, ?User $user = null, array $filters = []): array
     {
         $today = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfDay()->utc();
         $weekStart = $today->subDays(6);
@@ -55,7 +60,8 @@ class DashboardMetricsService
             ->get()
             ->keyBy('day');
 
-        $analytics = $this->analytics->sales($store, 30);
+        $analytics = $this->analytics->sales($store, $filters ?: 30);
+        $analytics30d = $filters ? $this->analytics->sales($store, 30) : $analytics;
 
         return [
             'store' => [
@@ -101,10 +107,28 @@ class DashboardMetricsService
                     'total_price' => (string) $order->total_price,
                     'processed_at' => $order->processed_at?->toIso8601String() ?? $order->created_at_shopify?->toIso8601String(),
                 ])->values(),
-            'analytics_30d' => $analytics,
+            'analytics_30d' => $analytics30d,
+            'analytics' => $analytics,
+            'metric_definitions' => $this->metricDefinitions(),
             'store_comparison' => $organization && $user
                 ? $this->analytics->storeComparison($organization, $user, 30)
                 : ['stores' => []],
+        ];
+    }
+
+    /** @return list<array{key: string, label: string, format: string, description: string}> */
+    private function metricDefinitions(): array
+    {
+        return [
+            ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency', 'description' => '扣除退款后的商品销售额'],
+            ['key' => 'gross_sales', 'label' => '商品销售额', 'format' => 'currency', 'description' => '折扣前商品销售额'],
+            ['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency', 'description' => '包含税费与运费的订单总额'],
+            ['key' => 'orders', 'label' => '订单数', 'format' => 'number', 'description' => '统计周期内的有效订单'],
+            ['key' => 'average_order_value', 'label' => '平均订单金额', 'format' => 'currency', 'description' => '净销售额除以订单数'],
+            ['key' => 'refunds', 'label' => '退款金额', 'format' => 'currency', 'description' => '统计周期内记录的退款'],
+            ['key' => 'discounts', 'label' => '折扣金额', 'format' => 'currency', 'description' => '订单优惠与折扣合计'],
+            ['key' => 'taxes', 'label' => '税费', 'format' => 'currency', 'description' => '订单税费合计'],
+            ['key' => 'shipping', 'label' => '运费', 'format' => 'currency', 'description' => '订单运费合计'],
         ];
     }
 
