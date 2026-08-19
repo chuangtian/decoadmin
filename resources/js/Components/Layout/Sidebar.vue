@@ -71,7 +71,7 @@ onBeforeUnmount(rememberScrollPosition);
     >
         <button
             type="button"
-            class="absolute top-24 -right-3 z-10 hidden h-7 w-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md transition hover:text-slate-900 lg:grid"
+            class="absolute top-10 -right-3 z-10 hidden h-7 w-7 -translate-y-1/2 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md transition hover:text-slate-900 lg:grid"
             :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'"
             :title="collapsed ? '展开侧边栏' : '收起侧边栏'"
             @click="emit('toggleCollapsed')"

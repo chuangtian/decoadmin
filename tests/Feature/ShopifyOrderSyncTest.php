@@ -300,7 +300,7 @@ class ShopifyOrderSyncTest extends TestCase
             'shop_domain' => $store->shopify_domain,
             'access_token_encrypted' => 'order-sync-token',
             'token_type' => 'offline',
-            'scopes' => ['read_products', 'read_inventory', 'read_orders'],
+            'scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers'],
             'api_version' => '2026-07',
             'status' => 'connected',
         ]);
@@ -310,7 +310,7 @@ class ShopifyOrderSyncTest extends TestCase
             'shopify_connection_id' => $connection->id,
             'installed_by' => $user->id,
             'status' => 'active',
-            'granted_scopes' => ['read_products', 'read_inventory', 'read_orders'],
+            'granted_scopes' => ['read_products', 'read_inventory', 'read_orders', 'read_customers'],
             'installed_at' => now(),
         ]);
 

@@ -22,12 +22,12 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
             'description' => '管理指定店铺及其日常业务运营。',
-            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*', 'alerts.*'],
+            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*', 'alerts.*', 'reports.*'],
         ],
         'developer' => [
             'name' => '开发人员',
@@ -37,7 +37,7 @@ class RoleSeeder extends Seeder
         'operator' => [
             'name' => '运营人员',
             'description' => '负责店铺的日常运营工作。',
-            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view'],
+            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export'],
         ],
         'marketing' => [
             'name' => '营销人员',
@@ -56,6 +56,7 @@ class RoleSeeder extends Seeder
                 'organization.view', 'store.view', 'shopify.view', 'orders.view', 'products.view',
                 'customers.view', 'inventory.view', 'users.view',
                 'roles.view', 'audit.view', 'system.settings.view', 'system.health.view',
+                'reports.view',
             ],
         ],
     ];

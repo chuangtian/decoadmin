@@ -10,6 +10,7 @@ use App\Models\Location;
 use App\Models\Product;
 use App\Models\Store;
 use App\Models\WebhookEvent;
+use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\Customers\ShopifyCustomerDataService;
 use App\Services\Shopify\Orders\ShopifyOrderDataService;
 use App\Services\Shopify\Products\ShopifyProductDataService;
@@ -20,6 +21,7 @@ class ShopifyIncrementalDataService
         private ShopifyProductDataService $products,
         private ShopifyOrderDataService $orders,
         private ShopifyCustomerDataService $customers,
+        private ?AnalyticsCacheVersionService $analyticsCache = null,
     ) {}
 
     public function handle(WebhookEvent $event): void
@@ -41,6 +43,8 @@ class ShopifyIncrementalDataService
             'inventory_levels/update' => $this->updateInventoryLevel($store->getKey(), $payload),
             default => throw new ShopifyApiException("不支持的增量主题 [{$event->topic}]。"),
         };
+
+        $this->analyticsCache?->bump((int) $store->getKey());
     }
 
     private function upsertProduct(Store $store, array $payload): void
@@ -70,6 +74,17 @@ class ShopifyIncrementalDataService
     {
         $currency = strtoupper((string) ($payload['currency'] ?? 'USD'));
         $money = fn (mixed $amount) => ['shopMoney' => ['amount' => (string) ($amount ?? '0'), 'currencyCode' => $currency]];
+        $shipping = data_get($payload, 'current_shipping_price_set.shop_money.amount')
+            ?? data_get($payload, 'total_shipping_price_set.shop_money.amount')
+            ?? $payload['total_shipping_price']
+            ?? '0';
+        $refunded = $payload['total_refunded'] ?? collect($payload['refunds'] ?? [])
+            ->filter(fn ($refund) => is_array($refund))
+            ->flatMap(fn (array $refund) => $refund['transactions'] ?? [])
+            ->filter(fn ($transaction) => is_array($transaction)
+                && ($transaction['kind'] ?? null) === 'refund'
+                && in_array($transaction['status'] ?? null, ['success', null], true))
+            ->sum(fn (array $transaction): float => (float) ($transaction['amount'] ?? 0));
         $items = collect($payload['line_items'] ?? [])->filter(fn ($item) => is_array($item))->map(fn (array $item) => [
             'id' => $this->gid('LineItem', $item['id'] ?? null),
             'title' => (string) ($item['title'] ?? ''),
@@ -87,10 +102,21 @@ class ShopifyIncrementalDataService
             'displayFulfillmentStatus' => $payload['fulfillment_status'] ?? null,
             'currencyCode' => $currency,
             'totalPriceSet' => $money($payload['total_price'] ?? '0'),
+            'currentTotalPriceSet' => $money($payload['current_total_price'] ?? $payload['total_price'] ?? '0'),
             'subtotalPriceSet' => $money($payload['subtotal_price'] ?? '0'),
+            'currentSubtotalPriceSet' => $money($payload['current_subtotal_price'] ?? $payload['subtotal_price'] ?? '0'),
+            'currentTotalDiscountsSet' => $money($payload['current_total_discounts'] ?? $payload['total_discounts'] ?? '0'),
+            'totalRefundedSet' => $money($refunded),
+            'currentShippingPriceSet' => $money($shipping),
             'totalTaxSet' => $money($payload['total_tax'] ?? '0'),
+            'currentTotalTaxSet' => $money($payload['current_total_tax'] ?? $payload['total_tax'] ?? '0'),
+            'test' => (bool) ($payload['test'] ?? false),
             'processedAt' => $payload['processed_at'] ?? null,
+            'cancelledAt' => $payload['cancelled_at'] ?? null,
             'createdAt' => $payload['created_at'] ?? now()->toIso8601String(),
+            'customer' => isset($payload['customer']['id'])
+                ? ['id' => $this->gid('Customer', $payload['customer']['id'])]
+                : null,
         ], $items);
     }
 
