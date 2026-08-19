@@ -165,13 +165,22 @@ class SystemStatusService
         try {
             $pending = Queue::connection()->size($name);
             $failed = DB::table('failed_jobs')->where('queue', $name)->count();
+            $oldestQueuedAt = $this->oldestQueuedAt($name);
+            $oldestAgeSeconds = $oldestQueuedAt
+                ? max(0, $oldestQueuedAt->diffInSeconds(now()))
+                : null;
+            $warning = $failed > 0
+                || $pending >= 100
+                || ($oldestAgeSeconds !== null && $oldestAgeSeconds > 300);
 
             return [
                 'name' => $name,
                 'label' => $label,
                 'pending' => $pending,
                 'failed' => $failed,
-                'status' => $failed > 0 ? 'warning' : 'healthy',
+                'oldest_queued_at' => $oldestQueuedAt?->toIso8601String(),
+                'oldest_age_seconds' => $oldestAgeSeconds,
+                'status' => $warning ? 'warning' : 'healthy',
             ];
         } catch (Throwable) {
             return [
@@ -179,9 +188,26 @@ class SystemStatusService
                 'label' => $label,
                 'pending' => null,
                 'failed' => null,
+                'oldest_queued_at' => null,
+                'oldest_age_seconds' => null,
                 'status' => 'unknown',
             ];
         }
+    }
+
+    private function oldestQueuedAt(string $queue): ?Carbon
+    {
+        $timestamp = match ($queue) {
+            'shopify-sync' => SyncJob::query()
+                ->whereIn('status', ['pending', 'queued'])
+                ->min('created_at'),
+            'shopify-webhook' => WebhookEvent::query()
+                ->whereIn('status', ['received', 'queued', 'retrying'])
+                ->min('received_at'),
+            default => null,
+        };
+
+        return $timestamp ? Carbon::parse($timestamp) : null;
     }
 
     /** @return list<array<string, mixed>> */

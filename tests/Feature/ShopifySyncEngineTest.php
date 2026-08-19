@@ -104,7 +104,7 @@ class ShopifySyncEngineTest extends TestCase
         $job->handle($processor);
 
         $this->assertSame('shopify-sync', $job->queue);
-        $this->assertSame(3, $job->tries);
+        $this->assertSame(3, $job->tries());
     }
 
     public function test_failed_handler_can_be_retried_by_the_queue_processor(): void

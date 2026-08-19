@@ -22,10 +22,33 @@ Schedule::command('shopify:scan-alerts')
     ->withoutOverlapping(10);
 
 if (config('shopify.scheduled_sync.enabled')) {
-    Schedule::command('shopify:sync-reconcile')
+    Schedule::command('shopify:sync-reconcile --mode=incremental')
+        ->name('shopify:incremental-sync')
+        ->everyFiveMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(10);
+
+    Schedule::command('shopify:sync-reconcile --mode=reconcile')
         ->name('shopify:daily-sync-reconciliation')
-        ->dailyAt((string) config('shopify.scheduled_sync.time', '03:00'))
+        ->dailyAt((string) config('shopify.scheduled_sync.reconciliation_time', '03:00'))
         ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
         ->onOneServer()
         ->withoutOverlapping(180);
+
+    Schedule::command('shopify:sync-reconcile --mode=full')
+        ->name('shopify:weekly-full-sync')
+        ->weeklyOn(
+            (int) config('shopify.scheduled_sync.full_sync_weekday', 1),
+            (string) config('shopify.scheduled_sync.full_sync_time', '02:00'),
+        )
+        ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
+        ->onOneServer()
+        ->withoutOverlapping(360);
+
+    Schedule::command('shopify:register-webhooks')
+        ->name('shopify:webhook-subscription-reconciliation')
+        ->dailyAt('01:30')
+        ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
+        ->onOneServer()
+        ->withoutOverlapping(60);
 }

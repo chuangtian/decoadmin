@@ -3,29 +3,34 @@
 namespace App\Services\Shopify\Sync;
 
 use App\Models\AppInstallation;
-use App\Models\SyncJob;
 use App\Services\Sync\SyncJobService;
 use Carbon\CarbonImmutable;
+use InvalidArgumentException;
 
 class ScheduledShopifySyncService
 {
     /** @var array<string, list<string>> */
     private const REQUIRED_SCOPES = [
-        'products' => ['read_products'],
-        'orders' => ['read_orders'],
+        'products' => ['read_products', 'read_inventory'],
+        'orders' => ['read_orders', 'read_products'],
         'customers' => ['read_customers'],
-        'inventory' => ['read_inventory'],
+        'inventory' => ['read_inventory', 'read_products'],
     ];
 
-    public function __construct(private SyncJobService $syncJobs) {}
+    public function __construct(
+        private SyncJobService $syncJobs,
+        private StoreSyncStateService $states,
+    ) {}
 
     /**
      * @return array{stores: int, created: int, duplicate: int, missing_scope: int}
      */
-    public function dispatch(?int $storeId = null): array
+    public function dispatch(?int $storeId = null, string $requestedMode = 'incremental'): array
     {
-        $timezone = (string) config('shopify.scheduled_sync.timezone', 'America/New_York');
-        $dayStartedAt = CarbonImmutable::now($timezone)->startOfDay()->utc();
+        if (! in_array($requestedMode, ['full', 'incremental', 'reconcile'], true)) {
+            throw new InvalidArgumentException("不支持的同步模式 [{$requestedMode}]。");
+        }
+
         $installations = AppInstallation::query()
             ->where('status', 'active')
             ->whereHas('store', fn ($query) => $query->where('status', 'active'))
@@ -39,7 +44,7 @@ class ScheduledShopifySyncService
 
         $result = ['stores' => 0, 'created' => 0, 'duplicate' => 0, 'missing_scope' => 0];
 
-        $installations->get()->unique('store_id')->each(function (AppInstallation $installation) use ($dayStartedAt, &$result): void {
+        $installations->get()->unique('store_id')->each(function (AppInstallation $installation) use ($requestedMode, &$result): void {
             $store = $installation->store;
 
             if (! $store) {
@@ -59,24 +64,43 @@ class ScheduledShopifySyncService
                     continue;
                 }
 
-                $alreadyScheduled = SyncJob::query()
-                    ->where('store_id', $store->getKey())
-                    ->where('type', $type)
-                    ->whereIn('status', ['pending', 'queued', 'running', 'completed'])
-                    ->where('created_at', '>=', $dayStartedAt)
-                    ->exists();
+                $state = $this->states->state($store, $type);
 
-                if ($alreadyScheduled) {
+                if (! $this->states->isDue($state, $requestedMode)) {
                     $result['duplicate']++;
 
                     continue;
                 }
 
-                $this->syncJobs->createScheduledAndDispatch($store, $type, $installation);
-                $result['created']++;
+                $window = $this->states->window($store, $type, $requestedMode);
+                $created = $this->syncJobs->createAutomaticAndDispatch(
+                    $store,
+                    $type,
+                    $installation,
+                    $window['mode'],
+                    $window['since_at'],
+                    $window['until_at'],
+                    $requestedMode === 'reconcile' ? 'reconciliation' : 'scheduled',
+                    $this->idempotencyWindow($window['until_at'], $requestedMode),
+                );
+                $created['created'] ? $result['created']++ : $result['duplicate']++;
             }
         });
 
         return $result;
+    }
+
+    private function idempotencyWindow(CarbonImmutable $untilAt, string $mode): string
+    {
+        if ($mode !== 'incremental') {
+            return $untilAt
+                ->setTimezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
+                ->format('Y-m-d');
+        }
+
+        $bucketMinutes = 5;
+        $minute = intdiv($untilAt->minute, $bucketMinutes) * $bucketMinutes;
+
+        return $untilAt->setMinute($minute)->setSecond(0)->format('Y-m-d\TH:i:00\Z');
     }
 }

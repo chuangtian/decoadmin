@@ -7,25 +7,43 @@ use App\Models\AppInstallation;
 use App\Models\Store;
 use App\Models\SyncJob;
 use App\Models\User;
+use App\Services\Shopify\Sync\StoreSyncStateService;
+use App\Services\Shopify\Sync\SyncErrorClassifier;
 use App\Services\Shopify\Sync\SyncResult;
+use Carbon\CarbonInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SyncJobService
 {
+    public function __construct(
+        private StoreSyncStateService $states,
+        private SyncErrorClassifier $errors,
+    ) {}
+
     public function createAndDispatch(
         Store $store,
         string $type,
         User $actor,
         ?AppInstallation $installation = null,
+        string $mode = 'full',
     ): SyncJob {
-        return $this->createAndDispatchForSource(
+        $window = $this->states->window($store, $type, $mode);
+        $syncJob = $this->createForSource(
             $store,
             $type,
             $installation,
             'manual',
             $actor->getKey(),
+            $window['mode'],
+            $window['since_at'],
+            $window['until_at'],
         );
+
+        ProcessSyncJob::dispatch($syncJob->getKey())->afterCommit();
+
+        return $syncJob;
     }
 
     public function createScheduledAndDispatch(
@@ -33,46 +51,121 @@ class SyncJobService
         string $type,
         AppInstallation $installation,
     ): SyncJob {
-        return $this->createAndDispatchForSource(
+        $window = $this->states->window($store, $type, 'full');
+        $created = $this->createAutomaticAndDispatch(
             $store,
             $type,
             $installation,
+            $window['mode'],
+            $window['since_at'],
+            $window['until_at'],
             'scheduled',
         );
+
+        return $created['job'];
     }
 
-    private function createAndDispatchForSource(
+    /** @return array{job: SyncJob, created: bool} */
+    public function createAutomaticAndDispatch(
+        Store $store,
+        string $type,
+        AppInstallation $installation,
+        string $mode,
+        ?CarbonInterface $sinceAt,
+        CarbonInterface $untilAt,
+        string $source = 'scheduled',
+        ?string $idempotencyWindow = null,
+    ): array {
+        $activeJob = SyncJob::query()
+            ->where('store_id', $store->getKey())
+            ->where('type', $type)
+            ->whereIn('status', ['pending', 'queued', 'running'])
+            ->latest('id')
+            ->first();
+
+        if ($activeJob) {
+            return ['job' => $activeJob, 'created' => false];
+        }
+
+        $idempotencyKey = hash('sha256', implode('|', [
+            $store->getKey(),
+            $type,
+            $mode,
+            $idempotencyWindow ?? $sinceAt?->utc()->toIso8601String() ?? 'beginning',
+            $idempotencyWindow ?? $untilAt->utc()->toIso8601String(),
+        ]));
+        $existing = SyncJob::query()->where('idempotency_key', $idempotencyKey)->first();
+
+        if ($existing) {
+            return ['job' => $existing, 'created' => false];
+        }
+
+        try {
+            $syncJob = $this->createForSource(
+                $store,
+                $type,
+                $installation,
+                $source,
+                mode: $mode,
+                sinceAt: $sinceAt,
+                untilAt: $untilAt,
+                idempotencyKey: $idempotencyKey,
+            );
+        } catch (QueryException $exception) {
+            $existing = SyncJob::query()->where('idempotency_key', $idempotencyKey)->first();
+
+            if (! $existing) {
+                throw $exception;
+            }
+
+            return ['job' => $existing, 'created' => false];
+        }
+
+        ProcessSyncJob::dispatch($syncJob->getKey())->afterCommit();
+
+        return ['job' => $syncJob, 'created' => true];
+    }
+
+    private function createForSource(
         Store $store,
         string $type,
         ?AppInstallation $installation,
         string $source,
         ?int $requestedBy = null,
+        string $mode = 'full',
+        ?CarbonInterface $sinceAt = null,
+        ?CarbonInterface $untilAt = null,
+        ?string $idempotencyKey = null,
     ): SyncJob {
-        $syncJob = DB::transaction(function () use ($store, $type, $installation, $source, $requestedBy): SyncJob {
+        return DB::transaction(function () use ($store, $type, $installation, $source, $requestedBy, $mode, $sinceAt, $untilAt, $idempotencyKey): SyncJob {
+            $filters = $this->filters($type, $mode, $sinceAt, $untilAt);
             $syncJob = SyncJob::query()->create([
                 'uuid' => (string) Str::uuid(),
+                'correlation_id' => (string) Str::uuid(),
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->getKey(),
                 'app_id' => $installation?->app_id,
                 'app_installation_id' => $installation?->getKey(),
                 'type' => $type,
                 'direction' => 'pull',
+                'mode' => $mode,
                 'status' => 'pending',
+                'since_at' => $sinceAt,
+                'until_at' => $untilAt,
+                'idempotency_key' => $idempotencyKey,
                 'payload' => [
                     'source' => $source,
                     'requested_by' => $requestedBy,
                     'framework_only' => ! in_array($type, ['products', 'orders', 'customers', 'inventory'], true),
+                    'filters' => $filters,
                 ],
                 'logs' => [],
+                'max_attempts' => min(5, max(1, (int) config('shopify.scheduled_sync.max_attempts', 3))),
                 'available_at' => now(),
             ]);
 
             return $this->markQueued($syncJob);
         });
-
-        ProcessSyncJob::dispatch($syncJob->getKey())->afterCommit();
-
-        return $syncJob;
     }
 
     public function markQueued(SyncJob $syncJob): SyncJob
@@ -82,6 +175,9 @@ class SyncJobService
             'available_at' => now(),
             'logs' => $this->appendLog($syncJob, 'info', '同步任务已加入 shopify-sync 队列。'),
         ])->save();
+
+        $syncJob->loadMissing('store');
+        $this->states->markQueued($syncJob);
 
         return $syncJob;
     }
@@ -109,6 +205,9 @@ class SyncJobService
                 'attempts' => $syncJob->attempts + 1,
                 'logs' => $this->appendLog($syncJob, 'info', '同步执行框架已启动。'),
             ])->save();
+
+            $syncJob->loadMissing('store');
+            $this->states->markRunning($syncJob);
 
             return $syncJob;
         });
@@ -142,10 +241,13 @@ class SyncJobService
             'logs' => $this->appendLog($syncJob, 'success', '同步执行框架已完成。'),
         ])->save();
 
+        $syncJob->loadMissing('store');
+        $this->states->markCompleted($syncJob);
+
         return $syncJob;
     }
 
-    public function markFailed(SyncJob $syncJob, string $error, ?SyncResult $result = null): SyncJob
+    public function markFailed(SyncJob $syncJob, string $error, ?SyncResult $result = null, ?string $errorCode = null): SyncJob
     {
         $finishedAt = now();
         $safeError = $this->safeError($error);
@@ -154,10 +256,14 @@ class SyncJobService
             'finished_at' => $finishedAt,
             'failed_at' => $finishedAt,
             'last_error' => $safeError,
+            'error_code' => $errorCode ?? $this->errors->classify($result ?? $error),
             'result' => $result?->toArray() ?? $syncJob->result,
             'failed_items' => $result ? max($syncJob->failed_items, count($result->errors)) : $syncJob->failed_items,
             'logs' => $this->appendLog($syncJob, 'error', $safeError),
         ])->save();
+
+        $syncJob->loadMissing('store');
+        $this->states->markFailed($syncJob);
 
         return $syncJob;
     }
@@ -191,5 +297,22 @@ class SyncJobService
         );
 
         return mb_substr($redacted ?: '同步任务执行失败。', 0, 2000);
+    }
+
+    /** @return array<string, string> */
+    private function filters(
+        string $type,
+        string $mode,
+        ?CarbonInterface $sinceAt,
+        ?CarbonInterface $untilAt,
+    ): array {
+        if ($mode !== 'incremental' || ! $sinceAt || ! $untilAt) {
+            return [];
+        }
+
+        return [
+            'updated_at_from' => $sinceAt->utc()->toIso8601String(),
+            'updated_at_to' => $untilAt->utc()->toIso8601String(),
+        ];
     }
 }

@@ -10,6 +10,8 @@ class SyncProcessor
     public function __construct(
         private SyncHandlerRegistry $handlers,
         private SyncJobService $syncJobs,
+        private ?SyncDataConsistencyService $consistency = null,
+        private ?SyncErrorClassifier $errors = null,
     ) {}
 
     public function process(int $syncJobId): SyncResult
@@ -35,14 +37,24 @@ class SyncProcessor
             $result = $handler->handle($syncJob);
 
             if ($result->success) {
+                $result = $this->consistency?->inspect($syncJob, $result) ?? $result;
                 $this->syncJobs->markCompleted($syncJob, $result);
             } else {
-                $this->syncJobs->markFailed($syncJob, $result->message, $result);
+                $this->syncJobs->markFailed(
+                    $syncJob,
+                    $result->message,
+                    $result,
+                    $this->errors?->classify($result),
+                );
             }
 
             return $result;
         } catch (Throwable $exception) {
-            $this->syncJobs->markFailed($syncJob, $exception->getMessage());
+            $this->syncJobs->markFailed(
+                $syncJob,
+                $exception->getMessage(),
+                errorCode: $this->errors?->classify($exception),
+            );
 
             throw $exception;
         }

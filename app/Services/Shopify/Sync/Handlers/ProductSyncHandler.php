@@ -9,6 +9,8 @@ use App\Models\SyncJob;
 use App\Services\Shopify\Products\ShopifyProductDataService;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use App\Services\Shopify\Sync\SyncResult;
+use Carbon\CarbonImmutable;
+use Throwable;
 
 class ProductSyncHandler implements SyncHandlerInterface
 {
@@ -20,8 +22,8 @@ class ProductSyncHandler implements SyncHandlerInterface
     private const REQUIRED_SCOPES = ['read_products', 'read_inventory'];
 
     private const PRODUCTS_QUERY = <<<'GRAPHQL'
-        query SyncProducts($first: Int!, $after: String, $variantsFirst: Int!) {
-          products(first: $first, after: $after, sortKey: ID) {
+        query SyncProducts($first: Int!, $after: String, $variantsFirst: Int!, $query: String) {
+          products(first: $first, after: $after, sortKey: UPDATED_AT, query: $query) {
             nodes {
               id
               title
@@ -107,12 +109,14 @@ class ProductSyncHandler implements SyncHandlerInterface
         $variantsUpdated = 0;
         $productPages = 0;
         $variantPages = 0;
+        $timeFilter = $this->timeFilter($syncJob);
 
         do {
             $payload = $this->client->executeSyncQuery($connection, self::PRODUCTS_QUERY, [
                 'first' => self::PRODUCT_PAGE_SIZE,
                 'after' => $cursor,
                 'variantsFirst' => self::VARIANT_PAGE_SIZE,
+                'query' => $timeFilter,
             ]);
             $products = data_get($payload, 'data.products');
 
@@ -159,8 +163,36 @@ class ProductSyncHandler implements SyncHandlerInterface
                 'products_updated' => $updatedCount,
                 'variants_created' => $variantsCreated,
                 'variants_updated' => $variantsUpdated,
+                'time_filter_applied' => $timeFilter !== null,
             ],
         );
+    }
+
+    private function timeFilter(SyncJob $syncJob): ?string
+    {
+        $parts = [];
+
+        foreach (['updated_at_from' => '>=', 'updated_at_to' => '<='] as $key => $operator) {
+            $value = data_get($syncJob->payload, "filters.{$key}");
+
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            if (! is_string($value)) {
+                throw new ShopifyApiException("商品同步时间过滤字段 [{$key}] 格式无效。");
+            }
+
+            try {
+                $timestamp = CarbonImmutable::parse($value)->utc()->toIso8601ZuluString();
+            } catch (Throwable) {
+                throw new ShopifyApiException("商品同步时间过滤字段 [{$key}] 格式无效。");
+            }
+
+            $parts[] = "updated_at:{$operator}'{$timestamp}'";
+        }
+
+        return $parts === [] ? null : implode(' ', $parts);
     }
 
     /**

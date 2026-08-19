@@ -74,6 +74,16 @@ class Store extends Model
         return $this->hasOne(SyncJob::class)->latestOfMany();
     }
 
+    public function syncJobs(): HasMany
+    {
+        return $this->hasMany(SyncJob::class);
+    }
+
+    public function syncStates(): HasMany
+    {
+        return $this->hasMany(StoreSyncState::class);
+    }
+
     public function notificationSetting(): HasOne
     {
         return $this->hasOne(StoreNotificationSetting::class);

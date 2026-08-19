@@ -235,8 +235,8 @@ class ShopifyOrderSyncTest extends TestCase
         Http::fake(['*' => Http::response($this->ordersPayload([]))]);
         $syncJob = $this->syncJob($organization, $store, $installation, [
             'filters' => [
-                'processed_at_from' => '2026-08-01T00:00:00+08:00',
-                'processed_at_to' => '2026-08-02T00:00:00+08:00',
+                'updated_at_from' => '2026-08-01T00:00:00+08:00',
+                'updated_at_to' => '2026-08-02T00:00:00+08:00',
             ],
         ]);
 
@@ -245,7 +245,7 @@ class ShopifyOrderSyncTest extends TestCase
         $this->assertTrue($result->success);
         $this->assertTrue($result->metadata['time_filter_applied']);
         Http::assertSent(fn (Request $request): bool => $request->data()['variables']['query']
-            === "processed_at:>='2026-07-31T16:00:00Z' processed_at:<='2026-08-01T16:00:00Z'");
+            === "updated_at:>='2026-07-31T16:00:00Z' updated_at:<='2026-08-01T16:00:00Z'");
     }
 
     public function test_shopify_api_failure_marks_sync_job_failed_without_saving_orders(): void

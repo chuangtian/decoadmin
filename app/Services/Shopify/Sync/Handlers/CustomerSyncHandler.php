@@ -20,7 +20,7 @@ class CustomerSyncHandler implements SyncHandlerInterface
 
     private const CUSTOMERS_QUERY = <<<'GRAPHQL'
         query SyncCustomers($first: Int!, $after: String, $query: String) {
-          customers(first: $first, after: $after, sortKey: ID, query: $query) {
+          customers(first: $first, after: $after, sortKey: UPDATED_AT, query: $query) {
             nodes {
               id
               firstName

@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'uuid', 'organization_id', 'store_id', 'app_id', 'app_installation_id', 'type', 'direction',
-    'status', 'cursor', 'payload', 'result', 'logs', 'total_items', 'processed_items',
+    'mode', 'status', 'cursor', 'since_at', 'until_at', 'idempotency_key', 'payload', 'result',
+    'logs', 'total_items', 'processed_items',
     'failed_items', 'attempts', 'max_attempts', 'available_at', 'started_at', 'finished_at',
-    'completed_at', 'failed_at', 'last_error',
+    'completed_at', 'failed_at', 'last_error', 'error_code', 'correlation_id',
 ])]
 class SyncJob extends Model
 {
@@ -49,6 +50,8 @@ class SyncJob extends Model
             'attempts' => 'integer',
             'max_attempts' => 'integer',
             'available_at' => 'datetime',
+            'since_at' => 'datetime',
+            'until_at' => 'datetime',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'completed_at' => 'datetime',

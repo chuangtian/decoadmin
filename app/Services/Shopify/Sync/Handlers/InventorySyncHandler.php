@@ -9,6 +9,8 @@ use App\Models\SyncJob;
 use App\Services\Shopify\Inventory\ShopifyInventoryDataService;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use App\Services\Shopify\Sync\SyncResult;
+use Carbon\CarbonImmutable;
+use Throwable;
 
 class InventorySyncHandler implements SyncHandlerInterface
 {
@@ -20,8 +22,8 @@ class InventorySyncHandler implements SyncHandlerInterface
     private const REQUIRED_SCOPES = ['read_inventory', 'read_products'];
 
     private const INVENTORY_ITEMS_QUERY = <<<'GRAPHQL'
-        query SyncInventoryItems($first: Int!, $after: String, $levelsFirst: Int!) {
-          inventoryItems(first: $first, after: $after) {
+        query SyncInventoryItems($first: Int!, $after: String, $levelsFirst: Int!, $query: String) {
+          inventoryItems(first: $first, after: $after, query: $query) {
             nodes {
               id
               sku
@@ -113,12 +115,14 @@ class InventorySyncHandler implements SyncHandlerInterface
         $locationsUpdated = 0;
         $inventoryItemPages = 0;
         $inventoryLevelPages = 0;
+        $timeFilter = $this->timeFilter($syncJob);
 
         do {
             $payload = $this->client->executeSyncQuery($connection, self::INVENTORY_ITEMS_QUERY, [
                 'first' => self::INVENTORY_ITEM_PAGE_SIZE,
                 'after' => $cursor,
                 'levelsFirst' => self::INVENTORY_LEVEL_PAGE_SIZE,
+                'query' => $timeFilter,
             ]);
             $inventoryItems = data_get($payload, 'data.inventoryItems');
 
@@ -167,8 +171,36 @@ class InventorySyncHandler implements SyncHandlerInterface
                 'levels_updated' => $levelsUpdated,
                 'locations_created' => $locationsCreated,
                 'locations_updated' => $locationsUpdated,
+                'time_filter_applied' => $timeFilter !== null,
             ],
         );
+    }
+
+    private function timeFilter(SyncJob $syncJob): ?string
+    {
+        $parts = [];
+
+        foreach (['updated_at_from' => '>=', 'updated_at_to' => '<='] as $key => $operator) {
+            $value = data_get($syncJob->payload, "filters.{$key}");
+
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            if (! is_string($value)) {
+                throw new ShopifyApiException("库存同步时间过滤字段 [{$key}] 格式无效。");
+            }
+
+            try {
+                $timestamp = CarbonImmutable::parse($value)->utc()->toIso8601ZuluString();
+            } catch (Throwable) {
+                throw new ShopifyApiException("库存同步时间过滤字段 [{$key}] 格式无效。");
+            }
+
+            $parts[] = "updated_at:{$operator}'{$timestamp}'";
+        }
+
+        return $parts === [] ? null : implode(' ', $parts);
     }
 
     /**

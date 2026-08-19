@@ -156,6 +156,25 @@ docker compose --env-file .env.staging -f compose.production.yaml exec app php a
 
 Only one Scheduler container should run for a single environment.
 
+Shopify 自动同步默认开启。部署环境可通过以下变量调整节奏：
+
+```dotenv
+SHOPIFY_SCHEDULED_SYNC_ENABLED=true
+SHOPIFY_SCHEDULED_SYNC_TIMEZONE=America/New_York
+SHOPIFY_INCREMENTAL_SYNC_INTERVAL=15
+SHOPIFY_INVENTORY_SYNC_INTERVAL=30
+SHOPIFY_INCREMENTAL_OVERLAP_MINUTES=5
+SHOPIFY_SYNC_MAX_ATTEMPTS=3
+SHOPIFY_RECONCILIATION_TIME=03:00
+SHOPIFY_FULL_SYNC_WEEKDAY=1
+SHOPIFY_FULL_SYNC_TIME=02:00
+SHOPIFY_SYNC_STALLED_AFTER_MINUTES=45
+```
+
+调度器每 5 分钟扫描店铺，实际是否创建任务由每类数据的 `next_sync_at` 决定。首次同步会自动使用全量模式；之后使用带 5 分钟重叠窗口的增量模式。每天执行一次一致性校准，每周执行一次全量同步，并每天校准 Webhook 订阅。同步任务通过店铺、类型、模式和时间窗口生成幂等键，同一店铺同一类型已有排队或运行任务时不会重复入队。
+
+部署后应确认 `shopify:incremental-sync`、`shopify:daily-sync-reconciliation`、`shopify:weekly-full-sync` 和 `shopify:webhook-subscription-reconciliation` 均出现在调度列表中，并在“系统状态”页面确认 Scheduler、Horizon 与 `shopify-sync` 队列正常。
+
 ## Release procedure
 
 ```bash

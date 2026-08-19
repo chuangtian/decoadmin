@@ -19,11 +19,11 @@ class OrderSyncHandler implements SyncHandlerInterface
     private const LINE_ITEM_PAGE_SIZE = 100;
 
     /** @var list<string> */
-    private const REQUIRED_SCOPES = ['read_orders'];
+    private const REQUIRED_SCOPES = ['read_orders', 'read_products'];
 
     private const ORDERS_QUERY = <<<'GRAPHQL'
         query SyncOrders($first: Int!, $after: String, $lineItemsFirst: Int!, $query: String) {
-          orders(first: $first, after: $after, sortKey: ID, query: $query) {
+          orders(first: $first, after: $after, sortKey: UPDATED_AT, query: $query) {
             nodes {
               id
               name
@@ -217,7 +217,7 @@ class OrderSyncHandler implements SyncHandlerInterface
     {
         $parts = [];
 
-        foreach (['processed_at_from' => '>=', 'processed_at_to' => '<='] as $key => $operator) {
+        foreach (['updated_at_from' => '>=', 'updated_at_to' => '<='] as $key => $operator) {
             $value = data_get($syncJob->payload, "filters.{$key}");
 
             if ($value === null || $value === '') {
@@ -234,7 +234,7 @@ class OrderSyncHandler implements SyncHandlerInterface
                 throw new ShopifyApiException("订单同步时间过滤字段 [{$key}] 格式无效。");
             }
 
-            $parts[] = "processed_at:{$operator}'{$timestamp}'";
+            $parts[] = "updated_at:{$operator}'{$timestamp}'";
         }
 
         return $parts === [] ? null : implode(' ', $parts);

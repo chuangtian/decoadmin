@@ -6,6 +6,7 @@ use App\Jobs\DeliverStoreAlertNotificationJob;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\StoreAlert;
+use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Models\WebhookEvent;
 use Illuminate\Database\Eloquent\Builder;
@@ -26,6 +27,7 @@ class StoreOperationalAlertService
         foreach ($stores as $store) {
             $created += $this->connectionAlert($store);
             $created += $this->syncAlerts($store);
+            $created += $this->syncStateAlerts($store);
             $created += $this->webhookAlerts($store);
         }
 
@@ -111,13 +113,74 @@ class StoreOperationalAlertService
                 'sync',
                 SyncJob::class,
                 $job->id,
-                'shopify_sync_failed',
+                $job->error_code ?: 'shopify_sync_failed',
                 'Shopify 数据同步失败',
                 $job->last_error ?: '同步任务执行失败，请查看任务详情。',
                 'error',
-                ['sync_type' => $job->type, 'job_uuid' => $job->uuid],
+                [
+                    'sync_type' => $job->type,
+                    'sync_mode' => $job->mode,
+                    'job_uuid' => $job->uuid,
+                    'correlation_id' => $job->correlation_id,
+                    'attempts' => $job->attempts,
+                    'max_attempts' => $job->max_attempts,
+                ],
                 $job->failed_at ?? $job->updated_at,
             ));
+    }
+
+    private function syncStateAlerts(Store $store): int
+    {
+        $created = 0;
+        $stalledAfter = max(10, (int) config('shopify.scheduled_sync.stalled_after_minutes', 45));
+
+        StoreSyncState::query()
+            ->where('store_id', $store->id)
+            ->with('lastJob')
+            ->get()
+            ->each(function (StoreSyncState $state) use ($store, $stalledAfter, &$created): void {
+                $job = $state->lastJob;
+
+                if ($state->status === 'running' && $job?->started_at?->lt(now()->subMinutes($stalledAfter))) {
+                    $created += (int) $this->record(
+                        $store,
+                        'sync',
+                        SyncJob::class,
+                        $job->id,
+                        'sync_stalled',
+                        'Shopify 同步任务长时间无进展',
+                        "{$state->sync_type} 同步已运行超过 {$stalledAfter} 分钟。",
+                        'critical',
+                        [
+                            'sync_type' => $state->sync_type,
+                            'job_uuid' => $job->uuid,
+                            'correlation_id' => $job->correlation_id,
+                        ],
+                        $job->started_at,
+                    );
+                }
+
+                if ($state->consecutive_failures >= max(1, (int) config('shopify.scheduled_sync.max_attempts', 3))) {
+                    $created += (int) $this->record(
+                        $store,
+                        'sync',
+                        StoreSyncState::class,
+                        $state->id,
+                        'sync_max_attempts_reached',
+                        'Shopify 同步连续失败',
+                        "{$state->sync_type} 同步已连续失败 {$state->consecutive_failures} 次。",
+                        'critical',
+                        [
+                            'sync_type' => $state->sync_type,
+                            'consecutive_failures' => $state->consecutive_failures,
+                            'last_job_id' => $state->last_job_id,
+                        ],
+                        $state->last_failed_at,
+                    );
+                }
+            });
+
+        return $created;
     }
 
     private function webhookAlerts(Store $store): int

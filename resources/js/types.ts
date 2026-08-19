@@ -112,6 +112,7 @@ export interface WebhookEventDetail extends WebhookEventSummary {
 
 export type SyncJobStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type SyncJobType = 'products' | 'orders' | 'customers' | 'inventory';
+export type SyncJobMode = 'full' | 'incremental' | 'reconcile';
 
 export interface SyncJobInstallation {
     id: number;
@@ -131,7 +132,12 @@ export interface SyncJobSummary {
     id: number;
     uuid: string;
     type: SyncJobType;
+    mode: SyncJobMode;
     status: SyncJobStatus;
+    since_at: string | null;
+    until_at: string | null;
+    error_code: string | null;
+    correlation_id: string | null;
     started_at: string | null;
     finished_at: string | null;
     created_at: string | null;
@@ -141,6 +147,32 @@ export interface SyncJobSummary {
         shopify_domain: string;
     };
     app_installation: SyncJobInstallation | null;
+}
+
+export interface StoreSyncStateSummary {
+    type: SyncJobType;
+    status: 'idle' | 'running' | 'failed';
+    watermark_at: string | null;
+    last_full_sync_at: string | null;
+    last_incremental_sync_at: string | null;
+    last_reconciled_at: string | null;
+    last_success_at: string | null;
+    last_failed_at: string | null;
+    next_sync_at: string | null;
+    consecutive_failures: number;
+    last_error_code: string | null;
+    last_job: { id: number; uuid: string; mode: SyncJobMode; status: SyncJobStatus; error_code: string | null; correlation_id: string | null } | null;
+}
+
+export interface StoreSyncStatusSummary {
+    store: { id: number; name: string; shopify_domain: string };
+    status: 'healthy' | 'running' | 'warning' | 'critical';
+    connection_status: string;
+    last_verified_at: string | null;
+    running_jobs: number;
+    open_alerts: number;
+    latest_webhook: { topic: string; status: string; received_at: string | null; processed_at: string | null } | null;
+    sync_states: StoreSyncStateSummary[];
 }
 
 export interface SyncJobLog {

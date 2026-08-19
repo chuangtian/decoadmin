@@ -50,12 +50,12 @@ class ScheduledShopifySyncTest extends TestCase
     public function test_it_skips_types_without_required_shopify_scopes(): void
     {
         Queue::fake();
-        $this->installation(['read_products']);
+        $this->installation(['read_customers']);
 
         $result = app(ScheduledShopifySyncService::class)->dispatch();
 
         $this->assertSame(['stores' => 1, 'created' => 1, 'duplicate' => 0, 'missing_scope' => 3], $result);
-        $this->assertSame('products', SyncJob::query()->sole()->type);
+        $this->assertSame('customers', SyncJob::query()->sole()->type);
         Queue::assertPushed(ProcessSyncJob::class, 1);
     }
 
