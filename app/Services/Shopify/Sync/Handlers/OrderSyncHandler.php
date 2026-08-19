@@ -19,7 +19,7 @@ class OrderSyncHandler implements SyncHandlerInterface
     private const LINE_ITEM_PAGE_SIZE = 100;
 
     /** @var list<string> */
-    private const REQUIRED_SCOPES = ['read_orders', 'read_products', 'read_customers'];
+    private const REQUIRED_SCOPES = ['read_orders', 'read_products', 'read_customers', 'read_locations'];
 
     private const ORDERS_QUERY = <<<'GRAPHQL'
         query SyncOrders($first: Int!, $after: String, $lineItemsFirst: Int!, $query: String) {
@@ -30,6 +30,9 @@ class OrderSyncHandler implements SyncHandlerInterface
               email
               displayFinancialStatus
               displayFulfillmentStatus
+              sourceName
+              app { id name }
+              retailLocation { id name }
               currencyCode
               currentTotalPriceSet { shopMoney { amount currencyCode } }
               subtotalPriceSet { shopMoney { amount currencyCode } }
@@ -48,7 +51,9 @@ class OrderSyncHandler implements SyncHandlerInterface
                   id
                   title
                   quantity
+                  currentQuantity
                   originalUnitPriceSet { shopMoney { amount currencyCode } }
+                  priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } }
                   product { id }
                   variant { id }
                 }
@@ -68,7 +73,9 @@ class OrderSyncHandler implements SyncHandlerInterface
                 id
                 title
                 quantity
+                currentQuantity
                 originalUnitPriceSet { shopMoney { amount currencyCode } }
+                priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } }
                 product { id }
                 variant { id }
               }

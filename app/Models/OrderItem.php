@@ -8,7 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'order_id', 'shopify_line_item_id', 'product_id', 'variant_id', 'shopify_product_id',
-    'shopify_variant_id', 'title', 'quantity', 'price',
+    'shopify_variant_id', 'title', 'quantity', 'current_quantity', 'price', 'attributed_sales',
+    'shopify_staff_id', 'staff_name',
 ])]
 class OrderItem extends Model
 {
@@ -33,8 +34,11 @@ class OrderItem extends Model
             'shopify_line_item_id' => 'string',
             'shopify_product_id' => 'string',
             'shopify_variant_id' => 'string',
+            'shopify_staff_id' => 'string',
             'quantity' => 'integer',
+            'current_quantity' => 'integer',
             'price' => 'decimal:4',
+            'attributed_sales' => 'decimal:4',
         ];
     }
 }
