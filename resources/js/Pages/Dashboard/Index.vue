@@ -67,6 +67,12 @@ const filteredMetrics = computed(() => {
     return props.dashboard.metric_definitions.filter((item) => !needle || `${item.label} ${item.description} ${item.key}`.toLowerCase().includes(needle));
 });
 
+const toggleMetricPicker = (index: number) => {
+    activeSlot.value = index;
+    pickerSlot.value = pickerSlot.value === index ? null : index;
+    metricSearch.value = '';
+};
+
 onMounted(() => {
     try {
         const saved = JSON.parse(localStorage.getItem(storageKey.value) || '[]');
@@ -133,17 +139,17 @@ const financialLabel = (status: string | null) => ({
                 </div>
                 <div class="grid divide-y divide-slate-100 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
                     <article v-for="(key,index) in selectedMetrics" :key="`${index}-${key}`" role="button" tabindex="0" class="group relative min-h-32 cursor-pointer p-5 text-left transition hover:bg-slate-50" :class="activeSlot === index ? 'bg-emerald-50/50' : ''" @click="activeSlot = index" @keydown.enter="activeSlot = index">
-                        <span class="flex items-start justify-between gap-3"><span class="text-sm font-semibold text-slate-500">{{ metricDefinition(key)?.label }}</span><button type="button" class="grid h-8 w-8 place-items-center rounded-xl text-slate-400 opacity-70 transition hover:bg-white hover:text-emerald-700 group-hover:opacity-100" :aria-label="`更换${metricDefinition(key)?.label}`" @click.stop="pickerSlot = pickerSlot === index ? null : index">✎</button></span>
+                        <span class="flex items-start justify-between gap-3"><span class="text-sm font-semibold text-slate-500">{{ metricDefinition(key)?.label }}</span><button type="button" class="grid h-8 w-8 place-items-center rounded-xl text-slate-400 opacity-70 transition hover:bg-white hover:text-emerald-700 group-hover:opacity-100" :aria-label="`更换${metricDefinition(key)?.label}`" @click.stop="toggleMetricPicker(index)">✎</button></span>
                         <strong class="mt-4 block text-2xl font-semibold tracking-tight text-slate-950">{{ formatMetric(key, dashboard.analytics.summary[key] ?? 0) }}</strong>
                         <span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold" :class="comparison(key) === null ? 'text-slate-400' : comparison(key)! >= 0 ? 'text-emerald-700' : 'text-rose-600'">环比 {{ comparisonLabel(key) }}</span>
+                        <div v-if="pickerSlot === index" class="absolute top-full z-30 mt-2 w-auto cursor-default rounded-3xl border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 max-lg:left-3 max-lg:right-3 lg:w-[460px]" :class="index < 2 ? 'lg:left-3' : 'lg:right-3'" @click.stop>
+                            <div class="flex items-center justify-between"><div><p class="text-sm font-semibold text-slate-900">选择指标</p><p class="mt-1 text-xs text-slate-400">第 {{ index + 1 }} 个指标</p></div><button type="button" class="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" @click="pickerSlot = null">×</button></div>
+                            <input v-model="metricSearch" type="search" placeholder="搜索指标" class="mt-4 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                            <div class="mt-3 max-h-80 space-y-1 overflow-y-auto">
+                                <button v-for="metric in filteredMetrics" :key="metric.key" type="button" class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left hover:bg-slate-50" @click="chooseMetric(metric.key)"><span><strong class="block text-sm text-slate-800">{{ metric.label }}</strong><small class="mt-1 block text-xs text-slate-400">{{ metric.description }}</small></span><span v-if="selectedMetrics[index] === metric.key" class="text-emerald-600">✓</span></button>
+                            </div>
+                        </div>
                     </article>
-                </div>
-                <div v-if="pickerSlot !== null" class="absolute right-4 top-full z-30 mt-2 w-[min(460px,calc(100vw-32px))] rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-900/15">
-                    <div class="flex items-center justify-between"><div><p class="text-sm font-semibold text-slate-900">选择指标</p><p class="mt-1 text-xs text-slate-400">第 {{ pickerSlot + 1 }} 个指标</p></div><button type="button" class="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" @click="pickerSlot = null">×</button></div>
-                    <input v-model="metricSearch" type="search" placeholder="搜索指标" class="mt-4 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
-                    <div class="mt-3 max-h-80 space-y-1 overflow-y-auto">
-                        <button v-for="metric in filteredMetrics" :key="metric.key" type="button" class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left hover:bg-slate-50" @click="chooseMetric(metric.key)"><span><strong class="block text-sm text-slate-800">{{ metric.label }}</strong><small class="mt-1 block text-xs text-slate-400">{{ metric.description }}</small></span><span v-if="selectedMetrics[pickerSlot] === metric.key" class="text-emerald-600">✓</span></button>
-                    </div>
                 </div>
             </section>
 
