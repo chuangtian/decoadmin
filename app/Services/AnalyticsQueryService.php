@@ -24,7 +24,9 @@ class AnalyticsQueryService
     {
         $period = $this->period($store, $filters);
         $version = $this->cacheVersion->current((int) $store->getKey());
-        $key = 'analytics:sales:'.$store->getKey().":v{$version}:".sha1(json_encode($period));
+        // Keep the response schema version in the cache key so older dashboard
+        // payloads cannot be reused after new metrics are introduced.
+        $key = 'analytics:sales:schema-v2:'.$store->getKey().":v{$version}:".sha1(json_encode($period));
 
         return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildSales($store, $period));
     }
@@ -69,7 +71,9 @@ class AnalyticsQueryService
     {
         $orders = $this->orders($store, $period);
         $summary = $this->summary(clone $orders);
-        $previous = $this->comparisonSummary($store, $period, 'previous');
+        $previousPeriod = $this->comparisonPeriod($period, 'previous');
+        $previousOrders = $this->orders($store, $previousPeriod);
+        $previous = $this->summary(clone $previousOrders);
         $year = $this->comparisonSummary($store, $period, 'year');
         $rankings = $this->productInsights($store, $period);
         $inventory = $this->inventoryInsights($store, $period);
@@ -89,6 +93,9 @@ class AnalyticsQueryService
                 'year_over_year' => $this->compare($summary, $year),
             ],
             'trend' => $this->trend($orders, $period),
+            'comparison_trend' => [
+                'previous' => $this->trend($previousOrders, $previousPeriod),
+            ],
             'customers' => $this->customerInsights($store, $period),
             'rankings' => $rankings,
             'inventory' => $inventory,
@@ -155,20 +162,41 @@ class AnalyticsQueryService
             $date = $period['local_start']->addDays($offset);
             $rows[$date->toDateString()] = [
                 'date' => $date->toDateString(), 'label' => $date->format('m/d'),
-                'sales' => 0.0, 'net_sales' => 0.0, 'refunds' => 0.0, 'orders' => 0,
+                'sales' => 0.0, 'net_sales' => 0.0, 'gross_sales' => 0.0,
+                'total_sales' => 0.0, 'refunds' => 0.0, 'discounts' => 0.0,
+                'taxes' => 0.0, 'shipping' => 0.0, 'orders' => 0,
+                'average_order_value' => 0.0,
             ];
         }
 
-        (clone $orders)->select(['id', 'created_at_shopify', 'net_sales', 'refund_total'])->orderBy('id')->lazyById(1000)
+        (clone $orders)->select([
+            'id', 'created_at_shopify', 'subtotal_price', 'discount_total', 'net_sales',
+            'refund_total', 'total_tax', 'shipping_total', 'total_price',
+        ])->orderBy('id')->lazyById(1000)
             ->each(function (Order $order) use (&$rows, $period): void {
                 $key = $order->created_at_shopify?->timezone($period['timezone'])->toDateString();
                 if ($key && isset($rows[$key])) {
                     $rows[$key]['orders']++;
                     $rows[$key]['net_sales'] += (float) $order->net_sales;
                     $rows[$key]['sales'] += (float) $order->net_sales;
+                    $rows[$key]['gross_sales'] += (float) $order->subtotal_price + (float) $order->discount_total;
+                    $rows[$key]['total_sales'] += (float) $order->total_price;
                     $rows[$key]['refunds'] += (float) $order->refund_total;
+                    $rows[$key]['discounts'] += (float) $order->discount_total;
+                    $rows[$key]['taxes'] += (float) $order->total_tax;
+                    $rows[$key]['shipping'] += (float) $order->shipping_total;
                 }
             });
+
+        foreach ($rows as &$row) {
+            $row['average_order_value'] = $row['orders'] > 0
+                ? round($row['net_sales'] / $row['orders'], 2)
+                : 0.0;
+            foreach (['sales', 'net_sales', 'gross_sales', 'total_sales', 'refunds', 'discounts', 'taxes', 'shipping'] as $metric) {
+                $row[$metric] = round($row[$metric], 2);
+            }
+        }
+        unset($row);
 
         return array_values($rows);
     }
@@ -277,7 +305,7 @@ class AnalyticsQueryService
     private function compare(array $summary, array $baseline): array
     {
         $metrics = [];
-        foreach (['net_sales', 'orders', 'average_order_value', 'refunds', 'discounts', 'taxes'] as $metric) {
+        foreach (['net_sales', 'gross_sales', 'total_sales', 'orders', 'average_order_value', 'refunds', 'discounts', 'taxes', 'shipping'] as $metric) {
             $current = (float) $summary[$metric];
             $before = (float) $baseline[$metric];
             $change = $current - $before;
@@ -293,11 +321,16 @@ class AnalyticsQueryService
     /** @param array<string, mixed> $period */
     private function comparisonSummary(Store $store, array $period, string $type): array
     {
+        return $this->summary($this->orders($store, $this->comparisonPeriod($period, $type)));
+    }
+
+    /** @param array<string, mixed> $period */
+    private function comparisonPeriod(array $period, string $type): array
+    {
         $localEnd = $type === 'year' ? $period['local_end']->subYear() : $period['local_start']->subDay()->endOfDay();
         $localStart = $type === 'year' ? $period['local_start']->subYear() : $localEnd->subDays($period['days'] - 1)->startOfDay();
-        $comparison = [...$period, 'local_start' => $localStart, 'local_end' => $localEnd, 'start' => $localStart->utc(), 'end' => $localEnd->utc()];
 
-        return $this->summary($this->orders($store, $comparison));
+        return [...$period, 'local_start' => $localStart, 'local_end' => $localEnd, 'start' => $localStart->utc(), 'end' => $localEnd->utc()];
     }
 
     /** @param int|array<string, mixed> $filters */

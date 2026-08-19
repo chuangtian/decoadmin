@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { computed, onMounted, ref } from 'vue';
+import DashboardDateRangePicker from '../../Components/Dashboard/DashboardDateRangePicker.vue';
+import DashboardMetricChart from '../../Components/Dashboard/DashboardMetricChart.vue';
 import TrendChart from '../../Components/Analytics/TrendChart.vue';
 import AppIcon from '../../Components/Layout/AppIcon.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
@@ -41,12 +43,63 @@ interface DashboardData {
         top_products: Array<{ product_id: number | null; title: string; units: number; revenue: number }>;
         low_stock: Array<{ id: number; sku: string; available: number }>;
     };
+    analytics: {
+        period: { days: number; from: string; to: string; timezone: string; include_test: boolean; include_cancelled: boolean };
+        summary: Record<string, number | string>;
+        comparisons: { previous: Record<string, { change_percent: number | null }> };
+        trend: Array<{ date: string; label: string; sales: number; orders: number; [key: string]: string | number }>;
+        comparison_trend: { previous: Array<{ date: string; label: string; sales: number; orders: number; [key: string]: string | number }> };
+    };
+    metric_definitions: Array<{ key: string; label: string; format: 'currency' | 'number'; description: string }>;
     store_comparison: { stores: Array<{ id: number; name: string; currency: string; orders: number; sales: number }> };
 }
 
 const props = defineProps<{ dashboard: DashboardData }>();
+const defaultMetrics = ['net_sales', 'orders', 'average_order_value', 'refunds'];
+const selectedMetrics = ref<string[]>([...defaultMetrics]);
+const activeSlot = ref(0);
+const pickerSlot = ref<number | null>(null);
+const metricSearch = ref('');
 
-const maxSales = computed(() => Math.max(...props.dashboard.sales_trend.map((item) => item.amount), 1));
+const storageKey = computed(() => `dashboard_metric_slots:${props.dashboard.store?.id ?? 'none'}`);
+const selectedMetric = computed(() => props.dashboard.metric_definitions.find((item) => item.key === selectedMetrics.value[activeSlot.value]) ?? props.dashboard.metric_definitions[0]);
+const filteredMetrics = computed(() => {
+    const needle = metricSearch.value.trim().toLowerCase();
+    return props.dashboard.metric_definitions.filter((item) => !needle || `${item.label} ${item.description} ${item.key}`.toLowerCase().includes(needle));
+});
+
+onMounted(() => {
+    try {
+        const saved = JSON.parse(localStorage.getItem(storageKey.value) || '[]');
+        const allowed = new Set(props.dashboard.metric_definitions.map((item) => item.key));
+        if (Array.isArray(saved) && saved.length === 4 && saved.every((key) => allowed.has(key))) selectedMetrics.value = saved;
+    } catch {
+        selectedMetrics.value = [...defaultMetrics];
+    }
+});
+
+const metricDefinition = (key: string) => props.dashboard.metric_definitions.find((item) => item.key === key) ?? props.dashboard.metric_definitions[0];
+const formatMetric = (key: string, value: string | number) => metricDefinition(key)?.format === 'currency' ? money(value) : number(Number(value || 0));
+const comparison = (key: string) => props.dashboard.analytics.comparisons.previous[key]?.change_percent ?? null;
+const comparisonLabel = (key: string) => comparison(key) === null ? '暂无对比' : `${comparison(key)! > 0 ? '+' : ''}${comparison(key)!.toFixed(1)}%`;
+const rangeText = (points: Array<{ date: string }>, fallback: string) => points.length ? `${shortDate(points[0].date)}–${shortDate(points[points.length - 1].date)}` : fallback;
+const shortDate = (value: string) => { const [, month, day] = value.split('-'); return `${Number(month)}月${Number(day)}日`; };
+
+const chooseMetric = (key: string) => {
+    if (pickerSlot.value === null) return;
+    selectedMetrics.value[pickerSlot.value] = key;
+    activeSlot.value = pickerSlot.value;
+    selectedMetrics.value = [...selectedMetrics.value];
+    localStorage.setItem(storageKey.value, JSON.stringify(selectedMetrics.value));
+    pickerSlot.value = null;
+    metricSearch.value = '';
+};
+
+const applyPeriod = (filters: { days: number; date_from: string; date_to: string }) => router.get('/dashboard', filters, {
+    preserveState: true,
+    preserveScroll: true,
+    replace: true,
+});
 
 const money = (value: number | string, currency?: string) => new Intl.NumberFormat('zh-CN', {
     style: 'currency',
@@ -67,18 +120,6 @@ const financialLabel = (status: string | null) => ({
 <template>
     <Head title="工作台" />
     <AppLayout :breadcrumbs="[{ label: '工作台' }]">
-        <section class="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-                <p class="text-sm font-semibold text-emerald-700">运营概览</p>
-                <h1 class="mt-1 text-3xl font-semibold tracking-[-0.03em] text-slate-950">{{ dashboard.store?.name ?? '工作台' }}</h1>
-                <p class="mt-2 text-sm text-slate-500">订单、销售、商品、客户、库存及运行异常均来自当前授权店铺。</p>
-            </div>
-            <div v-if="dashboard.store" class="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <p class="text-xs font-semibold text-slate-400">SHOPIFY 店铺</p>
-                <p class="mt-1 font-mono text-sm font-semibold text-slate-800">{{ dashboard.store.shopify_domain }}</p>
-            </div>
-        </section>
-
         <section v-if="!dashboard.store" class="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
             <AppIcon name="stores" :size="34" class="mx-auto text-slate-300" />
             <h2 class="mt-4 text-lg font-semibold text-slate-900">请先选择店铺</h2>
@@ -86,37 +127,34 @@ const financialLabel = (status: string | null) => ({
         </section>
 
         <template v-else>
-            <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <article v-for="card in [
-                    { label: '累计销售额', value: money(dashboard.summary.sales), detail: `今日 ${money(dashboard.summary.sales_today)}`, icon: 'analytics' },
-                    { label: '订单', value: number(dashboard.summary.orders), detail: `今日 ${dashboard.summary.orders_today} 单`, icon: 'orders' },
-                    { label: '商品', value: number(dashboard.summary.products), detail: '已同步商品', icon: 'products' },
-                    { label: '客户', value: number(dashboard.summary.customers), detail: '已同步客户', icon: 'customers' },
-                ]" :key="card.label" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div class="flex items-start justify-between">
-                        <p class="text-sm font-semibold text-slate-500">{{ card.label }}</p>
-                        <span class="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-700"><AppIcon :name="card.icon" :size="20" /></span>
+            <section class="relative rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div class="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{{ dashboard.store.name }}</p><h1 class="mt-1 text-xl font-semibold text-slate-950">经营数据概览</h1></div>
+                    <DashboardDateRangePicker :period="dashboard.analytics.period" @apply="applyPeriod" />
+                </div>
+                <div class="grid divide-y divide-slate-100 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+                    <article v-for="(key,index) in selectedMetrics" :key="`${index}-${key}`" role="button" tabindex="0" class="group relative min-h-32 cursor-pointer p-5 text-left transition hover:bg-slate-50" :class="activeSlot === index ? 'bg-emerald-50/50' : ''" @click="activeSlot = index" @keydown.enter="activeSlot = index">
+                        <span class="flex items-start justify-between gap-3"><span class="text-sm font-semibold text-slate-500">{{ metricDefinition(key)?.label }}</span><button type="button" class="grid h-8 w-8 place-items-center rounded-xl text-slate-400 opacity-70 transition hover:bg-white hover:text-emerald-700 group-hover:opacity-100" :aria-label="`更换${metricDefinition(key)?.label}`" @click.stop="pickerSlot = pickerSlot === index ? null : index">✎</button></span>
+                        <strong class="mt-4 block text-2xl font-semibold tracking-tight text-slate-950">{{ formatMetric(key, dashboard.analytics.summary[key] ?? 0) }}</strong>
+                        <span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold" :class="comparison(key) === null ? 'text-slate-400' : comparison(key)! >= 0 ? 'text-emerald-700' : 'text-rose-600'">环比 {{ comparisonLabel(key) }}</span>
+                    </article>
+                </div>
+                <div v-if="pickerSlot !== null" class="absolute right-4 top-full z-30 mt-2 w-[min(460px,calc(100vw-32px))] rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-900/15">
+                    <div class="flex items-center justify-between"><div><p class="text-sm font-semibold text-slate-900">选择指标</p><p class="mt-1 text-xs text-slate-400">第 {{ pickerSlot + 1 }} 个指标</p></div><button type="button" class="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" @click="pickerSlot = null">×</button></div>
+                    <input v-model="metricSearch" type="search" placeholder="搜索指标" class="mt-4 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    <div class="mt-3 max-h-80 space-y-1 overflow-y-auto">
+                        <button v-for="metric in filteredMetrics" :key="metric.key" type="button" class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left hover:bg-slate-50" @click="chooseMetric(metric.key)"><span><strong class="block text-sm text-slate-800">{{ metric.label }}</strong><small class="mt-1 block text-xs text-slate-400">{{ metric.description }}</small></span><span v-if="selectedMetrics[pickerSlot] === metric.key" class="text-emerald-600">✓</span></button>
                     </div>
-                    <p class="mt-5 text-2xl font-semibold tracking-tight text-slate-950">{{ card.value }}</p>
-                    <p class="mt-1 text-xs text-slate-400">{{ card.detail }}</p>
-                </article>
+                </div>
             </section>
+
+            <DashboardMetricChart class="mt-5" :current="dashboard.analytics.trend" :previous="dashboard.analytics.comparison_trend.previous" :metric="selectedMetric.key" :label="selectedMetric.label" :format="selectedMetric.format" :currency="dashboard.store.currency" :value="dashboard.analytics.summary[selectedMetric.key] ?? 0" :current-range="rangeText(dashboard.analytics.trend, '当前周期')" :previous-range="rangeText(dashboard.analytics.comparison_trend.previous, '上一周期')" />
 
             <section class="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
                 <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div class="flex items-center justify-between">
-                        <div><p class="text-xs font-semibold tracking-wider text-slate-400">最近 7 天</p><h2 class="mt-1 text-lg font-semibold text-slate-900">销售趋势</h2></div>
-                        <Link href="/orders" class="text-sm font-semibold text-emerald-700">查看订单</Link>
-                    </div>
-                    <div class="mt-8 flex h-56 items-end gap-3">
-                        <div v-for="item in dashboard.sales_trend" :key="item.date" class="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
-                            <span class="text-[10px] font-semibold text-slate-400">{{ item.amount ? money(item.amount) : '' }}</span>
-                            <div class="w-full rounded-t-xl bg-emerald-500/85 transition-all" :style="{ height: `${Math.max((item.amount / maxSales) * 150, item.orders ? 14 : 4)}px` }" />
-                            <span class="text-xs text-slate-500">{{ item.label }}</span>
-                        </div>
-                    </div>
+                    <div class="flex items-center justify-between"><div><p class="text-xs font-semibold tracking-wider text-slate-400">当前周期</p><h2 class="mt-1 text-lg font-semibold text-slate-900">订单趋势</h2></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">完整分析</Link></div>
+                    <TrendChart class="mt-6" :points="dashboard.analytics.trend" metric="orders" color="bg-blue-500" />
                 </article>
-
                 <article class="rounded-3xl bg-[#0d1828] p-6 text-white shadow-xl shadow-slate-900/8">
                     <p class="text-xs font-semibold tracking-wider text-slate-500">运营状态</p>
                     <div class="mt-5 flex items-center justify-between border-b border-white/10 pb-5">
