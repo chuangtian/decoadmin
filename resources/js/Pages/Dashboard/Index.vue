@@ -3,7 +3,6 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, onMounted, ref } from 'vue';
 import DashboardDateRangePicker from '../../Components/Dashboard/DashboardDateRangePicker.vue';
 import DashboardMetricChart from '../../Components/Dashboard/DashboardMetricChart.vue';
-import TrendChart from '../../Components/Analytics/TrendChart.vue';
 import AppIcon from '../../Components/Layout/AppIcon.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -150,11 +149,7 @@ const financialLabel = (status: string | null) => ({
 
             <DashboardMetricChart class="mt-5" :current="dashboard.analytics.trend" :previous="dashboard.analytics.comparison_trend.previous" :metric="selectedMetric.key" :label="selectedMetric.label" :format="selectedMetric.format" :currency="dashboard.store.currency" :value="dashboard.analytics.summary[selectedMetric.key] ?? 0" :current-range="rangeText(dashboard.analytics.trend, '当前周期')" :previous-range="rangeText(dashboard.analytics.comparison_trend.previous, '上一周期')" />
 
-            <section class="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
-                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div class="flex items-center justify-between"><div><p class="text-xs font-semibold tracking-wider text-slate-400">当前周期</p><h2 class="mt-1 text-lg font-semibold text-slate-900">订单趋势</h2></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">完整分析</Link></div>
-                    <TrendChart class="mt-6" :points="dashboard.analytics.trend" metric="orders" color="bg-blue-500" />
-                </article>
+            <section class="mt-5 grid gap-5 xl:grid-cols-2">
                 <article class="rounded-3xl bg-[#0d1828] p-6 text-white shadow-xl shadow-slate-900/8">
                     <p class="text-xs font-semibold tracking-wider text-slate-500">运营状态</p>
                     <div class="mt-5 flex items-center justify-between border-b border-white/10 pb-5">
@@ -168,13 +163,6 @@ const financialLabel = (status: string | null) => ({
                         <div class="flex items-center justify-between py-4"><span class="text-sm text-slate-300">24 小时 Webhook 失败</span><strong :class="dashboard.operations.failed_webhooks_24h ? 'text-rose-300' : 'text-emerald-300'">{{ dashboard.operations.failed_webhooks_24h }}</strong></div>
                     </div>
                     <p class="mt-4 text-xs text-slate-500">最近同步：{{ dateTime(dashboard.operations.last_sync_at) }}</p>
-                </article>
-            </section>
-
-            <section class="mt-5 grid gap-5 xl:grid-cols-2">
-                <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div class="flex items-start justify-between"><div><p class="text-xs font-semibold tracking-wider text-slate-400">最近 30 天</p><h2 class="mt-1 text-lg font-semibold text-slate-900">订单趋势</h2></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">完整分析</Link></div>
-                    <TrendChart class="mt-6" :points="dashboard.analytics_30d.trend" metric="orders" color="bg-blue-500" />
                 </article>
                 <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                     <div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><h2 class="font-semibold text-slate-900">热销商品</h2><p class="mt-1 text-xs text-slate-400">最近 30 天</p></div><Link href="/analytics/sales" class="text-sm font-semibold text-emerald-700">查看全部</Link></div>
