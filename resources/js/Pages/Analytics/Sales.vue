@@ -23,6 +23,7 @@ const props = defineProps<{
 }>();
 
 const money = (value: number | string) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: props.store.currency }).format(Number(value || 0));
+const comparisonPercent = (group: Record<string, Comparison>, key: string) => group[key]?.change_percent ?? null;
 const percent = (value: number | null) => value === null ? '暂无基期' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock: '低库存', slow_moving: '滞销风险', healthy: '正常' };
 const cards = [
@@ -47,8 +48,8 @@ const cards = [
                     <p class="text-sm font-semibold text-slate-500">{{ label }}</p>
                     <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ isMoney ? money(analytics.summary[key]) : Number(analytics.summary[key]).toLocaleString('zh-CN') }}</p>
                     <div class="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-                        <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">环比 {{ percent(analytics.comparisons.previous[key].change_percent) }}</span>
-                        <span class="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">同比 {{ percent(analytics.comparisons.year_over_year[key].change_percent) }}</span>
+                        <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">环比 {{ percent(comparisonPercent(analytics.comparisons.previous, key)) }}</span>
+                        <span class="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">同比 {{ percent(comparisonPercent(analytics.comparisons.year_over_year, key)) }}</span>
                     </div>
                 </article>
             </section>
