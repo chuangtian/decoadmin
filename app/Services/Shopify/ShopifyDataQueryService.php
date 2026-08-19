@@ -4,6 +4,7 @@ namespace App\Services\Shopify;
 
 use App\Models\Customer;
 use App\Models\InventoryItem;
+use App\Models\Location;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Store;
@@ -40,7 +41,7 @@ class ShopifyDataQueryService
     }
 
     /** @return LengthAwarePaginator<Order> */
-    public function orders(Store $store, ?string $search, ?string $financialStatus): LengthAwarePaginator
+    public function orders(Store $store, ?string $search, ?string $financialStatus, ?string $fulfillmentStatus = null): LengthAwarePaginator
     {
         return Order::query()
             ->forOrganization($store->organization_id)
@@ -49,6 +50,9 @@ class ShopifyDataQueryService
                 ->where('order_number', 'like', "%{$search}%")
                 ->orWhere('email', 'like', "%{$search}%")))
             ->when($financialStatus, fn ($query) => $query->where('financial_status', $financialStatus))
+            ->when($fulfillmentStatus === 'unfulfilled', fn ($query) => $query
+                ->where(fn ($query) => $query->whereNull('fulfillment_status')->orWhere('fulfillment_status', 'unfulfilled')))
+            ->when($fulfillmentStatus && $fulfillmentStatus !== 'unfulfilled', fn ($query) => $query->where('fulfillment_status', $fulfillmentStatus))
             ->withCount('items')
             ->latest('created_at_shopify')
             ->paginate(25)
@@ -115,6 +119,31 @@ class ShopifyDataQueryService
             ->forOrganization($store->organization_id)
             ->forStore($store)
             ->with(['variant.product:id,title,handle', 'levels.location'])
+            ->findOrFail($id);
+    }
+
+    /** @return LengthAwarePaginator<Location> */
+    public function locations(Store $store, ?string $search, ?bool $active): LengthAwarePaginator
+    {
+        return Location::query()
+            ->forOrganization($store->organization_id)
+            ->forStore($store)
+            ->when($search, fn ($query) => $query->where('name', 'like', "%{$search}%"))
+            ->when($active !== null, fn ($query) => $query->where('active', $active))
+            ->withCount('inventoryLevels')
+            ->withSum('inventoryLevels as available_total', 'available')
+            ->orderByDesc('active')
+            ->orderBy('name')
+            ->paginate(25)
+            ->withQueryString();
+    }
+
+    public function location(Store $store, int $id): Location
+    {
+        return Location::query()
+            ->forOrganization($store->organization_id)
+            ->forStore($store)
+            ->with(['inventoryLevels.inventoryItem.variant.product'])
             ->findOrFail($id);
     }
 }

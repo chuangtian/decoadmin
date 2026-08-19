@@ -15,6 +15,12 @@ Schedule::call([SystemStatusService::class, 'recordSchedulerHeartbeat'])
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('shopify:scan-alerts')
+    ->name('shopify:scan-operational-alerts')
+    ->everyFiveMinutes()
+    ->onOneServer()
+    ->withoutOverlapping(10);
+
 if (config('shopify.scheduled_sync.enabled')) {
     Schedule::command('shopify:sync-reconcile')
         ->name('shopify:daily-sync-reconciliation')

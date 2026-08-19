@@ -27,6 +27,7 @@ export const menu: MenuItem[] = [
             { name: '商品管理', route: '/products', icon: 'products', permission: 'products.view' },
             { name: '客户管理', route: '/customers', icon: 'customers', permission: 'customers.view' },
             { name: '库存管理', route: '/inventory', icon: 'inventory', permission: 'inventory.view' },
+            { name: '地点管理', route: '/locations', icon: 'stores', permission: 'inventory.view' },
         ],
     },
     {
@@ -58,6 +59,7 @@ export const menu: MenuItem[] = [
             { name: '应用管理', route: '/apps', icon: 'apps', permission: 'apps.view' },
             { name: '数据同步', route: '/sync', icon: 'sync', permission: 'sync.view' },
             { name: 'Webhook', route: '/webhooks', icon: 'webhooks', permission: 'webhooks.view' },
+            { name: '异常告警', route: '/alerts', icon: 'status', permission: 'alerts.view' },
             { name: 'API 状态', route: '/system/api-status', icon: 'status', permission: 'system.health.view', comingSoon: true },
         ],
     },
