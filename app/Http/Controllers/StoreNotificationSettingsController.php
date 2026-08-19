@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ToggleStoreNotificationChannelRequest;
 use App\Http\Requests\UpdateStoreFeishuSettingsRequest;
 use App\Http\Requests\UpdateStoreMailSettingsRequest;
 use App\Http\Requests\UpdateStoreNotificationSettingsRequest;
@@ -37,6 +38,15 @@ class StoreNotificationSettingsController extends Controller
         return back()->with('success', '店铺邮箱设置已保存。');
     }
 
+    public function toggleMail(ToggleStoreNotificationChannelRequest $request, CurrentStore $currentStore, StoreNotificationSettingsService $settings): RedirectResponse
+    {
+        $store = $currentStore->require();
+        $this->authorize('update', $store);
+        $settings->toggleMail($store, $request->boolean('enabled'), $request->user());
+
+        return back()->with('success', $request->boolean('enabled') ? '店铺邮箱已启用。' : '店铺邮箱已停用。');
+    }
+
     public function feishu(Request $request, CurrentStore $currentStore, StoreNotificationSettingsService $settings): Response
     {
         $store = $currentStore->require();
@@ -46,6 +56,7 @@ class StoreNotificationSettingsController extends Controller
         return Inertia::render('Stores/Settings/Feishu', [
             'store' => $this->storeSummary($store),
             'settings' => $settings->feishuForFrontend($store, $canUpdate),
+            'tableSettings' => $settings->feishuTableForFrontend($store, $canUpdate),
             'canUpdate' => $canUpdate,
         ]);
     }
@@ -57,6 +68,15 @@ class StoreNotificationSettingsController extends Controller
         $settings->updateFeishu($store, $request->validated(), $request->user());
 
         return back()->with('success', '店铺飞书设置已保存。');
+    }
+
+    public function toggleFeishu(ToggleStoreNotificationChannelRequest $request, CurrentStore $currentStore, StoreNotificationSettingsService $settings): RedirectResponse
+    {
+        $store = $currentStore->require();
+        $this->authorize('update', $store);
+        $settings->toggleFeishu($store, $request->boolean('enabled'), $request->user());
+
+        return back()->with('success', $request->boolean('enabled') ? '飞书机器人已启用。' : '飞书机器人已停用。');
     }
 
     public function show(Store $store): RedirectResponse

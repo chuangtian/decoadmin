@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'feishu_table' => [
+        'app_id' => env('FEISHU_APP_ID'),
+        'app_secret' => env('FEISHU_APP_SECRET'),
+    ],
+
 ];

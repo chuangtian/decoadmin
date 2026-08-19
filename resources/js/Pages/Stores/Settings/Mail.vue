@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import SecretSettingInput from '../../../Components/Settings/SecretSettingInput.vue';
 import StoreSettingsHeader from '../../../Components/Stores/StoreSettingsHeader.vue';
 import AppLayout from '../../../Layouts/AppLayout.vue';
@@ -34,7 +35,18 @@ const form = useForm({
     notification_email: props.settings.notification_email,
 });
 const inputClass = 'mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50';
+const toggleSaving = ref(false);
 const save = () => form.put('/store-settings/mail', { preserveScroll: true });
+const toggleMail = (event: Event) => {
+    const enabled = (event.target as HTMLInputElement).checked;
+    form.mail_enabled = enabled;
+    toggleSaving.value = true;
+    router.patch('/store-settings/mail/enabled', { enabled }, {
+        preserveScroll: true,
+        onError: () => { form.mail_enabled = !enabled; },
+        onFinish: () => { toggleSaving.value = false; },
+    });
+};
 </script>
 
 <template>
@@ -57,7 +69,7 @@ const save = () => form.put('/store-settings/mail', { preserveScroll: true });
                             <p class="mt-1 text-xs leading-5 text-emerald-700">启用并配置完成后，当前店铺的异常告警将从此邮箱发出。</p>
                         </div>
                         <label class="relative inline-flex shrink-0 cursor-pointer items-center">
-                            <input v-model="form.mail_enabled" :disabled="!canUpdate" type="checkbox" class="peer sr-only" />
+                            <input v-model="form.mail_enabled" :disabled="!canUpdate || toggleSaving" type="checkbox" class="peer sr-only" @change="toggleMail($event)" />
                             <span class="h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-emerald-500 peer-disabled:opacity-50 after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
                         </label>
                     </div>

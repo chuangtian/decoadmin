@@ -7,6 +7,7 @@ use App\Models\Store;
 use App\Models\StoreNotificationSetting;
 use App\Models\User;
 use Illuminate\Support\Arr;
+use Illuminate\Validation\ValidationException;
 
 class StoreNotificationSettingsService
 {
@@ -30,6 +31,19 @@ class StoreNotificationSettingsService
             'feishu_enabled', 'feishu_webhook_url', 'feishu_webhook_configured',
             'feishu_secret', 'feishu_secret_configured',
         ]);
+    }
+
+    public function feishuTableForFrontend(Store $store, bool $includeSecrets): array
+    {
+        $appId = (string) config('services.feishu_table.app_id', '');
+        $appSecret = (string) config('services.feishu_table.app_secret', '');
+
+        return [
+            'feishu_table_app_id' => $appId,
+            'feishu_table_app_secret' => $includeSecrets ? $appSecret : '',
+            'feishu_table_app_secret_configured' => filled($appSecret),
+            'feishu_table_configured' => filled($appId) && filled($appSecret),
+        ];
     }
 
     public function forFrontend(Store $store, bool $includeSecrets): array
@@ -69,6 +83,26 @@ class StoreNotificationSettingsService
     public function updateFeishu(Store $store, array $values, User $actor): StoreNotificationSetting
     {
         return $this->persist($store, $values, $actor, 'store_feishu_settings_updated');
+    }
+
+    public function toggleMail(Store $store, bool $enabled, User $actor): StoreNotificationSetting
+    {
+        $setting = $store->notificationSetting;
+        if ($enabled && (! $setting || blank($setting->mail_host) || blank($setting->mail_password) || blank($setting->mail_from_address) || $setting->mail_recipients === [])) {
+            throw ValidationException::withMessages(['enabled' => '请先完整配置 SMTP、邮箱密码、发件邮箱和通知邮箱。']);
+        }
+
+        return $this->persist($store, ['mail_enabled' => $enabled], $actor, 'store_mail_channel_toggled');
+    }
+
+    public function toggleFeishu(Store $store, bool $enabled, User $actor): StoreNotificationSetting
+    {
+        $setting = $store->notificationSetting;
+        if ($enabled && (! $setting || blank($setting->feishu_webhook_url))) {
+            throw ValidationException::withMessages(['enabled' => '请先配置飞书机器人 Webhook 地址。']);
+        }
+
+        return $this->persist($store, ['feishu_enabled' => $enabled], $actor, 'store_feishu_channel_toggled');
     }
 
     private function persist(Store $store, array $values, User $actor, string $action): StoreNotificationSetting

@@ -158,8 +158,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
 
     Route::get('/store-settings/mail', [StoreNotificationSettingsController::class, 'mail'])->middleware('permission:store.view')->name('store-settings.mail');
     Route::put('/store-settings/mail', [StoreNotificationSettingsController::class, 'updateMail'])->middleware('permission:store.update')->name('store-settings.mail.update');
+    Route::patch('/store-settings/mail/enabled', [StoreNotificationSettingsController::class, 'toggleMail'])->middleware('permission:store.update')->name('store-settings.mail.toggle');
     Route::get('/store-settings/feishu', [StoreNotificationSettingsController::class, 'feishu'])->middleware('permission:store.view')->name('store-settings.feishu');
     Route::put('/store-settings/feishu', [StoreNotificationSettingsController::class, 'updateFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.update');
+    Route::patch('/store-settings/feishu/enabled', [StoreNotificationSettingsController::class, 'toggleFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.toggle');
 
     Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
     Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');

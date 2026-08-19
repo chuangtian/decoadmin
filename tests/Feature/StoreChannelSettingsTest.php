@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -20,6 +21,8 @@ class StoreChannelSettingsTest extends TestCase
 
     public function test_store_settings_pages_use_the_current_authorized_store(): void
     {
+        Config::set('services.feishu_table.app_id', 'cli_shared123');
+        Config::set('services.feishu_table.app_secret', 'shared-table-secret');
         [$user, $organization, $store] = $this->context('organization-admin');
         $secondStore = $this->addStore($user, $organization, 'EU Store', 'settings-eu.myshopify.com');
         $this->settings($store, ['mail_recipients' => ['us@example.com']]);
@@ -42,7 +45,10 @@ class StoreChannelSettingsTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Stores/Settings/Feishu')
                 ->where('store.id', $secondStore->id)
-                ->where('settings.feishu_webhook_configured', true));
+                ->where('settings.feishu_webhook_configured', true)
+                ->where('tableSettings.feishu_table_app_id', 'cli_shared123')
+                ->where('tableSettings.feishu_table_app_secret', 'shared-table-secret')
+                ->where('tableSettings.feishu_table_configured', true));
 
         $this->actingAs($user)->withSession($session)->get(route('stores.notifications.show', $secondStore))
             ->assertRedirect(route('store-settings.mail'));
@@ -92,6 +98,8 @@ class StoreChannelSettingsTest extends TestCase
 
     public function test_viewer_can_view_but_cannot_change_store_channel_settings_or_receive_secrets(): void
     {
+        Config::set('services.feishu_table.app_id', 'cli_shared123');
+        Config::set('services.feishu_table.app_secret', 'shared-table-secret');
         [$user, $organization, $store] = $this->context('viewer');
         $this->settings($store, [
             'mail_password' => 'hidden-mail-secret',
@@ -112,6 +120,47 @@ class StoreChannelSettingsTest extends TestCase
             'feishu_webhook_url' => '',
             'feishu_secret' => '',
         ])->assertForbidden();
+
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.feishu'))
+            ->assertOk()
+            ->assertDontSee('shared-table-secret')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('tableSettings.feishu_table_app_id', 'cli_shared123')
+                ->where('tableSettings.feishu_table_app_secret', '')
+                ->where('tableSettings.feishu_table_app_secret_configured', true));
+
+        $this->actingAs($user)->withSession($session)->patch(route('store-settings.feishu.toggle'), [
+            'enabled' => true,
+        ])->assertForbidden();
+    }
+
+    public function test_mail_and_feishu_enable_switches_save_immediately(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $this->settings($store, [
+            'mail_enabled' => false,
+            'mail_host' => 'smtp.example.com',
+            'mail_password' => 'mail-secret',
+            'mail_from_address' => 'store@example.com',
+            'mail_recipients' => ['notify@example.com'],
+            'feishu_enabled' => false,
+            'feishu_webhook_url' => 'https://open.feishu.cn/open-apis/bot/v2/hook/private-token',
+        ]);
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)->withSession($session)->patch(route('store-settings.mail.toggle'), [
+            'enabled' => true,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->actingAs($user)->withSession($session)->patch(route('store-settings.feishu.toggle'), [
+            'enabled' => true,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $setting = $store->notificationSetting()->firstOrFail();
+        $this->assertTrue($setting->mail_enabled);
+        $this->assertTrue($setting->feishu_enabled);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'store_mail_channel_toggled']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'store_feishu_channel_toggled']);
     }
 
     private function context(string $roleSlug): array
