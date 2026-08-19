@@ -14,7 +14,7 @@ export const menu: MenuItem[] = [
     {
         name: '工作台',
         icon: 'dashboard',
-        section: 'Shopify 运营',
+        section: '店铺运营',
         children: [
             { name: '概览', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
         ],
@@ -45,7 +45,6 @@ export const menu: MenuItem[] = [
         icon: 'analytics',
         children: [
             { name: '销售分析', route: '/analytics/sales', icon: 'analytics', permission: 'orders.view' },
-            { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },
             { name: '报表中心', route: '/reports', icon: 'reports', permission: 'orders.export', comingSoon: true },
         ],
     },
@@ -70,6 +69,7 @@ export const menu: MenuItem[] = [
         sectionDivider: true,
         children: [
             { name: '店铺管理', route: '/stores', icon: 'stores', permission: 'store.view' },
+            { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },
             { name: '应用管理', route: '/apps', icon: 'apps', permission: 'apps.view' },
             { name: '数据同步', route: '/sync', icon: 'sync', permission: 'sync.view' },
             { name: 'Webhook', route: '/webhooks', icon: 'webhooks', permission: 'webhooks.view' },

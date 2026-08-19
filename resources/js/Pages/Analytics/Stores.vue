@@ -28,7 +28,7 @@ const changeDays = (event: Event) => router.get(
 
 <template>
     <Head title="店铺对比" />
-    <AppLayout :breadcrumbs="[{ label: '数据分析' }, { label: '店铺对比' }]">
+    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '店铺对比' }]">
         <div class="mx-auto max-w-7xl space-y-6">
             <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
