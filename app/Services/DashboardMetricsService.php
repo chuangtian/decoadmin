@@ -44,11 +44,12 @@ class DashboardMetricsService
     {
         $today = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfDay()->utc();
         $weekStart = $today->subDays(6);
-        $orders = Order::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id);
+        $orders = Order::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+            ->where('is_test', false)->whereNull('cancelled_at');
 
         $trendRows = (clone $orders)
             ->where('created_at_shopify', '>=', $weekStart)
-            ->selectRaw('DATE(created_at_shopify) as day, COUNT(*) as orders_count, COALESCE(SUM(total_price), 0) as sales_total')
+            ->selectRaw('DATE(created_at_shopify) as day, COUNT(*) as orders_count, COALESCE(SUM(net_sales), 0) as sales_total')
             ->groupByRaw('DATE(created_at_shopify)')
             ->orderBy('day')
             ->get()
@@ -66,9 +67,9 @@ class DashboardMetricsService
             ],
             'summary' => [
                 'orders' => (clone $orders)->count(),
-                'sales' => (string) (clone $orders)->sum('total_price'),
+                'sales' => (string) (clone $orders)->sum('net_sales'),
                 'orders_today' => (clone $orders)->where('created_at_shopify', '>=', $today)->count(),
-                'sales_today' => (string) (clone $orders)->where('created_at_shopify', '>=', $today)->sum('total_price'),
+                'sales_today' => (string) (clone $orders)->where('created_at_shopify', '>=', $today)->sum('net_sales'),
                 'products' => Product::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->count(),
                 'customers' => Customer::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->count(),
                 'inventory_available' => (int) InventoryItem::query()

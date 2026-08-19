@@ -19,7 +19,7 @@ class OrderSyncHandler implements SyncHandlerInterface
     private const LINE_ITEM_PAGE_SIZE = 100;
 
     /** @var list<string> */
-    private const REQUIRED_SCOPES = ['read_orders', 'read_products'];
+    private const REQUIRED_SCOPES = ['read_orders', 'read_products', 'read_customers'];
 
     private const ORDERS_QUERY = <<<'GRAPHQL'
         query SyncOrders($first: Int!, $after: String, $lineItemsFirst: Int!, $query: String) {
@@ -31,11 +31,18 @@ class OrderSyncHandler implements SyncHandlerInterface
               displayFinancialStatus
               displayFulfillmentStatus
               currencyCode
-              totalPriceSet { shopMoney { amount currencyCode } }
+              currentTotalPriceSet { shopMoney { amount currencyCode } }
               subtotalPriceSet { shopMoney { amount currencyCode } }
-              totalTaxSet { shopMoney { amount currencyCode } }
+              currentSubtotalPriceSet { shopMoney { amount currencyCode } }
+              currentTotalDiscountsSet { shopMoney { amount currencyCode } }
+              totalRefundedSet { shopMoney { amount currencyCode } }
+              currentShippingPriceSet { shopMoney { amount currencyCode } }
+              currentTotalTaxSet { shopMoney { amount currencyCode } }
+              test
               processedAt
+              cancelledAt
               createdAt
+              customer { id }
               lineItems(first: $lineItemsFirst) {
                 nodes {
                   id

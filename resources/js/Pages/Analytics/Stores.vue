@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import DateRangeFilters from '../../Components/Analytics/DateRangeFilters.vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -14,16 +16,11 @@ interface StoreComparison {
 
 const props = defineProps<{
     organization: { id: number; name: string };
-    comparison: { period: { days: number }; stores: StoreComparison[] };
+    comparison: { period: { days: number; from: string; to: string; include_test: boolean; include_cancelled: boolean }; stores: StoreComparison[] };
 }>();
 
-const maxSales = Math.max(...props.comparison.stores.map((store) => store.sales), 1);
+const maxSales = computed(() => Object.fromEntries([...new Set(props.comparison.stores.map((store) => store.currency))].map((currency) => [currency, Math.max(...props.comparison.stores.filter((store) => store.currency === currency).map((store) => store.sales), 1)])));
 const money = (value: number, currency: string) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(value);
-const changeDays = (event: Event) => router.get(
-    '/analytics/stores',
-    { days: (event.target as HTMLSelectElement).value },
-    { preserveState: true },
-);
 </script>
 
 <template>
@@ -36,12 +33,9 @@ const changeDays = (event: Event) => router.get(
                     <h1 class="mt-1 text-3xl font-semibold text-slate-950">授权店铺对比</h1>
                     <p class="mt-2 text-sm text-slate-500">仅比较当前用户有权访问的店铺。</p>
                 </div>
-                <select :value="comparison.period.days" class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold shadow-sm" @change="changeDays">
-                    <option :value="7">最近 7 天</option>
-                    <option :value="30">最近 30 天</option>
-                    <option :value="90">最近 90 天</option>
-                </select>
             </header>
+
+            <DateRangeFilters v-if="comparison.period.days" action="/analytics/stores" :period="comparison.period" />
 
             <section v-if="comparison.stores.length" class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="hidden grid-cols-[minmax(180px,1fr)_2fr_140px_160px] gap-5 border-b border-slate-100 bg-slate-50 px-6 py-4 text-xs font-semibold text-slate-500 md:grid">
@@ -59,7 +53,7 @@ const changeDays = (event: Event) => router.get(
                         <div>
                             <p class="mb-2 text-xs font-semibold text-slate-500 md:hidden">销售表现</p>
                             <div class="h-3 overflow-hidden rounded-full bg-slate-100">
-                                <div class="h-full rounded-full bg-emerald-500" :style="{ width: `${Math.max((store.sales / maxSales) * 100, store.sales ? 3 : 0)}%` }" />
+                                <div class="h-full rounded-full bg-emerald-500" :style="{ width: `${Math.max((store.sales / maxSales[store.currency]) * 100, store.sales ? 3 : 0)}%` }" />
                             </div>
                             <p class="mt-2 text-sm font-semibold text-slate-800">{{ money(store.sales, store.currency) }}</p>
                         </div>

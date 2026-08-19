@@ -35,15 +35,22 @@ class ShopifyOrderDataService
 
             $order->fill([
                 'organization_id' => $store->organization_id,
+                'shopify_customer_id' => $this->nullableNumericId(data_get($orderNode, 'customer.id'), 'Customer'),
                 'order_number' => $this->requiredString($orderNode, 'name'),
                 'email' => $this->nullableString($orderNode['email'] ?? null),
                 'financial_status' => $this->normalizedStatus($orderNode['displayFinancialStatus'] ?? null),
                 'fulfillment_status' => $this->normalizedStatus($orderNode['displayFulfillmentStatus'] ?? null),
                 'currency' => strtoupper($currency),
-                'total_price' => $this->money($orderNode, 'totalPriceSet', $currency),
+                'total_price' => $this->moneyWithFallback($orderNode, 'currentTotalPriceSet', 'totalPriceSet', $currency),
                 'subtotal_price' => $this->money($orderNode, 'subtotalPriceSet', $currency),
-                'total_tax' => $this->money($orderNode, 'totalTaxSet', $currency),
+                'net_sales' => $this->moneyWithFallback($orderNode, 'currentSubtotalPriceSet', 'subtotalPriceSet', $currency),
+                'discount_total' => $this->optionalMoney($orderNode, 'currentTotalDiscountsSet', $currency),
+                'refund_total' => $this->optionalMoney($orderNode, 'totalRefundedSet', $currency),
+                'shipping_total' => $this->optionalMoney($orderNode, 'currentShippingPriceSet', $currency),
+                'total_tax' => $this->moneyWithFallback($orderNode, 'currentTotalTaxSet', 'totalTaxSet', $currency),
+                'is_test' => (bool) ($orderNode['test'] ?? false),
                 'processed_at' => $this->nullableDate($orderNode['processedAt'] ?? null, 'processedAt'),
+                'cancelled_at' => $this->nullableDate($orderNode['cancelledAt'] ?? null, 'cancelledAt'),
                 'created_at_shopify' => $this->requiredDate($orderNode['createdAt'] ?? null, 'createdAt'),
                 'synced_at' => now(),
             ])->save();
@@ -157,6 +164,22 @@ class ShopifyOrderDataService
         }
 
         return (string) $amount;
+    }
+
+    /** @param array<string, mixed> $node */
+    private function moneyWithFallback(array $node, string $field, string $fallback, string $expectedCurrency): string
+    {
+        return data_get($node, "{$field}.shopMoney.amount") !== null
+            ? $this->money($node, $field, $expectedCurrency)
+            : $this->money($node, $fallback, $expectedCurrency);
+    }
+
+    /** @param array<string, mixed> $node */
+    private function optionalMoney(array $node, string $field, string $expectedCurrency): string
+    {
+        return data_get($node, "{$field}.shopMoney.amount") !== null
+            ? $this->money($node, $field, $expectedCurrency)
+            : '0';
     }
 
     private function requiredDate(mixed $value, string $field): string

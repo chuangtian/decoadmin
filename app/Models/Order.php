@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'organization_id', 'store_id', 'shopify_order_id', 'order_number', 'email',
+    'organization_id', 'store_id', 'shopify_order_id', 'shopify_customer_id', 'order_number', 'email',
     'financial_status', 'fulfillment_status', 'currency', 'total_price', 'subtotal_price',
-    'total_tax', 'processed_at', 'created_at_shopify', 'synced_at',
+    'net_sales', 'discount_total', 'refund_total', 'shipping_total', 'total_tax', 'is_test',
+    'processed_at', 'cancelled_at', 'created_at_shopify', 'synced_at',
 ])]
 class Order extends Model
 {
@@ -44,10 +45,17 @@ class Order extends Model
     {
         return [
             'shopify_order_id' => 'string',
+            'shopify_customer_id' => 'string',
             'total_price' => 'decimal:4',
             'subtotal_price' => 'decimal:4',
+            'net_sales' => 'decimal:4',
+            'discount_total' => 'decimal:4',
+            'refund_total' => 'decimal:4',
+            'shipping_total' => 'decimal:4',
             'total_tax' => 'decimal:4',
+            'is_test' => 'boolean',
             'processed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
             'created_at_shopify' => 'datetime',
             'synced_at' => 'datetime',
         ];

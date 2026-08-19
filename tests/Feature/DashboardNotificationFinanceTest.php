@@ -285,6 +285,7 @@ class DashboardNotificationFinanceTest extends TestCase
             'currency' => 'USD',
             'total_price' => $total,
             'subtotal_price' => $total,
+            'net_sales' => $total,
             'total_tax' => 0,
             'processed_at' => now(),
             'created_at_shopify' => now(),
