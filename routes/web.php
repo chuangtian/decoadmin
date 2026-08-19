@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
@@ -9,7 +10,9 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthCheckController;
+use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
@@ -81,6 +84,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
+    Route::get('/analytics/stores', [AnalyticsController::class, 'stores'])->middleware('permission:store.view')->name('analytics.stores');
     Route::get('/system/status', SystemStatusController::class)
         ->middleware('permission:system.health.view')
         ->name('system.status');
@@ -142,6 +147,14 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/alerts/scan', [StoreAlertController::class, 'scan'])->middleware('permission:alerts.manage')->name('alerts.scan');
     Route::post('/alerts/{storeAlert}/acknowledge', [StoreAlertController::class, 'acknowledge'])->middleware('permission:alerts.manage')->name('alerts.acknowledge');
     Route::post('/alerts/{storeAlert}/resolve', [StoreAlertController::class, 'resolve'])->middleware('permission:alerts.manage')->name('alerts.resolve');
+
+    Route::get('/notifications', [NotificationCenterController::class, 'index'])->middleware('permission:alerts.view')->name('notifications.index');
+    Route::post('/notifications/{storeAlert}/resend', [NotificationCenterController::class, 'resend'])->middleware('permission:alerts.manage')->name('notifications.resend');
+
+    Route::get('/finance', [FinanceController::class, 'index'])->middleware('permission:finance.view')->name('finance.index');
+    Route::post('/finance/categories', [FinanceController::class, 'storeCategory'])->middleware('permission:finance.manage')->name('finance.categories.store');
+    Route::post('/finance/entries', [FinanceController::class, 'storeEntry'])->middleware('permission:finance.manage')->name('finance.entries.store');
+    Route::delete('/finance/entries/{financeEntry}', [FinanceController::class, 'destroyEntry'])->middleware('permission:finance.manage')->name('finance.entries.destroy');
 
     Route::get('/store-settings/mail', [StoreNotificationSettingsController::class, 'mail'])->middleware('permission:store.view')->name('store-settings.mail');
     Route::put('/store-settings/mail', [StoreNotificationSettingsController::class, 'updateMail'])->middleware('permission:store.update')->name('store-settings.mail.update');

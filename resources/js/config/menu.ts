@@ -44,8 +44,8 @@ export const menu: MenuItem[] = [
         name: '数据分析',
         icon: 'analytics',
         children: [
-            { name: '销售分析', route: '/analytics/sales', icon: 'analytics', permission: 'orders.view', comingSoon: true },
-            { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view', comingSoon: true },
+            { name: '销售分析', route: '/analytics/sales', icon: 'analytics', permission: 'orders.view' },
+            { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },
             { name: '报表中心', route: '/reports', icon: 'reports', permission: 'orders.export', comingSoon: true },
         ],
     },
@@ -56,6 +56,12 @@ export const menu: MenuItem[] = [
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
         ],
+    },
+    {
+        name: '通知中心',
+        route: '/notifications',
+        icon: 'notifications',
+        permission: 'alerts.view',
     },
     {
         name: 'Shopify',
@@ -76,6 +82,12 @@ export const menu: MenuItem[] = [
         route: '/users',
         icon: 'users',
         permission: 'users.view',
+    },
+    {
+        name: '公司财务',
+        route: '/finance',
+        icon: 'finance',
+        permission: 'finance.view',
     },
     {
         name: '协作管理',
