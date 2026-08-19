@@ -74,6 +74,16 @@ class Store extends Model
         return $this->hasOne(SyncJob::class)->latestOfMany();
     }
 
+    public function notificationSetting(): HasOne
+    {
+        return $this->hasOne(StoreNotificationSetting::class);
+    }
+
+    public function alerts(): HasMany
+    {
+        return $this->hasMany(StoreAlert::class);
+    }
+
     public function hasMember(User|int $user): bool
     {
         $userId = $user instanceof User ? $user->getKey() : $user;

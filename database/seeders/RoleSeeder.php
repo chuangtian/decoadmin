@@ -22,17 +22,17 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
             'description' => '管理指定店铺及其日常业务运营。',
-            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*'],
+            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*', 'alerts.*'],
         ],
         'developer' => [
             'name' => '开发人员',
             'description' => '管理集成、应用、Webhook、数据同步和日志。',
-            'permissions' => ['store.view', 'apps.*', 'shopify.*', 'webhooks.*', 'sync.*', 'audit.view', 'system.health.view'],
+            'permissions' => ['store.view', 'apps.*', 'shopify.*', 'webhooks.*', 'sync.*', 'alerts.view', 'audit.view', 'system.health.view'],
         ],
         'operator' => [
             'name' => '运营人员',

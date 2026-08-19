@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PermissionController;
@@ -18,8 +19,10 @@ use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyWebhookController;
+use App\Http\Controllers\StoreAlertController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
+use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\SyncJobController;
 use App\Http\Controllers\SystemSettingsController;
 use App\Http\Controllers\SystemStatusController;
@@ -27,7 +30,6 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\WebhookEventController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/health', HealthCheckController::class)->name('health');
 
@@ -78,7 +80,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
-    Route::get('/dashboard', fn () => Inertia::render('Dashboard/Index'))->name('dashboard');
+    Route::get('/dashboard', DashboardController::class)->name('dashboard');
     Route::get('/system/status', SystemStatusController::class)
         ->middleware('permission:system.health.view')
         ->name('system.status');
@@ -136,6 +138,11 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/webhooks/{webhookEvent}', [WebhookEventController::class, 'show'])->middleware('permission:webhooks.view')->name('webhooks.show');
     Route::post('/webhooks/{webhookEvent}/retry', [WebhookEventController::class, 'retry'])->middleware('permission:webhooks.retry')->name('webhooks.retry');
 
+    Route::get('/alerts', [StoreAlertController::class, 'index'])->middleware('permission:alerts.view')->name('alerts.index');
+    Route::post('/alerts/scan', [StoreAlertController::class, 'scan'])->middleware('permission:alerts.manage')->name('alerts.scan');
+    Route::post('/alerts/{storeAlert}/acknowledge', [StoreAlertController::class, 'acknowledge'])->middleware('permission:alerts.manage')->name('alerts.acknowledge');
+    Route::post('/alerts/{storeAlert}/resolve', [StoreAlertController::class, 'resolve'])->middleware('permission:alerts.manage')->name('alerts.resolve');
+
     Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
     Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');
     Route::get('/sync/{syncJob}', [SyncJobController::class, 'show'])->middleware('permission:sync.view')->name('sync.show');
@@ -148,6 +155,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/customers/{customer}', [ShopifyDataController::class, 'customer'])->whereNumber('customer')->middleware('permission:customers.view')->name('customers.show');
     Route::get('/inventory', [ShopifyDataController::class, 'inventory'])->middleware('permission:inventory.view')->name('inventory.index');
     Route::get('/inventory/{inventoryItem}', [ShopifyDataController::class, 'inventoryItem'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
+    Route::get('/locations', [ShopifyDataController::class, 'locations'])->middleware('permission:inventory.view')->name('locations.index');
+    Route::get('/locations/{location}', [ShopifyDataController::class, 'location'])->whereNumber('location')->middleware('permission:inventory.view')->name('locations.show');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');
@@ -156,7 +165,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:store.connect'])->name('stores.connect');
     Route::post('/stores/{store}/shopify/verify', ShopifyConnectionHealthController::class)->middleware(['store.access', 'permission:store.connect'])->name('stores.shopify.verify');
     Route::post('/stores/{store}/shopify/disconnect', ShopifyConnectionDisconnectController::class)->middleware(['store.access', 'permission:store.disconnect'])->name('stores.shopify.disconnect');
-
+    Route::get('/stores/{store}/notifications', [StoreNotificationSettingsController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.notifications.show');
+    Route::put('/stores/{store}/notifications', [StoreNotificationSettingsController::class, 'update'])->middleware(['store.access', 'permission:store.update'])->name('stores.notifications.update');
     Route::get('/stores/{store}/access-check', fn (Store $store) => response()->json(['data' => ['id' => $store->id]]))
         ->middleware(['store.access', 'permission:store.view'])
         ->name('stores.access-check');

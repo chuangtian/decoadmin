@@ -32,10 +32,19 @@ class ShopifyDataController extends Controller
 
     public function orders(Request $request): Response
     {
-        $filters = $request->validate(['search' => ['nullable', 'string', 'max:100'], 'financial_status' => ['nullable', 'string', 'max:40']]);
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'financial_status' => ['nullable', 'string', 'max:40'],
+            'fulfillment_status' => ['nullable', 'in:fulfilled,partial,restocked,unfulfilled'],
+        ]);
 
         return Inertia::render('Orders/Index', [
-            'orders' => $this->queries->orders($this->currentStore->require(), $filters['search'] ?? null, $filters['financial_status'] ?? null),
+            'orders' => $this->queries->orders(
+                $this->currentStore->require(),
+                $filters['search'] ?? null,
+                $filters['financial_status'] ?? null,
+                $filters['fulfillment_status'] ?? null,
+            ),
             'filters' => $filters,
         ]);
     }
@@ -76,5 +85,23 @@ class ShopifyDataController extends Controller
     public function inventoryItem(int $inventoryItem): Response
     {
         return Inertia::render('Inventory/Show', ['inventoryItem' => $this->queries->inventoryItem($this->currentStore->require(), $inventoryItem)]);
+    }
+
+    public function locations(Request $request): Response
+    {
+        $filters = $request->validate(['search' => ['nullable', 'string', 'max:100'], 'active' => ['nullable', 'in:0,1']]);
+        $active = array_key_exists('active', $filters) && $filters['active'] !== null
+            ? (bool) ((int) $filters['active'])
+            : null;
+
+        return Inertia::render('Locations/Index', [
+            'locations' => $this->queries->locations($this->currentStore->require(), $filters['search'] ?? null, $active),
+            'filters' => $filters,
+        ]);
+    }
+
+    public function location(int $location): Response
+    {
+        return Inertia::render('Locations/Show', ['location' => $this->queries->location($this->currentStore->require(), $location)]);
     }
 }
