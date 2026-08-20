@@ -3,13 +3,14 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import Pagination from '../../Components/Navigation/Pagination.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface ProductRow { id:number; title:string; handle:string; status:string; vendor:string|null; product_type:string|null; variants_count:number; variants_min_price:string|null; variants_max_price:string|null; synced_at:string|null }
 interface Paginator<T> { data:T[]; links:Array<{url:string|null;label:string;active:boolean}> }
 const props = defineProps<{ products:Paginator<ProductRow>; filters:{search?:string;status?:string} }>();
 const form = useForm({ search: props.filters.search ?? '', status: props.filters.status ?? '' });
 const submit = () => form.get('/products', { preserveState:true, replace:true });
-const date = (value:string|null) => value ? new Intl.DateTimeFormat('zh-CN',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)) : '—';
+const { formatDateTime: date } = useStoreDateTime();
 const statusLabel = (value:string) => ({active:'销售中',draft:'草稿',archived:'已归档'}[value] ?? value);
 const price = (value:string|null) => value === null ? '—' : Number(value).toFixed(2);
 </script>

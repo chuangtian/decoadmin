@@ -107,6 +107,8 @@ class ShopifyOrderSyncTest extends TestCase
         ]);
         $order = Order::query()->sole();
         $this->assertNotNull($order->synced_at);
+        $this->assertSame('2026-08-17 09:55:00', $order->created_at_shopify->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-08-17 10:15:00', $order->updated_at_shopify->utc()->format('Y-m-d H:i:s'));
         $this->assertDatabaseHas('order_items', [
             'order_id' => $order->id,
             'shopify_line_item_id' => 201,
@@ -446,7 +448,8 @@ class ShopifyOrderSyncTest extends TestCase
             'subtotalPriceSet' => $this->moneyBag($total),
             'totalTaxSet' => $this->moneyBag('0.00'),
             'processedAt' => '2026-08-17T10:00:00Z',
-            'createdAt' => '2026-08-17T09:55:00Z',
+            'createdAt' => '2026-08-17T05:55:00-04:00',
+            'updatedAt' => '2026-08-17T06:15:00-04:00',
             'lineItems' => [
                 'nodes' => $lineItems,
                 'pageInfo' => ['hasNextPage' => $hasNextItems, 'endCursor' => $lineItemCursor],

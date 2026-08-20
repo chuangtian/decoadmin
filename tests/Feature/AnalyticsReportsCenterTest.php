@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AnalyticsSnapshot;
 use App\Models\Order;
 use App\Models\Organization;
 use App\Models\Role;
@@ -15,6 +16,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -22,6 +24,166 @@ use Tests\TestCase;
 class AnalyticsReportsCenterTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_core_sales_uses_shopifyql_store_dates_and_shopify_totals(): void
+    {
+        Cache::flush();
+        Carbon::setTestNow('2026-08-20 12:00:00 UTC');
+
+        try {
+            [$user, $organization, $store] = $this->context('organization-admin');
+            $store->update(['timezone' => 'America/Los_Angeles']);
+            ShopifyConnection::query()->create([
+                'store_id' => $store->id,
+                'shop_domain' => $store->shopify_domain,
+                'access_token_encrypted' => 'token',
+                'token_type' => 'offline',
+                'scopes' => ['read_orders', 'read_reports'],
+                'api_version' => '2026-07',
+                'status' => 'connected',
+            ]);
+
+            Http::fake(function (Request $request) {
+                $query = (string) data_get($request->data(), 'variables.query');
+                if (str_contains($query, 'GROUP BY product_title, product_vendor, product_type')) {
+                    return Http::response(['data' => ['shopifyqlQuery' => [
+                        'tableData' => ['columns' => [], 'rows' => [[
+                            'product_title' => 'Macfox X1S',
+                            'product_vendor' => 'Macfox Bike',
+                            'product_type' => 'Electric Bike',
+                            'net_items_sold' => '474',
+                            'gross_sales' => '727392',
+                            'net_sales' => '626672',
+                            'total_sales' => '672246.79',
+                            'net_items_sold__totals' => '2774',
+                            'net_sales__totals' => '1502581.39',
+                        ]]],
+                        'parseErrors' => [],
+                    ]]]);
+                }
+
+                if (str_contains($query, 'GROUP BY new_or_returning_customer')) {
+                    return Http::response(['data' => ['shopifyqlQuery' => [
+                        'tableData' => ['columns' => [], 'rows' => [[
+                            'new_or_returning_customer' => 'New',
+                            'customers' => '1311',
+                            'customers__totals' => '1679',
+                        ], [
+                            'new_or_returning_customer' => 'Returning',
+                            'customers' => '457',
+                            'customers__totals' => '1679',
+                        ]]],
+                        'parseErrors' => [],
+                    ]]]);
+                }
+
+                if (str_contains($query, 'SHOW returning_customers, customers, returning_customer_rate')) {
+                    return Http::response(['data' => ['shopifyqlQuery' => [
+                        'tableData' => ['columns' => [], 'rows' => [[
+                            'day' => '2026-07-21',
+                            'returning_customers' => '15',
+                            'customers' => '54',
+                            'returning_customer_rate' => '0.2777',
+                            'returning_customers__totals' => '457',
+                            'customers__totals' => '1679',
+                            'returning_customer_rate__totals' => '0.2721858',
+                        ]]],
+                        'parseErrors' => [],
+                    ]]]);
+                }
+
+                if (str_contains($query, 'GROUP BY product_vendor') || str_contains($query, 'GROUP BY product_type')) {
+                    return Http::response(['data' => ['shopifyqlQuery' => [
+                        'tableData' => ['columns' => [], 'rows' => []],
+                        'parseErrors' => [],
+                    ]]]);
+                }
+
+                $comparison = str_contains($query, 'previous_year') ? 'previous_year' : 'previous_period';
+                $row = [
+                    'day' => '2026-07-21',
+                    'total_sales' => '100',
+                    'orders' => '2',
+                    'average_order_value' => '871.605',
+                    'gross_sales' => '110',
+                    'discounts' => '-10',
+                    'returns' => '-5',
+                    'net_sales' => '95',
+                    'taxes' => '4',
+                    'shipping_charges' => '1',
+                    'total_sales__totals' => '1616604.05',
+                    'orders__totals' => '1820',
+                    'average_order_value__totals' => '871.605',
+                    'gross_sales__totals' => '1774674.62',
+                    'discounts__totals' => '-179147.24',
+                    'returns__totals' => '-92945.99',
+                    'net_sales__totals' => '1502581.39',
+                    'taxes__totals' => '106022.31',
+                    'shipping_charges__totals' => '8000.35',
+                ];
+                foreach ([
+                    'total_sales' => '1704127.8', 'orders' => '1788', 'average_order_value' => '900',
+                    'gross_sales' => '1830000', 'discounts' => '-170000', 'returns' => '-85000',
+                    'net_sales' => '1575000', 'taxes' => '101000', 'shipping_charges' => '7900',
+                ] as $metric => $value) {
+                    $row["comparison_{$metric}__{$comparison}"] = '1';
+                    $row["comparison_{$metric}__{$comparison}__totals"] = $value;
+                    $row["percent_change_{$metric}__{$comparison}"] = '99';
+                    $row["percent_change_{$metric}__{$comparison}__totals"] = $comparison === 'previous_period' ? '-2.842' : '1.25';
+                }
+
+                return Http::response(['data' => ['shopifyqlQuery' => [
+                    'tableData' => ['columns' => [], 'rows' => [$row]],
+                    'parseErrors' => [],
+                ]]]);
+            });
+
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->get(route('analytics.sales', ['days' => 30]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('analytics.period.from', '2026-07-21')
+                    ->where('analytics.period.to', '2026-08-20')
+                    ->where('analytics.period.timezone', 'America/Los_Angeles')
+                    ->where('analytics.period.include_cancelled', true)
+                    ->where('analytics.summary.total_sales', 1616604.05)
+                    ->where('analytics.summary.orders', 1820)
+                    ->where('analytics.summary.net_sales', 1502581.39)
+                    ->where('analytics.summary.discounts', 179147.24)
+                    ->where('analytics.summary.refunds', 92945.99)
+                    ->where('analytics.comparisons.previous.total_sales.baseline', 1704127.8)
+                    ->where('analytics.comparisons.previous.total_sales.change_percent', -2.84)
+                    ->where('analytics.comparisons.year_over_year.total_sales.change_percent', 1.25)
+                    ->where('analytics.rankings.products.0.product_id', null)
+                    ->where('analytics.rankings.products.0.units', 474)
+                    ->where('analytics.rankings.products.0.gross_sales', 727392)
+                    ->where('analytics.rankings.products.0.net_sales', 626672)
+                    ->where('analytics.customers.active', 1679)
+                    ->where('analytics.customers.new', 1311)
+                    ->where('analytics.customers.returning', 457)
+                    ->where('analytics.customers.repeat_rate', 27.22)
+                    ->where('analytics.customers.average_lifetime_value', null)
+                    ->where('analytics.data_source.primary', 'shopifyql')
+                    ->where('analytics.trend.0.date', '2026-07-21')
+                    ->has('analytics.trend', 31));
+
+            $queries = collect(Http::recorded())->map(
+                fn (array $exchange): string => (string) data_get($exchange[0]->data(), 'variables.query'),
+            )->filter();
+            $this->assertCount(7, $queries);
+            $this->assertTrue($queries->contains(fn (string $query): bool => str_contains(
+                $query,
+                'TIMESERIES day WITH TOTALS, PERCENT_CHANGE SINCE 2026-07-21 UNTIL 2026-08-20 COMPARE TO previous_period ORDER BY day',
+            )));
+            $this->assertTrue($queries->contains(fn (string $query): bool => str_contains($query, 'GROUP BY product_title, product_vendor, product_type')));
+            $this->assertTrue($queries->contains(fn (string $query): bool => str_contains($query, 'GROUP BY new_or_returning_customer')));
+            $this->assertTrue($queries->contains(fn (string $query): bool => str_contains($query, 'SHOW returning_customers, customers, returning_customer_rate')));
+            $this->assertDatabaseCount('analytics_snapshots', 7);
+        } finally {
+            Carbon::setTestNow();
+            Cache::flush();
+        }
+    }
 
     public function test_custom_period_uses_accurate_order_scope_and_financial_metrics(): void
     {
@@ -35,7 +197,11 @@ class AnalyticsReportsCenterTest extends TestCase
         $this->order($organization, $store, 'cancelled', $today, ['net_sales' => 888, 'cancelled_at' => $today]);
 
         $this->actingAs($user)->withSession($this->contextSession($organization, $store))
-            ->get(route('analytics.sales', ['date_from' => $today->toDateString(), 'date_to' => $today->toDateString()]))
+            ->get(route('analytics.sales', [
+                'date_from' => $today->toDateString(),
+                'date_to' => $today->toDateString(),
+                'include_cancelled' => false,
+            ]))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Analytics/Sales')
             ->where('analytics.period.timezone', 'UTC')
@@ -153,6 +319,9 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('insights.locations.items.0.country', 'Germany')
             ->where('insights.customers.source', 'local_sync')
             ->where('insights.pos.source', 'shopifyql')
+            ->where('insights.integration.storage.persisted', true)
+            ->where('insights.integration.storage.source', 'database')
+            ->where('insights.integration.storage.stale', false)
             ->where('insights.pos.locations.0.name', 'Berlin Store')
             ->where('insights.pos.staff.0.name', 'Alex'));
 
@@ -160,6 +329,30 @@ class AnalyticsReportsCenterTest extends TestCase
             fn (array $exchange): bool => str_contains((string) data_get($exchange[0]->data(), 'query'), 'shopifyqlQuery'),
         );
         $this->assertCount(1, $shopifyQlRequests);
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'report_key' => 'analytics-overview',
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview'))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('insights.acquisition.items.0.label', 'Instagram')
+            ->where('insights.devices.items.0.label', '移动设备'));
+        $this->assertCount(1, collect(Http::recorded()));
+
+        AnalyticsSnapshot::query()->where('report_key', 'analytics-overview')
+            ->update(['expires_at' => now()->subMinute()]);
+        $store->shopifyConnection()->update(['status' => 'disconnected']);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview'))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('insights.acquisition.items.0.label', 'Instagram')
+            ->where('insights.integration.storage.stale', true)
+            ->where('insights.pos.locations.0.name', 'Berlin Store'));
+        $this->assertCount(1, collect(Http::recorded()));
     }
 
     public function test_report_center_is_store_scoped_and_exports_csv_and_excel(): void
@@ -175,9 +368,9 @@ class AnalyticsReportsCenterTest extends TestCase
         $this->actingAs($admin)->withSession($session)->get(route('reports.index'))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Reports/Index')
-            ->has('reports', 38)
-            ->where('reports.0.slug', 'store-overview')
-            ->where('reports.0.creator', 'DecoAdmin'));
+            ->has('reports', 172)
+            ->where('reports.0.slug', 'sessions_over_time')
+            ->where('reports.0.creator', 'Shopify'));
         $this->actingAs($admin)->withSession($session)->get(route('reports.show', ['report' => 'sales-over-time']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Reports/Show')
@@ -209,11 +402,14 @@ class AnalyticsReportsCenterTest extends TestCase
 
         $this->actingAs($admin)->withSession($session)->get(route('reports.index'))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
-            ->where('reports.29.slug', 'acquisition-by-source')
-            ->where('reports.29.data_source', 'shopifyql')
-            ->where('reports.29.available', false)
-            ->where('reports.29.requires_scope', 'read_reports'));
-        $this->actingAs($admin)->withSession($session)->get(route('reports.show', ['report' => 'acquisition-by-source']))
+            ->where('reports', function ($reports): bool {
+                $report = collect($reports)->firstWhere('slug', 'sessions_by_referrer');
+
+                return $report['data_source'] === 'shopifyql'
+                    && $report['available'] === false
+                    && $report['requires_scope'] === 'read_reports';
+            }));
+        $this->actingAs($admin)->withSession($session)->get(route('reports.show', ['report' => 'sessions_by_referrer']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('report.integration.source', 'shopifyql')
             ->where('report.integration.available', false)
@@ -237,19 +433,106 @@ class AnalyticsReportsCenterTest extends TestCase
             'parseErrors' => [],
         ]]]));
 
-        $this->actingAs($admin)->withSession($session)->get(route('reports.show', ['report' => 'acquisition-by-source']))
+        $this->actingAs($admin)->withSession($session)->get(route('reports.show', ['report' => 'sessions_by_referrer']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('report.integration.available', true)
             ->where('report.integration.scope_granted', true)
+            ->where('report.integration.storage.persisted', true)
+            ->where('report.integration.storage.source', 'database')
+            ->where('report.integration.storage.stale', false)
             ->where('report.rows.0.referrer_source', 'Social')
             ->where('report.rows.0.referrer_name', 'Instagram')
             ->where('report.rows.0.sessions', 12)
             ->where('report.rows.0.conversion_rate', 25));
 
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'report_key' => 'catalog:acquisition-by-source',
+        ]);
+        $this->assertCount(1, collect(Http::recorded()));
+
+        $this->actingAs($admin)->withSession($session)
+            ->get(route('reports.show', ['report' => 'sessions_by_referrer']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('report.integration.available', true)
+            ->where('report.integration.storage.stale', false)
+            ->where('report.rows.0.referrer_name', 'Instagram'));
+        $this->assertCount(1, collect(Http::recorded()));
+
+        AnalyticsSnapshot::query()->where('report_key', 'catalog:acquisition-by-source')
+            ->update(['expires_at' => now()->subMinute()]);
+        $connection->update(['status' => 'disconnected']);
+
+        $this->actingAs($admin)->withSession($session)
+            ->get(route('reports.show', ['report' => 'sessions_by_referrer']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('report.integration.available', true)
+            ->where('report.integration.storage.stale', true)
+            ->where('report.rows.0.referrer_name', 'Instagram'));
+        $this->assertCount(1, collect(Http::recorded()));
+
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), $store->shopify_domain)
             && str_contains((string) data_get($request->data(), 'variables.query'), 'FROM sessions')
             && str_contains((string) data_get($request->data(), 'variables.query'), 'GROUP BY referrer_source, referrer_name')
         );
+    }
+
+    public function test_macfox_catalog_includes_store_custom_reports_and_preferences_are_store_scoped(): void
+    {
+        Carbon::setTestNow('2026-08-20 14:30:00 UTC');
+
+        try {
+            [$admin, $organization, $store] = $this->context('organization-admin');
+            $store->update(['shopify_domain' => 'macfoxebike.myshopify.com']);
+            $other = $organization->stores()->create([
+                'name' => 'Other Reports Store', 'shopify_domain' => 'other-reports-store.myshopify.com',
+                'status' => 'active', 'currency' => 'USD', 'timezone' => 'UTC',
+            ]);
+            $session = $this->contextSession($organization, $store);
+
+            $this->actingAs($admin)->withSession($session)->get(route('reports.index'))
+                ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->has('reports', 177)
+                ->where('reports', function ($reports): bool {
+                    $catalog = collect($reports);
+                    $breakdown = $catalog->firstWhere('slug', 'conversion_rate_breakdown');
+                    $byStore = $catalog->firstWhere('slug', 'conversion_rate_over_time_by_store');
+                    $vendor = $catalog->firstWhere('slug', 'total_sales_by_vendor');
+
+                    return $catalog->where('kind', 'shopify_custom')->count() === 5
+                        && $breakdown['data_source'] === 'shopifyql'
+                        && $byStore['data_source'] === 'shopify_internal'
+                        && $vendor['data_source'] === 'shopifyql';
+                }));
+
+            $this->actingAs($admin)->withSession($session)
+                ->put(route('reports.pin', ['report' => 'sessions_over_time']), ['pinned' => true])
+                ->assertRedirect();
+            $this->actingAs($admin)->withSession($session)
+                ->get(route('reports.show', ['report' => 'sessions_over_time']))
+                ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->where('report.integration.source', 'shopifyql')
+                ->where('report.integration.available', false)
+                ->where('report.creator', 'Shopify')
+                ->where('report.external_url', 'https://admin.shopify.com/store/macfoxebike/analytics/reports/sessions_over_time'));
+
+            $this->assertDatabaseHas('report_preferences', [
+                'user_id' => $admin->id, 'organization_id' => $organization->id,
+                'store_id' => $store->id, 'report_slug' => 'sessions_over_time',
+            ]);
+            $this->assertDatabaseMissing('report_preferences', [
+                'user_id' => $admin->id, 'store_id' => $other->id, 'report_slug' => 'sessions_over_time',
+            ]);
+
+            $this->actingAs($admin)->withSession($session)->get(route('reports.index'))
+                ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->where('reports.0.slug', 'sessions_over_time')
+                ->where('reports.0.pinned', true)
+                ->where('reports.0.last_viewed_at', '2026-08-20T14:30:00+00:00'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_derived_report_keeps_the_existing_report_dataset(): void
@@ -292,9 +575,9 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('snapshot.metrics.orders.value', 1)
             ->where('snapshot.metrics.net_sales.value', 50)
             ->where('snapshot.metrics.current_visitors.available', false)
-            ->where('snapshot.insights.visits_by_location.message', '此日期范围内无数据')
-            ->where('snapshot.insights.new_vs_returning.message', '此日期范围内无数据')
-            ->where('snapshot.insights.sales_by_product.message', '此日期范围内无数据')
+            ->where('snapshot.insights.visits_by_location.message', 'Web Pixel 尚未收到粗粒度地点。')
+            ->where('snapshot.insights.new_vs_returning.classification', 'shopify_internal')
+            ->where('snapshot.insights.sales_by_product.classification', 'shopify_internal')
             ->where('snapshot.traffic.reason_code', 'web_pixel_not_connected')
             ->where('snapshot.privacy.location_precision', 'coarse')
             ->where('snapshot.privacy.raw_ip_collected', false)

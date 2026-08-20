@@ -29,6 +29,8 @@ class ShopifyConnectionHealthTest extends TestCase
                 'id' => 'gid://shopify/Shop/123456',
                 'name' => 'Macfox US',
                 'myshopifyDomain' => $store->shopify_domain,
+                'ianaTimezone' => 'America/New_York',
+                'currencyCode' => 'USD',
             ]]]),
         ]);
 
@@ -50,6 +52,8 @@ class ShopifyConnectionHealthTest extends TestCase
         $this->assertNull($connection->last_error);
         $this->assertNull($connection->last_error_at);
         $this->assertSame('Macfox US', data_get($connection->metadata, 'health_shop.name'));
+        $this->assertSame('America/New_York', $store->fresh()->timezone);
+        $this->assertSame('USD', $store->fresh()->currency);
         $audit = AuditLog::query()->where('action', 'shopify_connection_connected')->sole();
         $this->assertSame($organization->id, $audit->organization_id);
         $this->assertSame($store->id, $audit->store_id);
@@ -139,6 +143,8 @@ class ShopifyConnectionHealthTest extends TestCase
                 'id' => 'gid://shopify/Shop/123456',
                 'name' => 'Macfox US',
                 'myshopifyDomain' => $store->shopify_domain,
+                'ianaTimezone' => 'America/Los_Angeles',
+                'currencyCode' => 'USD',
             ]]]),
         ]);
 
@@ -148,6 +154,7 @@ class ShopifyConnectionHealthTest extends TestCase
 
         $this->assertSame('connected', $connection->fresh()->status);
         $this->assertNotNull($connection->fresh()->last_verified_at);
+        $this->assertSame('America/Los_Angeles', $store->fresh()->timezone);
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */

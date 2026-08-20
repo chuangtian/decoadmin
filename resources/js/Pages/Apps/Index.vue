@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, ShopifyApp } from '../../types';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     apps: PaginatedResource<ShopifyApp>;
@@ -17,9 +18,7 @@ const clearFilters = () => {
     form.status = '';
     search();
 };
-const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-    : '—';
+const { formatDateTime: dateLabel } = useStoreDateTime();
 const typeLabel = (type: string) => ({ custom: '自定义应用', public: '公开应用', private: '私有应用' }[type] ?? type);
 const statusLabel = (status: string) => ({ active: '启用', inactive: '停用', draft: '草稿', disabled: '已禁用' }[status] ?? status);
 const statusClass = (status: string) => status === 'active'

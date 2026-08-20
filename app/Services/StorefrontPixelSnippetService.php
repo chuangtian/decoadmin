@@ -32,6 +32,8 @@ analytics.subscribe('all_standard_events', (event) => {
   if (!decoEvents.has(event.name)) return;
 
   const location = event.context?.document?.location;
+  const referrer = event.context?.document?.referrer;
+  const address = event.data?.checkout?.shippingAddress;
   const searchQuery = event.name === 'search_submitted'
     ? event.data?.searchResult?.query ?? null
     : null;
@@ -47,6 +49,10 @@ analytics.subscribe('all_standard_events', (event) => {
       session_id: decoSessionId,
       occurred_at: event.timestamp,
       path: location?.pathname ?? null,
+      referrer_host: (() => { try { return referrer ? new URL(referrer).hostname : null; } catch (_) { return null; } })(),
+      country_code: address?.countryCode ?? null,
+      region_code: address?.provinceCode ?? null,
+      city: address?.city ?? null,
       search_query: searchQuery,
     }),
   });

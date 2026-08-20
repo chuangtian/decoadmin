@@ -71,6 +71,8 @@ class HandleInertiaRequests extends Middleware
                         'id' => $availableStore->id,
                         'name' => $availableStore->name,
                         'status' => $availableStore->status,
+                        'timezone' => $availableStore->timezone ?: 'UTC',
+                        'currency' => $availableStore->currency,
                     ])->values()->all(),
                 ])
                 ->values()
@@ -99,6 +101,8 @@ class HandleInertiaRequests extends Middleware
                 'name' => $store->name,
                 'status' => $store->status,
                 'organization_id' => $store->organization_id,
+                'timezone' => $store->timezone ?: 'UTC',
+                'currency' => $store->currency,
             ] : null,
             'availableOrganizations' => $availableOrganizations,
             'flash' => [

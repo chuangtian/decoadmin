@@ -36,7 +36,7 @@ class DashboardMetricsService
             'recent_orders' => [],
             'analytics_30d' => ['summary' => ['sales' => '0', 'orders' => 0, 'average_order_value' => '0.00'], 'trend' => [], 'top_products' => [], 'low_stock' => []],
             'analytics' => [
-                'period' => ['days' => 30, 'from' => now()->subDays(29)->toDateString(), 'to' => now()->toDateString(), 'timezone' => 'UTC', 'include_test' => false, 'include_cancelled' => false],
+                'period' => ['days' => 30, 'from' => now()->subDays(30)->toDateString(), 'to' => now()->toDateString(), 'timezone' => 'UTC', 'include_test' => false, 'include_cancelled' => true],
                 'summary' => [], 'comparisons' => ['previous' => []], 'trend' => [], 'comparison_trend' => ['previous' => []],
             ],
             'metric_definitions' => $this->metricDefinitions(),
@@ -47,18 +47,22 @@ class DashboardMetricsService
     /** @return array<string, mixed> */
     public function forStore(Store $store, ?Organization $organization = null, ?User $user = null, array $filters = []): array
     {
-        $today = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfDay()->utc();
-        $weekStart = $today->subDays(6);
+        $timezone = $store->timezone ?: 'UTC';
+        $localToday = CarbonImmutable::now($timezone)->startOfDay();
+        $today = $localToday->utc();
+        $weekStart = $localToday->subDays(6);
+        $weekStartUtc = $weekStart->utc();
         $orders = Order::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
             ->where('is_test', false)->whereNull('cancelled_at');
 
         $trendRows = (clone $orders)
-            ->where('created_at_shopify', '>=', $weekStart)
-            ->selectRaw('DATE(created_at_shopify) as day, COUNT(*) as orders_count, COALESCE(SUM(net_sales), 0) as sales_total')
-            ->groupByRaw('DATE(created_at_shopify)')
-            ->orderBy('day')
-            ->get()
-            ->keyBy('day');
+            ->where('created_at_shopify', '>=', $weekStartUtc)
+            ->get(['created_at_shopify', 'net_sales'])
+            ->groupBy(fn (Order $order): string => $order->created_at_shopify->timezone($timezone)->toDateString())
+            ->map(fn (Collection $dayOrders): object => (object) [
+                'orders_count' => $dayOrders->count(),
+                'sales_total' => $dayOrders->sum(fn (Order $order): float => (float) $order->net_sales),
+            ]);
 
         $analytics = $this->analytics->sales($store, $filters ?: 30);
         $analytics30d = $filters ? $this->analytics->sales($store, 30) : $analytics;
@@ -123,7 +127,7 @@ class DashboardMetricsService
             ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency', 'description' => '扣除退款后的商品销售额'],
             ['key' => 'gross_sales', 'label' => '商品销售额', 'format' => 'currency', 'description' => '折扣前商品销售额'],
             ['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency', 'description' => '包含税费与运费的订单总额'],
-            ['key' => 'orders', 'label' => '订单数', 'format' => 'number', 'description' => '统计周期内的有效订单'],
+            ['key' => 'orders', 'label' => '订单数', 'format' => 'number', 'description' => 'Shopify 报表订单口径，默认包含取消订单'],
             ['key' => 'average_order_value', 'label' => '平均订单金额', 'format' => 'currency', 'description' => '净销售额除以订单数'],
             ['key' => 'refunds', 'label' => '退款金额', 'format' => 'currency', 'description' => '统计周期内记录的退款'],
             ['key' => 'discounts', 'label' => '折扣金额', 'format' => 'currency', 'description' => '订单优惠与折扣合计'],

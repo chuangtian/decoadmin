@@ -3,8 +3,10 @@ import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
+import StoreStatusOverview from '../../Components/Stores/StoreStatusOverview.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { AuditLogResult, SharedProps, ShopifyConnectionHistory, ShopifyStore, StoreOperations, SyncJobMode, SyncJobStatus, SyncJobType, WebhookEventStatus } from '../../types';
+import { formatDateTimeInTimezone } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     store: { data: ShopifyStore };
@@ -55,7 +57,7 @@ const disconnect = () => {
 const createSyncJob = () => syncForm.post('/sync', { preserveScroll: true });
 const retrySyncJob = (id: number) => syncRetryForm.post(`/sync/${id}/retry`, { preserveScroll: true });
 const retryWebhook = (id: number) => webhookRetryForm.post(`/webhooks/${id}/retry`, { preserveScroll: true });
-const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value)) : '暂无记录';
+const dateLabel = (value: string | null) => value ? formatDateTimeInTimezone(value, props.store.data.timezone) : '暂无记录';
 const eventLabels: Record<string, string> = {
     shopify_connection_connected: '连接成功',
     shopify_connection_warning: '连接警告',
@@ -87,7 +89,6 @@ const logStatusClass = (status: AuditLogResult) => ({
     info: 'bg-slate-100 text-slate-600 ring-slate-200',
 }[status]);
 const logSourceLabel = (source: string) => ({ audit: '操作记录', sync: '数据同步', webhook: 'Webhook' }[source] ?? source);
-const installationStatusLabel = (status: string) => ({ active: '已安装', pending: '待安装', inactive: '已停用', uninstalled: '已卸载', failed: '安装失败' }[status] ?? status);
 </script>
 
 <template>
@@ -102,17 +103,7 @@ const installationStatusLabel = (status: string) => ({ active: '已安装', pend
 
             <div class="mt-7 overflow-x-auto border-b border-slate-200"><nav class="flex min-w-max gap-1" aria-label="店铺详情导航"><button v-for="tab in tabs" :key="tab.id" type="button" class="border-b-2 px-4 py-3 text-sm font-semibold transition" :class="activeTab === tab.id ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'" @click="selectTab(tab.id)">{{ tab.name }}</button></nav></div>
 
-            <div v-if="activeTab === 'overview'" class="mt-6 space-y-5">
-                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">店铺名称</p><p class="mt-3 text-lg font-semibold text-slate-900">{{ store.data.name }}</p></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">Shopify 域名</p><p class="mt-3 break-all font-mono text-sm font-semibold text-slate-700">{{ store.data.shopify_domain }}</p></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">连接状态</p><div class="mt-3"><ShopifyConnectionStatus :status="store.data.connection_status" size="md" /></div></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">已安装应用</p><p class="mt-3 text-2xl font-semibold text-slate-900">{{ store.data.installed_apps_count }}</p></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">最近同步</p><p class="mt-3 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.last_sync?.at ?? null) }}</p><p v-if="store.data.last_sync" class="mt-1 text-xs text-slate-400">状态：{{ syncStatusLabel(store.data.last_sync.status) }}</p></section>
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-semibold tracking-wider text-slate-400">创建时间</p><p class="mt-3 text-sm font-semibold text-slate-900">{{ dateLabel(store.data.created_at) }}</p></section>
-                </div>
-                <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div class="border-b border-slate-100 px-6 py-5"><h3 class="font-semibold text-slate-950">已安装应用</h3><p class="mt-1 text-sm text-slate-500">数据来自当前店铺的应用安装记录。</p></div><div v-if="store.data.app_installations.length" class="divide-y divide-slate-100"><div v-for="installation in store.data.app_installations" :key="installation.id" class="flex items-center justify-between gap-4 px-6 py-4"><div><p class="font-semibold text-slate-900">{{ installation.app?.name ?? 'Shopify 应用' }}</p><p class="mt-1 text-xs text-slate-400">{{ dateLabel(installation.installed_at) }}</p></div><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{{ installationStatusLabel(installation.status) }}</span></div></div><p v-else class="px-6 py-10 text-center text-sm text-slate-500">暂无已安装应用。</p></section>
-            </div>
+            <StoreStatusOverview v-if="activeTab === 'overview'" class="mt-6" :store="store.data" />
 
             <section v-else-if="activeTab === 'shopify'" class="mt-6">
                 <div v-if="store.data.connection" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

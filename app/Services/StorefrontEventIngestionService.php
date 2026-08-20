@@ -15,6 +15,7 @@ class StorefrontEventIngestionService
         'page_viewed',
         'product_viewed',
         'product_added_to_cart',
+        'product_removed_from_cart',
         'cart_viewed',
         'search_submitted',
         'checkout_started',
@@ -26,7 +27,7 @@ class StorefrontEventIngestionService
     ];
 
     /** @return array{event: StorefrontEvent, created: bool} */
-    public function ingest(Store $store, string $rawPayload): array
+    public function ingest(Store $store, string $rawPayload, array $requestContext = []): array
     {
         if (strlen($rawPayload) > 64 * 1024) {
             throw new InvalidArgumentException('事件载荷超过 64 KB 限制。');
@@ -69,6 +70,9 @@ class StorefrontEventIngestionService
             'occurred_at' => $occurredAt,
             'path' => $this->path($payload['path'] ?? null),
             'referrer_host' => $this->host($payload['referrer_host'] ?? null),
+            'country_code' => $this->countryCode($payload['country_code'] ?? ($requestContext['country_code'] ?? null)),
+            'region_code' => $this->locationPart($payload['region_code'] ?? null, 64),
+            'city' => $this->locationPart($payload['city'] ?? null, 120),
             'search_query' => $eventName === 'search_submitted'
                 ? $this->searchQuery($payload['search_query'] ?? null)
                 : null,
@@ -145,5 +149,27 @@ class StorefrontEventIngestionService
         $query = preg_replace('/(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)/u', '[已脱敏]', $query) ?? $query;
 
         return $query === '' ? null : mb_substr($query, 0, 160);
+    }
+
+    private function countryCode(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $country = strtoupper(trim($value));
+
+        return preg_match('/^[A-Z]{2}$/', $country) === 1 ? $country : null;
+    }
+
+    private function locationPart(mixed $value, int $maxLength): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = preg_replace('/\s+/u', ' ', trim($value)) ?? '';
+
+        return $value === '' ? null : mb_substr($value, 0, $maxLength);
     }
 }

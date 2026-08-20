@@ -105,6 +105,15 @@ class ShopifySyncEngineTest extends TestCase
 
         $this->assertSame('shopify-sync', $job->queue);
         $this->assertSame(3, $job->tries());
+        $this->assertSame(1800, $job->timeout);
+        $this->assertTrue($job->failOnTimeout);
+    }
+
+    public function test_sync_job_timeout_is_shorter_than_redis_retry_window(): void
+    {
+        $job = new ProcessSyncJob($this->syncJob('orders')->id);
+
+        $this->assertGreaterThan($job->timeout, (int) config('queue.connections.redis.retry_after'));
     }
 
     public function test_failed_handler_can_be_retried_by_the_queue_processor(): void

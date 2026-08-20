@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { todayDateKeyInTimezone } from '../../composables/useStoreDateTime';
 
 interface Period {
     days: number;
     from: string;
     to: string;
+    timezone: string;
 }
 
 const props = defineProps<{ period: Period }>();
@@ -17,7 +19,7 @@ const pastDays = ref(props.period.days || 30);
 const includeToday = ref(true);
 const viewMonth = ref(startOfMonth(parseDate(props.period.from)));
 
-const today = startOfDay(parseDate(props.period.to));
+const today = startOfDay(parseDate(todayDateKeyInTimezone(props.period.timezone)));
 const secondMonth = computed(() => addMonths(viewMonth.value, 1));
 const monthPanels = computed(() => [monthGrid(viewMonth.value), monthGrid(secondMonth.value)]);
 const rangeLabel = computed(() => {

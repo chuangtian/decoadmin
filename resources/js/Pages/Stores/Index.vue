@@ -5,12 +5,13 @@ import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, SharedProps, ShopifyStore } from '../../types';
+import { formatDateTimeInTimezone } from '../../composables/useStoreDateTime';
 
 defineProps<{ stores: PaginatedResource<ShopifyStore> }>();
 const page = usePage<SharedProps>();
 const canCreate = computed(() => page.props.auth.permissions.includes('store.create'));
 const storeStatusLabel = (status: string) => ({ active: '启用', pending: '待授权', inactive: '停用', error: '异常' }[status] ?? status);
-const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const dateLabel = (value: string | null, timezone: string) => value ? formatDateTimeInTimezone(value, timezone) : '—';
 </script>
 
 <template>
@@ -35,7 +36,7 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat('zh-
                             <td class="px-5 py-4"><span class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700"><span class="h-2 w-2 rounded-full" :class="store.status === 'active' ? 'bg-emerald-500' : store.status === 'error' ? 'bg-rose-500' : 'bg-amber-400'" />{{ storeStatusLabel(store.status) }}</span></td>
                             <td class="px-5 py-4"><ShopifyConnectionStatus :status="store.connection_status" /></td>
                             <td class="px-5 py-4 text-center font-semibold text-slate-700">{{ store.installed_apps_count }}</td>
-                            <td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(store.created_at) }}</td>
+                            <td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(store.created_at, store.timezone) }}</td>
                             <td class="px-5 py-4 text-right"><Link :href="`/stores/${store.id}`" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td>
                         </tr>
                     </tbody>

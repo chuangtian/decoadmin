@@ -7,6 +7,7 @@ import AppIcon from '../../Components/Layout/AppIcon.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { ShopifyConnectionStatus as ConnectionStatus } from '../../types';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface DashboardData {
     store: { id: number; name: string; shopify_domain: string; currency: string } | null;
@@ -112,9 +113,8 @@ const money = (value: number | string, currency?: string) => new Intl.NumberForm
 
 const number = (value: number) => new Intl.NumberFormat('zh-CN').format(value);
 
-const dateTime = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-    : '暂无记录';
+const { formatDateTime: storeDateTime } = useStoreDateTime();
+const dateTime = (value: string | null) => value ? storeDateTime(value) : '暂无记录';
 
 const financialLabel = (status: string | null) => ({
     paid: '已付款', pending: '待付款', refunded: '已退款', partially_refunded: '部分退款', voided: '已作废', authorized: '已授权',

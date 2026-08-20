@@ -21,6 +21,7 @@ class SystemStatusService
     private const QUEUES = [
         'shopify-webhook' => 'Webhook 处理',
         'shopify-sync' => 'Shopify 数据同步',
+        'shopify-analytics' => 'Shopify 分析刷新',
         'default' => '默认任务',
         'notifications' => '通知任务',
     ];

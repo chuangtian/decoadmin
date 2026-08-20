@@ -43,11 +43,11 @@ class AnalyticsOverviewInsightsService
             'locations' => $this->reportCard($location, $this->locationRows($location['rows'])),
             'customers' => [
                 'available' => true,
-                'source' => 'local_sync',
+                'source' => (string) ($customers['source'] ?? 'local_sync'),
+                'semantic_mode' => (string) ($customers['semantic_mode'] ?? 'decoadmin_custom'),
                 'items' => [
                     ['key' => 'new', 'label' => '新客户', 'value' => (int) ($customers['new'] ?? 0)],
                     ['key' => 'returning', 'label' => '回头客户', 'value' => (int) ($customers['returning'] ?? 0)],
-                    ['key' => 'repeat', 'label' => '复购客户', 'value' => (int) ($customers['repeat_customers'] ?? 0)],
                 ],
                 'repeat_rate' => round((float) ($customers['repeat_rate'] ?? 0), 2),
                 'error' => null,
@@ -63,6 +63,7 @@ class AnalyticsOverviewInsightsService
                 'report_scope_granted' => $source['scope_granted'],
                 'shopifyql_available' => collect([$source, $device, $location, $posLocations, $posStaff])
                     ->contains(fn (array $report): bool => $report['available']),
+                'storage' => $native['storage'] ?? null,
             ],
             'generated_at' => now()->toIso8601String(),
         ];

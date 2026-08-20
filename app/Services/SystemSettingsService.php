@@ -112,11 +112,15 @@ class SystemSettingsService
 
         config([
             'app.name' => $general['platform_name'],
-            'app.timezone' => $general['timezone'],
+            // Persistence and background jobs always run in UTC. The configured
+            // timezone is a display fallback only; store-facing dates use the
+            // Shopify shop's own IANA timezone.
+            'app.timezone' => 'UTC',
+            'system.display_timezone' => $general['timezone'],
             'app.locale' => $general['locale'],
             'services.feishu' => $settings['feishu'],
         ]);
-        date_default_timezone_set((string) $general['timezone']);
+        date_default_timezone_set('UTC');
         app()->setLocale((string) $general['locale']);
 
         if (! $settings['mail']['enabled']) {

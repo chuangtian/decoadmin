@@ -5,50 +5,115 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\InventoryItem;
 use App\Models\Product;
+use App\Models\ReportPreference;
 use App\Models\Store;
+use App\Models\User;
 use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
+use App\Support\ShopifyReportCatalog;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportCenterService
 {
+    /**
+     * Exact public ShopifyQL implementations currently available in DecoAdmin.
+     * Reports not listed here remain visible and open in Shopify because the
+     * Admin API doesn't expose their saved query definitions.
+     */
+    private const SHOPIFY_REPORT_IMPLEMENTATIONS = [
+        'sessions_over_time' => 'sessions-timeseries',
+        'visitors_over_time' => 'sessions-timeseries',
+        'sessions_by_location' => 'acquisition-by-location',
+        'sessions_by_referrer' => 'acquisition-by-source',
+        'sessions_by_device_type' => 'behavior-by-device',
+        'sessions_by_landing_page' => 'behavior-by-landing-page',
+        'conversion_rate_over_time' => 'conversion-funnel-timeseries',
+        'conversion_rate_breakdown' => 'conversion-funnel-breakdown',
+        'largest_contentful_paint_by_page_url' => 'performance-by-page',
+        'performance_by_utm_campaign' => 'campaign-attributed-sales',
+        'performance_by_marketing_channel' => 'marketing-engagement-performance',
+        'orders_over_time' => 'orders-over-time',
+        'orders_fulfilled_over_time' => 'orders-fulfilled-timeseries',
+        'abc_product_analysis' => 'abc-product-analysis',
+        'new_vs_returning_customers' => 'customer-overview',
+        'returning_customer_rate_over_time' => 'customer-returning-rate-timeseries',
+        'total_sales_breakdown' => 'financial-summary',
+        'gross_sales_over_time' => 'gross-sales-over-time',
+        'net_sales_over_time' => 'sales-over-time',
+        'total_sales_over_time' => 'total-sales-over-time',
+        'average_order_value_over_time' => 'average-order-value-over-time',
+        'total_sales_by_product' => 'product-sales',
+        'total_sales_by_vendor' => 'vendor-sales',
+        'total_sales_by_product_variant' => 'product-variant-sales',
+        'units_sold_by_product_variant' => 'product-variant-sales',
+        'gross_sales_by_sales_channel' => 'sales-by-channel',
+        'net_sales_by_sales_channel' => 'sales-by-channel',
+        'total_sales_by_sales_channel' => 'sales-by-channel',
+    ];
+
     public function __construct(
         private AnalyticsQueryService $analytics,
         private ShopifyAnalyticsReportService $shopifyReports,
+        private ShopifyReportCatalog $shopifyCatalog,
     ) {}
 
     /** @return list<array<string, mixed>> */
-    public function catalog(Store $store): array
+    public function catalog(Store $store, User $user): array
     {
         $connection = $store->shopifyConnection;
         $reportScopeGranted = in_array('read_reports', $connection?->scopes ?? [], true);
         $reportConnectionReady = $connection && in_array($connection->status, ['connected', 'warning'], true);
+        $definitions = $this->definitions();
+        $preferences = ReportPreference::query()
+            ->where('user_id', $user->getKey())
+            ->where('organization_id', $store->organization_id)
+            ->forStore($store)
+            ->get()
+            ->keyBy('report_slug');
 
-        return collect($this->definitions())->map(function (array $report) use ($reportScopeGranted, $reportConnectionReady): array {
+        return collect($this->shopifyCatalog->entries($store))->map(function (array $entry) use ($definitions, $preferences, $reportScopeGranted, $reportConnectionReady, $store): array {
+            $report = $this->catalogDefinition($entry, $definitions, $store);
             $shopifyql = str_starts_with((string) ($report['source'] ?? ''), 'shopifyql:');
+            $internal = str_starts_with((string) ($report['source'] ?? ''), 'shopify_internal:');
+            $preference = $preferences->get($report['slug']);
 
             return [
                 ...Arr::only($report, [
                     'slug', 'name', 'description', 'category', 'category_label', 'icon',
-                    'creator', 'last_viewed_at',
+                    'creator', 'report_semantics', 'report_semantics_label', 'kind', 'external_url',
                 ]),
-                'data_source' => $shopifyql ? 'shopifyql' : 'local',
-                'available' => ! $shopifyql || ($reportConnectionReady && $reportScopeGranted),
+                'data_source' => $shopifyql ? 'shopifyql' : ($internal ? 'shopify_internal' : 'local'),
+                'available' => $internal || ! $shopifyql || ($reportConnectionReady && $reportScopeGranted),
+                'executable' => ! $internal,
                 'requires_scope' => $shopifyql ? 'read_reports' : null,
+                'pinned' => $preference?->pinned_at !== null,
+                'last_viewed_at' => $preference?->last_viewed_at?->toIso8601String(),
             ];
-        })->values()->all();
+        })->sortByDesc(fn (array $report): int => $report['pinned'] ? 1 : 0)->values()->all();
     }
 
     /** @param array<string, mixed> $filters */
-    public function detail(Store $store, string $slug, array $filters): array
+    public function detail(Store $store, string $slug, array $filters, ?User $user = null): array
     {
-        $definition = $this->definitions()[$slug] ?? null;
+        $definition = $this->resolvedDefinition($store, $slug);
         abort_unless($definition, 404);
+        if ($user) {
+            $this->markViewed($store, $user, $slug);
+        }
 
         $analytics = $this->analytics->sales($store, $filters);
         $source = (string) ($definition['source'] ?? $slug);
-        if (str_starts_with($source, 'shopifyql:')) {
+        if (str_starts_with($source, 'shopify_internal:')) {
+            $dataset = $this->shopifyDataset($definition, []);
+            $integration = [
+                'source' => 'shopify_internal',
+                'available' => false,
+                'scope_granted' => null,
+                'error' => 'Shopify Admin API 未开放此报告的查询定义或结果。请在 Shopify 后台查看原报告。',
+                'storage' => null,
+            ];
+        } elseif (str_starts_with($source, 'shopifyql:')) {
             $native = $this->shopifyReports->report(
                 $store,
                 substr($source, strlen('shopifyql:')),
@@ -61,6 +126,7 @@ class ReportCenterService
                 'available' => $native['available'],
                 'scope_granted' => $native['scope_granted'],
                 'error' => $native['error'],
+                'storage' => $native['storage'] ?? null,
             ];
         } else {
             $dataset = $this->dataset($analytics, $source, $store, $filters);
@@ -69,6 +135,7 @@ class ReportCenterService
                 'available' => true,
                 'scope_granted' => null,
                 'error' => null,
+                'storage' => null,
             ];
         }
         $metricKeys = array_column($definition['metrics'], 'key');
@@ -83,7 +150,8 @@ class ReportCenterService
         return [
             ...Arr::only($definition, [
                 'slug', 'name', 'description', 'category', 'category_label', 'icon',
-                'metrics', 'dimensions', 'visualizations',
+                'metrics', 'dimensions', 'visualizations', 'report_semantics', 'report_semantics_label',
+                'creator', 'kind', 'external_url',
             ]),
             'period' => $analytics['period'],
             'summary' => $analytics['summary'],
@@ -102,6 +170,102 @@ class ReportCenterService
             'integration' => $integration,
             'generated_at' => now()->toIso8601String(),
         ];
+    }
+
+    public function setPinned(Store $store, User $user, string $slug, bool $pinned): void
+    {
+        abort_unless($this->resolvedDefinition($store, $slug), 404);
+
+        ReportPreference::query()->updateOrCreate([
+            'user_id' => $user->getKey(),
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->getKey(),
+            'report_slug' => $slug,
+        ], [
+            'pinned_at' => $pinned ? now() : null,
+        ]);
+    }
+
+    private function markViewed(Store $store, User $user, string $slug): void
+    {
+        ReportPreference::query()->updateOrCreate([
+            'user_id' => $user->getKey(),
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->getKey(),
+            'report_slug' => $slug,
+        ], [
+            'last_viewed_at' => now(),
+        ]);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function resolvedDefinition(Store $store, string $slug): ?array
+    {
+        $definitions = $this->definitions();
+        if (isset($definitions[$slug])) {
+            return $definitions[$slug];
+        }
+
+        $entry = collect($this->shopifyCatalog->entries($store))->firstWhere('slug', $slug);
+
+        return is_array($entry) ? $this->catalogDefinition($entry, $definitions, $store) : null;
+    }
+
+    /** @param array<string, string> $entry @param array<string, array<string, mixed>> $definitions @return array<string, mixed> */
+    private function catalogDefinition(array $entry, array $definitions, Store $store): array
+    {
+        $implementation = self::SHOPIFY_REPORT_IMPLEMENTATIONS[$entry['slug']] ?? null;
+        if ($implementation && isset($definitions[$implementation])) {
+            return [
+                ...$definitions[$implementation],
+                ...$entry,
+                'default_metric' => $this->catalogDefaultMetric($entry['slug'], $definitions[$implementation]['default_metric']),
+                'description' => '使用公开 ShopifyQL，按 Shopify 原生口径展示此报告。',
+                'report_semantics' => 'shopify_native',
+                'report_semantics_label' => 'Shopify 原生报告',
+                'external_url' => $this->shopifyReportUrl($store, $entry['slug']),
+            ];
+        }
+
+        return [
+            ...$entry,
+            'description' => $entry['kind'] === 'shopify_custom'
+                ? '本店在 Shopify 后台创建的自定义报告；公开 API 不提供其保存的查询定义。'
+                : 'Shopify 原生目录报告；公开 API 不提供此内部报告的查询定义。',
+            'icon' => $entry['category'],
+            'metrics' => [['key' => 'value', 'label' => '指标', 'format' => 'number']],
+            'dimensions' => [['key' => 'dimension', 'label' => '维度']],
+            'default_metric' => 'value',
+            'default_dimension' => 'dimension',
+            'visualizations' => ['table'],
+            'default_visualization' => 'table',
+            'source' => 'shopify_internal:'.$entry['slug'],
+            'report_semantics' => 'shopify_internal',
+            'report_semantics_label' => $entry['kind'] === 'shopify_custom' ? 'Shopify 店铺自定义报告' : 'Shopify 内部报告',
+            'external_url' => $this->shopifyReportUrl($store, $entry['slug']),
+        ];
+    }
+
+    private function catalogDefaultMetric(string $slug, string $fallback): string
+    {
+        return match ($slug) {
+            'visitors_over_time' => 'online_store_visitors',
+            'conversion_rate_over_time', 'conversion_rate_breakdown' => 'conversion_rate',
+            'returning_customer_rate_over_time' => 'returning_customer_rate',
+            'total_sales_by_product', 'total_sales_by_vendor', 'total_sales_by_product_variant',
+            'total_sales_by_sales_channel' => 'total_sales',
+            'units_sold_by_product_variant' => 'units',
+            'gross_sales_by_sales_channel' => 'gross_sales',
+            'net_sales_by_sales_channel' => 'net_sales',
+            default => $fallback,
+        };
+    }
+
+    private function shopifyReportUrl(Store $store, string $slug): string
+    {
+        $handle = str($store->shopify_domain)->before('.myshopify.com')->toString();
+
+        return sprintf('https://admin.shopify.com/store/%s/analytics/reports/%s', rawurlencode($handle), rawurlencode($slug));
     }
 
     /** @param array<string, mixed> $filters */
@@ -143,7 +307,7 @@ class ReportCenterService
     /** @return array<string, array<string, mixed>> */
     private function definitions(): array
     {
-        return [
+        $definitions = [
             'store-overview' => $this->definition('store-overview', '商店数据概览', '汇总当前商店的商品、客户、库存 SKU、可用库存和周期订单。', 'store', '商店', 'stores',
                 [['key' => 'value', 'label' => '数量', 'format' => 'number']], [['key' => 'item', 'label' => '项目']], 'value', 'item', ['bar', 'table'], 'bar'),
             'order-status' => $this->definition('order-status', '订单状态分布', '按付款状态和发货状态查看周期内订单分布。', 'orders', '订单', 'orders',
@@ -156,20 +320,75 @@ class ReportCenterService
                 [['key' => 'orders', 'label' => '订单数', 'format' => 'number'], ['key' => 'average_order_value', 'label' => '平均订单金额', 'format' => 'currency']],
                 [['key' => 'date', 'label' => '日期']], 'orders', 'date', ['line', 'bar', 'table'], 'line'),
             'product-sales' => $this->definition('product-sales', '商品销售排行', '按商品查看销量与净销售额排行。', 'products', '商品', 'products',
-                [['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'], ['key' => 'units', 'label' => '销量', 'format' => 'number']],
+                [
+                    ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'],
+                    ['key' => 'gross_sales', 'label' => '毛销售额', 'format' => 'currency'],
+                    ['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency'],
+                    ['key' => 'units', 'label' => '净售出数量', 'format' => 'number'],
+                ],
                 [['key' => 'name', 'label' => '商品']], 'net_sales', 'name', ['bar', 'table'], 'bar'),
+            'product-variant-sales' => $this->definition('product-variant-sales', '商品多属性销售排行', '按 Shopify 商品和多属性维度查看净售出数量及原生销售额。', 'products', '商品', 'products',
+                [
+                    ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'],
+                    ['key' => 'gross_sales', 'label' => '毛销售额', 'format' => 'currency'],
+                    ['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency'],
+                    ['key' => 'units', 'label' => '净售出数量', 'format' => 'number'],
+                ],
+                [['key' => 'name', 'label' => '商品多属性'], ['key' => 'sku', 'label' => 'SKU']], 'net_sales', 'name', ['bar', 'table'], 'bar', 'shopifyql:product-variant-sales'),
             'vendor-sales' => $this->definition('vendor-sales', '供应商销售排行', '按供应商汇总商品销量与净销售额。', 'products', '商品', 'vendors',
-                [['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'], ['key' => 'units', 'label' => '销量', 'format' => 'number']],
-                [['key' => 'vendor', 'label' => '供应商']], 'net_sales', 'vendor', ['bar', 'table'], 'bar'),
+                [['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency'], ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'], ['key' => 'gross_sales', 'label' => '毛销售额', 'format' => 'currency'], ['key' => 'units', 'label' => '净售出数量', 'format' => 'number']],
+                [['key' => 'vendor', 'label' => '供应商']], 'total_sales', 'vendor', ['bar', 'table'], 'bar'),
             'product-type-sales' => $this->definition('product-type-sales', '商品分类销售排行', '按商品分类汇总销量与净销售额。', 'products', '商品', 'category',
-                [['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'], ['key' => 'units', 'label' => '销量', 'format' => 'number']],
-                [['key' => 'product_type', 'label' => '商品分类']], 'net_sales', 'product_type', ['bar', 'table'], 'bar'),
+                [['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency'], ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'], ['key' => 'gross_sales', 'label' => '毛销售额', 'format' => 'currency'], ['key' => 'units', 'label' => '净售出数量', 'format' => 'number']],
+                [['key' => 'product_type', 'label' => '商品分类']], 'total_sales', 'product_type', ['bar', 'table'], 'bar'),
             'customer-value' => $this->definition('customer-value', '客户价值排行', '按客户累计消费金额和订单数查看高价值客户。', 'customers', '客户', 'customers',
                 [['key' => 'lifetime_value', 'label' => '客户价值', 'format' => 'currency'], ['key' => 'orders', 'label' => '订单数', 'format' => 'number']],
                 [['key' => 'name', 'label' => '客户']], 'lifetime_value', 'name', ['bar', 'table'], 'bar'),
             'customer-overview' => $this->definition('customer-overview', '客户构成', '查看活跃、新增、回头和复购客户构成。', 'customers', '客户', 'segments',
                 [['key' => 'customers', 'label' => '客户数', 'format' => 'number'], ['key' => 'rate', 'label' => '占比', 'format' => 'percent']],
                 [['key' => 'segment', 'label' => '客户群体']], 'customers', 'segment', ['donut', 'bar', 'table'], 'donut'),
+            'customer-returning-rate-timeseries' => $this->definition('customer-returning-rate-timeseries', '回头客率随时间变化', '按 Shopify 原生周期口径查看客户、回头客和回头客率。', 'customers', '客户', 'customers',
+                [
+                    ['key' => 'returning_customer_rate', 'label' => '回头客率', 'format' => 'percent'],
+                    ['key' => 'returning_customers', 'label' => '回头客', 'format' => 'number'],
+                    ['key' => 'customers', 'label' => '客户', 'format' => 'number'],
+                ],
+                [['key' => 'day', 'label' => '日期']], 'returning_customer_rate', 'day', ['line', 'bar', 'table'], 'line', 'shopifyql:customer-returning-rate'),
+            'sessions-timeseries' => $this->definition('sessions-timeseries', '访问随时间变化', '采用 Shopify human + bot 规则查看访问和在线商店访客。', 'acquisition', '获取', 'trend',
+                [
+                    ['key' => 'sessions', 'label' => 'Session', 'format' => 'number'],
+                    ['key' => 'online_store_visitors', 'label' => '访客', 'format' => 'number'],
+                ],
+                [['key' => 'day', 'label' => '日期']], 'sessions', 'day', ['line', 'bar', 'table'], 'line', 'shopifyql:sessions-timeseries'),
+            'conversion-funnel-timeseries' => $this->definition('conversion-funnel-timeseries', '转化率与漏斗随时间变化', '采用 Shopify human + bot 规则查看访问、加购、结账和购买转化。', 'behavior', '行为', 'funnel',
+                [
+                    ['key' => 'conversion_rate', 'label' => '转化率', 'format' => 'percent'],
+                    ['key' => 'sessions', 'label' => 'Session', 'format' => 'number'],
+                    ['key' => 'sessions_with_cart_additions', 'label' => '加购 Session', 'format' => 'number'],
+                    ['key' => 'sessions_that_reached_checkout', 'label' => '到达结账 Session', 'format' => 'number'],
+                    ['key' => 'sessions_that_completed_checkout', 'label' => '完成结账 Session', 'format' => 'number'],
+                ],
+                [['key' => 'day', 'label' => '日期']], 'conversion_rate', 'day', ['line', 'bar', 'table'], 'line', 'shopifyql:conversion-funnel-timeseries'),
+            'conversion-funnel-breakdown' => $this->definition('conversion-funnel-breakdown', '转化率细分', '采用 Shopify human + bot 规则查看当前周期的访问、加购、结账和购买漏斗。', 'behavior', '行为', 'funnel',
+                [
+                    ['key' => 'conversion_rate', 'label' => '转化率', 'format' => 'percent'],
+                    ['key' => 'sessions', 'label' => 'Session', 'format' => 'number'],
+                    ['key' => 'sessions_with_cart_additions', 'label' => '加购 Session', 'format' => 'number'],
+                    ['key' => 'sessions_that_reached_checkout', 'label' => '到达结账 Session', 'format' => 'number'],
+                    ['key' => 'sessions_that_completed_checkout', 'label' => '完成结账 Session', 'format' => 'number'],
+                ],
+                [], 'conversion_rate', 'conversion_rate', ['bar', 'table'], 'table', 'shopifyql:conversion-funnel-breakdown'),
+            'sales-by-channel' => $this->definition('sales-by-channel', '按销售渠道统计销售额', '按 Shopify 销售渠道查看订单及毛、净、总销售额。', 'sales', '销售额', 'channels',
+                [
+                    ['key' => 'total_sales', 'label' => '总销售额', 'format' => 'currency'],
+                    ['key' => 'net_sales', 'label' => '净销售额', 'format' => 'currency'],
+                    ['key' => 'gross_sales', 'label' => '毛销售额', 'format' => 'currency'],
+                    ['key' => 'orders', 'label' => '订单', 'format' => 'number'],
+                ],
+                [['key' => 'sales_channel', 'label' => '销售渠道']], 'total_sales', 'sales_channel', ['bar', 'table'], 'bar', 'shopifyql:sales-by-channel'),
+            'orders-fulfilled-timeseries' => $this->definition('orders-fulfilled-timeseries', '已发货订单随时间变化', '按日期和 Shopify 发货状态查看订单数量。', 'orders', '订单', 'orders',
+                [['key' => 'orders', 'label' => '订单', 'format' => 'number']],
+                [['key' => 'day', 'label' => '日期'], ['key' => 'order_fulfillment_status', 'label' => '发货状态']], 'orders', 'day', ['line', 'bar', 'table'], 'line', 'shopifyql:orders-fulfilled-timeseries'),
             'inventory-risk' => $this->definition('inventory-risk', '库存风险', '查看可用库存、周期销量、周转估算和缺货风险。', 'inventory', '库存', 'inventory',
                 [['key' => 'available', 'label' => '可用库存', 'format' => 'number'], ['key' => 'units_sold', 'label' => '周期销量', 'format' => 'number'], ['key' => 'turnover', 'label' => '周转估算', 'format' => 'number']],
                 [['key' => 'sku', 'label' => 'SKU']], 'available', 'sku', ['bar', 'table'], 'table'),
@@ -302,6 +521,56 @@ class ReportCenterService
                 [['key' => 'marketing_platform', 'label' => '营销平台'], ['key' => 'marketing_activity_title', 'label' => '营销活动']],
                 'engagements_total_sales', 'marketing_platform', ['bar', 'table'], 'bar', 'shopifyql:marketing-engagement-performance'),
         ];
+
+        $nativeSources = [
+            'order-status' => 'order-status',
+            'financial-summary' => 'core-sales-timeseries',
+            'sales-over-time' => 'core-sales-timeseries',
+            'orders-over-time' => 'core-sales-timeseries',
+            'gross-sales-over-time' => 'core-sales-timeseries',
+            'total-sales-over-time' => 'core-sales-timeseries',
+            'discounts-over-time' => 'core-sales-timeseries',
+            'refunds-over-time' => 'core-sales-timeseries',
+            'taxes-over-time' => 'core-sales-timeseries',
+            'shipping-over-time' => 'core-sales-timeseries',
+            'average-order-value-over-time' => 'core-sales-timeseries',
+            'product-sales' => 'product-sales',
+            'product-variant-sales' => 'product-variant-sales',
+            'units-sold-by-product' => 'product-sales',
+            'sales-by-product' => 'product-sales',
+            'vendor-sales' => 'vendor-sales',
+            'sales-by-vendor' => 'vendor-sales',
+            'product-type-sales' => 'product-type-sales',
+            'sales-by-product-type' => 'product-type-sales',
+            'customer-value' => 'customer-value',
+            'high-value-customers' => 'customer-value',
+            'customer-overview' => 'customer-overview',
+            'customer-returning-rate-timeseries' => 'customer-returning-rate',
+            'returning-customers' => 'customer-overview',
+            'returning-customer-rate' => 'customer-overview',
+            'customer-segment-analysis' => 'customer-overview',
+            'abc-product-analysis' => 'abc-product-analysis',
+            'sessions-timeseries' => 'sessions-timeseries',
+            'conversion-funnel-timeseries' => 'conversion-funnel-timeseries',
+            'conversion-funnel-breakdown' => 'conversion-funnel-breakdown',
+            'sales-by-channel' => 'sales-by-channel',
+            'orders-fulfilled-timeseries' => 'orders-fulfilled-timeseries',
+        ];
+
+        return collect($definitions)->map(function (array $definition, string $slug) use ($nativeSources): array {
+            $existingSource = (string) ($definition['source'] ?? '');
+            $nativeReport = $nativeSources[$slug] ?? (str_starts_with($existingSource, 'shopifyql:')
+                ? substr($existingSource, strlen('shopifyql:'))
+                : null);
+
+            return [
+                ...$definition,
+                'source' => $nativeReport ? "shopifyql:{$nativeReport}" : ($definition['source'] ?? $slug),
+                'native_report' => $nativeReport,
+                'report_semantics' => $nativeReport ? 'shopify_native' : 'decoadmin_custom',
+                'report_semantics_label' => $nativeReport ? 'Shopify 原生报告' : 'DecoAdmin 自定义报告',
+            ];
+        })->all();
     }
 
     /** @param list<array<string, string>> $metrics @param list<array<string, string>> $dimensions @param list<string> $visualizations */
@@ -383,11 +652,11 @@ class ReportCenterService
                 'rows' => $analytics['trend'],
             ],
             'product-sales' => [
-                'headers' => $this->headers(['name' => ['商品', 'text'], 'vendor' => ['供应商', 'text'], 'product_type' => ['商品分类', 'text'], 'units' => ['销量', 'number'], 'net_sales' => ['净销售额', 'currency']]),
+                'headers' => $this->headers(['name' => ['商品', 'text'], 'vendor' => ['供应商', 'text'], 'product_type' => ['商品分类', 'text'], 'units' => ['净售出数量', 'number'], 'gross_sales' => ['毛销售额', 'currency'], 'net_sales' => ['净销售额', 'currency'], 'total_sales' => ['总销售额', 'currency']]),
                 'rows' => $analytics['rankings']['products'],
             ],
-            'vendor-sales' => ['headers' => $this->headers(['vendor' => ['供应商', 'text'], 'units' => ['销量', 'number'], 'net_sales' => ['净销售额', 'currency']]), 'rows' => $analytics['rankings']['vendors']],
-            'product-type-sales' => ['headers' => $this->headers(['product_type' => ['商品分类', 'text'], 'units' => ['销量', 'number'], 'net_sales' => ['净销售额', 'currency']]), 'rows' => $analytics['rankings']['product_types']],
+            'vendor-sales' => ['headers' => $this->headers(['vendor' => ['供应商', 'text'], 'units' => ['净售出数量', 'number'], 'gross_sales' => ['毛销售额', 'currency'], 'net_sales' => ['净销售额', 'currency'], 'total_sales' => ['总销售额', 'currency']]), 'rows' => $analytics['rankings']['vendors']],
+            'product-type-sales' => ['headers' => $this->headers(['product_type' => ['商品分类', 'text'], 'units' => ['净售出数量', 'number'], 'gross_sales' => ['毛销售额', 'currency'], 'net_sales' => ['净销售额', 'currency'], 'total_sales' => ['总销售额', 'currency']]), 'rows' => $analytics['rankings']['product_types']],
             'customer-value' => ['headers' => $this->headers(['name' => ['客户', 'text'], 'orders' => ['订单数', 'number'], 'lifetime_value' => ['客户价值', 'currency']]), 'rows' => $analytics['customers']['high_value']],
             'customer-overview' => ['headers' => $this->headers(['segment' => ['客户群体', 'text'], 'customers' => ['客户数', 'number'], 'rate' => ['占比', 'percent']]), 'rows' => $this->customerSegments($analytics['customers'])],
             'inventory-risk' => ['headers' => $this->headers(['sku' => ['SKU', 'text'], 'available' => ['可用库存', 'number'], 'units_sold' => ['周期销量', 'number'], 'estimated_days_cover' => ['预计可售天数', 'number'], 'turnover' => ['周转估算', 'number'], 'risk' => ['风险', 'status']]), 'rows' => $analytics['inventory']['items']],
@@ -432,6 +701,7 @@ class ReportCenterService
     /** @param array<string, mixed> $definition @param list<array<string, mixed>> $rows */
     private function shopifyDataset(array $definition, array $rows): array
     {
+        $rows = $this->adaptShopifyRows($definition, $rows);
         $columns = collect([...$definition['dimensions'], ...$definition['metrics']])
             ->unique('key')
             ->values();
@@ -451,6 +721,62 @@ class ReportCenterService
                 ])->all();
             })->all(),
         ];
+    }
+
+    /** @param array<string, mixed> $definition @param list<array<string, mixed>> $rows @return list<array<string, mixed>> */
+    private function adaptShopifyRows(array $definition, array $rows): array
+    {
+        $nativeReport = (string) ($definition['native_report'] ?? '');
+        $slug = (string) ($definition['slug'] ?? '');
+
+        if ($nativeReport === 'core-sales-timeseries') {
+            $totals = collect($rows)->first(fn (array $row): bool => array_key_exists('total_sales__totals', $row));
+            if ($slug === 'financial-summary' && is_array($totals)) {
+                return [
+                    ['item' => '毛销售额', 'amount' => (float) ($totals['gross_sales__totals'] ?? 0)],
+                    ['item' => '折扣', 'amount' => (float) ($totals['discounts__totals'] ?? 0)],
+                    ['item' => '退款', 'amount' => (float) ($totals['returns__totals'] ?? 0)],
+                    ['item' => '净销售额', 'amount' => (float) ($totals['net_sales__totals'] ?? 0)],
+                    ['item' => '运费', 'amount' => (float) ($totals['shipping_charges__totals'] ?? 0)],
+                    ['item' => '税费', 'amount' => (float) ($totals['taxes__totals'] ?? 0)],
+                    ['item' => '总销售额', 'amount' => (float) ($totals['total_sales__totals'] ?? 0)],
+                ];
+            }
+
+            return collect($rows)
+                ->filter(fn (array $row): bool => filled($row['day'] ?? null))
+                ->map(fn (array $row): array => [
+                    ...$row,
+                    'date' => substr((string) ($row['day'] ?? ''), 0, 10),
+                    'refunds' => abs((float) ($row['returns'] ?? 0)),
+                    'shipping' => (float) ($row['shipping_charges'] ?? 0),
+                ])->values()->all();
+        }
+
+        if ($nativeReport === 'customer-overview') {
+            $totals = collect($rows)->first(fn (array $row): bool => array_key_exists('customers__totals', $row));
+            if (! is_array($totals)) {
+                return [];
+            }
+
+            $active = max(1, (int) round((float) ($totals['customers__totals'] ?? 0)));
+
+            return collect($rows)->filter(fn (array $row): bool => filled($row['new_or_returning_customer'] ?? null))
+                ->map(function (array $row) use ($active): array {
+                    $customers = (int) round((float) ($row['customers'] ?? 0));
+                    $segment = strcasecmp((string) $row['new_or_returning_customer'], 'Returning') === 0
+                        ? '回头客户'
+                        : '新增客户';
+
+                    return [
+                        'segment' => $segment,
+                        'customers' => $customers,
+                        'rate' => round($customers / $active * 100, 2),
+                    ];
+                })->values()->all();
+        }
+
+        return $rows;
     }
 
     private function normalizeShopifyValue(mixed $value, string $format): mixed

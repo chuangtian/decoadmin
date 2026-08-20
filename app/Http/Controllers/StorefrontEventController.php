@@ -13,7 +13,9 @@ class StorefrontEventController extends Controller
     public function __invoke(Request $request, Store $store, StorefrontEventIngestionService $events): JsonResponse
     {
         try {
-            $result = $events->ingest($store, $request->getContent());
+            $result = $events->ingest($store, $request->getContent(), [
+                'country_code' => $request->header('CF-IPCountry'),
+            ]);
         } catch (InvalidArgumentException $exception) {
             return $this->response(['accepted' => false, 'message' => $exception->getMessage()], 422);
         }

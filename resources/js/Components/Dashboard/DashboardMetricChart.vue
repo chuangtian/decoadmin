@@ -39,13 +39,13 @@ const formatted = (value: number) => props.format === 'currency'
             <svg :viewBox="`0 0 ${width} ${height}`" class="min-w-[700px] w-full" role="img" :aria-label="`${label}趋势图`">
                 <g v-for="(tick,index) in ticks" :key="tick">
                     <line :x1="inset.left" :x2="width-inset.right" :y1="y(tick)" :y2="y(tick)" stroke="#e2e8f0" stroke-width="1" />
-                    <text :x="inset.left-10" :y="y(tick)+4" text-anchor="end" fill="#94a3b8" font-size="11">{{ formatted(tick) }}</text>
+                    <text :x="inset.left-10" :y="y(tick)+4" text-anchor="end" fill="#94a3b8" font-size="8.8">{{ formatted(tick) }}</text>
                 </g>
                 <path v-if="previous.length" :d="path(previous)" fill="none" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="5 5" />
                 <path v-if="current.length" :d="path(current)" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" />
                 <g v-for="(point,index) in current" :key="`${point.label}-${index}`">
                     <circle :cx="x(index,current.length)" :cy="y(Number(point[metric] || 0))" r="3.5" fill="#10b981"><title>{{ point.label }} · {{ formatted(Number(point[metric] || 0)) }}</title></circle>
-                    <text v-if="index % visibleEvery === 0 || index === current.length-1" :x="x(index,current.length)" :y="height-14" text-anchor="middle" fill="#94a3b8" font-size="11">{{ point.label }}</text>
+                    <text v-if="index % visibleEvery === 0 || index === current.length-1" :x="x(index,current.length)" :y="height-14" text-anchor="middle" fill="#94a3b8" font-size="8.8">{{ point.label }}</text>
                 </g>
             </svg>
         </div>

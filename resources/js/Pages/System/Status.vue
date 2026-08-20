@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppIcon from '../../Components/Layout/AppIcon.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 type HealthStatus = 'healthy' | 'warning' | 'unavailable' | 'unknown';
 type OverallStatus = 'healthy' | 'warning' | 'degraded';
@@ -96,11 +97,8 @@ const environmentLabel = computed(() => ({
     testing: '自动测试环境',
 }[props.systemStatus.runtime.environment] ?? props.systemStatus.runtime.environment));
 
-const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', {
-        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    }).format(new Date(value))
-    : '暂无记录';
+const { formatDateTime: storeDateTime } = useStoreDateTime();
+const dateLabel = (value: string | null) => value ? storeDateTime(value) : '暂无记录';
 
 const byteLabel = (value: string | number | null | undefined) => {
     if (typeof value !== 'number') return '暂不可用';

@@ -16,7 +16,7 @@ const props = defineProps<{
         summary: { gross_sales: number; net_sales: number; discounts: number; refunds: number; taxes: number; shipping: number; total_sales: number; orders: number; average_order_value: number };
         comparisons: { previous: Record<string, Comparison>; year_over_year: Record<string, Comparison> };
         trend: Trend[];
-        customers: { active: number; new: number; returning: number; repeat_customers: number; repeat_rate: number; average_lifetime_value: number };
+        customers: { active: number; new: number; returning: number; repeat_customers: number; repeat_rate: number; average_lifetime_value: number | null };
         rankings: { products: Ranking[]; vendors: Array<{vendor: string; units: number; net_sales: number}>; product_types: Array<{product_type: string; units: number; net_sales: number}> };
         inventory: { summary: { out_of_stock: number; low_stock: number; slow_moving: number }; items: RiskItem[] };
     };
@@ -62,7 +62,7 @@ const cards = [
             <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
                 <article v-for="item in [
                     ['活跃客户', analytics.customers.active], ['新客户', analytics.customers.new], ['老客户', analytics.customers.returning],
-                    ['复购客户', analytics.customers.repeat_customers], ['复购率', `${analytics.customers.repeat_rate}%`], ['平均客户价值', money(analytics.customers.average_lifetime_value)],
+                    ['复购客户', analytics.customers.repeat_customers], ['复购率', `${analytics.customers.repeat_rate}%`], ['平均客户价值', analytics.customers.average_lifetime_value === null ? '请查看客户价值报告' : money(analytics.customers.average_lifetime_value)],
                 ]" :key="String(item[0])" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-slate-500">{{ item[0] }}</p><p class="mt-2 text-xl font-semibold text-slate-950">{{ item[1] }}</p></article>
             </section>
 

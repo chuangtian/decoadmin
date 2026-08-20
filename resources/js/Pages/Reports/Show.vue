@@ -4,6 +4,7 @@ import { computed, reactive } from 'vue';
 import DateRangeFilters from '../../Components/Analytics/DateRangeFilters.vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface Option { key: string; label: string; format?: string }
 interface Header extends Option { format: string }
@@ -18,6 +19,11 @@ const props = defineProps<{
         metrics: Option[];
         dimensions: Option[];
         visualizations: string[];
+        report_semantics: 'shopify_native' | 'decoadmin_custom' | 'shopify_internal';
+        report_semantics_label: string;
+        creator: string;
+        kind: 'shopify_default' | 'shopify_custom';
+        external_url: string;
         period: { days: number; from: string; to: string; include_test: boolean; include_cancelled: boolean };
         summary: Record<string, number>;
         comparisons: { previous: Record<string, { change_percent: number | null }> };
@@ -26,7 +32,7 @@ const props = defineProps<{
         selected: { metric: string; dimension: string; visualization: string };
         chart: { labels: string[]; values: number[] };
         integration: {
-            source: 'local' | 'shopifyql';
+            source: 'local' | 'shopifyql' | 'shopify_internal';
             available: boolean;
             scope_granted: boolean | null;
             error: string | null;
@@ -37,6 +43,7 @@ const props = defineProps<{
 }>();
 
 const controls = reactive({ ...props.report.selected });
+const { formatDateTime } = useStoreDateTime();
 const visualizationLabels: Record<string, string> = { line: '折线图', bar: '条形图', donut: '环形图', table: '数据表格' };
 const riskLabels: Record<string, string> = { out_of_stock: '已缺货', low_stock: '低库存', slow_moving: '滞销风险', healthy: '正常' };
 const selectedMetric = computed(() => props.report.metrics.find((item) => item.key === controls.metric) ?? props.report.metrics[0]);
@@ -95,27 +102,34 @@ const exportUrl = (type: string) => {
             <header class="flex flex-col gap-5 border-b border-slate-200 pb-5 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                     <Link href="/reports" class="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-emerald-700">← 返回报告目录</Link>
-                    <div class="mt-4 flex flex-wrap items-center gap-3"><h1 class="text-3xl font-semibold tracking-tight text-slate-950">{{ report.name }}</h1><span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{{ report.category_label }}</span></div>
+                    <div class="mt-4 flex flex-wrap items-center gap-3"><h1 class="text-3xl font-semibold tracking-tight text-slate-950">{{ report.name }}</h1><span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{{ report.category_label }}</span><span class="rounded-full px-3 py-1 text-xs font-semibold" :class="report.report_semantics === 'shopify_native' ? 'bg-sky-50 text-sky-700' : 'bg-violet-50 text-violet-700'">{{ report.report_semantics_label }}</span></div>
                     <p class="mt-2 text-sm text-slate-500">{{ report.description }} · {{ store.name }} · {{ store.timezone }}</p>
                 </div>
-                <div v-if="canExport && report.integration.available" class="flex gap-2"><a :href="exportUrl('csv')" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">导出 CSV</a><a :href="exportUrl('excel')" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">导出 Excel</a></div>
+                <div class="flex gap-2"><a v-if="report.integration.source === 'shopify_internal'" :href="report.external_url" target="_blank" rel="noopener noreferrer" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">在 Shopify 后台打开 ↗</a><template v-else-if="canExport && report.integration.available"><a :href="exportUrl('csv')" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">导出 CSV</a><a :href="exportUrl('excel')" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">导出 Excel</a></template></div>
             </header>
 
-            <DateRangeFilters :action="`/reports/${report.slug}`" :period="report.period" :extra="filterExtra" />
+            <DateRangeFilters v-if="report.integration.source !== 'shopify_internal'" :action="`/reports/${report.slug}`" :period="report.period" :extra="filterExtra" />
+
+            <section v-if="report.integration.source === 'shopify_internal'" class="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <div class="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-50 text-2xl text-emerald-700">S</div>
+                <h2 class="mt-5 text-xl font-semibold text-slate-950">此报告由 Shopify 后台提供</h2>
+                <p class="mx-auto mt-2 max-w-2xl text-sm leading-7 text-slate-500">{{ report.integration.error }} 目录、类别、创建者、收藏和最近查看已在 DecoAdmin 同步；数据口径不会用本地近似算法替代。</p>
+                <a :href="report.external_url" target="_blank" rel="noopener noreferrer" class="mt-6 inline-flex rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-sm">查看 Shopify 原报告 ↗</a>
+            </section>
 
             <section v-if="report.integration.source === 'shopifyql' && !report.integration.available" class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-sm">
                 <p class="font-semibold">Shopify 原生报告暂不可用</p>
                 <p class="mt-1 text-amber-800">{{ report.integration.error || '请检查 Shopify 连接，并重新授权 read_reports 权限。' }}</p>
             </section>
 
-            <section class="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3">
+            <section v-if="report.integration.source !== 'shopify_internal'" class="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3">
                 <label class="text-xs font-semibold text-slate-500">指标<select v-model="controls.metric" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800" @change="applyControls"><option v-for="item in report.metrics" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
                 <label class="text-xs font-semibold text-slate-500">维度<select v-model="controls.dimension" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800" @change="applyControls"><option v-for="item in report.dimensions" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
                 <label class="text-xs font-semibold text-slate-500">展示方式<select v-model="controls.visualization" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800" @change="applyControls"><option v-for="item in report.visualizations" :key="item" :value="item">{{ visualizationLabels[item] }}</option></select></label>
             </section>
 
             <section v-if="report.rows.length && controls.visualization !== 'table'" class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-xs font-semibold uppercase tracking-[.18em] text-slate-400">数据可视化</p><h2 class="mt-2 text-xl font-semibold text-slate-950">{{ selectedMetric.label }}</h2></div><p class="text-xs text-slate-400">更新于 {{ new Date(report.generated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</p></div>
+                <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-xs font-semibold uppercase tracking-[.18em] text-slate-400">数据可视化</p><h2 class="mt-2 text-xl font-semibold text-slate-950">{{ selectedMetric.label }}</h2></div><p class="text-xs text-slate-400">更新于 {{ formatDateTime(report.generated_at) }}</p></div>
 
                 <div v-if="controls.visualization === 'line'" class="mt-8">
                     <div class="h-72 border-b border-l border-slate-200 bg-[linear-gradient(to_bottom,transparent_24%,#e2e8f0_25%,transparent_26%,transparent_49%,#e2e8f0_50%,transparent_51%,transparent_74%,#e2e8f0_75%,transparent_76%)] p-3"><svg viewBox="0 0 100 100" preserveAspectRatio="none" class="h-full w-full overflow-visible"><polyline :points="linePoints" fill="none" stroke="#0ea5e9" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" /></svg></div>
@@ -138,7 +152,7 @@ const exportUrl = (type: string) => {
                 <div class="border-b border-slate-100 px-5 py-4"><h2 class="font-semibold text-slate-950">报告明细</h2><p class="mt-1 text-sm text-slate-500">共 {{ report.rows.length }} 条结果，按当前店铺和统计周期生成。</p></div>
                 <div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs font-semibold text-slate-500"><tr><th v-for="header in report.headers" :key="header.key" class="whitespace-nowrap px-5 py-4">{{ header.label }}</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="(row,index) in report.rows" :key="index" class="hover:bg-slate-50"><td v-for="header in report.headers" :key="header.key" class="whitespace-nowrap px-5 py-4 text-slate-700">{{ format(row[header.key], header.format) }}</td></tr></tbody></table></div>
             </section>
-            <EmptyState v-else :title="report.integration.available ? '当前报告暂无数据' : '当前报告暂不可用'" :description="report.integration.error || (report.integration.source === 'shopifyql' ? '调整统计周期，或确认 Shopify 原生报告中已有数据。' : '调整统计周期，或先同步当前店铺的 Shopify 数据。')" icon="reports" />
+            <EmptyState v-else-if="report.integration.source !== 'shopify_internal'" :title="report.integration.available ? '当前报告暂无数据' : '当前报告暂不可用'" :description="report.integration.error || (report.integration.source === 'shopifyql' ? '调整统计周期，或确认 Shopify 原生报告中已有数据。' : '调整统计周期，或先同步当前店铺的 Shopify 数据。')" icon="reports" />
         </div>
     </AppLayout>
 </template>

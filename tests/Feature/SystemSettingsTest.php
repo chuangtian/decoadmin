@@ -104,6 +104,9 @@ class SystemSettingsTest extends TestCase
 
         $this->assertSame('DecoAdmin Platform', $this->storedValue('general', 'platform_name'));
         $this->assertSame('America/New_York', $this->storedValue('general', 'timezone'));
+        $this->assertSame('UTC', config('app.timezone'));
+        $this->assertSame('UTC', date_default_timezone_get());
+        $this->assertSame('America/New_York', config('system.display_timezone'));
         $this->assertSame('smtp-password-secret', $this->storedValue('mail', 'password'));
         $this->assertSame('system', config('mail.default'));
         $this->assertSame('smtp-password-secret', config('mail.mailers.system.password'));

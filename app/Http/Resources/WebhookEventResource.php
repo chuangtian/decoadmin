@@ -23,6 +23,7 @@ class WebhookEventResource extends JsonResource
                 'id' => $this->store->id,
                 'name' => $this->store->name,
                 'shopify_domain' => $this->store->shopify_domain,
+                'timezone' => $this->store->timezone ?: 'UTC',
             ]),
         ];
     }

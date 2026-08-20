@@ -27,6 +27,7 @@ class SyncJobResource extends JsonResource
                 'id' => $this->store->id,
                 'name' => $this->store->name,
                 'shopify_domain' => $this->store->shopify_domain,
+                'timezone' => $this->store->timezone ?: 'UTC',
             ]),
             'app_installation' => $this->whenLoaded('appInstallation', fn () => $this->appInstallation ? [
                 'id' => $this->appInstallation->id,

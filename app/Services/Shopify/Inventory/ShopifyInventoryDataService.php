@@ -8,6 +8,7 @@ use App\Models\InventoryLevel;
 use App\Models\Location;
 use App\Models\ProductVariant;
 use App\Models\Store;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 class ShopifyInventoryDataService
@@ -208,10 +209,14 @@ class ShopifyInventoryDataService
             return null;
         }
 
-        if (! is_string($value) || strtotime($value) === false) {
+        if (! is_string($value)) {
             throw new ShopifyApiException('Shopify 库存数量更新时间格式无效。');
         }
 
-        return $value;
+        try {
+            return CarbonImmutable::parse($value)->utc()->toDateTimeString();
+        } catch (\Throwable) {
+            throw new ShopifyApiException('Shopify 库存数量更新时间格式无效。');
+        }
     }
 }

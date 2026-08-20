@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\AuditLogQueryService;
 use App\Support\CurrentOrganization;
+use App\Support\CurrentStore;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -14,6 +15,7 @@ class AuditLogController extends Controller
 {
     public function __construct(
         private CurrentOrganization $currentOrganization,
+        private CurrentStore $currentStore,
         private AuditLogQueryService $auditLogs,
     ) {}
 
@@ -42,8 +44,17 @@ class AuditLogController extends Controller
             ])->validate();
         }
 
+        $filterStore = filled($filters['store_id'] ?? null)
+            ? $organization->stores()->find((int) $filters['store_id'])
+            : $this->currentStore->get();
+
         return Inertia::render('AuditLogs/Index', [
-            'auditLogs' => $this->auditLogs->paginate($request->user(), $organization, $filters),
+            'auditLogs' => $this->auditLogs->paginate(
+                $request->user(),
+                $organization,
+                $filters,
+                $filterStore?->timezone ?: 'UTC',
+            ),
             'summary' => $this->auditLogs->summary($request->user(), $organization),
             'filters' => [
                 'search' => trim((string) ($filters['search'] ?? '')),

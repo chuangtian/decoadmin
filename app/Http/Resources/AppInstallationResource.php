@@ -20,6 +20,7 @@ class AppInstallationResource extends JsonResource
                 'name' => $this->store->name,
                 'shopify_domain' => $this->store->shopify_domain,
                 'status' => $this->store->status,
+                'timezone' => $this->store->timezone ?: 'UTC',
             ]),
         ];
     }

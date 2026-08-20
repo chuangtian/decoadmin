@@ -17,9 +17,14 @@ class ProcessSyncJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $timeout;
+
+    public bool $failOnTimeout = true;
+
     public function __construct(public readonly int $syncJobId)
     {
         $this->onQueue('shopify-sync');
+        $this->timeout = max(120, (int) config('shopify.scheduled_sync.job_timeout_seconds', 1800));
     }
 
     public function handle(SyncProcessor $processor): void
@@ -44,7 +49,7 @@ class ProcessSyncJob implements ShouldQueue
         return [
             (new WithoutOverlapping("shopify-sync-job:{$this->syncJobId}"))
                 ->releaseAfter(60)
-                ->expireAfter(1800)
+                ->expireAfter($this->timeout + 120)
                 ->shared(),
         ];
     }

@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -17,7 +18,10 @@ use Throwable;
 
 class AnalyticsQueryService
 {
-    public function __construct(private AnalyticsCacheVersionService $cacheVersion) {}
+    public function __construct(
+        private AnalyticsCacheVersionService $cacheVersion,
+        private ShopifyAnalyticsReportService $shopifyReports,
+    ) {}
 
     /** @param int|array<string, mixed> $filters */
     public function sales(Store $store, int|array $filters = 30): array
@@ -26,7 +30,7 @@ class AnalyticsQueryService
         $version = $this->cacheVersion->current((int) $store->getKey());
         // Keep the response schema version in the cache key so older dashboard
         // payloads cannot be reused after new metrics are introduced.
-        $key = 'analytics:sales:schema-v2:'.$store->getKey().":v{$version}:".sha1(json_encode($period));
+        $key = 'analytics:sales:schema-v3:'.$store->getKey().":v{$version}:".sha1(json_encode($period));
 
         return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildSales($store, $period));
     }
@@ -136,7 +140,7 @@ class AnalyticsQueryService
         $rankings = $this->productInsights($store, $period);
         $inventory = $this->inventoryInsights($store, $period);
 
-        return [
+        $result = [
             'period' => [
                 'days' => $period['days'],
                 'from' => $period['local_start']->toDateString(),
@@ -171,7 +175,361 @@ class AnalyticsQueryService
                 'net_sales' => '商品原始小计减退款后的当前净商品销售额，不含税费和运费。',
                 'inventory_turnover' => '当前周期售出数量 ÷ 平均可用库存的估算值。',
             ],
+            'data_source' => [
+                'primary' => 'local_sync',
+                'fallback' => null,
+                'timezone' => $period['timezone'],
+                'storage' => null,
+            ],
         ];
+
+        return $this->applyShopifySales($store, $period, $result);
+    }
+
+    /**
+     * Shopify Analytics uses the store's reporting timezone and its own sales
+     * accounting semantics. Prefer that canonical source when the requested
+     * filters match Shopify's native report; keep synchronized data as a safe
+     * fallback and for app-only test/cancelled-order filtering.
+     *
+     * @param  array<string, mixed>  $period
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function applyShopifySales(Store $store, array $period, array $result): array
+    {
+        if ($period['include_test'] || ! $period['include_cancelled']) {
+            $result['data_source']['semantic_mode'] = 'decoadmin_custom';
+            $result['data_source']['notice'] = '启用测试订单或排除取消订单时使用 DecoAdmin 自定义筛选口径。';
+
+            return $result;
+        }
+
+        $from = $period['local_start']->toDateString();
+        $to = $period['local_end']->toDateString();
+        $current = $this->shopifyReports->report($store, 'core-sales-timeseries', $from, $to);
+        if (! is_array($current) || ! ($current['available'] ?? false) || ($current['rows'] ?? []) === []) {
+            $result['data_source']['semantic_mode'] = 'decoadmin_custom';
+            $result['data_source']['notice'] = 'Shopify 原生报表当前不可用，暂时显示本地同步数据。';
+
+            return $result;
+        }
+
+        $currentSummary = $this->shopifySummary($current['rows']);
+        if ($currentSummary === null) {
+            return $result;
+        }
+
+        $year = $this->shopifyReports->report($store, 'core-sales-year-comparison', $from, $to);
+        $previousSummary = $this->shopifyComparisonSummary($current['rows'], 'previous_period');
+        $yearSummary = ($year['available'] ?? false)
+            ? $this->shopifyComparisonSummary($year['rows'] ?? [], 'previous_year')
+            : null;
+
+        $result['summary'] = [...$currentSummary, 'sales' => (string) $currentSummary['net_sales']];
+        $result['trend'] = $this->shopifyTrend($current['rows'], $period);
+
+        if ($previousSummary !== null) {
+            $result['comparisons']['previous'] = $this->shopifyComparison(
+                $currentSummary,
+                $previousSummary,
+                $current['rows'],
+                'previous_period',
+            );
+            $result['comparison_trend']['previous'] = $this->shopifyComparisonTrend(
+                $current['rows'],
+                $period,
+                'previous_period',
+            );
+        } else {
+            $result['comparisons']['previous'] = $this->unavailableComparison($currentSummary);
+            $result['comparison_trend']['previous'] = [];
+        }
+        if ($yearSummary !== null) {
+            $result['comparisons']['year_over_year'] = $this->shopifyComparison(
+                $currentSummary,
+                $yearSummary,
+                $year['rows'] ?? [],
+                'previous_year',
+            );
+        } else {
+            $result['comparisons']['year_over_year'] = $this->unavailableComparison($currentSummary);
+        }
+
+        $result = $this->applyShopifyCatalogInsights($store, $period, $result);
+        $result['data_source'] = [
+            'primary' => 'shopifyql',
+            'fallback' => 'local_sync',
+            'timezone' => $period['timezone'],
+            'storage' => $current['storage'] ?? null,
+            'semantic_mode' => 'shopify_native',
+            'comparison' => 'previous_period',
+            'traffic_filter' => ['human', 'bot'],
+            'snapshot_delay_minutes' => 15,
+        ];
+
+        return $result;
+    }
+
+    /** @param list<array<string, mixed>> $rows */
+    private function shopifyComparisonSummary(array $rows, string $comparison): ?array
+    {
+        $totals = collect($rows)->first(fn (array $row): bool => collect(array_keys($row))->contains(
+            fn (string $key): bool => str_contains($key, "comparison_total_sales__{$comparison}")
+                && str_ends_with($key, '__totals'),
+        ));
+
+        if (! is_array($totals)) {
+            return null;
+        }
+
+        return [
+            'gross_sales' => $this->comparisonValue($totals, 'gross_sales', $comparison, true),
+            'net_sales' => $this->comparisonValue($totals, 'net_sales', $comparison, true),
+            'discounts' => abs($this->comparisonValue($totals, 'discounts', $comparison, true)),
+            'refunds' => abs($this->comparisonValue($totals, 'returns', $comparison, true)),
+            'taxes' => $this->comparisonValue($totals, 'taxes', $comparison, true),
+            'shipping' => $this->comparisonValue($totals, 'shipping_charges', $comparison, true),
+            'total_sales' => $this->comparisonValue($totals, 'total_sales', $comparison, true),
+            'orders' => (int) round($this->comparisonValue($totals, 'orders', $comparison, true)),
+            'average_order_value' => $this->comparisonValue($totals, 'average_order_value', $comparison, true),
+        ];
+    }
+
+    /** @param array<string, mixed> $row */
+    private function comparisonValue(array $row, string $metric, string $comparison, bool $totals = false): float
+    {
+        $prefix = "comparison_{$metric}__{$comparison}";
+        $expected = $prefix.($totals ? '__totals' : '');
+        $key = array_key_exists($expected, $row) ? $expected : null;
+
+        return $this->decimal($key === null ? 0 : ($row[$key] ?? 0));
+    }
+
+    /** @param array<string, mixed> $row */
+    private function percentChangeValue(array $row, string $metric, string $comparison, bool $totals = false): ?float
+    {
+        $prefix = "percent_change_{$metric}__{$comparison}";
+        $expected = $prefix.($totals ? '__totals' : '');
+        $key = array_key_exists($expected, $row) ? $expected : null;
+        $value = $key === null ? null : ($row[$key] ?? null);
+
+        return is_numeric($value) ? round((float) $value, 2) : null;
+    }
+
+    /**
+     * Shopify's percent-change column is the canonical comparison shown in
+     * Admin. It can differ from a naïve current/baseline calculation because
+     * Shopify applies native reporting rules to partial days and reversals.
+     *
+     * @param  array<string, mixed>  $current
+     * @param  array<string, mixed>  $baseline
+     * @param  list<array<string, mixed>>  $rows
+     * @return array<string, mixed>
+     */
+    private function shopifyComparison(array $current, array $baseline, array $rows, string $comparison): array
+    {
+        $metrics = $this->compare($current, $baseline);
+        $totals = collect($rows)->first(fn (array $row): bool => collect(array_keys($row))->contains(
+            fn (string $key): bool => str_starts_with($key, "percent_change_total_sales__{$comparison}")
+                && str_ends_with($key, '__totals'),
+        ));
+
+        if (! is_array($totals)) {
+            return $metrics;
+        }
+
+        foreach (array_keys($metrics) as $metric) {
+            $shopifyMetric = match ($metric) {
+                'refunds' => 'returns',
+                'shipping' => 'shipping_charges',
+                default => $metric,
+            };
+            $metrics[$metric]['change_percent'] = $this->percentChangeValue(
+                $totals,
+                $shopifyMetric,
+                $comparison,
+                true,
+            );
+        }
+
+        return $metrics;
+    }
+
+    /** @param array<string, mixed> $current @return array<string, mixed> */
+    private function unavailableComparison(array $current): array
+    {
+        return collect([
+            'net_sales', 'gross_sales', 'total_sales', 'orders', 'average_order_value',
+            'refunds', 'discounts', 'taxes', 'shipping',
+        ])->mapWithKeys(fn (string $metric): array => [$metric => [
+            'current' => (float) ($current[$metric] ?? 0),
+            'baseline' => 0.0,
+            'change' => 0.0,
+            'change_percent' => null,
+        ]])->all();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $reportRows
+     * @param  array<string, mixed>  $period
+     * @return list<array<string, int|float|string>>
+     */
+    private function shopifyComparisonTrend(array $reportRows, array $period, string $comparison): array
+    {
+        $rows = collect($reportRows)->filter(fn (array $row): bool => filled($row['day'] ?? null))->values();
+
+        return collect(range(0, $period['calendar_days'] - 1))->map(function (int $offset) use ($period, $rows, $comparison): array {
+            $date = $period['local_start']->addDays($offset);
+            $row = $rows->get($offset, []);
+
+            return [
+                'date' => $date->toDateString(),
+                'label' => $date->format('m/d'),
+                'sales' => $this->comparisonValue($row, 'net_sales', $comparison),
+                'net_sales' => $this->comparisonValue($row, 'net_sales', $comparison),
+                'gross_sales' => $this->comparisonValue($row, 'gross_sales', $comparison),
+                'total_sales' => $this->comparisonValue($row, 'total_sales', $comparison),
+                'refunds' => abs($this->comparisonValue($row, 'returns', $comparison)),
+                'discounts' => abs($this->comparisonValue($row, 'discounts', $comparison)),
+                'taxes' => $this->comparisonValue($row, 'taxes', $comparison),
+                'shipping' => $this->comparisonValue($row, 'shipping_charges', $comparison),
+                'orders' => (int) round($this->comparisonValue($row, 'orders', $comparison)),
+                'average_order_value' => $this->comparisonValue($row, 'average_order_value', $comparison),
+            ];
+        })->all();
+    }
+
+    /** @param array<string, mixed> $period @param array<string, mixed> $result */
+    private function applyShopifyCatalogInsights(Store $store, array $period, array $result): array
+    {
+        $from = $period['local_start']->toDateString();
+        $to = $period['local_end']->toDateString();
+        $reports = collect([
+            'products' => 'product-sales',
+            'vendors' => 'vendor-sales',
+            'product_types' => 'product-type-sales',
+            'customer_overview' => 'customer-overview',
+            'customer_returning_rate' => 'customer-returning-rate',
+        ])->map(fn (string $report): array => $this->shopifyReports->report($store, $report, $from, $to));
+
+        foreach (['products', 'vendors', 'product_types'] as $key) {
+            $report = $reports->get($key);
+            if (($report['available'] ?? false) && ($report['rows'] ?? []) !== []) {
+                $result['rankings'][$key] = $report['rows'];
+            }
+        }
+
+        $customerOverview = $reports->get('customer_overview');
+        $customerRate = $reports->get('customer_returning_rate');
+        $customerRows = collect($customerOverview['rows'] ?? []);
+        $totals = $customerRows->first(fn (array $row): bool => array_key_exists('customers__totals', $row));
+        $rateTotals = collect($customerRate['rows'] ?? [])->first(
+            fn (array $row): bool => array_key_exists('returning_customer_rate__totals', $row),
+        );
+        if (($customerOverview['available'] ?? false) && is_array($totals)) {
+            $active = (int) round($this->decimal($totals['customers__totals'] ?? 0));
+            $new = $this->customerSegmentCount($customerRows, 'New');
+            $returning = $this->customerSegmentCount($customerRows, 'Returning');
+            $repeatRate = is_array($rateTotals)
+                ? round((float) ($rateTotals['returning_customer_rate__totals'] ?? 0) * 100, 2)
+                : ($active > 0 ? round($returning / $active * 100, 2) : 0.0);
+            $result['customers'] = [
+                'active' => $active,
+                'new' => $new,
+                'returning' => $returning,
+                'repeat_customers' => $returning,
+                'repeat_rate' => $repeatRate,
+                // Lifetime value is intentionally not mixed into period
+                // customer metrics. It remains a separate native report.
+                'average_lifetime_value' => null,
+                'high_value' => [],
+                'source' => 'shopifyql',
+                'semantic_mode' => 'shopify_native',
+                'period_semantics' => 'shopify_new_or_returning_customer',
+            ];
+        }
+
+        $result['top_products'] = collect($result['rankings']['products'] ?? [])->take(8)->map(fn (array $item): array => [
+            'product_id' => $item['product_id'] ?? null,
+            'title' => $item['name'] ?? '未命名商品',
+            'units' => $item['units'] ?? 0,
+            'revenue' => $item['net_sales'] ?? 0,
+        ])->all();
+
+        return $result;
+    }
+
+    /** @param Collection<int, array<string, mixed>> $rows */
+    private function customerSegmentCount(Collection $rows, string $segment): int
+    {
+        $row = $rows->first(fn (array $row): bool => strcasecmp(
+            (string) ($row['new_or_returning_customer'] ?? ''),
+            $segment,
+        ) === 0);
+
+        return is_array($row) ? (int) round($this->decimal($row['customers'] ?? 0)) : 0;
+    }
+
+    /** @param list<array<string, mixed>> $rows */
+    private function shopifySummary(array $rows): ?array
+    {
+        $totals = collect($rows)->first(fn (array $row): bool => array_key_exists('total_sales__totals', $row));
+        if (! is_array($totals)) {
+            return null;
+        }
+
+        return [
+            'gross_sales' => $this->decimal($totals['gross_sales__totals'] ?? 0),
+            'net_sales' => $this->decimal($totals['net_sales__totals'] ?? 0),
+            'discounts' => abs($this->decimal($totals['discounts__totals'] ?? 0)),
+            'refunds' => abs($this->decimal($totals['returns__totals'] ?? 0)),
+            'taxes' => $this->decimal($totals['taxes__totals'] ?? 0),
+            'shipping' => $this->decimal($totals['shipping_charges__totals'] ?? 0),
+            'total_sales' => $this->decimal($totals['total_sales__totals'] ?? 0),
+            'orders' => (int) round($this->decimal($totals['orders__totals'] ?? 0)),
+            'average_order_value' => $this->decimal($totals['average_order_value__totals'] ?? 0),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $reportRows
+     * @param  array<string, mixed>  $period
+     * @return list<array<string, int|float|string>>
+     */
+    private function shopifyTrend(array $reportRows, array $period): array
+    {
+        $rows = collect($reportRows)->mapWithKeys(function (array $row): array {
+            $date = substr((string) ($row['day'] ?? ''), 0, 10);
+
+            return $date === '' ? [] : [$date => $row];
+        });
+
+        return collect(range(0, $period['calendar_days'] - 1))->map(function (int $offset) use ($period, $rows): array {
+            $date = $period['local_start']->addDays($offset);
+            $key = $date->toDateString();
+            $row = $rows->get($key, []);
+
+            return [
+                'date' => $key,
+                'label' => $date->format('m/d'),
+                'sales' => $this->decimal($row['net_sales'] ?? 0),
+                'net_sales' => $this->decimal($row['net_sales'] ?? 0),
+                'gross_sales' => $this->decimal($row['gross_sales'] ?? 0),
+                'total_sales' => $this->decimal($row['total_sales'] ?? 0),
+                'refunds' => abs($this->decimal($row['returns'] ?? 0)),
+                'discounts' => abs($this->decimal($row['discounts'] ?? 0)),
+                'taxes' => $this->decimal($row['taxes'] ?? 0),
+                'shipping' => $this->decimal($row['shipping_charges'] ?? 0),
+                'orders' => (int) round($this->decimal($row['orders'] ?? 0)),
+                'average_order_value' => $this->decimal($row['average_order_value'] ?? 0),
+            ];
+        })->all();
+    }
+
+    private function decimal(mixed $value): float
+    {
+        return round((float) $value, 2);
     }
 
     /** @param array<string, mixed> $period */
@@ -216,7 +574,7 @@ class AnalyticsQueryService
     private function trend(Builder $orders, array $period): array
     {
         $rows = [];
-        foreach (range(0, $period['days'] - 1) as $offset) {
+        foreach (range(0, $period['calendar_days'] - 1) as $offset) {
             $date = $period['local_start']->addDays($offset);
             $rows[$date->toDateString()] = [
                 'date' => $date->toDateString(), 'label' => $date->format('m/d'),
@@ -336,7 +694,7 @@ class AnalyticsQueryService
             ->groupBy('inventory_items.id', 'inventory_items.sku')->get()->map(function (object $row) use ($period): array {
                 $available = (int) $row->available;
                 $sold = (int) $row->units_sold;
-                $daily = $period['days'] > 0 ? $sold / $period['days'] : 0;
+                $daily = $period['calendar_days'] > 0 ? $sold / $period['calendar_days'] : 0;
                 $daysCover = $daily > 0 ? round($available / $daily, 1) : null;
                 $risk = $available <= 0 ? 'out_of_stock' : ($available <= 10 || ($daysCover !== null && $daysCover <= 14) ? 'low_stock' : ($sold === 0 ? 'slow_moving' : 'healthy'));
 
@@ -386,7 +744,7 @@ class AnalyticsQueryService
     private function comparisonPeriod(array $period, string $type): array
     {
         $localEnd = $type === 'year' ? $period['local_end']->subYear() : $period['local_start']->subDay()->endOfDay();
-        $localStart = $type === 'year' ? $period['local_start']->subYear() : $localEnd->subDays($period['days'] - 1)->startOfDay();
+        $localStart = $type === 'year' ? $period['local_start']->subYear() : $localEnd->subDays($period['calendar_days'] - 1)->startOfDay();
 
         return [...$period, 'local_start' => $localStart, 'local_end' => $localEnd, 'start' => $localStart->utc(), 'end' => $localEnd->utc()];
     }
@@ -399,7 +757,8 @@ class AnalyticsQueryService
         $days = min(max((int) ($values['days'] ?? 30), 1), 366);
         $now = CarbonImmutable::now($timezone);
         $localEnd = $now->endOfDay();
-        $localStart = $localEnd->subDays($days - 1)->startOfDay();
+        $lookbackDays = $days === 1 ? 0 : min($days, 365);
+        $localStart = $localEnd->subDays($lookbackDays)->startOfDay();
 
         if (filled($values['date_from'] ?? null) && filled($values['date_to'] ?? null)) {
             try {
@@ -412,10 +771,12 @@ class AnalyticsQueryService
         }
 
         return [
-            'days' => $days, 'timezone' => $timezone, 'local_start' => $localStart, 'local_end' => $localEnd,
+            'days' => $days,
+            'calendar_days' => (int) $localStart->diffInDays($localEnd) + 1,
+            'timezone' => $timezone, 'local_start' => $localStart, 'local_end' => $localEnd,
             'start' => $localStart->utc(), 'end' => $localEnd->utc(),
             'include_test' => filter_var($values['include_test'] ?? false, FILTER_VALIDATE_BOOL),
-            'include_cancelled' => filter_var($values['include_cancelled'] ?? false, FILTER_VALIDATE_BOOL),
+            'include_cancelled' => filter_var($values['include_cancelled'] ?? true, FILTER_VALIDATE_BOOL),
         ];
     }
 }

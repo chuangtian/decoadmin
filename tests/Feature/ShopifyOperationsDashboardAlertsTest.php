@@ -63,8 +63,8 @@ class ShopifyOperationsDashboardAlertsTest extends TestCase
                 ->component('Dashboard/Index')
                 ->where('dashboard.analytics.period.days', 7)
                 ->where('dashboard.analytics.summary.net_sales', 125.5)
-                ->has('dashboard.analytics.trend', 7)
-                ->has('dashboard.analytics.comparison_trend.previous', 7)
+                ->has('dashboard.analytics.trend', 8)
+                ->has('dashboard.analytics.comparison_trend.previous', 8)
                 ->has('dashboard.metric_definitions', 9)
                 ->where('dashboard.metric_definitions.0.key', 'net_sales'));
     }

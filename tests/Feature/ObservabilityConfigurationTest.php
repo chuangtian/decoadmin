@@ -18,6 +18,7 @@ class ObservabilityConfigurationTest extends TestCase
         $this->assertSame([
             'shopify-webhook',
             'shopify-sync',
+            'shopify-analytics',
             'default',
             'notifications',
         ], $supervisor['queue']);

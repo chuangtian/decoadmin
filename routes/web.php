@@ -30,6 +30,7 @@ use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
 use App\Http\Controllers\StoreNotificationSettingsController;
+use App\Http\Controllers\StoreStatusController;
 use App\Http\Controllers\SyncJobController;
 use App\Http\Controllers\SystemSettingsController;
 use App\Http\Controllers\SystemStatusController;
@@ -104,6 +105,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/analytics/live', [LiveViewController::class, 'index'])->middleware('permission:orders.view')->name('analytics.live');
     Route::get('/analytics/live/data', [LiveViewController::class, 'data'])->middleware('permission:orders.view')->name('analytics.live.data');
     Route::get('/reports', [ReportController::class, 'index'])->middleware('permission:reports.view')->name('reports.index');
+    Route::put('/reports/{report}/pin', [ReportController::class, 'pin'])->middleware('permission:reports.view')->name('reports.pin');
     Route::get('/reports/{report}', [ReportController::class, 'show'])->middleware('permission:reports.view')->name('reports.show');
     Route::get('/reports/{report}/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
     Route::get('/system/status', SystemStatusController::class)
@@ -176,6 +178,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/finance/entries', [FinanceController::class, 'storeEntry'])->middleware('permission:finance.manage')->name('finance.entries.store');
     Route::delete('/finance/entries/{financeEntry}', [FinanceController::class, 'destroyEntry'])->middleware('permission:finance.manage')->name('finance.entries.destroy');
 
+    Route::get('/store-settings/status', StoreStatusController::class)->middleware('permission:store.view')->name('store-settings.status');
     Route::get('/store-settings/mail', [StoreNotificationSettingsController::class, 'mail'])->middleware('permission:store.view')->name('store-settings.mail');
     Route::put('/store-settings/mail', [StoreNotificationSettingsController::class, 'updateMail'])->middleware('permission:store.update')->name('store-settings.mail.update');
     Route::patch('/store-settings/mail/enabled', [StoreNotificationSettingsController::class, 'toggleMail'])->middleware('permission:store.update')->name('store-settings.mail.toggle');

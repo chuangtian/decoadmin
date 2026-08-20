@@ -12,7 +12,10 @@ use Throwable;
 
 class ShopifyConnectionService
 {
-    public function __construct(private ShopifyConnectionLifecycleService $lifecycle) {}
+    public function __construct(
+        private ShopifyConnectionLifecycleService $lifecycle,
+        private ShopifyConnectionHealthService $health,
+    ) {}
 
     /**
      * @param  array{access_token: string, scope?: string, expires_in?: int, refresh_token?: string, refresh_token_expires_in?: int}  $token
@@ -82,6 +85,19 @@ class ShopifyConnectionService
         });
 
         $installation = $store->appInstallations->firstWhere('app_id', $state->app_id);
+
+        $connection = $store->shopifyConnection;
+
+        if ($connection) {
+            try {
+                $this->health->refreshMetadata($connection, $state->user);
+                $store->refresh();
+            } catch (Throwable $exception) {
+                // Metadata is refreshed again by scheduled health checks. A
+                // temporary API failure must not invalidate a completed OAuth.
+                report($exception);
+            }
+        }
 
         if ($installation) {
             try {

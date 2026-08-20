@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, WebhookEventStatus, WebhookEventSummary } from '../../types';
+import { formatDateTimeInTimezone } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     events: PaginatedResource<WebhookEventSummary>;
@@ -23,8 +24,12 @@ const clearFilters = () => {
     form.store_id = '';
     search();
 };
+const eventTimezones = new Map(props.events.data.flatMap((event) => [
+    [event.received_at, event.store.timezone],
+    [event.processed_at, event.store.timezone],
+]).filter((entry): entry is [string, string] => Boolean(entry[0])));
 const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+    ? formatDateTimeInTimezone(value, eventTimezones.get(value) ?? 'UTC')
     : '—';
 const statusLabel = (status: string) => ({
     received: '已接收',

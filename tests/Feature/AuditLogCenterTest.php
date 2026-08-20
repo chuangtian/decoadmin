@@ -7,6 +7,7 @@ use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -84,6 +85,29 @@ class AuditLogCenterTest extends TestCase
                 ->where('filters.action', 'shopify_connection_disconnected')
                 ->where('filters.user_id', $user->id)
                 ->where('filters.store_id', $store->id));
+    }
+
+    public function test_audit_date_filter_uses_the_selected_store_local_day(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $store->update(['timezone' => 'Asia/Shanghai']);
+
+        $matching = $this->audit($organization, $store, $user, 'shopify_connection_connected');
+        $matching->forceFill(['created_at' => CarbonImmutable::parse('2026-08-19 16:30:00', 'UTC')])->saveQuietly();
+        $outside = $this->audit($organization, $store, $user, 'shopify_connection_disconnected');
+        $outside->forceFill(['created_at' => CarbonImmutable::parse('2026-08-19 15:30:00', 'UTC')])->saveQuietly();
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('audit-logs.index', [
+                'store_id' => $store->id,
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-20',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('auditLogs.data', 1)
+                ->where('auditLogs.data.0.id', $matching->id));
     }
 
     public function test_user_without_audit_permission_cannot_view_index_or_detail(): void

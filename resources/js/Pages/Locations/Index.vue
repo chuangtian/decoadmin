@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import Pagination from '../../Components/Navigation/Pagination.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface LocationRow { id:number; name:string; shopify_location_id:string; address:Record<string,string|null>|null; active:boolean; inventory_levels_count:number; available_total:number|null; synced_at:string|null }
 interface Page<T> { data:T[]; links:Array<{url:string|null;label:string;active:boolean}> }
@@ -10,7 +11,7 @@ const props = defineProps<{ locations:Page<LocationRow>; filters:{search?:string
 const form = useForm({ search:props.filters.search ?? '', active:props.filters.active ?? '' });
 const submit = () => form.get('/locations', { preserveState:true, replace:true });
 const address = (value:Record<string,string|null>|null) => value ? [value.address1, value.city, value.province, value.country].filter(Boolean).join(' · ') : '未提供地址';
-const date = (value:string|null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle:'medium', timeStyle:'short' }).format(new Date(value)) : '—';
+const { formatDateTime: date } = useStoreDateTime();
 </script>
 
 <template>

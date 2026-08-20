@@ -79,6 +79,9 @@ class SyncJobService
                 $locked->until_at ?? now(),
             );
             $retryJob->forceFill([
+                'cursor' => $locked->cursor,
+                'total_items' => $locked->total_items,
+                'processed_items' => $locked->processed_items,
                 'payload' => [
                     ...($retryJob->payload ?? []),
                     'retry_of_job_id' => $locked->getKey(),

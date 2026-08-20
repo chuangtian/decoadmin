@@ -10,7 +10,7 @@ class ShopifyConnectionLifecycleService
 {
     public const NEW_CONNECTION = '__new_connection__';
 
-    /** @param array{id?: string, name?: string, myshopify_domain?: string}|null $shop */
+    /** @param array{id?: string, name?: string, myshopify_domain?: string, iana_timezone?: string, currency_code?: string}|null $shop */
     public function markConnected(
         ShopifyConnection $connection,
         ?User $actor = null,
@@ -41,6 +41,24 @@ class ShopifyConnectionLifecycleService
         }
 
         $connection->forceFill($attributes)->save();
+
+        if ($shop !== null) {
+            $timezone = $shop['iana_timezone'] ?? null;
+            $currency = $shop['currency_code'] ?? null;
+            $storeAttributes = [];
+
+            if (is_string($timezone) && in_array($timezone, timezone_identifiers_list(), true)) {
+                $storeAttributes['timezone'] = $timezone;
+            }
+
+            if (is_string($currency) && preg_match('/^[A-Z]{3}$/', $currency) === 1) {
+                $storeAttributes['currency'] = $currency;
+            }
+
+            if ($storeAttributes !== []) {
+                $connection->store()->update($storeAttributes);
+            }
+        }
 
         if ($auditPreviousStatus !== 'connected') {
             $this->audit(

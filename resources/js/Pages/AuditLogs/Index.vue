@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { AuditLogResult, AuditLogSummary, PaginatedResource } from '../../types';
+import { formatDateTimeInTimezone, useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     auditLogs: PaginatedResource<AuditLogSummary>;
@@ -35,8 +36,12 @@ const clearFilters = () => {
     search();
 };
 const hasFilters = () => Boolean(props.filters.search || props.filters.action || props.filters.user_id || props.filters.store_id || props.filters.date_from || props.filters.date_to);
+const { formatDateTime: currentStoreDateTime } = useStoreDateTime();
+const auditTimezones = new Map(props.auditLogs.data
+    .filter((audit) => audit.created_at && audit.store?.timezone)
+    .map((audit) => [audit.created_at!, audit.store!.timezone] as [string, string]));
 const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium', hour12: false }).format(new Date(value))
+    ? (auditTimezones.has(value) ? formatDateTimeInTimezone(value, auditTimezones.get(value)!) : currentStoreDateTime(value))
     : '—';
 const resultLabel = (result: AuditLogResult) => ({ success: '成功', warning: '需要关注', error: '异常', info: '已记录' }[result]);
 const resultClass = (result: AuditLogResult) => ({

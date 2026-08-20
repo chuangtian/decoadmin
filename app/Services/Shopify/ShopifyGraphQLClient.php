@@ -15,6 +15,8 @@ class ShopifyGraphQLClient
             id
             name
             myshopifyDomain
+            ianaTimezone
+            currencyCode
           }
         }
         GRAPHQL;
@@ -125,7 +127,7 @@ class ShopifyGraphQLClient
      * @return array{
      *     success: bool,
      *     message: string,
-     *     shop: array{id: string, name: string, myshopify_domain: string}|null,
+     *     shop: array{id: string, name: string, myshopify_domain: string, iana_timezone: string, currency_code: string}|null,
      *     status_code: int|null
      * }
      */
@@ -135,7 +137,7 @@ class ShopifyGraphQLClient
             $payload = $this->query($connection, self::CONNECTION_HEALTH_QUERY);
             $shop = data_get($payload, 'data.shop');
 
-            if (! is_array($shop) || ! isset($shop['id'], $shop['name'], $shop['myshopifyDomain'])) {
+            if (! is_array($shop) || ! isset($shop['id'], $shop['name'], $shop['myshopifyDomain'], $shop['ianaTimezone'], $shop['currencyCode'])) {
                 throw new ShopifyApiException('Shopify API 未返回有效店铺信息。');
             }
 
@@ -146,6 +148,8 @@ class ShopifyGraphQLClient
                     'id' => (string) $shop['id'],
                     'name' => (string) $shop['name'],
                     'myshopify_domain' => (string) $shop['myshopifyDomain'],
+                    'iana_timezone' => (string) $shop['ianaTimezone'],
+                    'currency_code' => strtoupper((string) $shop['currencyCode']),
                 ],
                 'status_code' => null,
             ];

@@ -3,6 +3,7 @@ import { Head, router, useForm } from '@inertiajs/vue3';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import Pagination from '../../Components/Navigation/Pagination.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface AlertRow { id:number; uuid:string; type:string; severity:string; code:string; title:string; message:string; status:string; delivery_status:string|null; delivery_error:string|null; occurred_at:string|null; acknowledged_at:string|null; resolved_at:string|null }
 interface Page<T> { data:T[]; links:Array<{url:string|null;label:string;active:boolean}> }
@@ -11,7 +12,7 @@ const form=useForm({status:props.filters.status??'',type:props.filters.type??''}
 const submit=()=>form.get('/alerts',{preserveState:true,replace:true});
 const scan=()=>router.post('/alerts/scan',{}, {preserveScroll:true});
 const act=(id:number,action:'acknowledge'|'resolve')=>router.post(`/alerts/${id}/${action}`,{}, {preserveScroll:true});
-const date=(value:string|null)=>value?new Intl.DateTimeFormat('zh-CN',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'—';
+const { formatDateTime: date } = useStoreDateTime();
 const typeLabel=(value:string)=>({connection:'连接',sync:'数据同步',webhook:'Webhook'}[value]||value);
 const statusLabel=(value:string)=>({open:'待处理',acknowledged:'已确认',resolved:'已解决'}[value]||value);
 const severityClass=(value:string)=>value==='critical'||value==='error'?'bg-rose-50 text-rose-700':value==='warning'?'bg-amber-50 text-amber-700':'bg-sky-50 text-sky-700';

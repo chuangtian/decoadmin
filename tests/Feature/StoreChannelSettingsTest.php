@@ -32,6 +32,14 @@ class StoreChannelSettingsTest extends TestCase
         ]);
 
         $session = $this->contextSession($organization, $secondStore);
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.status'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Stores/Settings/Status')
+                ->where('store.data.id', $secondStore->id)
+                ->where('store.data.name', 'EU Store')
+                ->where('store.data.shopify_domain', 'settings-eu.myshopify.com'));
+
         $this->actingAs($user)->withSession($session)->get(route('store-settings.mail'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page

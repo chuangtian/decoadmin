@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'organization_id', 'store_id', 'event_id', 'event_name', 'client_id_hash', 'session_id_hash',
-    'occurred_at', 'path', 'referrer_host', 'search_query', 'received_at',
+    'occurred_at', 'path', 'referrer_host', 'country_code', 'region_code', 'city',
+    'search_query', 'received_at',
 ])]
 class StorefrontEvent extends Model
 {

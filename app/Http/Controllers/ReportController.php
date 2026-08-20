@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\AnalyticsFilterRequest;
 use App\Services\ReportCenterService;
 use App\Support\CurrentStore;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -19,7 +20,7 @@ class ReportController extends Controller
 
         return Inertia::render('Reports/Index', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => $store->currency ?: 'USD'],
-            'reports' => $reports->catalog($store),
+            'reports' => $reports->catalog($store, $request->user()),
         ]);
     }
 
@@ -35,9 +36,21 @@ class ReportController extends Controller
                 'currency' => $store->currency ?: 'USD',
                 'timezone' => $store->timezone ?: 'UTC',
             ],
-            'report' => $reports->detail($store, $report, $request->filters()),
+            'report' => $reports->detail($store, $report, $request->filters(), $request->user()),
             'canExport' => Gate::allows('permission', 'reports.export'),
         ]);
+    }
+
+    public function pin(AnalyticsFilterRequest $request, string $report, CurrentStore $currentStore, ReportCenterService $reports): RedirectResponse
+    {
+        $store = $currentStore->require();
+        $this->authorize('view', $store);
+        $validated = $request->validate([
+            'pinned' => ['required', 'boolean'],
+        ]);
+        $reports->setPinned($store, $request->user(), $report, (bool) $validated['pinned']);
+
+        return back();
     }
 
     public function export(AnalyticsFilterRequest $request, string $report, string $format, CurrentStore $currentStore, ReportCenterService $reports): StreamedResponse

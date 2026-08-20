@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { AppInstallation, ResourceCollection, ShopifyApp } from '../../types';
+import { formatDateTimeInTimezone, useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{ app: { data: ShopifyApp }; installations: ResourceCollection<AppInstallation> }>();
 const activeTab = ref('overview');
@@ -14,8 +15,12 @@ const tabs = [
     { id: 'logs', name: '应用日志' },
 ];
 const currentApp = computed(() => props.app.data);
+const { formatDateTime: currentStoreDateTime } = useStoreDateTime();
+const installationTimezones = new Map(props.installations.data
+    .filter((installation) => installation.installed_at)
+    .map((installation) => [installation.installed_at!, installation.store.timezone] as [string, string]));
 const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value))
+    ? (installationTimezones.has(value) ? formatDateTimeInTimezone(value, installationTimezones.get(value)!) : currentStoreDateTime(value))
     : '—';
 const typeLabel = (type: string) => ({ custom: '自定义应用', public: '公开应用', private: '私有应用' }[type] ?? type);
 const statusLabel = (status: string) => ({ active: '启用', inactive: '停用', draft: '草稿', disabled: '已禁用', pending: '待处理', uninstalled: '已卸载' }[status] ?? status);

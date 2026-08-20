@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\Store;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 class ShopifyOrderDataService
@@ -73,6 +74,7 @@ class ShopifyOrderDataService
                 'processed_at' => $this->nullableDate($orderNode['processedAt'] ?? null, 'processedAt'),
                 'cancelled_at' => $this->nullableDate($orderNode['cancelledAt'] ?? null, 'cancelledAt'),
                 'created_at_shopify' => $this->requiredDate($orderNode['createdAt'] ?? null, 'createdAt'),
+                'updated_at_shopify' => $this->nullableDate($orderNode['updatedAt'] ?? null, 'updatedAt'),
                 'synced_at' => now(),
             ])->save();
 
@@ -237,10 +239,14 @@ class ShopifyOrderDataService
             return null;
         }
 
-        if (! is_string($value) || strtotime($value) === false) {
+        if (! is_string($value)) {
             throw new ShopifyApiException("Shopify 订单日期 [{$field}] 格式无效。");
         }
 
-        return $value;
+        try {
+            return CarbonImmutable::parse($value)->utc()->toDateTimeString();
+        } catch (\Throwable) {
+            throw new ShopifyApiException("Shopify 订单日期 [{$field}] 格式无效。");
+        }
     }
 }

@@ -2,11 +2,10 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { WebhookEventDetail } from '../../types';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{ event: { data: WebhookEventDetail }; canRetry: boolean }>();
-const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'medium' }).format(new Date(value))
-    : '—';
+const { formatDateTime: dateLabel } = useStoreDateTime();
 const statusLabel = (status: string) => ({ received: '已接收', queued: '已入队', processing: '处理中', processed: '已处理', failed: '处理失败', retrying: '重试排队中' }[status] ?? status);
 const statusClass = (status: string) => ({ received: 'bg-slate-50 text-slate-700 ring-slate-200', queued: 'bg-violet-50 text-violet-700 ring-violet-100', processing: 'bg-blue-50 text-blue-700 ring-blue-100', processed: 'bg-emerald-50 text-emerald-700 ring-emerald-100', failed: 'bg-rose-50 text-rose-700 ring-rose-100', retrying: 'bg-amber-50 text-amber-700 ring-amber-100' }[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200');
 const durationLabel = (value: number | null) => value === null ? '—' : value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`;

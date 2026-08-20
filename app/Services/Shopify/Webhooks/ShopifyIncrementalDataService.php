@@ -14,6 +14,7 @@ use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\Customers\ShopifyCustomerDataService;
 use App\Services\Shopify\Orders\ShopifyOrderDataService;
 use App\Services\Shopify\Products\ShopifyProductDataService;
+use Carbon\CarbonImmutable;
 
 class ShopifyIncrementalDataService
 {
@@ -135,6 +136,7 @@ class ShopifyIncrementalDataService
             'processedAt' => $payload['processed_at'] ?? null,
             'cancelledAt' => $payload['cancelled_at'] ?? null,
             'createdAt' => $payload['created_at'] ?? now()->toIso8601String(),
+            'updatedAt' => $payload['updated_at'] ?? null,
             'customer' => isset($payload['customer']['id'])
                 ? ['id' => $this->gid('Customer', $payload['customer']['id'])]
                 : null,
@@ -192,7 +194,9 @@ class ShopifyIncrementalDataService
         ], [
             'shopify_location_id' => $location->shopify_location_id,
             'available' => (int) ($payload['available'] ?? 0),
-            'updated_at_shopify' => $payload['updated_at'] ?? now(),
+            'updated_at_shopify' => isset($payload['updated_at'])
+                ? CarbonImmutable::parse((string) $payload['updated_at'])->utc()->toDateTimeString()
+                : now()->utc(),
             'synced_at' => now(),
         ]);
         $inventoryItem->forceFill(['synced_at' => now()])->save();

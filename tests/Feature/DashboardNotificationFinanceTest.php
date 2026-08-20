@@ -17,6 +17,7 @@ use App\Models\StoreAlert;
 use App\Models\StoreNotificationSetting;
 use App\Models\User;
 use App\Services\StoreAlertNotificationService;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,6 +33,30 @@ use Tests\TestCase;
 class DashboardNotificationFinanceTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_dashboard_uses_each_store_local_midnight_for_today_and_daily_trend(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-20 00:30:00', 'Asia/Shanghai'));
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $store->update(['timezone' => 'Asia/Shanghai']);
+
+        $todayOrder = $this->order($organization, $store, 'tz-today', '80.00');
+        $todayOrder->update(['created_at_shopify' => '2026-08-19 16:10:00']);
+        $yesterdayOrder = $this->order($organization, $store, 'tz-yesterday', '20.00');
+        $yesterdayOrder->update(['created_at_shopify' => '2026-08-19 15:50:00']);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.summary.orders_today', 1)
+                ->where('dashboard.summary.sales_today', '80')
+                ->where('dashboard.sales_trend.6.date', '2026-08-20')
+                ->where('dashboard.sales_trend.6.orders', 1)
+                ->where('dashboard.sales_trend.6.amount', 80));
+
+        CarbonImmutable::setTestNow();
+    }
 
     public function test_sales_analytics_uses_real_current_store_data(): void
     {
@@ -75,7 +100,7 @@ class DashboardNotificationFinanceTest extends TestCase
                 ->component('Analytics/Sales')
                 ->where('analytics.summary.orders', 1)
                 ->where('analytics.summary.sales', '125.5')
-                ->has('analytics.trend', 30)
+                ->has('analytics.trend', 31)
                 ->where('analytics.top_products.0.title', 'Electric Bike')
                 ->where('analytics.top_products.0.units', 2)
                 ->where('analytics.low_stock.0.sku', 'LOW-001')

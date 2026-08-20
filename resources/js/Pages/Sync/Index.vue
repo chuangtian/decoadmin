@@ -4,6 +4,7 @@ import { computed } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { PaginatedResource, StoreSyncStatusSummary, SyncJobMode, SyncJobStatus, SyncJobStoreOption, SyncJobSummary, SyncJobType } from '../../types';
+import { formatDateTimeInTimezone, useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     syncJobs: PaginatedResource<SyncJobSummary>;
@@ -40,8 +41,22 @@ const statusClass = (status: string) => ({
     failed: 'bg-rose-50 text-rose-700 ring-rose-100',
     cancelled: 'bg-slate-100 text-slate-500 ring-slate-200',
 }[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200');
+const { formatDateTime: currentStoreDateTime } = useStoreDateTime();
+const jobTimezones = new Map(props.syncJobs.data.flatMap((job) => [
+    [job.started_at, job.store.timezone],
+    [job.finished_at, job.store.timezone],
+    [job.created_at, job.store.timezone],
+]).filter((entry): entry is [string, string] => Boolean(entry[0])));
+const stateTimezones = new Map(props.syncStatus.flatMap((summary) => summary.sync_states.flatMap((state) => [
+    [state.last_success_at, summary.store.timezone],
+    [state.last_full_sync_at, summary.store.timezone],
+    [state.last_incremental_sync_at, summary.store.timezone],
+    [state.next_sync_at, summary.store.timezone],
+])).filter((entry): entry is [string, string] => Boolean(entry[0])));
 const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+    ? (jobTimezones.has(value) || stateTimezones.has(value)
+        ? formatDateTimeInTimezone(value, jobTimezones.get(value) ?? stateTimezones.get(value)!)
+        : currentStoreDateTime(value))
     : '—';
 const selectStore = () => {
     createForm.app_installation_id = selectedStore.value?.installations[0]?.id

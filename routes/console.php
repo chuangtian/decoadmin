@@ -21,6 +21,18 @@ Schedule::command('shopify:scan-alerts')
     ->onOneServer()
     ->withoutOverlapping(10);
 
+Schedule::command('shopify:prune-analytics-snapshots')
+    ->name('shopify:prune-analytics-snapshots')
+    ->dailyAt('04:15')
+    ->onOneServer()
+    ->withoutOverlapping(60);
+
+Schedule::command('shopify:check-connections')
+    ->name('shopify:connection-and-store-metadata-refresh')
+    ->everySixHours()
+    ->onOneServer()
+    ->withoutOverlapping(60);
+
 if (config('shopify.scheduled_sync.enabled')) {
     Schedule::command('shopify:sync-reconcile --mode=incremental')
         ->name('shopify:incremental-sync')

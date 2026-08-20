@@ -3,11 +3,10 @@ import { Head, Link } from '@inertiajs/vue3';
 import AuditDataPanel from '../../Components/Audit/AuditDataPanel.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { AuditLogDetail, AuditLogResult } from '../../types';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{ auditLog: AuditLogDetail }>();
-const dateLabel = (value: string | null) => value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'medium', hour12: false }).format(new Date(value))
-    : '—';
+const { formatDateTime: dateLabel } = useStoreDateTime();
 const resultLabel = (result: AuditLogResult) => ({ success: '成功', warning: '需要关注', error: '异常', info: '已记录' }[result]);
 const resultClass = (result: AuditLogResult) => ({
     success: 'bg-emerald-50 text-emerald-700 ring-emerald-100',

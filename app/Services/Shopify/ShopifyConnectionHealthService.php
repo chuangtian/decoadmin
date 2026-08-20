@@ -18,7 +18,7 @@ class ShopifyConnectionHealthService
      *     success: bool,
      *     status: 'connected'|'warning'|'invalid'|'disconnected',
      *     message: string,
-     *     shop: array{id: string, name: string, myshopify_domain: string}|null
+     *     shop: array{id: string, name: string, myshopify_domain: string, iana_timezone: string, currency_code: string}|null
      * }
      */
     public function check(ShopifyConnection $connection, ?User $actor = null): array
@@ -58,6 +58,33 @@ class ShopifyConnectionHealthService
             'message' => $result['message'],
             'shop' => $shop,
         ];
+    }
+
+    /**
+     * Refresh shop metadata after OAuth without turning a successful install
+     * into a warning when Shopify is temporarily unavailable.
+     */
+    public function refreshMetadata(ShopifyConnection $connection, ?User $actor = null): bool
+    {
+        try {
+            $result = $this->client->checkConnection($connection);
+        } catch (Throwable) {
+            return false;
+        }
+
+        if (! $result['success'] || $result['shop'] === null) {
+            return false;
+        }
+
+        $this->lifecycle->markConnected(
+            $connection,
+            $actor,
+            'Shopify 店铺时区与币种元数据已同步。',
+            apiChecked: true,
+            shop: $result['shop'],
+        );
+
+        return true;
     }
 
     /**

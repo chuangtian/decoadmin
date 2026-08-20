@@ -45,6 +45,7 @@ class OrderSyncHandler implements SyncHandlerInterface
               processedAt
               cancelledAt
               createdAt
+              updatedAt
               customer { id }
               lineItems(first: $lineItemsFirst) {
                 nodes {

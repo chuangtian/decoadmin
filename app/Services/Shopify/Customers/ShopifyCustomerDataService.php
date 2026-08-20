@@ -5,6 +5,7 @@ namespace App\Services\Shopify\Customers;
 use App\Exceptions\ShopifyApiException;
 use App\Models\Customer;
 use App\Models\Store;
+use Carbon\CarbonImmutable;
 
 class ShopifyCustomerDataService
 {
@@ -119,10 +120,14 @@ class ShopifyCustomerDataService
 
     private function requiredDate(mixed $value, string $field): string
     {
-        if (! is_string($value) || strtotime($value) === false) {
+        if (! is_string($value)) {
             throw new ShopifyApiException("Shopify 客户日期 [{$field}] 格式无效。");
         }
 
-        return $value;
+        try {
+            return CarbonImmutable::parse($value)->utc()->toDateTimeString();
+        } catch (\Throwable) {
+            throw new ShopifyApiException("Shopify 客户日期 [{$field}] 格式无效。");
+        }
     }
 }

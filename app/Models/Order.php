@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'financial_status', 'fulfillment_status', 'sales_channel', 'shopify_order_app_id', 'sales_channel_name',
     'pos_location_id', 'pos_location_name', 'pos_staff_id', 'pos_staff_name', 'currency', 'total_price', 'subtotal_price',
     'net_sales', 'discount_total', 'refund_total', 'shipping_total', 'total_tax', 'is_test',
-    'processed_at', 'cancelled_at', 'created_at_shopify', 'synced_at',
+    'processed_at', 'cancelled_at', 'created_at_shopify', 'updated_at_shopify', 'synced_at',
 ])]
 class Order extends Model
 {
@@ -61,6 +61,7 @@ class Order extends Model
             'processed_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'created_at_shopify' => 'datetime',
+            'updated_at_shopify' => 'datetime',
             'synced_at' => 'datetime',
         ];
     }

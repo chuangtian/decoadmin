@@ -21,6 +21,8 @@ export interface StoreOption {
     id: number;
     name: string;
     status: string;
+    timezone: string;
+    currency: string;
 }
 
 export type ShopifyConnectionStatus = 'connected' | 'warning' | 'invalid' | 'disconnected';
@@ -75,6 +77,7 @@ export interface AppInstallation {
         name: string;
         shopify_domain: string;
         status: string;
+        timezone: string;
     };
 }
 
@@ -93,6 +96,7 @@ export interface WebhookEventSummary {
         id: number;
         name: string;
         shopify_domain: string;
+        timezone: string;
     };
 }
 
@@ -145,6 +149,7 @@ export interface SyncJobSummary {
         id: number;
         name: string;
         shopify_domain: string;
+        timezone: string;
     };
     app_installation: SyncJobInstallation | null;
 }
@@ -165,7 +170,7 @@ export interface StoreSyncStateSummary {
 }
 
 export interface StoreSyncStatusSummary {
-    store: { id: number; name: string; shopify_domain: string };
+    store: { id: number; name: string; shopify_domain: string; timezone: string };
     status: 'healthy' | 'running' | 'warning' | 'critical';
     connection_status: string;
     last_verified_at: string | null;
@@ -216,7 +221,7 @@ export interface AuditLogSummary {
     category: string;
     result: AuditLogResult;
     actor: { id: number; name: string; email: string } | null;
-    store: { id: number; name: string; shopify_domain: string } | null;
+    store: { id: number; name: string; shopify_domain: string; timezone: string } | null;
     subject: { type: string; id: number | null } | null;
     created_at: string | null;
 }

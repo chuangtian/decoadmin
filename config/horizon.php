@@ -205,6 +205,7 @@ return [
             'queue' => [
                 'shopify-webhook',
                 'shopify-sync',
+                'shopify-analytics',
                 'default',
                 'notifications',
             ],

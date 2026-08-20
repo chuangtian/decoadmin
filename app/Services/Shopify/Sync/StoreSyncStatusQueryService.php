@@ -59,6 +59,7 @@ class StoreSyncStatusQueryService
                     'id' => $store->id,
                     'name' => $store->name,
                     'shopify_domain' => $store->shopify_domain,
+                    'timezone' => $store->timezone ?: 'UTC',
                 ],
                 'status' => $status,
                 'connection_status' => $connectionStatus,

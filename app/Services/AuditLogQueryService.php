@@ -6,9 +6,9 @@ use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Carbon;
 
 class AuditLogQueryService
 {
@@ -33,10 +33,10 @@ class AuditLogQueryService
     /**
      * @param  array{search?: string, action?: string, user_id?: int, store_id?: int, date_from?: string, date_to?: string}  $filters
      */
-    public function paginate(User $user, Organization $organization, array $filters): LengthAwarePaginator
+    public function paginate(User $user, Organization $organization, array $filters, string $timezone = 'UTC'): LengthAwarePaginator
     {
-        return $this->applyFilters($this->scopedQuery($user, $organization), $filters)
-            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain'])
+        return $this->applyFilters($this->scopedQuery($user, $organization), $filters, $timezone)
+            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain,timezone'])
             ->latest('created_at')
             ->paginate(25)
             ->withQueryString()
@@ -46,7 +46,7 @@ class AuditLogQueryService
     public function find(User $user, Organization $organization, int $id): AuditLog
     {
         return $this->scopedQuery($user, $organization)
-            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain'])
+            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain,timezone'])
             ->findOrFail($id);
     }
 
@@ -57,7 +57,7 @@ class AuditLogQueryService
 
         return $this->scopedQuery($user, $organization)
             ->where('store_id', $store->getKey())
-            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain'])
+            ->with(['user:id,name,email', 'store:id,organization_id,name,shopify_domain,timezone'])
             ->latest('created_at')
             ->limit(min(50, max(1, $limit)))
             ->get()
@@ -138,9 +138,16 @@ class AuditLogQueryService
     /**
      * @param  array{search?: string, action?: string, user_id?: int, store_id?: int, date_from?: string, date_to?: string}  $filters
      */
-    private function applyFilters(Builder $query, array $filters): Builder
+    private function applyFilters(Builder $query, array $filters, string $timezone): Builder
     {
         $search = trim((string) ($filters['search'] ?? ''));
+        $timezone = in_array($timezone, timezone_identifiers_list(), true) ? $timezone : 'UTC';
+        $dateFrom = filled($filters['date_from'] ?? null)
+            ? CarbonImmutable::createFromFormat('!Y-m-d', (string) $filters['date_from'], $timezone)->utc()
+            : null;
+        $dateTo = filled($filters['date_to'] ?? null)
+            ? CarbonImmutable::createFromFormat('!Y-m-d', (string) $filters['date_to'], $timezone)->endOfDay()->utc()
+            : null;
 
         return $query
             ->when($search !== '', function (Builder $query) use ($search): void {
@@ -158,8 +165,8 @@ class AuditLogQueryService
             ->when(filled($filters['action'] ?? null), fn (Builder $query) => $query->where('action', $filters['action']))
             ->when(filled($filters['user_id'] ?? null), fn (Builder $query) => $query->where('user_id', $filters['user_id']))
             ->when(filled($filters['store_id'] ?? null), fn (Builder $query) => $query->where('store_id', $filters['store_id']))
-            ->when(filled($filters['date_from'] ?? null), fn (Builder $query) => $query->where('created_at', '>=', Carbon::parse($filters['date_from'])->startOfDay()))
-            ->when(filled($filters['date_to'] ?? null), fn (Builder $query) => $query->where('created_at', '<=', Carbon::parse($filters['date_to'])->endOfDay()));
+            ->when($dateFrom, fn (Builder $query) => $query->where('created_at', '>=', $dateFrom))
+            ->when($dateTo, fn (Builder $query) => $query->where('created_at', '<=', $dateTo));
     }
 
     /** @return list<int> */
@@ -192,6 +199,7 @@ class AuditLogQueryService
                 'id' => $audit->store->id,
                 'name' => $audit->store->name,
                 'shopify_domain' => $audit->store->shopify_domain,
+                'timezone' => $audit->store->timezone ?: 'UTC',
             ] : null,
             'subject' => $audit->subject_type ? [
                 'type' => class_basename($audit->subject_type),

@@ -31,7 +31,7 @@ class SystemStatusTest extends TestCase
                 ->component('System/Status')
                 ->where('systemStatus.summary.status', fn (string $status): bool => in_array($status, ['healthy', 'warning', 'degraded'], true))
                 ->has('systemStatus.services', 6)
-                ->has('systemStatus.queues', 4)
+                ->has('systemStatus.queues', 5)
                 ->has('systemStatus.incidents', 3)
                 ->where('systemStatus.runtime.environment', app()->environment()));
     }

@@ -99,6 +99,11 @@ class StoreOperationsTabsTest extends TestCase
         Queue::fake();
         [$admin, $organization, $store] = $this->context('organization-admin');
         $failed = $this->syncJob($organization, $store, 'failed');
+        $failed->forceFill([
+            'cursor' => 'page-cursor-10',
+            'total_items' => 500,
+            'processed_items' => 500,
+        ])->save();
 
         $this->actingAs($admin)
             ->withSession($this->contextSession($organization, $store))
@@ -108,6 +113,9 @@ class StoreOperationsTabsTest extends TestCase
 
         $retry = SyncJob::query()->whereKeyNot($failed->id)->sole();
         $this->assertSame('queued', $retry->status);
+        $this->assertSame('page-cursor-10', $retry->cursor);
+        $this->assertSame(500, $retry->total_items);
+        $this->assertSame(500, $retry->processed_items);
         $this->assertSame($failed->id, data_get($retry->payload, 'retry_of_job_id'));
         $this->assertSame($retry->id, data_get($failed->fresh()->payload, 'retry_job_id'));
         $this->assertDatabaseHas('audit_logs', [

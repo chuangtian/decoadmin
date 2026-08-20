@@ -100,6 +100,11 @@ class Store extends Model
         return $this->hasMany(StorefrontEvent::class);
     }
 
+    public function analyticsSnapshots(): HasMany
+    {
+        return $this->hasMany(AnalyticsSnapshot::class);
+    }
+
     public function financeEntries(): HasMany
     {
         return $this->hasMany(FinanceEntry::class);
