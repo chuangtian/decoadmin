@@ -2,7 +2,6 @@
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import SecretSettingInput from '../../../Components/Settings/SecretSettingInput.vue';
-import StoreSettingsHeader from '../../../Components/Stores/StoreSettingsHeader.vue';
 import AppLayout from '../../../Layouts/AppLayout.vue';
 
 interface MailSettings {
@@ -53,8 +52,6 @@ const toggleMail = (event: Event) => {
     <Head :title="`${store.name} 邮箱设置`" />
     <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: '邮箱设置' }]">
         <div class="mx-auto max-w-5xl">
-            <StoreSettingsHeader :store="store" active="mail" :can-update="canUpdate" />
-
             <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <header class="border-b border-slate-100 px-5 py-5 sm:px-7">
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">店铺独立邮件通道</p>
