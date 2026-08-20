@@ -164,6 +164,66 @@ class ShopifyInventorySyncTest extends TestCase
         $this->assertDatabaseCount('inventory_levels', 2);
     }
 
+    public function test_inventory_sync_skips_bundle_level_without_available_quantity(): void
+    {
+        [, $organization, $store, $installation] = $this->context('store-admin');
+        Http::fake(['*' => Http::response($this->inventoryItemsPayload([
+            $this->inventoryItemNode(901, 'BUNDLE-X7-BLACK-X1S-BLACK', true, null, [[
+                'location' => [
+                    'id' => 'gid://shopify/Location/1001',
+                    'name' => 'Bundle Location',
+                    'isActive' => true,
+                ],
+                'quantities' => [],
+            ]]),
+        ]))]);
+
+        $result = app(SyncProcessor::class)->process(
+            $this->syncJob($organization, $store, $installation)->id,
+        );
+
+        $this->assertTrue($result->success);
+        $this->assertSame(1, $result->recordsCount);
+        $this->assertSame(1, $result->metadata['levels_unavailable']);
+        $this->assertSame(0, $result->metadata['levels_removed']);
+        $this->assertStringContainsString('1 个库存级别没有地点可用数量，已跳过', $result->message);
+        $this->assertDatabaseHas('inventory_items', [
+            'store_id' => $store->id,
+            'shopify_inventory_item_id' => 901,
+            'sku' => 'BUNDLE-X7-BLACK-X1S-BLACK',
+        ]);
+        $this->assertDatabaseCount('inventory_levels', 0);
+        $this->assertDatabaseCount('locations', 0);
+    }
+
+    public function test_inventory_sync_removes_stale_level_when_available_quantity_disappears(): void
+    {
+        [, $organization, $store, $installation] = $this->context('store-admin');
+        Http::fakeSequence()
+            ->push($this->inventoryItemsPayload([
+                $this->inventoryItemNode(901, 'BUNDLE', true, null, [
+                    $this->inventoryLevelNode(1001, 'Warehouse', 10),
+                ]),
+            ]))
+            ->push($this->inventoryItemsPayload([
+                $this->inventoryItemNode(901, 'BUNDLE', true, null, [[
+                    'location' => ['id' => 'gid://shopify/Location/1001'],
+                    'quantities' => [],
+                ]]),
+            ]));
+
+        app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
+        $result = app(SyncProcessor::class)->process(
+            $this->syncJob($organization, $store, $installation)->id,
+        );
+
+        $this->assertTrue($result->success);
+        $this->assertSame(1, $result->metadata['levels_unavailable']);
+        $this->assertSame(1, $result->metadata['levels_removed']);
+        $this->assertDatabaseCount('inventory_items', 1);
+        $this->assertDatabaseCount('inventory_levels', 0);
+    }
+
     public function test_missing_local_variant_does_not_block_inventory_sync(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');

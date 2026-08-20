@@ -111,6 +111,8 @@ class InventorySyncHandler implements SyncHandlerInterface
         $updatedCount = 0;
         $levelsCreated = 0;
         $levelsUpdated = 0;
+        $levelsUnavailable = 0;
+        $levelsRemoved = 0;
         $locationsCreated = 0;
         $locationsUpdated = 0;
         $inventoryItemPages = 0;
@@ -140,6 +142,8 @@ class InventorySyncHandler implements SyncHandlerInterface
                 $saved['created'] ? $createdCount++ : $updatedCount++;
                 $levelsCreated += $saved['levels_created'];
                 $levelsUpdated += $saved['levels_updated'];
+                $levelsUnavailable += $saved['levels_unavailable'];
+                $levelsRemoved += $saved['levels_removed'];
                 $locationsCreated += $saved['locations_created'];
                 $locationsUpdated += $saved['locations_updated'];
                 $inventoryItemCount++;
@@ -156,8 +160,14 @@ class InventorySyncHandler implements SyncHandlerInterface
 
         $durationMs = max(0, (int) round((hrtime(true) - $startedAt) / 1_000_000));
 
+        $message = "已同步 {$inventoryItemCount} 个 Shopify 库存项目。";
+
+        if ($levelsUnavailable > 0) {
+            $message .= " {$levelsUnavailable} 个库存级别没有地点可用数量，已跳过。";
+        }
+
         return SyncResult::successful(
-            "已同步 {$inventoryItemCount} 个 Shopify 库存项目。",
+            $message,
             $inventoryItemCount,
             [
                 'framework_only' => false,
@@ -169,6 +179,8 @@ class InventorySyncHandler implements SyncHandlerInterface
                 'inventory_level_pages' => $inventoryLevelPages,
                 'levels_created' => $levelsCreated,
                 'levels_updated' => $levelsUpdated,
+                'levels_unavailable' => $levelsUnavailable,
+                'levels_removed' => $levelsRemoved,
                 'locations_created' => $locationsCreated,
                 'locations_updated' => $locationsUpdated,
                 'time_filter_applied' => $timeFilter !== null,

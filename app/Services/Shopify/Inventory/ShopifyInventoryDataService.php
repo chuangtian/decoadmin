@@ -20,7 +20,7 @@ class ShopifyInventoryDataService
      *
      * @param  array<string, mixed>  $inventoryItemNode
      * @param  list<array<string, mixed>>  $levelNodes
-     * @return array{inventory_item: InventoryItem, created: bool, levels_created: int, levels_updated: int, locations_created: int, locations_updated: int}
+     * @return array{inventory_item: InventoryItem, created: bool, levels_created: int, levels_updated: int, levels_unavailable: int, levels_removed: int, locations_created: int, locations_updated: int}
      */
     public function upsert(Store $store, array $inventoryItemNode, array $levelNodes): array
     {
@@ -61,6 +61,8 @@ class ShopifyInventoryDataService
 
             $levelsCreated = 0;
             $levelsUpdated = 0;
+            $levelsUnavailable = 0;
+            $levelsRemoved = 0;
             $locationsCreated = 0;
             $locationsUpdated = 0;
 
@@ -72,6 +74,18 @@ class ShopifyInventoryDataService
                 }
 
                 $shopifyLocationId = $this->numericId($locationNode['id'] ?? null, 'Location');
+                $quantity = $this->availableQuantity($levelNode);
+
+                if ($quantity === null) {
+                    $levelsUnavailable++;
+                    $levelsRemoved += InventoryLevel::query()
+                        ->where('inventory_item_id', $inventoryItem->getKey())
+                        ->where('shopify_location_id', $shopifyLocationId)
+                        ->delete();
+
+                    continue;
+                }
+
                 $location = Location::query()->firstOrNew([
                     'store_id' => $store->getKey(),
                     'shopify_location_id' => $shopifyLocationId,
@@ -92,7 +106,6 @@ class ShopifyInventoryDataService
                     'synced_at' => now(),
                 ])->save();
 
-                $quantity = $this->availableQuantity($levelNode);
                 $level = InventoryLevel::query()->firstOrNew([
                     'inventory_item_id' => $inventoryItem->getKey(),
                     'location_id' => $location->getKey(),
@@ -111,6 +124,8 @@ class ShopifyInventoryDataService
                 'created' => $created,
                 'levels_created' => $levelsCreated,
                 'levels_updated' => $levelsUpdated,
+                'levels_unavailable' => $levelsUnavailable,
+                'levels_removed' => $levelsRemoved,
                 'locations_created' => $locationsCreated,
                 'locations_updated' => $locationsUpdated,
             ];
@@ -162,9 +177,9 @@ class ShopifyInventoryDataService
 
     /**
      * @param  array<string, mixed>  $levelNode
-     * @return array{name: string, quantity: int, updatedAt?: mixed}
+     * @return array{name: string, quantity: int, updatedAt?: mixed}|null
      */
-    private function availableQuantity(array $levelNode): array
+    private function availableQuantity(array $levelNode): ?array
     {
         $quantities = $levelNode['quantities'] ?? null;
 
@@ -176,8 +191,12 @@ class ShopifyInventoryDataService
             fn ($quantity) => is_array($quantity) && ($quantity['name'] ?? null) === 'available',
         );
 
+        if ($available === null) {
+            return null;
+        }
+
         if (! is_array($available) || ! is_int($available['quantity'] ?? null)) {
-            throw new ShopifyApiException('Shopify 库存级别缺少可用数量。');
+            throw new ShopifyApiException('Shopify 库存级别的可用数量格式无效。');
         }
 
         return $available;
