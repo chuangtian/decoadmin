@@ -11,8 +11,8 @@
             .code { color: #059669; font-size: 14px; font-weight: 700; letter-spacing: .18em; }
             h1 { margin: 14px 0 0; font-size: clamp(28px, 6vw, 42px); line-height: 1.2; }
             p { margin: 18px auto 0; max-width: 430px; color: #64748b; line-height: 1.8; }
-            a { display: inline-flex; margin-top: 28px; padding: 12px 20px; border-radius: 12px; background: #0f172a; color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; }
-            a:hover { background: #1e293b; }
+            a, button { display: inline-flex; margin-top: 28px; padding: 12px 20px; border: 0; border-radius: 12px; background: #0f172a; color: #fff; font: inherit; font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; }
+            a:hover, button:hover { background: #1e293b; }
         </style>
     </head>
     <body>
@@ -20,7 +20,11 @@
             <div class="code">@yield('code')</div>
             <h1>@yield('heading')</h1>
             <p>@yield('message')</p>
-            <a href="/">返回管理后台</a>
+            @hasSection('backAction')
+                <button type="button" onclick="document.referrer ? window.history.back() : window.location.assign('/')">返回上一页</button>
+            @else
+                <a href="/">返回管理后台</a>
+            @endif
         </main>
     </body>
 </html>

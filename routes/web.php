@@ -26,6 +26,7 @@ use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreAlertController;
+use App\Http\Controllers\StoreBusinessCredentialController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
@@ -186,6 +187,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/store-settings/feishu', [StoreNotificationSettingsController::class, 'feishu'])->middleware('permission:store.view')->name('store-settings.feishu');
     Route::put('/store-settings/feishu', [StoreNotificationSettingsController::class, 'updateFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.update');
     Route::patch('/store-settings/feishu/enabled', [StoreNotificationSettingsController::class, 'toggleFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.toggle');
+    Route::get('/store-settings/credentials', [StoreBusinessCredentialController::class, 'index'])->middleware('permission:store.view')->name('store-settings.credentials');
+    Route::get('/store-settings/credentials/{provider}/{credentialKey}/reveal', [StoreBusinessCredentialController::class, 'reveal'])->middleware(['permission:store.update', 'throttle:30,1'])->name('store-settings.credentials.reveal');
+    Route::put('/store-settings/credentials/{provider}/{credentialKey}', [StoreBusinessCredentialController::class, 'update'])->middleware('permission:store.update')->name('store-settings.credentials.update');
+    Route::delete('/store-settings/credentials/{provider}/{credentialKey}', [StoreBusinessCredentialController::class, 'destroy'])->middleware('permission:store.update')->name('store-settings.credentials.destroy');
 
     Route::get('/sync', [SyncJobController::class, 'index'])->middleware('permission:sync.view')->name('sync.index');
     Route::post('/sync', [SyncJobController::class, 'store'])->middleware('permission:sync.run')->name('sync.store');

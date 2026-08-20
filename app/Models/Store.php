@@ -90,6 +90,11 @@ class Store extends Model
         return $this->hasOne(StoreNotificationSetting::class);
     }
 
+    public function businessCredentials(): HasMany
+    {
+        return $this->hasMany(StoreBusinessCredential::class);
+    }
+
     public function alerts(): HasMany
     {
         return $this->hasMany(StoreAlert::class);
