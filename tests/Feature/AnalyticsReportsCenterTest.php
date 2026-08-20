@@ -553,6 +553,107 @@ class AnalyticsReportsCenterTest extends TestCase
             ->has('report.rows'));
     }
 
+    public function test_model_sales_summary_uses_active_shopify_products_and_previous_period(): void
+    {
+        Cache::flush();
+        [$admin, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders', 'read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+
+        Http::fake(function (Request $request) {
+            $query = (string) data_get($request->data(), 'variables.query');
+            $rows = [[
+                'product_id' => 'gid://shopify/Product/100',
+                'product_title' => 'Macfox X1S',
+                'product_variant_id' => 'gid://shopify/ProductVariant/101',
+                'product_variant_title' => 'Black',
+                'product_variant_sku' => 'X1S-BLK',
+                'net_items_sold' => '10',
+                'total_sales' => '1000',
+                'gross_sales' => '1100',
+                'comparison_net_items_sold__previous_period' => '8',
+                'comparison_total_sales__previous_period' => '800',
+                'comparison_gross_sales__previous_period' => '850',
+            ], [
+                'product_id' => 'gid://shopify/Product/100',
+                'product_title' => 'Macfox X1S',
+                'product_variant_id' => 'gid://shopify/ProductVariant/102',
+                'product_variant_title' => 'Nebula Purple',
+                'product_variant_sku' => 'X1S-PUR',
+                'net_items_sold' => '5',
+                'total_sales' => '500',
+                'gross_sales' => '550',
+                'comparison_net_items_sold__previous_period' => '2',
+                'comparison_total_sales__previous_period' => '200',
+                'comparison_gross_sales__previous_period' => '220',
+            ], [
+                'product_id' => 'gid://shopify/Product/200',
+                'product_title' => 'Macfox X7',
+                'product_variant_id' => 'gid://shopify/ProductVariant/201',
+                'product_variant_title' => 'Default Title',
+                'product_variant_sku' => 'X7',
+                'net_items_sold' => '3',
+                'total_sales' => '300',
+                'gross_sales' => '320',
+                'comparison_net_items_sold__previous_period' => '0',
+                'comparison_total_sales__previous_period' => '0',
+                'comparison_gross_sales__previous_period' => '0',
+            ]];
+
+            return Http::response(['data' => ['shopifyqlQuery' => [
+                'tableData' => ['columns' => [], 'rows' => $rows],
+                'parseErrors' => [],
+            ]]]);
+        });
+
+        $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.model-sales', ['date_from' => '2026-08-01', 'date_to' => '2026-08-20']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Analytics/ModelSales')
+            ->where('store.id', $store->id)
+            ->where('report.schema', 'model-sales-summary-v1')
+            ->where('report.period.comparison_from', '2026-07-12')
+            ->where('report.period.comparison_to', '2026-07-31')
+            ->where('report.summary.models', 2)
+            ->where('report.summary.variants', 3)
+            ->where('report.summary.net_items_sold', 18)
+            ->where('report.summary.total_sales', 1800)
+            ->where('report.models.0.title', 'Macfox X1S')
+            ->where('report.models.0.variant_count', 2)
+            ->where('report.models.0.current.total_sales', 1500)
+            ->where('report.models.0.previous.total_sales', 1000)
+            ->where('report.models.0.trend.key', 'hot')
+            ->where('report.models.0.trend.percent', 50)
+            ->where('report.models.1.title', 'Macfox X7')
+            ->where('report.models.1.variants.0.title', '默认款')
+            ->where('report.models.1.trend.key', 'new')
+            ->where('report.integration.complete', true));
+
+        Http::assertSent(fn (Request $request): bool => str_contains((string) data_get($request->data(), 'variables.query'), "product_status = 'Active'")
+            && str_contains((string) data_get($request->data(), 'variables.query'), 'GROUP BY product_id, product_title, product_variant_id, product_variant_title, product_variant_sku')
+            && str_contains((string) data_get($request->data(), 'variables.query'), 'WITH TOTALS, PERCENT_CHANGE')
+            && str_contains((string) data_get($request->data(), 'variables.query'), 'COMPARE TO previous_period'));
+        $modelReportRequests = collect(Http::recorded())->filter(
+            fn (array $record): bool => str_contains(
+                (string) data_get($record[0]->data(), 'variables.query'),
+                "product_status = 'Active'",
+            ),
+        );
+        $this->assertCount(1, $modelReportRequests);
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'report_key' => 'catalog:model-sales-summary',
+        ]);
+    }
+
     public function test_live_view_is_store_scoped_and_does_not_collect_raw_ip_data(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');

@@ -31,6 +31,7 @@ class ShopifyAnalyticsReportService
         'core-sales-year-comparison' => 'FROM sales SHOW total_sales, orders, average_order_value, gross_sales, discounts, returns, net_sales, taxes, shipping_charges TIMESERIES day WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_year ORDER BY day',
         'product-sales' => 'FROM sales SHOW net_items_sold, gross_sales, discounts, sales_reversals, net_sales, taxes, total_sales WHERE product_title IS NOT NULL GROUP BY product_title, product_vendor, product_type WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_period ORDER BY net_sales DESC LIMIT 200',
         'product-variant-sales' => 'FROM sales SHOW net_items_sold, gross_sales, discounts, sales_reversals, net_sales, taxes, total_sales WHERE product_title IS NOT NULL GROUP BY product_title, product_variant_title, product_variant_sku, product_vendor, product_type WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_period ORDER BY net_sales DESC LIMIT 200',
+        'model-sales-summary' => "FROM sales SHOW net_items_sold, total_sales, gross_sales WHERE product_status = 'Active' AND product_title IS NOT NULL GROUP BY product_id, product_title, product_variant_id, product_variant_title, product_variant_sku WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_period ORDER BY total_sales DESC LIMIT 1000",
         'vendor-sales' => 'FROM sales SHOW net_items_sold, gross_sales, discounts, sales_reversals, net_sales, taxes, total_sales GROUP BY product_vendor WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_period ORDER BY total_sales DESC LIMIT 100',
         'product-type-sales' => 'FROM sales SHOW net_items_sold, gross_sales, discounts, sales_reversals, net_sales, taxes, total_sales GROUP BY product_type WITH TOTALS, PERCENT_CHANGE {range} COMPARE TO previous_period ORDER BY total_sales DESC LIMIT 100',
         'customer-overview' => 'FROM sales SHOW customers WHERE new_or_returning_customer IS NOT NULL GROUP BY new_or_returning_customer WITH TOTALS {range} ORDER BY new_or_returning_customer ASC LIMIT 2',
@@ -902,7 +903,7 @@ class ShopifyAnalyticsReportService
             'core-sales-timeseries', 'core-sales-year-comparison', 'product-sales', 'product-variant-sales',
             'vendor-sales', 'product-type-sales', 'customer-overview', 'customer-returning-rate',
             'customer-value', 'order-status',
-            'abc-product-analysis',
+            'abc-product-analysis', 'model-sales-summary',
         ], true) ? 3 : self::CATALOG_REPORT_SCHEMA_VERSION;
     }
 

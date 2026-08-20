@@ -6,6 +6,7 @@ const props = defineProps<{
     action: string;
     period: { days: number; from: string; to: string; include_test: boolean; include_cancelled: boolean };
     extra?: Record<string, string | number | boolean>;
+    showOrderOptions?: boolean;
 }>();
 
 const form = reactive({
@@ -69,7 +70,7 @@ const apply = () => {
             <label class="min-w-0 flex-1 text-xs font-semibold text-slate-500">结束日期
                 <input v-model="form.date_to" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800" required @input="useCustomRange">
             </label>
-            <div class="flex flex-wrap gap-4 pb-2 text-sm font-medium text-slate-600">
+            <div v-if="showOrderOptions !== false" class="flex flex-wrap gap-4 pb-2 text-sm font-medium text-slate-600">
                 <label class="flex items-center gap-2"><input v-model="form.include_test" type="checkbox" class="rounded border-slate-300 text-emerald-600">包含测试订单</label>
                 <label class="flex items-center gap-2"><input v-model="form.include_cancelled" type="checkbox" class="rounded border-slate-300 text-emerald-600">包含取消订单</label>
             </div>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\AnalyticsFilterRequest;
 use App\Services\AnalyticsOverviewInsightsService;
 use App\Services\AnalyticsQueryService;
+use App\Services\ModelSalesSummaryService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Inertia\Inertia;
@@ -43,6 +44,25 @@ class AnalyticsController extends Controller
         return Inertia::render('Analytics/Sales', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => $store->currency ?: 'USD'],
             'analytics' => $analytics->sales($store, $request->filters()),
+        ]);
+    }
+
+    public function modelSales(
+        AnalyticsFilterRequest $request,
+        CurrentStore $currentStore,
+        ModelSalesSummaryService $summary,
+    ): Response {
+        $store = $currentStore->require();
+        $this->authorize('view', $store);
+
+        return Inertia::render('Analytics/ModelSales', [
+            'store' => [
+                'id' => $store->id,
+                'name' => $store->name,
+                'currency' => $store->currency ?: 'USD',
+                'timezone' => $store->timezone ?: 'UTC',
+            ],
+            'report' => $summary->forStore($store, $request->filters()),
         ]);
     }
 

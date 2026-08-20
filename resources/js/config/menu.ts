@@ -46,6 +46,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: '经营分析', route: '/analytics/overview', icon: 'analytics', permission: 'orders.view' },
             { name: '销售分析', route: '/analytics/sales', icon: 'analytics', permission: 'orders.view' },
+            { name: '车型销量汇总', route: '/analytics/model-sales', icon: 'analytics', permission: 'reports.view' },
             { name: '渠道与转化', route: '/business/insights', icon: 'analytics', permission: 'reports.view' },
             { name: '报告', route: '/reports', icon: 'reports', permission: 'reports.view' },
             { name: '实时视图', route: '/analytics/live', icon: 'analytics', permission: 'orders.view' },

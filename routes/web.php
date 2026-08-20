@@ -101,6 +101,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/business/insights', BusinessInsightsController::class)->middleware('permission:reports.view')->name('business.insights');
     Route::get('/analytics/overview', [AnalyticsController::class, 'overview'])->middleware('permission:orders.view')->name('analytics.overview');
     Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
+    Route::get('/analytics/model-sales', [AnalyticsController::class, 'modelSales'])->middleware('permission:reports.view')->name('analytics.model-sales');
     Route::get('/analytics/stores', [AnalyticsController::class, 'stores'])->middleware('permission:store.view')->name('analytics.stores');
     Route::get('/analytics/live', [LiveViewController::class, 'index'])->middleware('permission:orders.view')->name('analytics.live');
     Route::get('/analytics/live/data', [LiveViewController::class, 'data'])->middleware('permission:orders.view')->name('analytics.live.data');
