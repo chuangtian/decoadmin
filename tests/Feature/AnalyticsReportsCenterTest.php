@@ -629,10 +629,16 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('report.models.0.variant_count', 2)
             ->where('report.models.0.current.total_sales', 1500)
             ->where('report.models.0.previous.total_sales', 1000)
+            ->where('report.models.0.changes.net_items_sold.percent', 50)
+            ->where('report.models.0.changes.total_sales.percent', 50)
+            ->where('report.models.0.variants.0.changes.net_items_sold.percent', 25)
+            ->where('report.models.0.variants.0.changes.total_sales.percent', 25)
             ->where('report.models.0.trend.key', 'hot')
             ->where('report.models.0.trend.percent', 50)
             ->where('report.models.1.title', 'Macfox X7')
             ->where('report.models.1.variants.0.title', '默认款')
+            ->where('report.models.1.changes.net_items_sold.key', 'new')
+            ->where('report.models.1.changes.total_sales.key', 'new')
             ->where('report.models.1.trend.key', 'new')
             ->where('report.integration.complete', true));
 

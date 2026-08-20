@@ -24,6 +24,7 @@ interface Variant {
     sku: string;
     current: Metrics;
     previous: Metrics;
+    changes: { net_items_sold: Trend; total_sales: Trend };
     trend: Trend;
 }
 
@@ -34,6 +35,7 @@ interface Model {
     variant_count: number;
     current: Metrics;
     previous: Metrics;
+    changes: { net_items_sold: Trend; total_sales: Trend };
     trend: Trend;
     variants: Variant[];
 }
@@ -70,7 +72,10 @@ const money = (value: number | string) => new Intl.NumberFormat('zh-CN', {
     maximumFractionDigits: 2,
 }).format(Number(value || 0));
 const integer = (value: number) => Number(value || 0).toLocaleString('zh-CN');
-const trendPercent = (trend: Trend) => trend.percent === null ? '上期无销量' : `${trend.percent > 0 ? '+' : ''}${trend.percent.toFixed(1)}%`;
+const directionSymbol = (direction: Trend['direction']) => direction === 'up' ? '↑' : direction === 'down' ? '↓' : '—';
+const changePercent = (change: Trend) => change.percent === null
+    ? `${directionSymbol(change.direction)} 上期无销量`
+    : `${directionSymbol(change.direction)} ${Math.abs(change.percent).toFixed(1)}%`;
 const trendClass = (trend: Trend) => ({
     hot: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     up: 'bg-teal-50 text-teal-700 ring-teal-200',
@@ -79,6 +84,14 @@ const trendClass = (trend: Trend) => ({
     down: 'bg-rose-50 text-rose-700 ring-rose-200',
     new: 'bg-violet-50 text-violet-700 ring-violet-200',
 }[trend.key]);
+const changeTextClass = (change: Trend) => ({
+    hot: 'text-emerald-600',
+    up: 'text-teal-600',
+    stable: 'text-slate-500',
+    sliding: 'text-amber-600',
+    down: 'text-rose-600',
+    new: 'text-violet-600',
+}[change.key]);
 
 const cards = computed(() => [
     { label: '在售车型', value: integer(props.report.summary.models), note: `${integer(props.report.summary.variants)} 个款式` },
@@ -138,7 +151,14 @@ const cards = computed(() => [
                 </div>
 
                 <div v-if="report.models.length" class="hidden overflow-x-auto lg:block">
-                    <table class="min-w-full text-left">
+                    <table class="w-full table-fixed text-left">
+                        <colgroup>
+                            <col style="width: 36%">
+                            <col style="width: 14%">
+                            <col style="width: 18%">
+                            <col style="width: 18%">
+                            <col style="width: 14%">
+                        </colgroup>
                         <thead class="bg-white text-xs font-semibold uppercase tracking-wide text-slate-400">
                             <tr><th class="px-7 py-4">车型 / 款式</th><th class="px-5 py-4 text-right">净销量</th><th class="px-5 py-4 text-right">总销售额</th><th class="px-5 py-4 text-right">毛销售额</th><th class="px-7 py-4 text-right">趋势</th></tr>
                         </thead>
@@ -146,22 +166,22 @@ const cards = computed(() => [
                             <template v-for="model in report.models" :key="model.id">
                                 <tr class="bg-slate-50/80">
                                     <td class="px-7 py-5">
-                                        <button type="button" class="flex max-w-xl items-center gap-3 text-left" :aria-expanded="expanded.has(model.id)" @click="toggle(model.id)">
+                                        <button type="button" class="flex w-full min-w-0 items-center gap-3 text-left" :aria-expanded="expanded.has(model.id)" @click="toggle(model.id)">
                                             <span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition" :class="expanded.has(model.id) ? 'rotate-90 text-emerald-700' : ''">›</span>
-                                            <span class="min-w-0"><strong class="block truncate text-base text-slate-950">{{ model.title }}</strong><span class="mt-1 block text-xs text-slate-400">{{ model.variant_count }} 个款式</span></span>
+                                            <span class="min-w-0"><strong class="block truncate text-base text-slate-950" :title="model.title">{{ model.title }}</strong><span class="mt-1 block text-xs text-slate-400">{{ model.variant_count }} 个款式</span></span>
                                         </button>
                                     </td>
-                                    <td class="px-5 py-5 text-right"><strong class="text-base text-slate-950">{{ integer(model.current.net_items_sold) }}</strong><p class="mt-1 text-xs text-slate-400">上期 {{ integer(model.previous.net_items_sold) }}</p></td>
-                                    <td class="px-5 py-5 text-right"><strong class="text-base text-emerald-700">{{ money(model.current.total_sales) }}</strong><p class="mt-1 text-xs text-slate-400">上期 {{ money(model.previous.total_sales) }}</p></td>
-                                    <td class="px-5 py-5 text-right"><span class="font-semibold text-slate-800">{{ money(model.current.gross_sales) }}</span><p class="mt-1 text-xs text-slate-400">上期 {{ money(model.previous.gross_sales) }}</p></td>
-                                    <td class="px-7 py-5 text-right"><span class="inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset" :class="trendClass(model.trend)">{{ model.trend.label }} · {{ trendPercent(model.trend) }}</span></td>
+                                    <td class="px-5 py-5 text-right"><strong class="text-base text-slate-950">{{ integer(model.current.net_items_sold) }}</strong><p class="mt-1 text-xs font-semibold" :class="changeTextClass(model.changes.net_items_sold)">{{ changePercent(model.changes.net_items_sold) }}</p></td>
+                                    <td class="px-5 py-5 text-right"><strong class="text-base text-emerald-700">{{ money(model.current.total_sales) }}</strong><p class="mt-1 text-xs font-semibold" :class="changeTextClass(model.changes.total_sales)">{{ changePercent(model.changes.total_sales) }}</p></td>
+                                    <td class="px-5 py-5 text-right"><span class="font-semibold text-slate-800">{{ money(model.current.gross_sales) }}</span></td>
+                                    <td class="px-7 py-5 text-right"><span class="inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset" :class="trendClass(model.trend)">{{ model.trend.label }} {{ directionSymbol(model.trend.direction) }}</span></td>
                                 </tr>
                                 <tr v-for="variant in (expanded.has(model.id) ? model.variants : [])" :key="variant.id" class="hover:bg-slate-50/60">
-                                    <td class="px-7 py-4"><div class="flex items-center gap-3 pl-11"><span class="h-2 w-2 rounded-full bg-emerald-400"></span><div><p class="font-medium text-slate-800">{{ variant.title }}</p><p v-if="variant.sku" class="mt-0.5 font-mono text-xs text-slate-400">SKU {{ variant.sku }}</p></div></div></td>
-                                    <td class="px-5 py-4 text-right text-sm text-slate-700">{{ integer(variant.current.net_items_sold) }}<p class="mt-1 text-xs text-slate-400">上期 {{ integer(variant.previous.net_items_sold) }}</p></td>
-                                    <td class="px-5 py-4 text-right text-sm font-medium text-slate-800">{{ money(variant.current.total_sales) }}<p class="mt-1 text-xs font-normal text-slate-400">上期 {{ money(variant.previous.total_sales) }}</p></td>
-                                    <td class="px-5 py-4 text-right text-sm text-slate-600">{{ money(variant.current.gross_sales) }}<p class="mt-1 text-xs text-slate-400">上期 {{ money(variant.previous.gross_sales) }}</p></td>
-                                    <td class="px-7 py-4 text-right"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="trendClass(variant.trend)">{{ variant.trend.label }} · {{ trendPercent(variant.trend) }}</span></td>
+                                    <td class="px-7 py-4"><div class="flex min-w-0 items-center gap-3 pl-11"><span class="h-2 w-2 shrink-0 rounded-full bg-emerald-400"></span><div class="min-w-0"><p class="truncate font-medium text-slate-800" :title="variant.title">{{ variant.title }}</p><p v-if="variant.sku" class="mt-0.5 truncate font-mono text-xs text-slate-400" :title="variant.sku">SKU {{ variant.sku }}</p></div></div></td>
+                                    <td class="px-5 py-4 text-right text-sm text-slate-700">{{ integer(variant.current.net_items_sold) }}<p class="mt-1 text-xs font-semibold" :class="changeTextClass(variant.changes.net_items_sold)">{{ changePercent(variant.changes.net_items_sold) }}</p></td>
+                                    <td class="px-5 py-4 text-right text-sm font-medium text-slate-800">{{ money(variant.current.total_sales) }}<p class="mt-1 text-xs font-semibold" :class="changeTextClass(variant.changes.total_sales)">{{ changePercent(variant.changes.total_sales) }}</p></td>
+                                    <td class="px-5 py-4 text-right text-sm text-slate-600">{{ money(variant.current.gross_sales) }}</td>
+                                    <td class="px-7 py-4 text-right"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="trendClass(variant.trend)">{{ variant.trend.label }} {{ directionSymbol(variant.trend.direction) }}</span></td>
                                 </tr>
                             </template>
                         </tbody>
@@ -171,12 +191,12 @@ const cards = computed(() => [
                 <div v-if="report.models.length" class="divide-y divide-slate-100 lg:hidden">
                     <article v-for="model in report.models" :key="model.id">
                         <button type="button" class="w-full px-5 py-5 text-left" :aria-expanded="expanded.has(model.id)" @click="toggle(model.id)">
-                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold text-slate-950">{{ model.title }}</h3><p class="mt-1 text-xs text-slate-400">{{ model.variant_count }} 个款式</p></div><span class="text-xl text-slate-400" :class="expanded.has(model.id) ? 'rotate-90' : ''">›</span></div>
-                            <div class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><p class="text-xs text-slate-400">净销量</p><p class="mt-1 font-semibold text-slate-900">{{ integer(model.current.net_items_sold) }}</p></div><div><p class="text-xs text-slate-400">总销售额</p><p class="mt-1 font-semibold text-emerald-700">{{ money(model.current.total_sales) }}</p></div></div>
-                            <span class="mt-4 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="trendClass(model.trend)">{{ model.trend.label }} · {{ trendPercent(model.trend) }}</span>
+                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="truncate font-semibold text-slate-950" :title="model.title">{{ model.title }}</h3><p class="mt-1 text-xs text-slate-400">{{ model.variant_count }} 个款式</p></div><span class="text-xl text-slate-400" :class="expanded.has(model.id) ? 'rotate-90' : ''">›</span></div>
+                            <div class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><p class="text-xs text-slate-400">净销量</p><p class="mt-1 font-semibold text-slate-900">{{ integer(model.current.net_items_sold) }}</p><p class="mt-1 text-xs font-semibold" :class="changeTextClass(model.changes.net_items_sold)">{{ changePercent(model.changes.net_items_sold) }}</p></div><div><p class="text-xs text-slate-400">总销售额</p><p class="mt-1 font-semibold text-emerald-700">{{ money(model.current.total_sales) }}</p><p class="mt-1 text-xs font-semibold" :class="changeTextClass(model.changes.total_sales)">{{ changePercent(model.changes.total_sales) }}</p></div><div class="col-span-2"><p class="text-xs text-slate-400">毛销售额</p><p class="mt-1 font-semibold text-slate-900">{{ money(model.current.gross_sales) }}</p></div></div>
+                            <span class="mt-4 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="trendClass(model.trend)">{{ model.trend.label }} {{ directionSymbol(model.trend.direction) }}</span>
                         </button>
                         <div v-if="expanded.has(model.id)" class="divide-y divide-slate-100 border-t border-slate-100 bg-slate-50/70 px-5">
-                            <div v-for="variant in model.variants" :key="variant.id" class="py-4"><div class="flex items-center justify-between gap-3"><div><p class="font-medium text-slate-800">{{ variant.title }}</p><p v-if="variant.sku" class="mt-1 font-mono text-xs text-slate-400">{{ variant.sku }}</p></div><span class="text-sm font-semibold text-slate-900">{{ integer(variant.current.net_items_sold) }} 件</span></div><div class="mt-3 flex items-center justify-between text-sm"><span class="text-emerald-700">{{ money(variant.current.total_sales) }}</span><span class="text-xs text-slate-400">上期 {{ money(variant.previous.total_sales) }}</span></div></div>
+                            <div v-for="variant in model.variants" :key="variant.id" class="py-4"><div class="flex items-center justify-between gap-3"><div class="min-w-0"><p class="truncate font-medium text-slate-800" :title="variant.title">{{ variant.title }}</p><p v-if="variant.sku" class="mt-1 truncate font-mono text-xs text-slate-400" :title="variant.sku">{{ variant.sku }}</p></div><span class="shrink-0 text-sm font-semibold text-slate-900">{{ integer(variant.current.net_items_sold) }} 件</span></div><div class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><p class="text-xs text-slate-400">净销量变化</p><p class="mt-1 text-xs font-semibold" :class="changeTextClass(variant.changes.net_items_sold)">{{ changePercent(variant.changes.net_items_sold) }}</p></div><div><p class="text-xs text-slate-400">总销售额</p><p class="mt-1 text-emerald-700">{{ money(variant.current.total_sales) }}</p><p class="mt-1 text-xs font-semibold" :class="changeTextClass(variant.changes.total_sales)">{{ changePercent(variant.changes.total_sales) }}</p></div><div class="col-span-2"><p class="text-xs text-slate-400">毛销售额</p><p class="mt-1 text-slate-700">{{ money(variant.current.gross_sales) }}</p></div></div></div>
                         </div>
                     </article>
                 </div>

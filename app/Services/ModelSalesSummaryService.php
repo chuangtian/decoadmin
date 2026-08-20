@@ -143,6 +143,10 @@ class ModelSalesSummaryService
                     (float) $variant['current']['total_sales'],
                     (float) $variant['previous']['total_sales'],
                 );
+                $variant['changes'] = $this->metricChanges(
+                    $variant['current'],
+                    $variant['previous'],
+                );
 
                 return $variant;
             })
@@ -160,8 +164,28 @@ class ModelSalesSummaryService
             'variant_count' => count($variants),
             'current' => $current,
             'previous' => $previous,
+            'changes' => $this->metricChanges($current, $previous),
             'trend' => $this->trend((float) $current['total_sales'], (float) $previous['total_sales']),
             'variants' => $variants,
+        ];
+    }
+
+    /**
+     * @param  array{net_items_sold: int, total_sales: float, gross_sales: float}  $current
+     * @param  array{net_items_sold: int, total_sales: float, gross_sales: float}  $previous
+     * @return array{net_items_sold: array{key: string, label: string, direction: string, percent: float|null}, total_sales: array{key: string, label: string, direction: string, percent: float|null}}
+     */
+    private function metricChanges(array $current, array $previous): array
+    {
+        return [
+            'net_items_sold' => $this->trend(
+                (float) $current['net_items_sold'],
+                (float) $previous['net_items_sold'],
+            ),
+            'total_sales' => $this->trend(
+                (float) $current['total_sales'],
+                (float) $previous['total_sales'],
+            ),
         ];
     }
 
