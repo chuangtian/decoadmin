@@ -30,7 +30,17 @@ class AnalyticsQueryService
         $version = $this->cacheVersion->current((int) $store->getKey());
         // Keep the response schema version in the cache key so older dashboard
         // payloads cannot be reused after new metrics are introduced.
-        $key = 'analytics:sales:schema-v3:'.$store->getKey().":v{$version}:".sha1(json_encode($period));
+        $key = implode(':', [
+            'analytics',
+            'sales',
+            'schema-v4',
+            'organization',
+            $store->organization_id,
+            'store',
+            $store->getKey(),
+            "v{$version}",
+            sha1(json_encode($period)),
+        ]);
 
         return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildSales($store, $period));
     }

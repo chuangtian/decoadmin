@@ -45,8 +45,8 @@ const props = defineProps<{
             reports_available: boolean;
             report_errors: Record<string, string>;
             comparison_primary: 'shopifyql' | 'local' | null;
-            storage: { persisted: boolean; source: 'database' | null; stale: boolean; fetched_at: string | null; expires_at: string | null };
-            comparison_storage: { persisted: boolean; source: 'database' | null; stale: boolean; fetched_at: string | null; expires_at: string | null } | null;
+            storage: { persisted: boolean; source: 'database' | null; stale: boolean; pending?: boolean; refreshing?: boolean; fetched_at: string | null; expires_at: string | null };
+            comparison_storage: { persisted: boolean; source: 'database' | null; stale: boolean; pending?: boolean; refreshing?: boolean; fetched_at: string | null; expires_at: string | null } | null;
         };
         privacy: { raw_ip_collected: boolean; raw_payload_stored: boolean; identifiers: string; search_query: string };
         generated_at: string;
@@ -144,7 +144,7 @@ async function copyPixel() {
                 </article>
                 <article class="flex items-start gap-4 rounded-2xl border bg-white p-5 shadow-sm" :class="insights.integration.reports_ready ? 'border-emerald-200' : 'border-amber-200'">
                     <span class="mt-0.5 h-3 w-3 rounded-full" :class="insights.integration.reports_ready ? 'bg-emerald-500' : 'bg-amber-500'" />
-                    <div><h2 class="font-semibold text-slate-900">Shopify 原生报表</h2><p class="mt-1 text-sm text-slate-500">{{ insights.integration.reports_ready ? 'read_reports 已生效，当前数据优先使用 ShopifyQL 口径' : (insights.integration.report_scope_granted ? '权限已存在，但部分报表查询失败，失败项已使用本地数据' : '缺少 read_reports，请重新授权后同步 Shopify 原生统计') }}</p><p v-if="insights.data_source.storage.persisted" class="mt-1 text-xs font-semibold" :class="insights.data_source.storage.stale ? 'text-amber-600' : 'text-emerald-600'">{{ insights.data_source.storage.stale ? '正在使用数据库中的最近一次快照' : '数据已保存到本地数据库' }}<span v-if="insights.data_source.storage.fetched_at" class="font-normal text-slate-400"> · {{ formatDateTime(insights.data_source.storage.fetched_at) }}</span></p></div>
+                    <div><h2 class="font-semibold text-slate-900">Shopify 原生报表</h2><p class="mt-1 text-sm text-slate-500">{{ insights.integration.reports_ready ? 'read_reports 已生效，当前数据优先使用 ShopifyQL 口径' : (insights.integration.report_scope_granted ? '权限已存在，但部分报表查询失败，失败项已使用本地数据' : '缺少 read_reports，请重新授权后同步 Shopify 原生统计') }}</p><p v-if="insights.data_source.storage.persisted" class="mt-1 text-xs font-semibold" :class="insights.data_source.storage.stale ? 'text-amber-600' : 'text-emerald-600'">{{ insights.data_source.storage.pending ? 'Shopify 数据正在后台加载，当前先显示本地同步数据' : (insights.data_source.storage.stale ? '正在使用数据库中的最近一次快照' : '数据已保存到本地数据库') }}<span v-if="insights.data_source.storage.fetched_at && !insights.data_source.storage.pending" class="font-normal text-slate-400"> · {{ formatDateTime(insights.data_source.storage.fetched_at) }}</span></p></div>
                 </article>
                 <article class="flex items-start gap-4 rounded-2xl border bg-white p-5 shadow-sm" :class="insights.integration.pixel_receiving ? 'border-emerald-200' : 'border-amber-200'">
                     <span class="mt-0.5 h-3 w-3 rounded-full" :class="insights.integration.pixel_receiving ? 'bg-emerald-500' : 'bg-amber-500'" />

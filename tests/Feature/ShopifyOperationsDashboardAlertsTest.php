@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\DeliverStoreAlertNotificationJob;
+use App\Jobs\RefreshShopifyAnalyticsSnapshot;
 use App\Models\Location;
 use App\Models\Order;
 use App\Models\Organization;
@@ -19,6 +20,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -27,6 +29,42 @@ use Tests\TestCase;
 class ShopifyOperationsDashboardAlertsTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_dashboard_cold_snapshot_returns_local_data_and_queues_shopify_refresh(): void
+    {
+        config()->set('inertia.ssr.enabled', false);
+        Queue::fake();
+        Http::preventStrayRequests();
+        [$user, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+        $this->order($organization, $store, 'cold-1001', '125.50');
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Dashboard/Index')
+                ->where('dashboard.store.id', $store->id)
+                ->where('dashboard.summary.orders', 1)
+                ->where('dashboard.analytics.data_source.primary', 'local_sync'));
+
+        Http::assertNothingSent();
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'source' => 'pending',
+        ]);
+        Queue::assertPushed(RefreshShopifyAnalyticsSnapshot::class);
+    }
 
     public function test_dashboard_uses_only_current_store_metrics(): void
     {

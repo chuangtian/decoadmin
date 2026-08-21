@@ -19,6 +19,75 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_missing_snapshot_is_queued_without_calling_shopify_in_the_web_request(): void
+    {
+        [$organization, $store] = $this->context();
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $result = app(ShopifyAnalyticsReportService::class)
+            ->report($store, 'acquisition-by-source', '2026-08-01', '2026-08-20');
+
+        $this->assertFalse($result['available']);
+        $this->assertTrue($result['storage']['stale']);
+        $this->assertTrue($result['storage']['pending']);
+        Http::assertNothingSent();
+
+        $snapshot = AnalyticsSnapshot::query()->sole();
+        $this->assertSame($organization->id, $snapshot->organization_id);
+        $this->assertSame($store->id, $snapshot->store_id);
+        $this->assertSame('pending', $snapshot->source);
+        Queue::assertPushed(RefreshShopifyAnalyticsSnapshot::class, fn ($job): bool => $job->snapshotId === $snapshot->id
+            && $job->queue === 'shopify-analytics'
+        );
+    }
+
+    public function test_missing_snapshots_are_isolated_by_organization_and_store(): void
+    {
+        [$firstOrganization, $firstStore] = $this->context();
+        $secondOrganization = Organization::query()->create([
+            'name' => 'Second Snapshot Organization',
+            'code' => 'second-snapshot-organization',
+        ]);
+        $secondStore = $secondOrganization->stores()->create([
+            'name' => 'Second Snapshot Store',
+            'shopify_domain' => 'second-snapshot-store.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+            'currency' => 'USD',
+        ]);
+        ShopifyConnection::query()->create([
+            'store_id' => $secondStore->id,
+            'shop_domain' => $secondStore->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+        $secondStore->load('shopifyConnection');
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $reports = app(ShopifyAnalyticsReportService::class);
+        $reports->report($firstStore, 'acquisition-by-source', '2026-08-01', '2026-08-20');
+        $reports->report($secondStore, 'acquisition-by-source', '2026-08-01', '2026-08-20');
+
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $firstOrganization->id,
+            'store_id' => $firstStore->id,
+            'source' => 'pending',
+        ]);
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'organization_id' => $secondOrganization->id,
+            'store_id' => $secondStore->id,
+            'source' => 'pending',
+        ]);
+        $this->assertDatabaseCount('analytics_snapshots', 2);
+        Http::assertNothingSent();
+        Queue::assertPushed(RefreshShopifyAnalyticsSnapshot::class, 2);
+    }
+
     public function test_first_request_does_not_call_shopify_when_an_identical_refresh_lock_is_held(): void
     {
         [$organization, $store] = $this->context();

@@ -151,6 +151,22 @@ class ShopifyAnalyticsReportService
                 : $this->unavailable(false, '缺少 read_reports。');
         }
 
+        if (! $snapshot && ! $insideRefreshLock) {
+            $snapshot = $this->pendingSnapshot(
+                $store,
+                self::BUSINESS_OVERVIEW_REPORT,
+                $from,
+                $to,
+                self::BUSINESS_OVERVIEW_SCHEMA_VERSION,
+                $this->unavailable(true, 'Shopify 报表正在刷新，请稍后重试。'),
+                (string) $period['timezone'],
+            );
+            $this->queueRefresh($snapshot);
+            $snapshot = $snapshot->fresh() ?? $snapshot;
+
+            return $this->storedOverview($snapshot, ! $snapshot->expires_at->isFuture());
+        }
+
         if (! $insideRefreshLock) {
             return $this->withRefreshLock(
                 $store,
@@ -267,6 +283,21 @@ class ShopifyAnalyticsReportService
                 : $this->unavailableReport(false, '缺少 read_reports，请重新授权店铺。');
         }
 
+        if (! $snapshot && ! $insideRefreshLock) {
+            $snapshot = $this->pendingSnapshot(
+                $store,
+                $snapshotKey,
+                $from,
+                $to,
+                $schemaVersion,
+                $this->unavailableReport(true, 'Shopify 报表正在刷新，请稍后重试。'),
+            );
+            $this->queueRefresh($snapshot);
+            $snapshot = $snapshot->fresh() ?? $snapshot;
+
+            return $this->storedReport($snapshot, ! $snapshot->expires_at->isFuture());
+        }
+
         $range = "SINCE {$from} UNTIL {$to}";
         if (! $insideRefreshLock) {
             return $this->withRefreshLock(
@@ -347,6 +378,21 @@ class ShopifyAnalyticsReportService
             return $snapshot
                 ? $this->storedAnalyticsOverview($snapshot, true)
                 : $this->unavailableReports($keys, false, '缺少 read_reports，请重新授权店铺。');
+        }
+
+        if (! $snapshot && ! $insideRefreshLock) {
+            $snapshot = $this->pendingSnapshot(
+                $store,
+                self::ANALYTICS_OVERVIEW_REPORT,
+                $from,
+                $to,
+                self::ANALYTICS_OVERVIEW_SCHEMA_VERSION,
+                $this->unavailableReports($keys, true, 'Shopify 报表正在刷新，请稍后重试。'),
+            );
+            $this->queueRefresh($snapshot);
+            $snapshot = $snapshot->fresh() ?? $snapshot;
+
+            return $this->storedAnalyticsOverview($snapshot, ! $snapshot->expires_at->isFuture());
         }
 
         if (! $insideRefreshLock) {
@@ -591,6 +637,34 @@ class ShopifyAnalyticsReportService
         return $snapshot;
     }
 
+    /** @param array<string, mixed> $payload */
+    private function pendingSnapshot(
+        Store $store,
+        string $reportKey,
+        string $from,
+        string $to,
+        int $schemaVersion,
+        array $payload,
+        ?string $timezone = null,
+    ): AnalyticsSnapshot {
+        $now = now();
+
+        return AnalyticsSnapshot::query()->firstOrCreate([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->getKey(),
+            'report_key' => $reportKey,
+            'period_from' => $from,
+            'period_to' => $to,
+            'schema_version' => $schemaVersion,
+        ], [
+            'timezone' => $timezone ?: $store->timezone ?: 'UTC',
+            'source' => 'pending',
+            'payload' => $payload,
+            'fetched_at' => $now,
+            'expires_at' => $now->copy()->subSecond(),
+        ]);
+    }
+
     /** @return array<string, mixed> */
     private function storedOverview(AnalyticsSnapshot $snapshot, bool $stale): array
     {
@@ -599,13 +673,7 @@ class ShopifyAnalyticsReportService
             return $this->unavailable(false, '本地分析快照不可用。');
         }
 
-        $payload['storage'] = [
-            'persisted' => true,
-            'source' => 'database',
-            'stale' => $stale,
-            'fetched_at' => $snapshot->fetched_at?->toIso8601String(),
-            'expires_at' => $snapshot->expires_at?->toIso8601String(),
-        ];
+        $payload['storage'] = $this->storageMetadata($snapshot, $stale);
 
         return $payload;
     }
@@ -648,13 +716,15 @@ class ShopifyAnalyticsReportService
         );
     }
 
-    /** @return array{persisted: true, source: string, stale: bool, fetched_at: string|null, expires_at: string|null} */
+    /** @return array{persisted: true, source: string, stale: bool, pending: bool, refreshing: bool, fetched_at: string|null, expires_at: string|null} */
     private function storageMetadata(AnalyticsSnapshot $snapshot, bool $stale): array
     {
         return [
             'persisted' => true,
             'source' => 'database',
             'stale' => $stale,
+            'pending' => $snapshot->source === 'pending',
+            'refreshing' => $stale,
             'fetched_at' => $snapshot->fetched_at?->toIso8601String(),
             'expires_at' => $snapshot->expires_at?->toIso8601String(),
         ];

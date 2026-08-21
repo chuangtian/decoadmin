@@ -89,9 +89,9 @@ class DashboardMetricsService
                     ->sum('inventory_levels.available'),
             ],
             'operations' => [
-                'open_alerts' => StoreAlert::query()->where('store_id', $store->id)->whereIn('status', ['open', 'acknowledged'])->count(),
-                'failed_sync_jobs_24h' => SyncJob::query()->where('store_id', $store->id)->where('status', 'failed')->where('created_at', '>=', now()->subDay())->count(),
-                'failed_webhooks_24h' => WebhookEvent::query()->where('store_id', $store->id)->where('status', 'failed')->where('received_at', '>=', now()->subDay())->count(),
+                'open_alerts' => StoreAlert::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereIn('status', ['open', 'acknowledged'])->count(),
+                'failed_sync_jobs_24h' => SyncJob::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('status', 'failed')->where('created_at', '>=', now()->subDay())->count(),
+                'failed_webhooks_24h' => WebhookEvent::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('status', 'failed')->where('received_at', '>=', now()->subDay())->count(),
                 'connection_status' => $store->shopifyConnection?->status ?? 'disconnected',
                 'last_sync_at' => $store->latestSyncJob?->finished_at?->toIso8601String()
                     ?? $store->latestSyncJob?->completed_at?->toIso8601String(),
