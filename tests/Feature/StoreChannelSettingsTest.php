@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
+use App\Models\StoreBusinessCredential;
 use App\Models\StoreNotificationSetting;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
@@ -169,6 +170,105 @@ class StoreChannelSettingsTest extends TestCase
         $this->assertTrue($setting->feishu_enabled);
         $this->assertDatabaseHas('audit_logs', ['action' => 'store_mail_channel_toggled']);
         $this->assertDatabaseHas('audit_logs', ['action' => 'store_feishu_channel_toggled']);
+    }
+
+    public function test_feishu_data_links_are_saved_only_for_the_current_store_and_encrypted(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $secondStore = $this->addStore($user, $organization, 'EU Store', 'settings-eu.myshopify.com');
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $secondStore->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'brand_spreadsheet_token',
+            'credential_value' => 'second-store-secret',
+            'updated_by' => $user->id,
+        ]);
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)->withSession($session)->put(
+            route('store-settings.feishu.data-links.update', ['section' => 'brand']),
+            ['values' => [
+                'brand_spreadsheet_token' => 'current-store-secret',
+                'brand_license_sheet_id' => 'sheet-current',
+                'brand_wiki_url' => 'https://example.feishu.cn/wiki/current',
+            ]],
+        )->assertRedirect()->assertSessionHas('success');
+
+        $credential = StoreBusinessCredential::query()
+            ->whereBelongsTo($store)
+            ->where('provider', 'feishu_data_links')
+            ->where('credential_key', 'brand_spreadsheet_token')
+            ->sole();
+
+        $this->assertSame('current-store-secret', $credential->credential_value);
+        $this->assertSame(
+            'second-store-secret',
+            StoreBusinessCredential::query()
+                ->whereBelongsTo($secondStore)
+                ->where('provider', 'feishu_data_links')
+                ->where('credential_key', 'brand_spreadsheet_token')
+                ->sole()
+                ->credential_value,
+        );
+        $this->assertStringNotContainsString(
+            'current-store-secret',
+            (string) DB::table('store_business_credentials')->where('id', $credential->id)->value('credential_value'),
+        );
+
+        $this->actingAs($user)->withSession($session)->get(
+            route('store-settings.feishu.data-links.reveal', [
+                'section' => 'brand',
+                'field' => 'brand_spreadsheet_token',
+            ]),
+        )->assertOk()->assertJsonPath('data.value', 'current-store-secret');
+
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.feishu'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dataLinks.0.key', 'brand')
+                ->where('dataLinks.0.fields.0.configured', true)
+                ->where('dataLinks.0.fields.0.current_value', '')
+                ->where('dataLinks.0.fields.1.current_value', 'sheet-current'));
+
+        $audit = DB::table('audit_logs')->where('action', 'store_feishu_data_links_updated')->sole();
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertStringNotContainsString('current-store-secret', json_encode($audit));
+    }
+
+    public function test_viewer_cannot_change_or_reveal_feishu_data_links(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'brand_spreadsheet_token',
+            'credential_value' => 'viewer-hidden-secret',
+            'updated_by' => $user->id,
+        ]);
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.feishu'))
+            ->assertOk()
+            ->assertDontSee('viewer-hidden-secret')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canUpdate', false)
+                ->where('dataLinks.0.fields.0.configured', true)
+                ->where('dataLinks.0.fields.0.masked_value', '')
+                ->where('dataLinks.0.fields.0.current_value', ''));
+
+        $this->actingAs($user)->withSession($session)->put(
+            route('store-settings.feishu.data-links.update', ['section' => 'brand']),
+            ['values' => ['brand_spreadsheet_token' => 'forbidden-change']],
+        )->assertForbidden();
+
+        $this->actingAs($user)->withSession($session)->get(
+            route('store-settings.feishu.data-links.reveal', [
+                'section' => 'brand',
+                'field' => 'brand_spreadsheet_token',
+            ]),
+        )->assertForbidden();
     }
 
     private function context(string $roleSlug): array

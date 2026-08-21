@@ -177,7 +177,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
 
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="grid sm:grid-cols-2 xl:grid-cols-4">
-                    <article v-for="(card,index) in cards" :key="card.key" class="relative min-h-44 p-6" :class="[index ? 'border-t border-slate-100 sm:border-l sm:border-t-0' : '', index === 3 ? 'bg-emerald-50/60' : '']">
+                    <article v-for="(card,index) in cards" :key="card.key" class="relative min-h-44 p-6" :class="index ? 'border-t border-slate-100 sm:border-l sm:border-t-0' : ''">
                         <p class="text-sm font-semibold text-slate-500">{{ card.label }}</p>
                         <p class="mt-8 text-3xl font-semibold tracking-tight text-slate-950">{{ card.value }}</p>
                         <div class="mt-3 flex items-center justify-between gap-2 text-xs"><span :class="changeClass(card.key)">环比 {{ changeText(card.key) }}</span><span class="text-slate-400">{{ card.note }}</span></div>
