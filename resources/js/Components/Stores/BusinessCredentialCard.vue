@@ -20,6 +20,10 @@ type CredentialProvider = {
     description: string;
     setup_hint: string;
     oauth_label: string | null;
+    oauth_connect_title: string;
+    oauth_connect_url: string | null;
+    oauth_ready: boolean;
+    oauth_connected: boolean;
     configured: boolean;
     fields: CredentialField[];
 };
@@ -151,7 +155,20 @@ const clear = () => {
                 <span class="text-sm font-semibold text-slate-800">{{ provider.oauth_label }}</span>
                 <span class="rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">自动刷新</span>
             </div>
-            <span class="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">授权流程待接入</span>
+            <button v-if="provider.oauth_connected" type="button" disabled class="inline-flex cursor-default items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+                已连接
+            </button>
+            <a
+                v-else-if="provider.oauth_connect_url && provider.oauth_ready && canUpdate"
+                :href="provider.oauth_connect_url"
+                class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            >
+                连接 {{ provider.oauth_connect_title }}
+            </a>
+            <span v-else-if="provider.oauth_connect_url && !provider.oauth_ready" class="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">请先配置 OAuth 凭证</span>
+            <span v-else-if="provider.oauth_connect_url" class="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">仅店铺编辑者可连接</span>
+            <span v-else class="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">授权流程待接入</span>
         </div>
 
         <div class="divide-y divide-slate-100 px-5 sm:px-7" :class="provider.oauth_label ? 'mt-3' : ''">
