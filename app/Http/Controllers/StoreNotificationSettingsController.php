@@ -3,12 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ToggleStoreNotificationChannelRequest;
+use App\Http\Requests\UpdateStoreFeishuDataLinksRequest;
 use App\Http\Requests\UpdateStoreFeishuSettingsRequest;
 use App\Http\Requests\UpdateStoreMailSettingsRequest;
 use App\Http\Requests\UpdateStoreNotificationSettingsRequest;
 use App\Models\Store;
+use App\Services\StoreFeishuDataLinkService;
 use App\Services\StoreNotificationSettingsService;
 use App\Support\CurrentStore;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -47,8 +50,12 @@ class StoreNotificationSettingsController extends Controller
         return back()->with('success', $request->boolean('enabled') ? '店铺邮箱已启用。' : '店铺邮箱已停用。');
     }
 
-    public function feishu(Request $request, CurrentStore $currentStore, StoreNotificationSettingsService $settings): Response
-    {
+    public function feishu(
+        Request $request,
+        CurrentStore $currentStore,
+        StoreNotificationSettingsService $settings,
+        StoreFeishuDataLinkService $dataLinks,
+    ): Response {
         $store = $currentStore->require();
         $this->authorize('view', $store);
         $canUpdate = $request->user()->hasPermission('store.update', $store->organization, $store);
@@ -57,8 +64,34 @@ class StoreNotificationSettingsController extends Controller
             'store' => $this->storeSummary($store),
             'settings' => $settings->feishuForFrontend($store, $canUpdate),
             'tableSettings' => $settings->feishuTableForFrontend($store, $canUpdate),
+            'dataLinks' => $dataLinks->catalogForFrontend($store, $canUpdate),
             'canUpdate' => $canUpdate,
         ]);
+    }
+
+    public function updateFeishuDataLinks(
+        UpdateStoreFeishuDataLinksRequest $request,
+        string $section,
+        CurrentStore $currentStore,
+        StoreFeishuDataLinkService $dataLinks,
+    ): RedirectResponse {
+        $store = $currentStore->require();
+        $this->authorize('update', $store);
+        $dataLinks->updateSection($store, $section, $request->validated('values'), $request->user());
+
+        return back()->with('success', '飞书数据链接已保存。');
+    }
+
+    public function revealFeishuDataLink(
+        string $section,
+        string $field,
+        CurrentStore $currentStore,
+        StoreFeishuDataLinkService $dataLinks,
+    ): JsonResponse {
+        $store = $currentStore->require();
+        $this->authorize('update', $store);
+
+        return response()->json(['data' => ['value' => $dataLinks->reveal($store, $section, $field)]]);
     }
 
     public function updateFeishu(UpdateStoreFeishuSettingsRequest $request, CurrentStore $currentStore, StoreNotificationSettingsService $settings): RedirectResponse

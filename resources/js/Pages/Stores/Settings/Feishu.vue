@@ -2,6 +2,7 @@
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import SecretSettingInput from '../../../Components/Settings/SecretSettingInput.vue';
+import FeishuDataLinkSettings, { type FeishuDataLinkSection } from '../../../Components/Stores/FeishuDataLinkSettings.vue';
 import AppLayout from '../../../Layouts/AppLayout.vue';
 
 interface FeishuSettings {
@@ -23,6 +24,7 @@ const props = defineProps<{
     store: { id: number; name: string; shopify_domain: string };
     settings: FeishuSettings;
     tableSettings: FeishuTableSettings;
+    dataLinks: FeishuDataLinkSection[];
     canUpdate: boolean;
 }>();
 
@@ -105,6 +107,8 @@ const toggleFeishu = (event: Event) => {
                     <SecretSettingInput :model-value="tableSettings.feishu_table_app_secret" label="App Secret" disabled :configured="tableSettings.feishu_table_app_secret_configured" help="此密钥来自当前运行环境，不会保存到店铺数据库，也不会提交到 Git。" />
                 </div>
             </section>
+
+            <FeishuDataLinkSettings :sections="dataLinks" :can-update="canUpdate" />
         </div>
     </AppLayout>
 </template>

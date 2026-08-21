@@ -27,6 +27,7 @@ type CredentialProvider = {
 const props = defineProps<{
     provider: CredentialProvider;
     canUpdate: boolean;
+    embedded?: boolean;
 }>();
 
 const values = reactive<Record<string, string>>({});
@@ -133,7 +134,7 @@ const clear = () => {
 </script>
 
 <template>
-    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section :class="embedded ? 'min-w-0 bg-white' : 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm'">
         <header class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-7">
             <div class="min-w-0">
                 <h2 class="text-xl font-semibold text-slate-950">{{ provider.title }}</h2>
