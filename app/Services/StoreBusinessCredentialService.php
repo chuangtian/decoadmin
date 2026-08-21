@@ -19,6 +19,7 @@ class StoreBusinessCredentialService
      *     description: string,
      *     setup_hint: string,
      *     oauth_label?: string,
+     *     oauth_connect_title?: string,
      *     fields: array<string, array{label: string, env_key: string, secret: bool, placeholder: string}>
      * }>
      */
@@ -88,6 +89,7 @@ class StoreBusinessCredentialService
             'fields' => [
                 'client_id' => ['label' => 'Client ID', 'env_key' => 'YOUTUBE_CLIENT_ID', 'secret' => false, 'placeholder' => '输入 YouTube OAuth Client ID'],
                 'client_secret' => ['label' => 'Client Secret', 'env_key' => 'YOUTUBE_CLIENT_SECRET', 'secret' => true, 'placeholder' => '输入 YouTube OAuth Client Secret'],
+                'refresh_token' => ['label' => 'Refresh Token', 'env_key' => 'YOUTUBE_REFRESH_TOKEN', 'secret' => true, 'placeholder' => '输入 YouTube OAuth Refresh Token'],
             ],
         ],
         'google_search_console_ga4' => [
@@ -95,6 +97,7 @@ class StoreBusinessCredentialService
             'description' => 'GSC OAuth + GA4 服务账号，用于获取搜索性能和分析数据。',
             'setup_hint' => 'Google Cloud Console → OAuth / Service Account',
             'oauth_label' => 'Google Search Console OAuth 授权',
+            'oauth_connect_title' => 'Google Search Console',
             'fields' => [
                 'gsc_client_id' => ['label' => 'GSC Client ID', 'env_key' => 'GSC_CLIENT_ID', 'secret' => false, 'placeholder' => '输入 Google Search Console OAuth Client ID'],
                 'gsc_client_secret' => ['label' => 'GSC Client Secret', 'env_key' => 'GSC_CLIENT_SECRET', 'secret' => true, 'placeholder' => '输入 Google Search Console OAuth Client Secret'],
@@ -127,6 +130,13 @@ class StoreBusinessCredentialService
         $this->fieldDefinition($provider, $credentialKey);
 
         return $this->credential($store, $provider, $credentialKey)?->credential_value ?? '';
+    }
+
+    public function value(Store $store, string $provider, string $credentialKey): ?string
+    {
+        $this->fieldDefinition($provider, $credentialKey);
+
+        return $this->credential($store, $provider, $credentialKey)?->credential_value;
     }
 
     public function update(Store $store, string $provider, string $credentialKey, ?string $value, User $actor): ?StoreBusinessCredential
@@ -180,6 +190,33 @@ class StoreBusinessCredentialService
     /** @param Collection<string, StoreBusinessCredential> $credentials */
     private function providerForFrontend(string $providerKey, array $provider, Collection $credentials): array
     {
+        $oauth = match ($providerKey) {
+            'google_ads' => [
+                'route' => 'google-ads.oauth.redirect',
+                'client_id' => 'client_id',
+                'client_secret' => 'client_secret',
+                'refresh_token' => 'refresh_token',
+            ],
+            'bing_ads' => [
+                'route' => 'bing-ads.oauth.redirect',
+                'client_id' => 'client_id',
+                'client_secret' => 'client_secret',
+                'refresh_token' => 'refresh_token',
+            ],
+            'youtube_analytics' => [
+                'route' => 'youtube-analytics.oauth.redirect',
+                'client_id' => 'client_id',
+                'client_secret' => 'client_secret',
+                'refresh_token' => 'refresh_token',
+            ],
+            'google_search_console_ga4' => [
+                'route' => 'google-search-console.oauth.redirect',
+                'client_id' => 'gsc_client_id',
+                'client_secret' => 'gsc_client_secret',
+                'refresh_token' => 'gsc_refresh_token',
+            ],
+            default => null,
+        };
         $fields = collect($provider['fields'])->map(function (array $field, string $fieldKey) use ($credentials, $providerKey): array {
             $credential = $credentials->get($providerKey.'.'.$fieldKey);
 
@@ -201,6 +238,13 @@ class StoreBusinessCredentialService
             'description' => $provider['description'],
             'setup_hint' => $provider['setup_hint'],
             'oauth_label' => $provider['oauth_label'] ?? null,
+            'oauth_connect_title' => $provider['oauth_connect_title'] ?? $provider['title'],
+            'oauth_connect_url' => $oauth ? route($oauth['route']) : null,
+            'oauth_ready' => $oauth !== null
+                && $credentials->has($providerKey.'.'.$oauth['client_id'])
+                && $credentials->has($providerKey.'.'.$oauth['client_secret']),
+            'oauth_connected' => $oauth !== null
+                && $credentials->has($providerKey.'.'.$oauth['refresh_token']),
             'configured' => collect($fields)->contains(fn (array $field): bool => $field['configured']),
             'fields' => $fields,
         ];

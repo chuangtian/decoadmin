@@ -21,6 +21,10 @@ type CredentialProvider = {
     description: string;
     setup_hint: string;
     oauth_label: string | null;
+    oauth_connect_title: string;
+    oauth_connect_url: string | null;
+    oauth_ready: boolean;
+    oauth_connected: boolean;
     configured: boolean;
     fields: CredentialField[];
 };

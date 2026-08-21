@@ -46,4 +46,24 @@ return [
         'amazon_sync_timezone' => env('FEISHU_AMAZON_SYNC_TIMEZONE', 'Asia/Shanghai'),
     ],
 
+    'google_ads' => [
+        'redirect_uri' => env('GOOGLE_ADS_REDIRECT_URI'),
+        'state_ttl_minutes' => (int) env('GOOGLE_ADS_OAUTH_STATE_TTL_MINUTES', 10),
+    ],
+
+    'bing_ads' => [
+        'redirect_uri' => env('BING_ADS_REDIRECT_URI'),
+        'state_ttl_minutes' => (int) env('BING_ADS_OAUTH_STATE_TTL_MINUTES', 10),
+    ],
+
+    'google_search_console' => [
+        'redirect_uri' => env('GOOGLE_SEARCH_CONSOLE_REDIRECT_URI'),
+        'state_ttl_minutes' => (int) env('GOOGLE_SEARCH_CONSOLE_OAUTH_STATE_TTL_MINUTES', 10),
+    ],
+
+    'youtube_analytics' => [
+        'redirect_uri' => env('YOUTUBE_ANALYTICS_REDIRECT_URI'),
+        'state_ttl_minutes' => (int) env('YOUTUBE_ANALYTICS_OAUTH_STATE_TTL_MINUTES', 10),
+    ],
+
 ];
