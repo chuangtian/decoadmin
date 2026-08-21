@@ -110,6 +110,11 @@ class Store extends Model
         return $this->hasMany(AnalyticsSnapshot::class);
     }
 
+    public function amazonDailySales(): HasMany
+    {
+        return $this->hasMany(AmazonDailySale::class);
+    }
+
     public function financeEntries(): HasMany
     {
         return $this->hasMany(FinanceEntry::class);
