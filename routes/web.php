@@ -187,6 +187,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/store-settings/feishu', [StoreNotificationSettingsController::class, 'feishu'])->middleware('permission:store.view')->name('store-settings.feishu');
     Route::put('/store-settings/feishu', [StoreNotificationSettingsController::class, 'updateFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.update');
     Route::patch('/store-settings/feishu/enabled', [StoreNotificationSettingsController::class, 'toggleFeishu'])->middleware('permission:store.update')->name('store-settings.feishu.toggle');
+    Route::get('/store-settings/feishu/data-links/{section}/{field}/reveal', [StoreNotificationSettingsController::class, 'revealFeishuDataLink'])->middleware(['permission:store.update', 'throttle:30,1'])->name('store-settings.feishu.data-links.reveal');
+    Route::put('/store-settings/feishu/data-links/{section}', [StoreNotificationSettingsController::class, 'updateFeishuDataLinks'])->middleware('permission:store.update')->name('store-settings.feishu.data-links.update');
     Route::get('/store-settings/credentials', [StoreBusinessCredentialController::class, 'index'])->middleware('permission:store.view')->name('store-settings.credentials');
     Route::get('/store-settings/credentials/{provider}/{credentialKey}/reveal', [StoreBusinessCredentialController::class, 'reveal'])->middleware(['permission:store.update', 'throttle:30,1'])->name('store-settings.credentials.reveal');
     Route::put('/store-settings/credentials/{provider}/{credentialKey}', [StoreBusinessCredentialController::class, 'update'])->middleware('permission:store.update')->name('store-settings.credentials.update');

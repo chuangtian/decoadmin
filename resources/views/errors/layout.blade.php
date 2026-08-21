@@ -21,7 +21,7 @@
             <h1>@yield('heading')</h1>
             <p>@yield('message')</p>
             @hasSection('backAction')
-                <button type="button" onclick="document.referrer ? window.history.back() : window.location.assign('/')">返回上一页</button>
+                <a href="{{ url()->previous() }}">返回上一页</a>
             @else
                 <a href="/">返回管理后台</a>
             @endif
