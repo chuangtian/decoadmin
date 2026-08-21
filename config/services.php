@@ -38,6 +38,12 @@ return [
     'feishu_table' => [
         'app_id' => env('FEISHU_APP_ID'),
         'app_secret' => env('FEISHU_APP_SECRET'),
+        'base_url' => env('FEISHU_API_BASE_URL', 'https://open.feishu.cn/open-apis'),
+        'timeout' => (int) env('FEISHU_API_TIMEOUT', 20),
+        'max_pages' => (int) env('FEISHU_API_MAX_PAGES', 200),
+        'amazon_sync_enabled' => (bool) env('FEISHU_AMAZON_SYNC_ENABLED', true),
+        'amazon_sync_time' => env('FEISHU_AMAZON_SYNC_TIME', '09:00'),
+        'amazon_sync_timezone' => env('FEISHU_AMAZON_SYNC_TIMEZONE', 'Asia/Shanghai'),
     ],
 
 ];

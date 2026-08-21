@@ -33,6 +33,15 @@ Schedule::command('shopify:check-connections')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+if (config('services.feishu_table.amazon_sync_enabled', true)) {
+    Schedule::command('feishu:sync-amazon-daily-sales')
+        ->name('feishu:amazon-daily-sales-sync')
+        ->dailyAt((string) config('services.feishu_table.amazon_sync_time', '09:00'))
+        ->timezone((string) config('services.feishu_table.amazon_sync_timezone', 'Asia/Shanghai'))
+        ->onOneServer()
+        ->withoutOverlapping(120);
+}
+
 if (config('shopify.scheduled_sync.enabled')) {
     Schedule::command('shopify:sync-reconcile --mode=incremental')
         ->name('shopify:incremental-sync')

@@ -175,6 +175,23 @@ class StoreFeishuDataLinkService
         return $this->credential($store, $fieldKey)?->credential_value ?? '';
     }
 
+    /**
+     * Internal background-sync entry point. Values remain scoped to the
+     * supplied store and must never be returned in an HTTP response.
+     *
+     * @return array<string, string>
+     */
+    public function valuesForSync(Store $store, string $sectionKey): array
+    {
+        $section = $this->sectionDefinition($sectionKey);
+        $allowedKeys = array_keys($section['fields']);
+
+        return $this->credentials($store)
+            ->filter(fn (StoreBusinessCredential $credential, string $key): bool => in_array($key, $allowedKeys, true))
+            ->map(fn (StoreBusinessCredential $credential): string => $credential->credential_value)
+            ->all();
+    }
+
     /** @param array<string, mixed> $values */
     public function updateSection(Store $store, string $sectionKey, array $values, User $actor): void
     {
