@@ -50,6 +50,7 @@ class CampaignThemeReviewService
                 'activity' => null,
                 'comparison_activity' => null,
                 'daily_sales' => $this->unavailableDataset('暂无已完成活动。'),
+                'traffic_cost_trend' => $this->unavailableTrafficCostTrend('暂无已完成活动。'),
                 'funnel' => $this->unavailableDataset('暂无已完成活动。'),
                 'model_sales' => $this->unavailableDataset('暂无已完成活动。'),
             ];
@@ -59,6 +60,13 @@ class CampaignThemeReviewService
         $comparisonReports = $comparisonActivity
             ? $this->comparisonReports($store, $comparisonActivity)
             : [];
+        $dailySales = $this->dailyPerformance(
+            $currentReports['sales'] ?? null,
+            $currentReports['ad_spend'] ?? null,
+            $selected->starts_on?->toDateString(),
+            $selected->ends_on?->toDateString(),
+            $selected->ad_spend !== null ? (float) $selected->ad_spend : null,
+        );
 
         return [
             'schema' => 'campaign-theme-review-v1',
@@ -77,12 +85,10 @@ class CampaignThemeReviewService
                 $comparisonReports['funnel'] ?? null,
             ),
             'comparison_activity' => $comparisonActivity ? $this->activitySummary($comparisonActivity) : null,
-            'daily_sales' => $this->dailyPerformance(
-                $currentReports['sales'] ?? null,
-                $currentReports['ad_spend'] ?? null,
-                $selected->starts_on?->toDateString(),
-                $selected->ends_on?->toDateString(),
-                $selected->ad_spend !== null ? (float) $selected->ad_spend : null,
+            'daily_sales' => $dailySales,
+            'traffic_cost_trend' => $this->trafficCostTrend(
+                $currentReports['funnel_timeseries'] ?? null,
+                $dailySales,
             ),
             'funnel' => $this->funnel(
                 $currentReports['funnel'] ?? null,
@@ -261,6 +267,7 @@ class CampaignThemeReviewService
         return [
             'sales' => $this->reports->report($store, 'core-sales-timeseries', $from, $to),
             'ad_spend' => $this->reports->report($store, 'marketing-engagement-spend-timeseries', $from, $to),
+            'funnel_timeseries' => $this->reports->report($store, 'conversion-funnel-timeseries', $from, $to),
             'funnel' => $this->reports->report($store, 'conversion-funnel-breakdown', $from, $to),
             'models' => $this->reports->report($store, 'model-sales-summary', $from, $to),
         ];
@@ -279,6 +286,73 @@ class CampaignThemeReviewService
         return [
             'funnel' => $this->reports->report($store, 'conversion-funnel-breakdown', $from, $to),
             'models' => $this->reports->report($store, 'model-sales-summary', $from, $to),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function trafficCostTrend(?array $funnelReport, array $dailySales): array
+    {
+        $state = $this->reportState(
+            $funnelReport,
+            '该活动缺少完整日期，无法读取 Shopify 每日流量与转化成本。',
+        );
+        $state['pending'] = (bool) $state['pending'] || (bool) ($dailySales['pending'] ?? false);
+        $state['stale'] = (bool) $state['stale'] || (bool) ($dailySales['stale'] ?? false);
+        $funnelByDate = collect($funnelReport['rows'] ?? [])
+            ->filter(fn (mixed $row): bool => is_array($row) && filled($row['day'] ?? null))
+            ->groupBy(fn (array $row): string => (string) $row['day'])
+            ->map(fn (Collection $rows): array => [
+                'sessions' => (int) $rows->sum(fn (array $row): int => $this->integer($row['sessions'] ?? 0)),
+                'cart_additions' => (int) $rows->sum(
+                    fn (array $row): int => $this->integer($row['sessions_with_cart_additions'] ?? 0),
+                ),
+                'reached_checkout' => (int) $rows->sum(
+                    fn (array $row): int => $this->integer($row['sessions_that_reached_checkout'] ?? 0),
+                ),
+            ]);
+
+        $points = collect(($state['available'] ?? false) ? ($dailySales['points'] ?? []) : [])
+            ->filter(fn (mixed $point): bool => is_array($point) && filled($point['date'] ?? null))
+            ->map(function (array $dailyPoint) use ($funnelByDate): array {
+                $date = (string) $dailyPoint['date'];
+                $funnel = $funnelByDate->get($date, [
+                    'sessions' => 0,
+                    'cart_additions' => 0,
+                    'reached_checkout' => 0,
+                ]);
+                $adSpend = is_numeric($dailyPoint['ad_spend'] ?? null)
+                    ? round((float) $dailyPoint['ad_spend'], 2)
+                    : null;
+                $cartAdditions = (int) $funnel['cart_additions'];
+                $reachedCheckout = (int) $funnel['reached_checkout'];
+
+                return [
+                    'date' => $date,
+                    'sessions' => (int) $funnel['sessions'],
+                    'cart_additions' => $cartAdditions,
+                    'reached_checkout' => $reachedCheckout,
+                    'ad_spend' => $adSpend,
+                    'cart_addition_cost' => $adSpend !== null && $cartAdditions > 0
+                        ? round($adSpend / $cartAdditions, 2)
+                        : null,
+                    'checkout_cost' => $adSpend !== null && $reachedCheckout > 0
+                        ? round($adSpend / $reachedCheckout, 2)
+                        : null,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            ...$state,
+            'ad_spend_available' => (bool) ($dailySales['ad_spend_available'] ?? false),
+            'ad_spend_message' => $dailySales['ad_spend_message'] ?? null,
+            'ad_spend_reconciled' => (bool) ($dailySales['ad_spend_reconciled'] ?? false),
+            'ad_spend_coverage_percent' => $dailySales['ad_spend_coverage_percent'] ?? null,
+            'date_from' => $dailySales['date_from'] ?? null,
+            'date_to' => $dailySales['date_to'] ?? null,
+            'points' => $points,
+            'date_order' => 'descending',
         ];
     }
 
@@ -533,6 +607,22 @@ class CampaignThemeReviewService
             'stale' => false,
             'source' => 'shopifyql',
             'message' => $message,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function unavailableTrafficCostTrend(string $message): array
+    {
+        return [
+            ...$this->unavailableDataset($message),
+            'ad_spend_available' => false,
+            'ad_spend_message' => $message,
+            'ad_spend_reconciled' => false,
+            'ad_spend_coverage_percent' => null,
+            'date_from' => null,
+            'date_to' => null,
+            'points' => [],
+            'date_order' => 'descending',
         ];
     }
 

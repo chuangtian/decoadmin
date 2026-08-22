@@ -55,6 +55,24 @@ export interface CampaignThemeReview {
             orders: number;
         }>;
     };
+    traffic_cost_trend: ReportState & {
+        ad_spend_available: boolean;
+        ad_spend_message: string | null;
+        ad_spend_reconciled: boolean;
+        ad_spend_coverage_percent: number | null;
+        date_from: string | null;
+        date_to: string | null;
+        date_order: 'descending';
+        points: Array<{
+            date: string;
+            sessions: number;
+            cart_additions: number;
+            reached_checkout: number;
+            ad_spend: number | null;
+            cart_addition_cost: number | null;
+            checkout_cost: number | null;
+        }>;
+    };
     funnel: ReportState & {
         comparison_available: boolean;
         stages: Array<{ key: string; label: string; sessions: number; rate_percent: number; comparison_rate_percent: number | null }>;
