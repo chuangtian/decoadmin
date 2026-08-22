@@ -16,26 +16,117 @@ class FeishuBitableClient
         return $this->allPages(
             $this->tablePath($appToken, $tableId).'/fields',
             ['page_size' => 100],
+            '读取飞书多维表格字段',
         );
     }
 
     /** @return list<array<string, mixed>> */
-    public function records(string $appToken, string $tableId, ?string $viewId = null): array
-    {
+    public function records(
+        string $appToken,
+        string $tableId,
+        ?string $viewId = null,
+        bool $textFieldAsArray = false,
+    ): array {
         $query = ['page_size' => 500];
 
         if (filled($viewId)) {
             $query['view_id'] = trim((string) $viewId);
         }
 
-        return $this->allPages($this->tablePath($appToken, $tableId).'/records', $query);
+        if ($textFieldAsArray) {
+            $query['text_field_as_array'] = 'true';
+        }
+
+        return $this->allPages(
+            $this->tablePath($appToken, $tableId).'/records',
+            $query,
+            '读取飞书多维表格记录',
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function document(string $documentToken): array
+    {
+        $documentToken = $this->requiredToken($documentToken, '飞书文档');
+        $payload = $this->get(
+            '/docx/v1/documents/'.rawurlencode($documentToken),
+            [],
+            '读取飞书策划书信息',
+        );
+        $document = data_get($payload, 'data.document');
+
+        if (! is_array($document)) {
+            throw new RuntimeException('飞书策划书信息响应无效。');
+        }
+
+        return $document;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function documentBlocks(string $documentToken): array
+    {
+        $documentToken = $this->requiredToken($documentToken, '飞书文档');
+
+        return $this->allPages(
+            '/docx/v1/documents/'.rawurlencode($documentToken).'/blocks',
+            ['page_size' => 500, 'document_revision_id' => -1],
+            '读取飞书策划书内容',
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function wikiNode(string $nodeToken): array
+    {
+        $nodeToken = $this->requiredToken($nodeToken, '飞书知识库节点');
+        $payload = $this->get(
+            '/wiki/v2/spaces/get_node',
+            ['token' => $nodeToken],
+            '解析飞书知识库节点',
+        );
+        $node = data_get($payload, 'data.node');
+
+        if (! is_array($node)) {
+            throw new RuntimeException('飞书知识库节点响应无效。');
+        }
+
+        return $node;
+    }
+
+    /** @return array{contents: string, content_type: string|null} */
+    public function downloadMedia(string $fileToken): array
+    {
+        $fileToken = trim($fileToken);
+
+        if ($fileToken === '') {
+            throw new RuntimeException('飞书附件缺少文件 Token。');
+        }
+
+        $response = Http::baseUrl($this->baseUrl())
+            ->accept('*/*')
+            ->withToken($this->accessToken())
+            ->timeout(max($this->timeout(), 60))
+            ->retry(3, 300, throw: false)
+            ->get('/drive/v1/medias/'.rawurlencode($fileToken).'/download');
+
+        if (! $response->successful()) {
+            throw new RuntimeException("下载飞书附件失败（HTTP {$response->status()}）。");
+        }
+
+        $contentType = $response->header('Content-Type');
+
+        return [
+            'contents' => $response->body(),
+            'content_type' => is_string($contentType) && $contentType !== ''
+                ? strtolower(trim(strtok($contentType, ';') ?: $contentType))
+                : null,
+        ];
     }
 
     /**
      * @param  array<string, int|string>  $query
      * @return list<array<string, mixed>>
      */
-    private function allPages(string $path, array $query): array
+    private function allPages(string $path, array $query, string $operation): array
     {
         $items = [];
         $pageToken = null;
@@ -48,7 +139,7 @@ class FeishuBitableClient
                 $pageQuery['page_token'] = $pageToken;
             }
 
-            $payload = $this->get($path, $pageQuery);
+            $payload = $this->get($path, $pageQuery, $operation);
             $pageItems = data_get($payload, 'data.items', []);
 
             if (! is_array($pageItems)) {
@@ -78,7 +169,7 @@ class FeishuBitableClient
     }
 
     /** @param array<string, int|string> $query */
-    private function get(string $path, array $query): array
+    private function get(string $path, array $query, string $operation): array
     {
         $response = Http::baseUrl($this->baseUrl())
             ->acceptJson()
@@ -87,7 +178,7 @@ class FeishuBitableClient
             ->retry(3, 300, throw: false)
             ->get($path, $query);
 
-        return $this->validatedPayload($response, '读取飞书多维表格');
+        return $this->validatedPayload($response, $operation);
     }
 
     private function accessToken(): string
@@ -149,10 +240,21 @@ class FeishuBitableClient
         $tableId = trim($tableId);
 
         if ($appToken === '' || $tableId === '') {
-            throw new RuntimeException('亚马逊多维表格 App Token 或 Table ID 未配置。');
+            throw new RuntimeException('飞书多维表格 App Token 或 Table ID 未配置。');
         }
 
         return '/bitable/v1/apps/'.rawurlencode($appToken).'/tables/'.rawurlencode($tableId);
+    }
+
+    private function requiredToken(string $token, string $label): string
+    {
+        $token = trim($token);
+
+        if ($token === '' || ! preg_match('/^[A-Za-z0-9_-]+$/', $token)) {
+            throw new RuntimeException("{$label} Token 无效。");
+        }
+
+        return $token;
     }
 
     private function baseUrl(): string

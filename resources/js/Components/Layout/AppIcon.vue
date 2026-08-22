@@ -5,6 +5,7 @@ defineProps<{ name: string; size?: number }>();
 <template>
     <svg :width="size ?? 20" :height="size ?? 20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <template v-if="name === 'dashboard'"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></template>
+        <template v-else-if="name === 'campaign'"><path d="M5 21V4"/><path d="M5 5h11l-2.5 4L16 13H5"/></template>
         <template v-else-if="name === 'business'"><path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M4 12h16M10 12v2h4v-2"/></template>
         <template v-else-if="name === 'shopify'"><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/><path d="M10 13c1-1 4-1 4 1s-4 1-4 3 3 2 4 1"/></template>
         <template v-else-if="name === 'app-center'"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></template>

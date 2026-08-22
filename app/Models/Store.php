@@ -115,6 +115,16 @@ class Store extends Model
         return $this->hasMany(AmazonDailySale::class);
     }
 
+    public function campaignActivities(): HasMany
+    {
+        return $this->hasMany(CampaignActivity::class);
+    }
+
+    public function campaignPlanningDocuments(): HasMany
+    {
+        return $this->hasMany(CampaignPlanningDocument::class);
+    }
+
     public function financeEntries(): HasMany
     {
         return $this->hasMany(FinanceEntry::class);

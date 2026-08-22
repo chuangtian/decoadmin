@@ -10,6 +10,8 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BusinessInsightsController;
+use App\Http\Controllers\CampaignPlanningAssetController;
+use App\Http\Controllers\CampaignThemeController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
@@ -103,6 +105,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/campaign-themes', CampaignThemeController::class)->middleware('permission:reports.view')->name('campaign-themes.index');
+    Route::post('/campaign-themes/refresh', [CampaignThemeController::class, 'refresh'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('campaign-themes.refresh');
     Route::get('/business/insights', BusinessInsightsController::class)->middleware('permission:reports.view')->name('business.insights');
     Route::get('/analytics/overview', [AnalyticsController::class, 'overview'])->middleware('permission:orders.view')->name('analytics.overview');
     Route::get('/analytics/sales', [AnalyticsController::class, 'sales'])->middleware('permission:orders.view')->name('analytics.sales');
@@ -114,6 +120,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/reports/{report}/pin', [ReportController::class, 'pin'])->middleware('permission:reports.view')->name('reports.pin');
     Route::get('/reports/{report}', [ReportController::class, 'show'])->middleware('permission:reports.view')->name('reports.show');
     Route::get('/reports/{report}/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
+    Route::get(
+        '/campaign-planning-documents/{campaignPlanningDocument}/assets/{assetHash}',
+        CampaignPlanningAssetController::class,
+    )->middleware('permission:reports.view')->name('campaign-planning-assets.show');
     Route::get('/system/status', SystemStatusController::class)
         ->middleware('permission:system.health.view')
         ->name('system.status');
