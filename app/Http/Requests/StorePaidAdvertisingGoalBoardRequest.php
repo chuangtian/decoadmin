@@ -25,6 +25,7 @@ class StorePaidAdvertisingGoalBoardRequest extends FormRequest
     {
         $organization = app(CurrentOrganization::class)->require();
         $store = app(CurrentStore::class)->require();
+        $requiresTableSelection = $this->input('type') !== PaidAdvertisingGoalService::TYPE_GOOGLE_ADS;
 
         return [
             'name' => [
@@ -39,8 +40,8 @@ class StorePaidAdvertisingGoalBoardRequest extends FormRequest
             ],
             'type' => ['required', Rule::in(PaidAdvertisingGoalService::TYPES)],
             'feishu_app_token' => ['required', 'string', 'max:4096'],
-            'feishu_table_id' => ['required', 'string', 'max:1024'],
-            'feishu_view_id' => ['required', 'string', 'max:1024'],
+            'feishu_table_id' => [Rule::requiredIf($requiresTableSelection), 'nullable', 'string', 'max:1024'],
+            'feishu_view_id' => [Rule::requiredIf($requiresTableSelection), 'nullable', 'string', 'max:1024'],
         ];
     }
 

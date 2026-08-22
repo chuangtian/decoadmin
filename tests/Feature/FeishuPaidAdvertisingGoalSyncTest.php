@@ -30,8 +30,8 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $board = PaidAdvertisingGoalBoard::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
-            'name' => 'Google 团队',
-            'type' => 'google_ads',
+            'name' => '个人目标团队',
+            'type' => 'personal_facebook',
             'feishu_app_token' => 'app_board',
             'feishu_table_id' => 'tbl_board',
             'feishu_view_id' => 'vew_board',
@@ -267,6 +267,153 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         ]);
     }
 
+    public function test_google_goal_sync_discovers_every_table_from_app_token_without_table_or_view_id(): void
+    {
+        Config::set('services.feishu_table.app_id', 'paid_goal_test');
+        Config::set('services.feishu_table.app_secret', 'paid-goal-secret');
+        [$organization, $store] = $this->storeContext('google-app');
+        $board = PaidAdvertisingGoalBoard::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'name' => 'Google 团队',
+            'type' => 'google_ads',
+            'feishu_app_token' => 'app_google',
+            'feishu_table_id' => '',
+            'feishu_view_id' => '',
+            'sync_status' => 'pending',
+        ]);
+        $phase = 1;
+        $this->fakeFeishu(
+            function (string $appToken, string $viewId): array {
+                $this->assertSame('app_google', $appToken);
+                $this->assertSame('', $viewId);
+
+                return [[
+                    'record_id' => 'rec_google',
+                    'fields' => ['来源' => 'Google Ads'],
+                ]];
+            },
+            null,
+            function (string $appToken) use (&$phase): array {
+                $this->assertSame('app_google', $appToken);
+
+                return $phase === 1
+                    ? [
+                        ['table_id' => 'tbl_campaigns', 'name' => '广告系列'],
+                        ['table_id' => 'tbl_weekly', 'name' => '每周汇总'],
+                    ]
+                    : [['table_id' => 'tbl_weekly', 'name' => '每周汇总']];
+            },
+        );
+
+        $first = app(PaidAdvertisingGoalSyncService::class)->syncBoard($board);
+
+        $this->assertSame(2, $first['sources']);
+        $this->assertSame(2, $first['inserted']);
+        $this->assertSame(2, $first['fields']);
+        $this->assertDatabaseHas('paid_advertising_goal_records', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'goal_board_id' => $board->id,
+            'source_key' => 'board:'.$board->id.':google:table:tbl_campaigns',
+        ]);
+        $this->assertDatabaseHas('paid_advertising_goal_records', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'goal_board_id' => $board->id,
+            'source_key' => 'board:'.$board->id.':google:table:tbl_weekly',
+        ]);
+
+        $phase = 2;
+        $second = app(PaidAdvertisingGoalSyncService::class)->syncBoard($board);
+
+        $this->assertSame(1, $second['sources']);
+        $this->assertSame(1, $second['updated']);
+        $this->assertSame(1, $second['deleted']);
+        $this->assertDatabaseMissing('paid_advertising_goal_records', [
+            'source_key' => 'board:'.$board->id.':google:table:tbl_campaigns',
+        ]);
+        $this->assertDatabaseMissing('paid_advertising_goal_fields', [
+            'source_key' => 'board:'.$board->id.':google:table:tbl_campaigns',
+        ]);
+        $this->assertDatabaseCount('paid_advertising_goal_records', 1);
+        $this->assertDatabaseCount('paid_advertising_goal_fields', 1);
+        $this->assertSame('completed', $board->fresh()->sync_status);
+    }
+
+    public function test_google_goal_automatically_falls_back_to_spreadsheet_and_imports_each_sheet(): void
+    {
+        Config::set('services.feishu_table.app_id', 'paid_goal_test');
+        Config::set('services.feishu_table.app_secret', 'paid-goal-secret');
+        [$organization, $store] = $this->storeContext('google-spreadsheet');
+        $board = PaidAdvertisingGoalBoard::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'name' => 'Google 电子表格团队',
+            'type' => 'google_ads',
+            'feishu_app_token' => 'sheet_token',
+            'feishu_table_id' => '',
+            'feishu_view_id' => '',
+            'sync_status' => 'pending',
+        ]);
+        $this->fakeFeishu(
+            fn (string $_appToken, string $_viewId): array => throw new \RuntimeException('不应读取多维表格记录。'),
+            null,
+            null,
+            fn (string $token): array => [
+                [
+                    'sheet_id' => 'daily01',
+                    'title' => '广告日报',
+                    'grid_properties' => ['row_count' => 4, 'column_count' => 3],
+                ],
+                [
+                    'sheet_id' => 'target01',
+                    'title' => '目标',
+                    'grid_properties' => ['row_count' => 2, 'column_count' => 2],
+                ],
+            ],
+            function (string $token, string $sheetId): array {
+                $this->assertSame('sheet_token', $token);
+
+                return $sheetId === 'daily01'
+                    ? [
+                        ['日期', '花费', '转化次数'],
+                        ['2026-08-21', 100, 2],
+                        ['', '', ''],
+                        ['2026-08-22', 120, 3],
+                    ]
+                    : [
+                        ['月份', '月目标'],
+                        ['2026-08', 5000],
+                    ];
+            },
+        );
+
+        $result = app(PaidAdvertisingGoalSyncService::class)->syncBoard($board);
+
+        $this->assertSame(2, $result['sources']);
+        $this->assertSame(5, $result['fields']);
+        $this->assertSame(3, $result['inserted']);
+        $this->assertDatabaseCount('paid_advertising_goal_records', 3);
+        $this->assertDatabaseCount('paid_advertising_goal_fields', 5);
+        $dailyRecord = PaidAdvertisingGoalRecord::query()
+            ->where('source_key', 'board:'.$board->id.':google:sheet:daily01')
+            ->where('source_record_id', 'row:2')
+            ->sole();
+        $this->assertSame([
+            '日期' => '2026-08-21',
+            '花费' => 100,
+            '转化次数' => 2,
+        ], $dailyRecord->fields_encrypted);
+        $dailyField = PaidAdvertisingGoalField::query()
+            ->where('source_key', 'board:'.$board->id.':google:sheet:daily01')
+            ->where('name', '花费')
+            ->sole();
+        $this->assertSame('飞书电子表格第 B 列', $dailyField->description);
+        $this->assertSame('广告日报', $dailyField->property_encrypted['sheet_title']);
+        $this->assertSame('completed', $board->fresh()->sync_status);
+    }
+
     public function test_paid_advertising_goal_sync_runs_daily_at_three_forty_in_beijing(): void
     {
         $event = collect(app(Schedule::class)->events())
@@ -280,14 +427,62 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
     /**
      * @param  callable(string, string): list<array<string, mixed>>  $records
      * @param  (callable(string): list<array<string, mixed>>)|null  $fields
+     * @param  (callable(string): list<array<string, mixed>>)|null  $tables
+     * @param  (callable(string): list<array<string, mixed>>)|null  $spreadsheetSheets
+     * @param  (callable(string, string): list<array<int, mixed>>)|null  $spreadsheetValues
      */
-    private function fakeFeishu(callable $records, ?callable $fields = null): void
-    {
-        Http::fake(function (Request $request) use ($records, $fields) {
+    private function fakeFeishu(
+        callable $records,
+        ?callable $fields = null,
+        ?callable $tables = null,
+        ?callable $spreadsheetSheets = null,
+        ?callable $spreadsheetValues = null,
+    ): void {
+        Http::fake(function (Request $request) use ($records, $fields, $tables, $spreadsheetSheets, $spreadsheetValues) {
             $path = (string) parse_url($request->url(), PHP_URL_PATH);
 
             if (str_ends_with($path, '/auth/v3/tenant_access_token/internal')) {
                 return Http::response(['code' => 0, 'tenant_access_token' => 'tenant-token']);
+            }
+
+            if (preg_match('#/apps/([^/]+)/tables$#', $path, $matches) === 1) {
+                if ($tables === null) {
+                    return Http::response(['code' => 1254043, 'msg' => 'resource not found'], 400);
+                }
+
+                return Http::response([
+                    'code' => 0,
+                    'data' => [
+                        'has_more' => false,
+                        'items' => $tables($matches[1]),
+                    ],
+                ]);
+            }
+
+            if (preg_match('#/sheets/v3/spreadsheets/([^/]+)/sheets/query$#', $path, $matches) === 1) {
+                return Http::response([
+                    'code' => 0,
+                    'msg' => 'success',
+                    'data' => ['sheets' => $spreadsheetSheets ? $spreadsheetSheets($matches[1]) : []],
+                ]);
+            }
+
+            if (preg_match('#/sheets/v2/spreadsheets/([^/]+)/values/([^/]+)$#', $path, $matches) === 1) {
+                $range = rawurldecode($matches[2]);
+                $sheetId = explode('!', $range, 2)[0];
+
+                return Http::response([
+                    'code' => 0,
+                    'msg' => 'success',
+                    'data' => [
+                        'revision' => 1,
+                        'spreadsheetToken' => $matches[1],
+                        'valueRange' => [
+                            'range' => $range,
+                            'values' => $spreadsheetValues ? $spreadsheetValues($matches[1], $sheetId) : [],
+                        ],
+                    ],
+                ]);
             }
 
             if (str_ends_with($path, '/fields')) {

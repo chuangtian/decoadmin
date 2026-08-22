@@ -958,6 +958,17 @@ class PaidAdvertisingPagesTest extends TestCase
 
         $this->actingAs($admin)
             ->withSession($this->contextSession($organization, $store))
+            ->from(route('paid-advertising.goals'))
+            ->post(route('paid-advertising.goals.store'), [
+                'name' => '缺少数据表配置',
+                'type' => 'personal_facebook',
+                'feishu_app_token' => 'secret-app-token',
+            ])
+            ->assertRedirect(route('paid-advertising.goals'))
+            ->assertSessionHasErrors(['feishu_table_id', 'feishu_view_id']);
+
+        $this->actingAs($admin)
+            ->withSession($this->contextSession($organization, $store))
             ->post(route('paid-advertising.goals.store'), $this->boardValues('重复名字'))
             ->assertRedirect();
 
@@ -996,6 +1007,186 @@ class PaidAdvertisingPagesTest extends TestCase
             ->withSession($this->contextSession($organization, $store))
             ->delete(route('paid-advertising.goals.overall.clear'), ['confirmed' => true])
             ->assertForbidden();
+    }
+
+    public function test_google_goal_tab_only_requires_and_stores_the_app_token(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        Queue::fake();
+
+        $response = $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->post(route('paid-advertising.goals.store'), [
+                'name' => 'Google 广告团队',
+                'type' => 'google_ads',
+                'feishu_app_token' => 'secret-google-app-token',
+            ]);
+
+        $board = PaidAdvertisingGoalBoard::query()->sole();
+        $response->assertRedirect(route('paid-advertising.goals', ['tab' => 'board-'.$board->id]));
+        $response->assertSessionHasNoErrors();
+        $this->assertSame('google_ads', $board->type);
+        $this->assertSame('secret-google-app-token', $board->feishu_app_token);
+        $this->assertSame('', $board->feishu_table_id);
+        $this->assertSame('', $board->feishu_view_id);
+        Queue::assertPushed(SyncPaidAdvertisingGoalTarget::class, fn (SyncPaidAdvertisingGoalTarget $job): bool => $job->target === 'board-'.$board->id);
+
+        $rawBoard = DB::table('paid_advertising_goal_boards')->where('id', $board->id)->first();
+        $this->assertNotNull($rawBoard);
+        $this->assertStringNotContainsString('secret-google-app-token', (string) $rawBoard->feishu_app_token);
+        $this->assertStringNotContainsString('secret-google-app-token', AuditLog::query()
+            ->where('action', 'paid_advertising_goal_board_created')
+            ->sole()
+            ->toJson());
+    }
+
+    public function test_google_goal_template_reads_the_last_valid_sales_target_record_for_the_selected_period(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $board = PaidAdvertisingGoalBoard::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'name' => '潘舒晴',
+            'type' => 'google_ads',
+            'feishu_app_token' => 'spreadsheet-token',
+            'feishu_table_id' => '',
+            'feishu_view_id' => '',
+            'sync_status' => 'completed',
+            'created_by' => $user->id,
+        ]);
+        $sourceKey = 'board:'.$board->id.':google:sheet:sales';
+        foreach ([
+            '日期',
+            '今日销售额($)',
+            '本月已完成销售额($)',
+            '本月销售额目标($)',
+            '日均还需完成($)',
+            '日均达成率',
+            '月目标当前完成率',
+            '月时间对比完成度',
+            '月时间进度',
+        ] as $position => $name) {
+            PaidAdvertisingGoalField::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'goal_board_id' => $board->id,
+                'source_key' => $sourceKey,
+                'source_field_id' => 'google-sales-'.$position,
+                'name' => $name,
+                'type' => $position === 0 ? 1 : 2,
+                'field_order' => $position,
+                'is_primary' => $position === 0,
+                'property_encrypted' => [
+                    'source' => 'spreadsheet',
+                    'sheet_title' => '销售目标',
+                ],
+                'synced_at' => now(),
+            ]);
+        }
+        PaidAdvertisingGoalField::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'goal_board_id' => $board->id,
+            'source_key' => 'board:'.$board->id.':google:sheet:learning',
+            'source_field_id' => 'google-learning-content',
+            'name' => '内容',
+            'type' => 1,
+            'field_order' => 0,
+            'is_primary' => true,
+            'property_encrypted' => [
+                'source' => 'spreadsheet',
+                'sheet_title' => '品牌学习',
+            ],
+            'synced_at' => now(),
+        ]);
+        foreach ([
+            ['2026/08/20', '36,944.91', '775,651.03', '1,500,000.00', '65,849.91', '56.10%', '51.71%', '-12.81%', '64.52%'],
+            ['2026/08/21', '18,478.09', '798,133.64', '1,500,000.00', '70,186.64', '26.33%', '53.21%', '-14.53%', '67.74%'],
+            ['2026/09/01', '999,999.00', '999,999.00', '1,500,000.00', '1.00', '99.99%', '99.99%', '99.99%', '99.99%'],
+        ] as $index => $values) {
+            PaidAdvertisingGoalRecord::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'goal_board_id' => $board->id,
+                'source_key' => $sourceKey,
+                'source_record_id' => 'google-sales-row-'.$index,
+                'fields_encrypted' => array_combine([
+                    '日期',
+                    '今日销售额($)',
+                    '本月已完成销售额($)',
+                    '本月销售额目标($)',
+                    '日均还需完成($)',
+                    '日均达成率',
+                    '月目标当前完成率',
+                    '月时间对比完成度',
+                    '月时间进度',
+                ], $values),
+                'synced_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('paid-advertising.goals', [
+                'tab' => 'board-'.$board->id,
+                'period_mode' => 'month',
+                'month' => '2026-08',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('goalPage.template_data.personal_facebook', null)
+                ->where('goalPage.template_data.google_ads.schema', 'paid-advertising-google-ads-summary-v1')
+                ->where('goalPage.template_data.google_ads.available', true)
+                ->where('goalPage.template_data.google_ads.source', 'database_sync')
+                ->where('goalPage.template_data.google_ads.source_sheet', '销售目标')
+                ->where('goalPage.template_data.google_ads.as_of_date', '2026-08-21')
+                ->where('goalPage.template_data.google_ads.missing_fields', [])
+                ->where('goalPage.template_data.google_ads.message', null)
+                ->where('goalPage.template_data.google_ads.pace_status', 'behind')
+                ->where('goalPage.template_data.google_ads.values.daily_sales', 18478.09)
+                ->where('goalPage.template_data.google_ads.values.monthly_sales', 798133.64)
+                ->where('goalPage.template_data.google_ads.values.monthly_target', 1500000)
+                ->where('goalPage.template_data.google_ads.values.daily_needed', 70186.64)
+                ->where('goalPage.template_data.google_ads.values.daily_achievement_rate', 26.33)
+                ->where('goalPage.template_data.google_ads.values.completion_rate', 53.21)
+                ->where('goalPage.template_data.google_ads.values.time_variance', -14.53)
+                ->where('goalPage.template_data.google_ads.values.time_progress', 67.74)
+                ->where('goalPage.template_data.google_ads.efficiency.schema', 'paid-advertising-google-efficiency-v1')
+                ->where('goalPage.template_data.google_ads.efficiency.values.current_roas', null)
+                ->where('goalPage.template_data.google_ads.efficiency.values.target_roas', 3.7)
+                ->where('goalPage.template_data.google_ads.efficiency.values.achievement_rate', null)
+                ->where('goalPage.template_data.google_ads.efficiency.values.monthly_spend', null)
+                ->where('goalPage.template_data.google_ads.efficiency.source_fields.current_roas', null)
+                ->where('goalPage.template_data.google_ads.efficiency.source_fields.target_roas', null)
+                ->where('goalPage.template_data.google_ads.efficiency.source_fields.monthly_spend', null)
+                ->where('goalPage.template_data.google_ads.details.schema', 'paid-advertising-google-target-details-v1')
+                ->where('goalPage.template_data.google_ads.details.total', 2)
+                ->where('goalPage.template_data.google_ads.details.columns.0.key', '日期')
+                ->where('goalPage.template_data.google_ads.details.columns.0.kind', 'date')
+                ->where('goalPage.template_data.google_ads.details.columns.1.key', '今日销售额($)')
+                ->where('goalPage.template_data.google_ads.details.columns.1.kind', 'currency')
+                ->where('goalPage.template_data.google_ads.details.columns.5.kind', 'percentage')
+                ->where('goalPage.template_data.google_ads.details.rows.0.date', '2026-08-21')
+                ->where('goalPage.template_data.google_ads.details.rows.0.values.日期', '2026-08-21')
+                ->where('goalPage.template_data.google_ads.details.rows.0.values.今日销售额($)', 18478.09)
+                ->where('goalPage.template_data.google_ads.details.rows.0.values.月目标当前完成率', 53.21)
+                ->where('goalPage.template_data.google_ads.details.rows.1.date', '2026-08-20'));
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('paid-advertising.goals', [
+                'tab' => 'board-'.$board->id,
+                'period_mode' => 'range',
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-20',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('goalPage.template_data.google_ads.as_of_date', '2026-08-20')
+                ->where('goalPage.template_data.google_ads.values.daily_sales', 36944.91)
+                ->where('goalPage.template_data.google_ads.values.completion_rate', 51.71)
+                ->where('goalPage.template_data.google_ads.details.total', 1)
+                ->where('goalPage.template_data.google_ads.details.rows.0.date', '2026-08-20'));
     }
 
     public function test_background_job_syncs_only_its_goal_board_target(): void

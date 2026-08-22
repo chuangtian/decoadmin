@@ -53,6 +53,7 @@ return [
         'paid_advertising_goal_sync_timezone' => env('FEISHU_PAID_ADVERTISING_GOAL_SYNC_TIMEZONE', 'Asia/Shanghai'),
         'paid_advertising_goal_max_fields' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_FIELDS', 1000),
         'paid_advertising_goal_max_records' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_RECORDS', 5000),
+        'paid_advertising_goal_max_tables' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_TABLES', 100),
     ],
 
     'google_ads' => [

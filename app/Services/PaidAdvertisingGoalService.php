@@ -32,6 +32,7 @@ class PaidAdvertisingGoalService
         private StoreFeishuDataLinkService $dataLinks,
         private PaidAdvertisingGoalMetricsService $metrics,
         private PaidAdvertisingPersonalFacebookMetricsService $personalFacebookMetrics,
+        private PaidAdvertisingGoogleAdsMetricsService $googleAdsMetrics,
     ) {}
 
     /**
@@ -43,7 +44,7 @@ class PaidAdvertisingGoalService
      *     configuration: array{schema: string, section: string, configured: bool, has_configuration: bool, missing_fields: list<string>},
      *     period: array{schema: string, mode: string, month: string|null, date_from: string, date_to: string, label: string, timezone: string},
      *     metrics: array<string, mixed>,
-     *     template_data: array{personal_facebook: array<string, mixed>|null, google_ads: null}
+     *     template_data: array{personal_facebook: array<string, mixed>|null, google_ads: array<string, mixed>|null}
      * }
      */
     public function page(
@@ -108,7 +109,10 @@ class PaidAdvertisingGoalService
                     && $activeBoard->type === self::TYPE_PERSONAL_FACEBOOK
                         ? $this->personalFacebookMetrics->summary($organization, $store, $activeBoard, $period)
                         : null,
-                'google_ads' => null,
+                'google_ads' => $activeBoard instanceof PaidAdvertisingGoalBoard
+                    && $activeBoard->type === self::TYPE_GOOGLE_ADS
+                        ? $this->googleAdsMetrics->summary($organization, $store, $activeBoard, $period)
+                        : null,
             ],
         ];
     }
@@ -182,14 +186,15 @@ class PaidAdvertisingGoalService
         }
 
         return DB::transaction(function () use ($organization, $store, $actor, $values): PaidAdvertisingGoalBoard {
+            $isGoogleAds = $values['type'] === self::TYPE_GOOGLE_ADS;
             $board = PaidAdvertisingGoalBoard::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
                 'name' => $values['name'],
                 'type' => $values['type'],
                 'feishu_app_token' => $values['feishu_app_token'],
-                'feishu_table_id' => $values['feishu_table_id'],
-                'feishu_view_id' => $values['feishu_view_id'],
+                'feishu_table_id' => $isGoogleAds ? '' : $values['feishu_table_id'],
+                'feishu_view_id' => $isGoogleAds ? '' : $values['feishu_view_id'],
                 'sync_status' => 'pending',
                 'created_by' => $actor->id,
             ]);

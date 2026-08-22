@@ -11,6 +11,62 @@ class FeishuBitableClient
     private ?string $tenantAccessToken = null;
 
     /** @return list<array<string, mixed>> */
+    public function tables(string $appToken): array
+    {
+        $appToken = $this->requiredToken($appToken, '飞书多维表格');
+
+        return $this->allPages(
+            '/bitable/v1/apps/'.rawurlencode($appToken).'/tables',
+            ['page_size' => 100],
+            '读取飞书多维表格数据表',
+        );
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function spreadsheetSheets(string $spreadsheetToken): array
+    {
+        $spreadsheetToken = $this->requiredToken($spreadsheetToken, '飞书电子表格');
+        $payload = $this->get(
+            '/sheets/v3/spreadsheets/'.rawurlencode($spreadsheetToken).'/sheets/query',
+            [],
+            '读取飞书电子表格工作表',
+        );
+        $sheets = data_get($payload, 'data.sheets');
+
+        if (! is_array($sheets)) {
+            throw new RuntimeException('飞书电子表格工作表响应无效。');
+        }
+
+        return array_values(array_filter($sheets, is_array(...)));
+    }
+
+    /** @return list<array<int, mixed>> */
+    public function spreadsheetValues(
+        string $spreadsheetToken,
+        string $sheetId,
+        int $rowCount,
+        int $columnCount,
+    ): array {
+        $spreadsheetToken = $this->requiredToken($spreadsheetToken, '飞书电子表格');
+        $sheetId = $this->requiredToken($sheetId, '飞书电子表格工作表');
+        $rowCount = max(1, $rowCount);
+        $columnCount = max(1, $columnCount);
+        $range = $sheetId.'!A1:'.$this->columnLetters($columnCount).$rowCount;
+        $payload = $this->get(
+            '/sheets/v2/spreadsheets/'.rawurlencode($spreadsheetToken).'/values/'.rawurlencode($range),
+            [],
+            '读取飞书电子表格数据',
+        );
+        $values = data_get($payload, 'data.valueRange.values');
+
+        if (! is_array($values)) {
+            throw new RuntimeException('飞书电子表格数据响应无效。');
+        }
+
+        return array_values(array_filter($values, is_array(...)));
+    }
+
+    /** @return list<array<string, mixed>> */
     public function fields(string $appToken, string $tableId): array
     {
         return $this->allPages(
@@ -255,6 +311,19 @@ class FeishuBitableClient
         }
 
         return $token;
+    }
+
+    private function columnLetters(int $columnNumber): string
+    {
+        $letters = '';
+
+        while ($columnNumber > 0) {
+            $columnNumber--;
+            $letters = chr(65 + ($columnNumber % 26)).$letters;
+            $columnNumber = intdiv($columnNumber, 26);
+        }
+
+        return $letters;
     }
 
     private function baseUrl(): string

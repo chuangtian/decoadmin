@@ -293,6 +293,57 @@ interface PersonalFacebookSummary {
     };
 }
 
+interface GoogleAdsSummary {
+    schema: 'paid-advertising-google-ads-summary-v1';
+    available: boolean;
+    source: 'database_sync';
+    source_sheet: string | null;
+    currency: string;
+    as_of_date: string | null;
+    synced_at: string | null;
+    missing_fields: string[];
+    message: string | null;
+    pace_status: 'ahead' | 'behind';
+    values: {
+        daily_sales: number | null;
+        monthly_sales: number | null;
+        monthly_target: number | null;
+        daily_needed: number | null;
+        daily_achievement_rate: number | null;
+        completion_rate: number | null;
+        time_variance: number | null;
+        time_progress: number | null;
+    };
+    source_fields: Record<string, string>;
+    efficiency: {
+        schema: 'paid-advertising-google-efficiency-v1';
+        available: boolean;
+        message: string | null;
+        values: {
+            current_roas: number | null;
+            target_roas: number | null;
+            achievement_rate: number | null;
+            monthly_spend: number | null;
+        };
+        source_fields: Record<string, string | null>;
+    };
+    details: {
+        schema: 'paid-advertising-google-target-details-v1';
+        period_label: string | null;
+        columns: Array<{
+            key: string;
+            label: string;
+            kind: 'date' | 'currency' | 'percentage' | 'roas' | 'text';
+        }>;
+        rows: Array<{
+            key: string;
+            date: string;
+            values: Record<string, string | number | null>;
+        }>;
+        total: number;
+    };
+}
+
 interface GoalTab {
     key: string;
     label: string;
@@ -319,7 +370,7 @@ interface GoalPage {
     metrics: GoalMetrics;
     template_data: {
         personal_facebook: PersonalFacebookSummary | null;
-        google_ads: null;
+        google_ads: GoogleAdsSummary | null;
     };
 }
 
@@ -369,6 +420,7 @@ const addForm = useForm({
     feishu_table_id: '',
     feishu_view_id: '',
 });
+const googleGoalSelected = computed(() => addForm.type === 'google_ads');
 const overallForm = useForm({
     feishu_app_token: '',
     feishu_table_id: '',
@@ -387,6 +439,13 @@ watch(() => props.goalPage.period, (period) => {
     periodFrom.value = period.date_from;
     periodTo.value = period.date_to;
 }, { deep: true });
+watch(() => addForm.type, (type) => {
+    if (type !== 'google_ads') return;
+
+    addForm.feishu_table_id = '';
+    addForm.feishu_view_id = '';
+    addForm.clearErrors('feishu_table_id', 'feishu_view_id');
+});
 
 const periodQuery = () => props.goalPage.period.mode === 'month'
     ? { period_mode: 'month', month: props.goalPage.period.month ?? '' }
@@ -584,7 +643,12 @@ const closeAddDialog = () => {
 };
 
 const submitAdd = () => {
-    addForm.transform((data) => ({ ...data, ...periodQuery() })).post('/paid-advertising/goals', {
+    addForm.transform((data) => ({
+        ...data,
+        feishu_table_id: data.type === 'google_ads' ? '' : data.feishu_table_id,
+        feishu_view_id: data.type === 'google_ads' ? '' : data.feishu_view_id,
+        ...periodQuery(),
+    })).post('/paid-advertising/goals', {
         only: ['goalPage'],
         preserveScroll: true,
         preserveState: true,
@@ -1045,7 +1109,12 @@ const confirmDelete = () => {
                     :loading="metricsLoading"
                     :board-name="activeTabDefinition.label"
                 />
-                <GoogleAdsGoalTemplate v-else-if="activeTabDefinition?.type === 'google_ads'" />
+                <GoogleAdsGoalTemplate
+                    v-else-if="activeTabDefinition?.type === 'google_ads'"
+                    :summary="goalPage.template_data.google_ads"
+                    :loading="metricsLoading"
+                    :board-name="activeTabDefinition.label"
+                />
                     </div>
                 </div>
 
@@ -1157,7 +1226,9 @@ const confirmDelete = () => {
                     <section class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
                         <div class="mb-5">
                             <h3 class="text-sm font-semibold text-slate-900">飞书多维表格</h3>
-                            <p class="mt-1 text-xs leading-5 text-slate-500">三项均为必填；配置值会加密保存，页面不会再回显。</p>
+                            <p class="mt-1 text-xs leading-5 text-slate-500">{{ googleGoalSelected
+                                ? '仅需填写 App Token；系统会自动识别其中的数据表。'
+                                : '三项均为必填；配置值会加密保存，页面不会再回显。' }}</p>
                         </div>
                         <div class="grid gap-4">
                             <label class="block">
@@ -1165,7 +1236,7 @@ const confirmDelete = () => {
                                 <input v-model="addForm.feishu_app_token" required type="password" autocomplete="off" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-mono text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="输入 App Token" />
                                 <span v-if="addForm.errors.feishu_app_token" class="mt-1.5 block text-xs text-rose-600">{{ addForm.errors.feishu_app_token }}</span>
                             </label>
-                            <div class="grid gap-4 sm:grid-cols-2">
+                            <div v-if="!googleGoalSelected" class="grid gap-4 sm:grid-cols-2">
                                 <label class="block">
                                     <span class="text-sm font-semibold text-slate-700">Table ID</span>
                                     <input v-model="addForm.feishu_table_id" required autocomplete="off" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-mono text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="输入 Table ID" />
