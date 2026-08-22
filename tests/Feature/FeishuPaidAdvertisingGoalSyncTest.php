@@ -190,6 +190,83 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->assertSame($firstStore->id, PaidAdvertisingGoalField::query()->sole()->store_id);
     }
 
+    public function test_personal_facebook_sync_imports_its_configured_meta_weekly_feishu_table(): void
+    {
+        Config::set('services.feishu_table.app_id', 'paid_goal_test');
+        Config::set('services.feishu_table.app_secret', 'paid-goal-secret');
+        [$organization, $store] = $this->storeContext('meta-weekly');
+        $this->metaWeeklyCredentials($store, 'app_meta_weekly', 'tbl_meta_weekly');
+        $board = PaidAdvertisingGoalBoard::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'name' => '黄智诚',
+            'type' => 'personal_facebook',
+            'feishu_app_token' => 'app_personal',
+            'feishu_table_id' => 'tbl_personal',
+            'feishu_view_id' => 'vew_personal',
+            'sync_status' => 'pending',
+        ]);
+        $this->fakeFeishu(
+            function (string $appToken, string $viewId): array {
+                if ($appToken === 'app_personal') {
+                    $this->assertSame('vew_personal', $viewId);
+
+                    return [[
+                        'record_id' => 'rec_personal',
+                        'fields' => ['日期' => 1786291200000, '今日销售额' => 1234.56],
+                    ]];
+                }
+
+                $this->assertSame('app_meta_weekly', $appToken);
+                $this->assertSame('', $viewId);
+
+                return [[
+                    'record_id' => 'rec_meta_weekly',
+                    'fields' => [
+                        '记录日期' => 1785686400000,
+                        '年度第几周' => '32周 08.03~08.09',
+                        'FB销售额-黄智诚' => 100000,
+                        'FB花费-黄智诚' => 20000,
+                        'FB的ROI-黄智诚' => 5,
+                    ],
+                ]];
+            },
+            fn (string $appToken): array => $appToken === 'app_personal'
+                ? [
+                    ['field_id' => 'fld_personal_date', 'field_name' => '日期', 'type' => 5, 'is_primary' => true],
+                    ['field_id' => 'fld_personal_sales', 'field_name' => '今日销售额', 'type' => 2, 'is_primary' => false],
+                ]
+                : [
+                    ['field_id' => 'fld_meta_date', 'field_name' => '记录日期', 'type' => 5, 'is_primary' => true],
+                    ['field_id' => 'fld_meta_week', 'field_name' => '年度第几周', 'type' => 1, 'is_primary' => false],
+                    ['field_id' => 'fld_meta_sales', 'field_name' => 'FB销售额-黄智诚', 'type' => 2, 'is_primary' => false],
+                    ['field_id' => 'fld_meta_spend', 'field_name' => 'FB花费-黄智诚', 'type' => 2, 'is_primary' => false],
+                    ['field_id' => 'fld_meta_roi', 'field_name' => 'FB的ROI-黄智诚', 'type' => 2, 'is_primary' => false],
+                ],
+        );
+
+        $result = app(PaidAdvertisingGoalSyncService::class)->syncBoard($board);
+
+        $this->assertSame(2, $result['sources']);
+        $this->assertSame(2, $result['inserted']);
+        $this->assertSame(7, $result['fields']);
+        $this->assertDatabaseCount('paid_advertising_goal_records', 2);
+        $this->assertDatabaseCount('paid_advertising_goal_fields', 7);
+        $metaRecord = PaidAdvertisingGoalRecord::query()
+            ->where('source_key', 'board:'.$board->id.':meta-weekly')
+            ->sole();
+        $this->assertSame($organization->id, $metaRecord->organization_id);
+        $this->assertSame($store->id, $metaRecord->store_id);
+        $this->assertSame($board->id, $metaRecord->goal_board_id);
+        $this->assertSame('32周 08.03~08.09', $metaRecord->fields_encrypted['年度第几周']);
+        $this->assertSame(100000, $metaRecord->fields_encrypted['FB销售额-黄智诚']);
+        $this->assertDatabaseHas('paid_advertising_goal_fields', [
+            'goal_board_id' => $board->id,
+            'source_key' => 'board:'.$board->id.':meta-weekly',
+            'name' => 'FB的ROI-黄智诚',
+        ]);
+    }
+
     public function test_paid_advertising_goal_sync_runs_daily_at_three_forty_in_beijing(): void
     {
         $event = collect(app(Schedule::class)->events())
@@ -238,7 +315,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
                     'code' => 0,
                     'data' => [
                         'has_more' => false,
-                        'items' => $records($matches[1] ?? '', (string) $request['view_id']),
+                        'items' => $records($matches[1] ?? '', (string) ($request->data()['view_id'] ?? '')),
                     ],
                 ]);
             }
@@ -268,6 +345,19 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
     private function overallCredentials(Store $store, string $appToken, string $tableId, string $viewId): void
     {
         foreach (['advertising_goals_app_token' => $appToken, 'advertising_goals_table_id' => $tableId, 'advertising_goals_view_id' => $viewId] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'provider' => 'feishu_data_links',
+                'credential_key' => $key,
+                'credential_value' => $value,
+            ]);
+        }
+    }
+
+    private function metaWeeklyCredentials(Store $store, string $appToken, string $tableId): void
+    {
+        foreach (['advertising_meta_weekly_app_token' => $appToken, 'advertising_meta_weekly_table_id' => $tableId] as $key => $value) {
             StoreBusinessCredential::query()->create([
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->id,

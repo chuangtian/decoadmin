@@ -213,7 +213,7 @@ class PaidAdvertisingGoalRefreshService
 
                 return [
                     'acquired' => true,
-                    'sources' => 1,
+                    'sources' => (int) ($syncResult['sources'] ?? 1),
                     'fields' => $syncResult['fields'],
                     'inserted' => $syncResult['inserted'],
                     'updated' => $syncResult['updated'],

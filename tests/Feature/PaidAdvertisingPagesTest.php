@@ -405,7 +405,7 @@ class PaidAdvertisingPagesTest extends TestCase
             'feishu_view_id' => 'board-view-id',
             'sync_status' => 'completed',
         ]);
-        foreach (['日期', '今日销售额', '月销售额之和', '月销售额目标', 'FB销售额-Macfox', '本月FB销售目标', '本月Criteo销售目标'] as $position => $name) {
+        foreach (['日期', '月份', '今日销售额', '月销售额之和', '月销售额目标', 'FB销售额-Macfox', '本月FB销售目标', 'Criteo销售额', '本月Criteo销售目标'] as $position => $name) {
             PaidAdvertisingGoalField::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
@@ -419,7 +419,7 @@ class PaidAdvertisingPagesTest extends TestCase
                 'synced_at' => now(),
             ]);
         }
-        foreach (['日期', 'FB花费-黄智诚', 'Criteo花费'] as $position => $name) {
+        foreach (['日期', '周', 'FB花费', 'FB销售额', 'FB的ROI', 'FB花费-黄智诚', 'FB销售额-黄智诚', 'Criteo花费'] as $position => $name) {
             PaidAdvertisingGoalField::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
@@ -427,17 +427,32 @@ class PaidAdvertisingPagesTest extends TestCase
                 'source_key' => 'overall',
                 'source_field_id' => 'overall-personal-field-'.$position,
                 'name' => $name,
-                'type' => $position === 0 ? 5 : 2,
+                'type' => $position === 0 ? 5 : ($position === 1 ? 1 : 2),
                 'field_order' => $position,
                 'is_primary' => $position === 0,
                 'synced_at' => now(),
             ]);
         }
+        $metaWeeklySourceKey = 'board:'.$board->id.':meta-weekly';
+        foreach (['记录日期', '年度第几周', '展示次数', '链接点击率', '花费金额', '转化次数', '每次转化费用', '转化价值', 'ROI', '加购数', '结账数', 'FB花费-黄智诚', 'FB销售额-黄智诚', 'FB的ROI-黄智诚'] as $position => $name) {
+            PaidAdvertisingGoalField::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'goal_board_id' => $board->id,
+                'source_key' => $metaWeeklySourceKey,
+                'source_field_id' => 'meta-weekly-field-'.$position,
+                'name' => $name,
+                'type' => $position === 0 ? 5 : ($position === 1 ? 1 : 2),
+                'field_order' => $position,
+                'is_primary' => $position === 1,
+                'synced_at' => now(),
+            ]);
+        }
         foreach ([
-            ['2026-08-20', 250, 500, 150],
-            ['2026-08-21', 300, 800, 200],
-            ['2026-08-22', 0, 800, 0],
-        ] as [$date, $dailySales, $monthlySales, $facebookSales]) {
+            ['2026-08-20', 250, 500, 150, 90],
+            ['2026-08-21', 300, 800, 200, 120],
+            ['2026-08-22', 0, 800, 0, 0],
+        ] as [$date, $dailySales, $monthlySales, $facebookSales, $criteoSales]) {
             PaidAdvertisingGoalRecord::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
@@ -446,20 +461,74 @@ class PaidAdvertisingPagesTest extends TestCase
                 'source_record_id' => 'personal-'.$date,
                 'fields_encrypted' => [
                     '日期' => CarbonImmutable::parse($date, 'Asia/Shanghai')->getTimestampMs(),
+                    '月份' => [['text' => '2026-08', 'type' => 'text']],
                     '今日销售额' => $dailySales,
                     '月销售额之和' => $monthlySales,
                     '月销售额目标' => 1000,
                     'FB销售额-Macfox' => $facebookSales,
                     '本月FB销售目标' => 600,
+                    'Criteo销售额' => [$criteoSales],
+                    '本月Criteo销售目标' => 200,
                 ],
                 'synced_at' => now(),
             ]);
         }
         foreach ([
-            ['2026-08-20', 60, 20],
-            ['2026-08-21', 40, 20],
-            ['2026-08-22', 900, 900],
-        ] as [$date, $facebookSpend, $criteoSpend]) {
+            ['2026-08-09', '32周 08.03~08.09', 100, 20],
+            ['2026-08-16', '33周 08.10~08.16', 150, 25],
+        ] as [$date, $week, $facebookSales, $facebookSpend]) {
+            PaidAdvertisingGoalRecord::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'goal_board_id' => null,
+                'source_key' => 'overall',
+                'source_record_id' => 'overall-week-'.$date,
+                'fields_encrypted' => [
+                    '日期' => CarbonImmutable::parse($date, 'Asia/Shanghai')->getTimestampMs(),
+                    '周' => [['text' => $week, 'type' => 'text']],
+                    'FB花费' => [$facebookSpend],
+                    'FB销售额' => [$facebookSales],
+                    'FB的ROI' => $facebookSales / $facebookSpend,
+                    'FB花费-黄智诚' => [$facebookSpend],
+                    'FB销售额-黄智诚' => [$facebookSales],
+                ],
+                'synced_at' => now(),
+            ]);
+        }
+        foreach ([
+            ['2026-08-03', '32周 08.03~08.09', 100000, 0.0123, 20, 10, 2, 100, 5, 20, 15, 100, 20],
+            ['2026-08-10', '33周 08.10~08.16', 120000, 0.015, 25, 12, 2.08, 150, 6, 25, 18, 150, 25],
+        ] as [$date, $week, $impressions, $ctr, $spend, $conversions, $cpa, $value, $roi, $carts, $checkouts, $personalSales, $personalSpend]) {
+            PaidAdvertisingGoalRecord::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'goal_board_id' => $board->id,
+                'source_key' => $metaWeeklySourceKey,
+                'source_record_id' => 'meta-weekly-'.$date,
+                'fields_encrypted' => [
+                    '记录日期' => CarbonImmutable::parse($date, 'Asia/Shanghai')->getTimestampMs(),
+                    '年度第几周' => [['text' => $week, 'type' => 'text']],
+                    '展示次数' => $impressions,
+                    '链接点击率' => $ctr,
+                    '花费金额' => $spend,
+                    '转化次数' => $conversions,
+                    '每次转化费用' => $cpa,
+                    '转化价值' => $value,
+                    'ROI' => $roi,
+                    '加购数' => $carts,
+                    '结账数' => $checkouts,
+                    'FB花费-黄智诚' => $personalSpend,
+                    'FB销售额-黄智诚' => $personalSales,
+                    'FB的ROI-黄智诚' => $roi,
+                ],
+                'synced_at' => now(),
+            ]);
+        }
+        foreach ([
+            ['2026-08-20', '34周 08.17~08.23', 60, 20, 210, 3.5],
+            ['2026-08-21', '34周 08.17~08.23', 40, 20, 170, 4.25],
+            ['2026-08-22', '34周 08.17~08.23', 900, 900, 9000, 10],
+        ] as [$date, $week, $facebookSpend, $criteoSpend, $facebookSales, $facebookRoi]) {
             PaidAdvertisingGoalRecord::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
@@ -468,7 +537,12 @@ class PaidAdvertisingPagesTest extends TestCase
                 'source_record_id' => 'overall-'.$date,
                 'fields_encrypted' => [
                     '日期' => CarbonImmutable::parse($date, 'Asia/Shanghai')->getTimestampMs(),
+                    '周' => [['text' => $week, 'type' => 'text']],
+                    'FB花费' => [$facebookSpend],
+                    'FB销售额' => [$facebookSales],
+                    'FB的ROI' => $facebookRoi,
                     'FB花费-黄智诚' => [$facebookSpend],
+                    'FB销售额-黄智诚' => [$facebookSales],
                     'Criteo花费' => [$criteoSpend],
                 ],
                 'synced_at' => now(),
@@ -511,8 +585,8 @@ class PaidAdvertisingPagesTest extends TestCase
                     ->where('goalPage.template_data.personal_facebook.values.monthly_sales', 800)
                     ->where('goalPage.template_data.personal_facebook.values.monthly_target', 1000)
                     ->where('goalPage.template_data.personal_facebook.values.completion_rate', 80)
-                    ->where('goalPage.template_data.personal_facebook.values.monthly_spend', 140)
-                    ->where('goalPage.template_data.personal_facebook.values.roas', 5.71)
+                    ->where('goalPage.template_data.personal_facebook.values.monthly_spend', 185)
+                    ->where('goalPage.template_data.personal_facebook.values.roas', 4.32)
                     ->where('goalPage.template_data.personal_facebook.facebook.schema', 'paid-advertising-personal-facebook-channel-goal-v1')
                     ->where('goalPage.template_data.personal_facebook.facebook.available', true)
                     ->where('goalPage.template_data.personal_facebook.facebook.as_of_date', '2026-08-21')
@@ -528,6 +602,66 @@ class PaidAdvertisingPagesTest extends TestCase
                     ->where('goalPage.template_data.personal_facebook.facebook.values.remaining_days', 10)
                     ->where('goalPage.template_data.personal_facebook.facebook.source_fields.daily_sales', 'FB销售额-Macfox')
                     ->where('goalPage.template_data.personal_facebook.facebook.source_fields.target', '本月FB销售目标')
+                    ->where('goalPage.template_data.personal_facebook.criteo.schema', 'paid-advertising-personal-criteo-channel-goal-v1')
+                    ->where('goalPage.template_data.personal_facebook.criteo.available', true)
+                    ->where('goalPage.template_data.personal_facebook.criteo.as_of_date', '2026-08-21')
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_sales', 120)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.period_sales', 210)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.target', 200)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.completion_rate', 105)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.time_progress', 67.74)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.time_variance', 37.26)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_needed', 0)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_achievement_rate', 155)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.elapsed_days', 21)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.remaining_days', 10)
+                    ->where('goalPage.template_data.personal_facebook.criteo.source_fields.daily_sales', 'Criteo销售额')
+                    ->where('goalPage.template_data.personal_facebook.criteo.source_fields.target', '本月Criteo销售目标')
+                    ->where('goalPage.template_data.personal_facebook.details.schema', 'paid-advertising-personal-goal-details-v1')
+                    ->where('goalPage.template_data.personal_facebook.details.available', true)
+                    ->where('goalPage.template_data.personal_facebook.details.message', null)
+                    ->where('goalPage.template_data.personal_facebook.details.period_label', '2026年8月')
+                    ->where('goalPage.template_data.personal_facebook.details.total', 2)
+                    ->where('goalPage.template_data.personal_facebook.details.columns.0.key', '月份')
+                    ->where('goalPage.template_data.personal_facebook.details.columns.0.kind', 'month')
+                    ->where('goalPage.template_data.personal_facebook.details.columns.1.key', '日期')
+                    ->where('goalPage.template_data.personal_facebook.details.columns.1.kind', 'date')
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.date', '2026-08-21')
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.values.月份', '2026-08')
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.values.日期', '2026-08-21')
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.values.Criteo销售额', 120)
+                    ->where('goalPage.template_data.personal_facebook.details.rows.1.date', '2026-08-20')
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.schema', 'paid-advertising-facebook-efficiency-v1')
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.available', true)
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.as_of_date', '2026-08-21')
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.current_roas', 4.25)
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.target_roas', 5)
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.achievement_rate', 85)
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.period_spend', 145)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.schema', 'paid-advertising-meta-weekly-v1')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.available', true)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.latest_week.label', '33周 08.10~08.16')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.previous_week.label', '32周 08.03~08.09')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.values.sales', 150)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.values.spend', 25)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.values.roi', 6)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.changes.sales', 50)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.changes.spend', 25)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.changes.roi', 20)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.available', true)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.points.0.week', '32周 08.03~08.09')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.points.1.week', '33周 08.10~08.16')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.points.1.sales', 150)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.points.1.spend', 25)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.trend.points.1.roi', 6)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.available', true)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.total', 2)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.columns.0.key', '年度第几周')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.columns.1.key', '展示次数')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.rows.1.values.年度第几周', '33周 08.10~08.16')
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.rows.1.values.展示次数', 120000)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.rows.1.values.链接点击率', 0.015)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.table.rows.1.values.ROI', 6)
                     ->where('goalPage.template_data.personal_facebook.source_fields.monthly_spend', ['FB花费-黄智诚', 'Criteo花费'])
                     ->where('goalPage.template_data.google_ads', null));
 
@@ -556,7 +690,24 @@ class PaidAdvertisingPagesTest extends TestCase
                     ->where('goalPage.template_data.personal_facebook.facebook.values.daily_needed', 450)
                     ->where('goalPage.template_data.personal_facebook.facebook.values.daily_achievement_rate', 25)
                     ->where('goalPage.template_data.personal_facebook.facebook.values.elapsed_days', 1)
-                    ->where('goalPage.template_data.personal_facebook.facebook.values.remaining_days', 0));
+                    ->where('goalPage.template_data.personal_facebook.facebook.values.remaining_days', 0)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_sales', 90)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.period_sales', 90)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.target', 200)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.completion_rate', 45)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.time_progress', 100)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.time_variance', -55)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_needed', 110)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.daily_achievement_rate', 45)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.elapsed_days', 1)
+                    ->where('goalPage.template_data.personal_facebook.criteo.values.remaining_days', 0)
+                    ->where('goalPage.template_data.personal_facebook.details.period_label', '2026-08-20 至 2026-08-20')
+                    ->where('goalPage.template_data.personal_facebook.details.total', 1)
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.date', '2026-08-20')
+                    ->where('goalPage.template_data.personal_facebook.details.rows.0.values.日期', '2026-08-20')
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.current_roas', 3.5)
+                    ->where('goalPage.template_data.personal_facebook.facebook_efficiency.values.period_spend', 60)
+                    ->where('goalPage.template_data.personal_facebook.meta_weekly.available', false));
         } finally {
             CarbonImmutable::setTestNow();
         }

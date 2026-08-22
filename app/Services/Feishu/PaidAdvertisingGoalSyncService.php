@@ -18,6 +18,8 @@ class PaidAdvertisingGoalSyncService
 {
     private const OVERALL_SOURCE_KEY = 'overall';
 
+    private const META_WEEKLY_SOURCE_SUFFIX = ':meta-weekly';
+
     public function __construct(
         private FeishuBitableClient $client,
         private StoreFeishuDataLinkService $dataLinks,
@@ -62,6 +64,7 @@ class PaidAdvertisingGoalSyncService
                 'paid_advertising_goal_boards.id',
                 'paid_advertising_goal_boards.organization_id',
                 'paid_advertising_goal_boards.store_id',
+                'paid_advertising_goal_boards.type',
                 'paid_advertising_goal_boards.feishu_app_token',
                 'paid_advertising_goal_boards.feishu_table_id',
                 'paid_advertising_goal_boards.feishu_view_id',
@@ -103,14 +106,32 @@ class PaidAdvertisingGoalSyncService
         $board->update(['sync_status' => 'running', 'last_error' => null]);
 
         try {
-            $result = $this->syncSource(
-                $board->store()->firstOrFail(),
+            $store = $board->store()->firstOrFail();
+            $results = [$this->syncSource(
+                $store,
                 $board,
                 'board:'.(int) $board->id,
                 (string) $board->feishu_app_token,
                 (string) $board->feishu_table_id,
                 (string) $board->feishu_view_id,
-            );
+            )];
+            if ($board->type === 'personal_facebook') {
+                $metaWeekly = $this->dataLinks->valuesForSync($store, 'advertising_meta_weekly');
+                $appToken = (string) ($metaWeekly['advertising_meta_weekly_app_token'] ?? '');
+                $tableId = (string) ($metaWeekly['advertising_meta_weekly_table_id'] ?? '');
+                if (filled($appToken) && filled($tableId)) {
+                    $results[] = $this->syncSource(
+                        $store,
+                        $board,
+                        'board:'.(int) $board->id.self::META_WEEKLY_SOURCE_SUFFIX,
+                        $appToken,
+                        $tableId,
+                        '',
+                        false,
+                    );
+                }
+            }
+            $result = $this->mergeSyncResults($results);
             $board->update([
                 'sync_status' => 'completed',
                 'last_synced_at' => now(),
@@ -133,10 +154,9 @@ class PaidAdvertisingGoalSyncService
      */
     private function runSource(array &$summary, Store $store, ?PaidAdvertisingGoalBoard $board): void
     {
-        $summary['sources']++;
-
         try {
             $result = $board ? $this->syncBoard($board) : $this->syncOverall($store);
+            $summary['sources'] += (int) ($result['sources'] ?? 1);
 
             foreach (['fields', 'inserted', 'updated', 'deleted', 'skipped'] as $metric) {
                 $summary[$metric] += $result[$metric];
@@ -168,12 +188,13 @@ class PaidAdvertisingGoalSyncService
         string $appToken,
         string $tableId,
         string $viewId,
+        bool $requireView = true,
     ): array {
         $appToken = trim($appToken);
         $tableId = trim($tableId);
         $viewId = trim($viewId);
 
-        if ($appToken === '' || $tableId === '' || $viewId === '') {
+        if ($appToken === '' || $tableId === '' || ($requireView && $viewId === '')) {
             throw new RuntimeException('当前目标页签未完整配置飞书多维表格。');
         }
 
@@ -261,6 +282,31 @@ class PaidAdvertisingGoalSyncService
             'skipped' => $skipped,
             'records' => count($records),
         ];
+    }
+
+    /**
+     * @param  list<array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int}>  $results
+     * @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int}
+     */
+    private function mergeSyncResults(array $results): array
+    {
+        $merged = [
+            'sources' => count($results),
+            'fields' => 0,
+            'inserted' => 0,
+            'updated' => 0,
+            'deleted' => 0,
+            'skipped' => 0,
+            'records' => 0,
+        ];
+
+        foreach ($results as $result) {
+            foreach (['fields', 'inserted', 'updated', 'deleted', 'skipped', 'records'] as $metric) {
+                $merged[$metric] += (int) ($result[$metric] ?? 0);
+            }
+        }
+
+        return $merged;
     }
 
     /**

@@ -165,6 +165,124 @@ interface PersonalFacebookSummary {
             daily_achievement_rate: string[];
         };
     };
+    criteo: {
+        schema: 'paid-advertising-personal-criteo-channel-goal-v1';
+        available: boolean;
+        message: string | null;
+        as_of_date: string | null;
+        values: {
+            daily_sales: number | null;
+            period_sales: number | null;
+            target: number | null;
+            completion_rate: number | null;
+            time_progress: number | null;
+            time_variance: number | null;
+            daily_needed: number | null;
+            daily_achievement_rate: number | null;
+            elapsed_days: number;
+            remaining_days: number;
+        };
+        source_fields: {
+            daily_sales: string;
+            period_sales: string;
+            target: string;
+            completion_rate: string[];
+            time_progress: string;
+            time_variance: string[];
+            daily_needed: string[];
+            daily_achievement_rate: string[];
+        };
+    };
+    details: {
+        schema: 'paid-advertising-personal-goal-details-v1';
+        available: boolean;
+        message: string | null;
+        period_label: string;
+        columns: Array<{
+            key: string;
+            label: string;
+            kind: 'date' | 'month' | 'percentage' | 'number' | 'text';
+            description: string | null;
+        }>;
+        rows: Array<{
+            key: string;
+            date: string;
+            values: Record<string, string | number | null>;
+        }>;
+        total: number;
+    };
+    facebook_efficiency: {
+        schema: 'paid-advertising-facebook-efficiency-v1';
+        available: boolean;
+        message: string | null;
+        as_of_date: string | null;
+        period_label: string;
+        values: {
+            current_roas: number | null;
+            target_roas: number;
+            achievement_rate: number | null;
+            period_spend: number | null;
+        };
+        source_fields: {
+            current_roas: string;
+            target_roas: string;
+            achievement_rate: string[];
+            period_spend: string;
+        };
+    };
+    meta_weekly: {
+        schema: 'paid-advertising-meta-weekly-v1';
+        available: boolean;
+        message: string | null;
+        latest_week: { label: string; date_from: string; date_to: string } | null;
+        previous_week: { label: string; date_from: string; date_to: string } | null;
+        values: {
+            sales: number | null;
+            spend: number | null;
+            roi: number | null;
+        };
+        changes: {
+            sales: number | null;
+            spend: number | null;
+            roi: number | null;
+        };
+        trend: {
+            schema: 'paid-advertising-meta-weekly-trend-v1';
+            available: boolean;
+            points: Array<{
+                week: string;
+                date_from: string;
+                date_to: string;
+                sales: number;
+                spend: number;
+                roi: number | null;
+            }>;
+        };
+        table: {
+            schema: 'paid-advertising-meta-weekly-table-v1';
+            available: boolean;
+            period_label: string;
+            columns: Array<{
+                key: string;
+                label: string;
+                format: 'text' | 'integer' | 'percentage' | 'currency' | 'roi';
+            }>;
+            rows: Array<{
+                key: string;
+                date_from: string;
+                date_to: string;
+                values: Record<string, string | number | null>;
+            }>;
+            total: number;
+        };
+        source_fields: {
+            week: string;
+            sales: string;
+            spend: string;
+            roi: string[];
+        };
+        synced_at: string | null;
+    };
     source_fields: {
         daily_sales: string;
         monthly_sales: string;
@@ -925,6 +1043,7 @@ const confirmDelete = () => {
                     v-else-if="activeTabDefinition?.type === 'personal_facebook'"
                     :summary="goalPage.template_data.personal_facebook"
                     :loading="metricsLoading"
+                    :board-name="activeTabDefinition.label"
                 />
                 <GoogleAdsGoalTemplate v-else-if="activeTabDefinition?.type === 'google_ads'" />
                     </div>

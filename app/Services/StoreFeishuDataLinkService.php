@@ -57,6 +57,14 @@ class StoreFeishuDataLinkService
                 'advertising_goals_view_id' => ['label' => '视图 View ID', 'env_key' => 'FEISHU_ADVERTISING_GOALS_VIEW_ID', 'secret' => false, 'placeholder' => '输入广告目标视图 View ID'],
             ],
         ],
+        'advertising_meta_weekly' => [
+            'title' => 'Meta 周数据',
+            'description' => 'Meta 周度投放多维表格，用于个人 Facebook 目标的趋势图和数据汇总表。',
+            'fields' => [
+                'advertising_meta_weekly_app_token' => ['label' => '多维表格 App Token', 'env_key' => 'FEISHU_ADVERTISING_META_WEEKLY_APP_TOKEN', 'secret' => true, 'placeholder' => '输入 Meta 周数据 App Token'],
+                'advertising_meta_weekly_table_id' => ['label' => '数据表 Table ID', 'env_key' => 'FEISHU_ADVERTISING_META_WEEKLY_TABLE_ID', 'secret' => false, 'placeholder' => '输入 Meta 周数据 Table ID'],
+            ],
+        ],
         'seo_geo' => [
             'title' => 'SEO / GEO',
             'description' => 'SEO 日、周、月数据多维表格，用于自然流量数据同步。',
