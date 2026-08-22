@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\CampaignActivity;
 use App\Models\Organization;
 use App\Models\Store;
+use App\Services\Advertising\AdvertisingChannelSnapshotService;
 use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -12,7 +13,10 @@ use InvalidArgumentException;
 
 class CampaignThemeReviewService
 {
-    public function __construct(private ShopifyAnalyticsReportService $reports) {}
+    public function __construct(
+        private ShopifyAnalyticsReportService $reports,
+        private AdvertisingChannelSnapshotService $advertisingChannels,
+    ) {}
 
     /** @return array<string, mixed> */
     public function review(
@@ -52,6 +56,7 @@ class CampaignThemeReviewService
                 'daily_sales' => $this->unavailableDataset('暂无已完成活动。'),
                 'traffic_cost_trend' => $this->unavailableTrafficCostTrend('暂无已完成活动。'),
                 'funnel' => $this->unavailableDataset('暂无已完成活动。'),
+                'channel_performance' => $this->unavailableChannelPerformance('暂无已完成活动。'),
                 'model_sales' => $this->unavailableDataset('暂无已完成活动。'),
             ];
         }
@@ -93,6 +98,9 @@ class CampaignThemeReviewService
             'funnel' => $this->funnel(
                 $currentReports['funnel'] ?? null,
                 $comparisonReports['funnel'] ?? null,
+            ),
+            'channel_performance' => $this->channelPerformance(
+                $currentReports['channel_performance'] ?? null,
             ),
             'model_sales' => $this->modelSales(
                 $currentReports['models'] ?? null,
@@ -158,6 +166,11 @@ class CampaignThemeReviewService
             ] : null,
             'campaign_images' => $this->imageUrls($activity->campaign_images),
             'email_images' => $this->imageUrls($activity->email_content),
+            'analysis' => [
+                'summary' => $activity->campaign_summary,
+                'diagnosis' => $activity->problem_diagnosis,
+                'optimization' => $activity->optimization_analysis,
+            ],
             'metrics' => $metrics,
             'source_updated_at' => $activity->source_updated_at?->toIso8601String(),
         ];
@@ -269,6 +282,7 @@ class CampaignThemeReviewService
             'ad_spend' => $this->reports->report($store, 'marketing-engagement-spend-timeseries', $from, $to),
             'funnel_timeseries' => $this->reports->report($store, 'conversion-funnel-timeseries', $from, $to),
             'funnel' => $this->reports->report($store, 'conversion-funnel-breakdown', $from, $to),
+            'channel_performance' => $this->advertisingChannels->report($store, $from, $to),
             'models' => $this->reports->report($store, 'model-sales-summary', $from, $to),
         ];
     }
@@ -495,6 +509,69 @@ class CampaignThemeReviewService
     }
 
     /** @return array<string, mixed> */
+    private function channelPerformance(?array $report): array
+    {
+        if ($report === null) {
+            return $this->unavailableChannelPerformance('该活动缺少完整日期，无法读取广告平台周期快照。');
+        }
+
+        $state = [
+            'available' => (bool) ($report['available'] ?? false),
+            'complete' => (bool) ($report['complete'] ?? false),
+            'pending' => (bool) ($report['pending'] ?? false) || (bool) data_get($report, 'storage.pending', false),
+            'stale' => (bool) data_get($report, 'storage.stale', false),
+            'source' => 'advertising_apis',
+            'message' => $report['message'] ?? null,
+        ];
+        $order = ['facebook' => 0, 'google' => 1, 'tiktok' => 2, 'bing' => 3, 'criteo' => 4];
+        $grouped = collect($report['channels'] ?? [])
+            ->filter(fn (mixed $row): bool => is_array($row) && (bool) ($row['available'] ?? false))
+            ->map(fn (array $row): array => [
+                'key' => (string) ($row['key'] ?? ''),
+                'name' => (string) ($row['name'] ?? ''),
+                'ad_spend' => max(0.0, $this->decimal($row['ad_spend'] ?? 0)),
+                'attributed_sales' => max(0.0, $this->decimal($row['attributed_sales'] ?? 0)),
+            ])
+            ->filter(fn (array $row): bool => isset($order[$row['key']]))
+            ->sortBy(fn (array $row): int => $order[$row['key']])
+            ->values();
+        $totalAdSpend = round((float) $grouped->sum('ad_spend'), 2);
+        $totalAttributedSales = round((float) $grouped->sum('attributed_sales'), 2);
+
+        $channels = $grouped
+            ->map(function (array $channel) use ($totalAdSpend, $totalAttributedSales): array {
+                $spendShare = $totalAdSpend > 0
+                    ? round((float) $channel['ad_spend'] / $totalAdSpend * 100, 1)
+                    : 0.0;
+                $salesShare = $totalAttributedSales > 0
+                    ? round((float) $channel['attributed_sales'] / $totalAttributedSales * 100, 1)
+                    : 0.0;
+
+                return [
+                    ...$channel,
+                    'spend_share_percent' => $spendShare,
+                    'sales_share_percent' => $salesShare,
+                    'efficiency_roi' => $spendShare > 0 ? round($salesShare / $spendShare, 2) : null,
+                ];
+            })
+            ->sortByDesc('ad_spend')
+            ->values()
+            ->all();
+
+        return [
+            ...$state,
+            'semantics' => 'advertising_platform_attribution_share',
+            'total_ad_spend' => $totalAdSpend,
+            'total_attributed_sales' => $totalAttributedSales,
+            'failed_channels' => array_values(array_filter(
+                is_array($report['failed_channels'] ?? null) ? $report['failed_channels'] : [],
+                'is_string',
+            )),
+            'channels' => $channels,
+        ];
+    }
+
+    /** @return array<string, mixed> */
     private function modelSales(?array $report, ?array $comparisonReport): array
     {
         $state = $this->reportState($report, '该活动缺少完整日期，无法读取 Shopify 车型销量。');
@@ -607,6 +684,24 @@ class CampaignThemeReviewService
             'stale' => false,
             'source' => 'shopifyql',
             'message' => $message,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function unavailableChannelPerformance(string $message): array
+    {
+        return [
+            'available' => false,
+            'complete' => false,
+            'pending' => false,
+            'stale' => false,
+            'source' => 'advertising_apis',
+            'message' => $message,
+            'semantics' => 'advertising_platform_attribution_share',
+            'total_ad_spend' => 0.0,
+            'total_attributed_sales' => 0.0,
+            'failed_channels' => [],
+            'channels' => [],
         ];
     }
 

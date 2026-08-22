@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\Advertising\AdvertisingChannelSnapshotService;
 use App\Services\CampaignThemeOverviewService;
 use App\Services\CampaignThemeRefreshService;
 use App\Services\CampaignThemeReviewService;
@@ -223,6 +224,9 @@ class CampaignThemeOverviewTest extends TestCase
             'email_content' => ['/storage/campaign-email.webp'],
             'daily_average_ad_spend' => 4000,
             'daily_average_order_count' => 33.5,
+            'campaign_summary' => "【结果】GMV 与 ROI 表现稳定。\n【亮点】活动末段增长明显。",
+            'problem_diagnosis' => "① 活动周期偏长。\n② 前段转化承接不足。",
+            'optimization_analysis' => "【P1】缩短活动周期。\n【P2】提前验证素材。",
         ]);
         $hidden = $this->campaign($organization, $otherStore, 'hidden-review', 999999, 1, 1, 0.9, '2026-03-01', '2026-03-02', 99);
 
@@ -308,6 +312,28 @@ class CampaignThemeOverviewTest extends TestCase
             },
         );
         app()->instance(ShopifyAnalyticsReportService::class, $reports);
+        $channelSnapshots = \Mockery::mock(AdvertisingChannelSnapshotService::class);
+        $channelSnapshots->shouldReceive('report')->once()->withArgs(
+            fn (Store $reportedStore, string $from, string $to): bool => $reportedStore->is($store)
+                && $from === '2026-02-10'
+                && $to === '2026-02-15',
+        )->andReturn([
+            'available' => true,
+            'complete' => true,
+            'pending' => false,
+            'source' => 'advertising_apis',
+            'message' => null,
+            'failed_channels' => [],
+            'channels' => [
+                ['key' => 'facebook', 'name' => 'Facebook', 'configured' => true, 'available' => true, 'ad_spend' => 450, 'attributed_sales' => 370],
+                ['key' => 'google', 'name' => 'Google', 'configured' => true, 'available' => true, 'ad_spend' => 220, 'attributed_sales' => 240],
+                ['key' => 'tiktok', 'name' => 'TikTok', 'configured' => true, 'available' => true, 'ad_spend' => 90, 'attributed_sales' => 110],
+                ['key' => 'bing', 'name' => 'Bing', 'configured' => true, 'available' => true, 'ad_spend' => 80, 'attributed_sales' => 110],
+                ['key' => 'criteo', 'name' => 'Criteo', 'configured' => true, 'available' => true, 'ad_spend' => 160, 'attributed_sales' => 170],
+            ],
+            'storage' => ['pending' => false, 'stale' => false],
+        ]);
+        app()->instance(AdvertisingChannelSnapshotService::class, $channelSnapshots);
 
         $this->actingAs($user)
             ->withSession($this->contextSession($organization, $store))
@@ -323,6 +349,9 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.comparison_activity_id', $previous->id)
                 ->where('review.activity.campaign_id', 'MACFOX-2026-010')
                 ->where('review.activity.campaign_images', ['/storage/campaign-current.webp'])
+                ->where('review.activity.analysis.summary', "【结果】GMV 与 ROI 表现稳定。\n【亮点】活动末段增长明显。")
+                ->where('review.activity.analysis.diagnosis', "① 活动周期偏长。\n② 前段转化承接不足。")
+                ->where('review.activity.analysis.optimization', "【P1】缩短活动周期。\n【P2】提前验证素材。")
                 ->where('review.activity.metrics.average_order_value.value', 1054.73)
                 ->where('review.activity.metrics.orders.value', 201)
                 ->where('review.activity.metrics.daily_average_sessions.value', 7846.17)
@@ -389,6 +418,19 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.traffic_cost_trend.points.5.checkout_cost', 2000)
                 ->where('review.funnel.stages.1.rate_percent', 16.22)
                 ->where('review.funnel.stages.3.sessions', 201)
+                ->where('review.channel_performance.available', true)
+                ->where('review.channel_performance.complete', true)
+                ->where('review.channel_performance.semantics', 'advertising_platform_attribution_share')
+                ->where('review.channel_performance.total_ad_spend', 1000)
+                ->where('review.channel_performance.total_attributed_sales', 1000)
+                ->has('review.channel_performance.failed_channels', 0)
+                ->has('review.channel_performance.channels', 5)
+                ->where('review.channel_performance.channels.0.name', 'Facebook')
+                ->where('review.channel_performance.channels.0.ad_spend', 450)
+                ->where('review.channel_performance.channels.0.attributed_sales', 370)
+                ->where('review.channel_performance.channels.0.spend_share_percent', 45)
+                ->where('review.channel_performance.channels.0.sales_share_percent', 37)
+                ->where('review.channel_performance.channels.0.efficiency_roi', 0.82)
                 ->where('review.model_sales.total_units', 10)
                 ->has('review.model_sales.models', 2)
                 ->where('review.model_sales.models.0.name', 'Macfox X1S')
@@ -413,7 +455,10 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.traffic_cost_trend.message', '暂无已完成活动。')
                 ->where('review.traffic_cost_trend.ad_spend_available', false)
                 ->where('review.traffic_cost_trend.ad_spend_reconciled', false)
-                ->has('review.traffic_cost_trend.points', 0));
+                ->has('review.traffic_cost_trend.points', 0)
+                ->where('review.channel_performance.available', false)
+                ->where('review.channel_performance.pending', false)
+                ->where('review.channel_performance.message', '暂无已完成活动。'));
     }
 
     public function test_authorized_user_can_queue_only_one_manual_feishu_refresh(): void
