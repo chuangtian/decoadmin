@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import CampaignConversionFunnel from './CampaignConversionFunnel.vue';
 import CampaignDailySalesChart from './CampaignDailySalesChart.vue';
 import CampaignModelSales from './CampaignModelSales.vue';
+import CampaignTrafficCostChart from './CampaignTrafficCostChart.vue';
 import type { CampaignReviewActivityOption, CampaignReviewJudgment, CampaignThemeReview } from './reviewTypes';
 
 const props = defineProps<{ review: CampaignThemeReview; currency: string }>();
@@ -157,6 +158,19 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
             :ad-spend-coverage-percent="review.daily_sales.ad_spend_coverage_percent"
         />
 
+        <CampaignTrafficCostChart
+            :currency="currency"
+            :points="review.traffic_cost_trend.points || []"
+            :available="review.traffic_cost_trend.available"
+            :pending="review.traffic_cost_trend.pending"
+            :stale="review.traffic_cost_trend.stale"
+            :message="review.traffic_cost_trend.message"
+            :ad-spend-available="review.traffic_cost_trend.ad_spend_available"
+            :ad-spend-message="review.traffic_cost_trend.ad_spend_message"
+            :ad-spend-reconciled="review.traffic_cost_trend.ad_spend_reconciled"
+            :ad-spend-coverage-percent="review.traffic_cost_trend.ad_spend_coverage_percent"
+        />
+
         <CampaignConversionFunnel
             :stages="review.funnel.stages || []"
             :available="review.funnel.available"
@@ -176,7 +190,7 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
 
         <section class="rounded-3xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-5">
             <h2 class="text-sm font-semibold text-slate-700">等待口径或数据接入的板块</h2>
-            <p class="mt-2 text-sm leading-6 text-slate-500">加购/结账成本、广告渠道花费与归因销售暂不展示数值，避免填充模拟数据。</p>
+            <p class="mt-2 text-sm leading-6 text-slate-500">广告渠道拆分花费与归因销售仍等待稳定口径，暂不展示数值，避免填充模拟数据。</p>
         </section>
 
         <Teleport to="body">

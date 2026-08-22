@@ -139,6 +139,7 @@ const refreshFromFeishu = () => {
 
 const reviewReportsPending = computed(() => Boolean(props.review && [
     props.review.daily_sales,
+    props.review.traffic_cost_trend,
     props.review.funnel,
     props.review.model_sales,
 ].some((dataset) => dataset?.pending)));
