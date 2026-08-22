@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Models\User;
 use App\Services\CampaignThemeOverviewService;
 use App\Services\CampaignThemeRefreshService;
+use App\Services\CampaignThemeReviewService;
 use App\Services\Feishu\CampaignActivitySyncService;
 use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
 use Carbon\CarbonImmutable;
@@ -226,10 +227,10 @@ class CampaignThemeOverviewTest extends TestCase
         $hidden = $this->campaign($organization, $otherStore, 'hidden-review', 999999, 1, 1, 0.9, '2026-03-01', '2026-03-02', 99);
 
         $reports = \Mockery::mock(ShopifyAnalyticsReportService::class);
-        $reports->shouldReceive('report')->times(6)->andReturnUsing(
+        $reports->shouldReceive('report')->times(7)->andReturnUsing(
             function (Store $reportedStore, string $report, string $from, string $to) use ($store): array {
                 $this->assertTrue($reportedStore->is($store));
-                $this->assertContains($report, ['core-sales-timeseries', 'marketing-engagement-spend-timeseries', 'conversion-funnel-breakdown', 'model-sales-summary']);
+                $this->assertContains($report, ['core-sales-timeseries', 'marketing-engagement-spend-timeseries', 'conversion-funnel-timeseries', 'conversion-funnel-breakdown', 'model-sales-summary']);
 
                 if ($report === 'core-sales-timeseries') {
                     return $this->shopifyReport([[
@@ -244,6 +245,28 @@ class CampaignThemeOverviewTest extends TestCase
                         'day' => '2026-02-10', 'engagements_ad_spend' => '1000.00',
                     ], [
                         'day' => '2026-02-15', 'engagements_ad_spend' => '5000.00',
+                    ]]);
+                }
+
+                if ($report === 'conversion-funnel-timeseries') {
+                    $this->assertSame('2026-02-10', $from);
+                    $this->assertSame('2026-02-15', $to);
+
+                    return $this->shopifyReport([[
+                        'day' => '2026-02-10',
+                        'sessions' => '25',
+                        'sessions_with_cart_additions' => '8',
+                        'sessions_that_reached_checkout' => '2',
+                    ], [
+                        'day' => '2026-02-11',
+                        'sessions' => '50',
+                        'sessions_with_cart_additions' => '0',
+                        'sessions_that_reached_checkout' => '0',
+                    ], [
+                        'day' => '2026-02-15',
+                        'sessions' => '100',
+                        'sessions_with_cart_additions' => '10',
+                        'sessions_that_reached_checkout' => '4',
                     ]]);
                 }
 
@@ -333,6 +356,37 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.daily_sales.points.5.date', '2026-02-10')
                 ->where('review.daily_sales.points.5.ad_spend', 4000)
                 ->where('review.daily_sales.points.5.roi', 6.96)
+                ->where('review.traffic_cost_trend.available', true)
+                ->where('review.traffic_cost_trend.pending', false)
+                ->where('review.traffic_cost_trend.stale', false)
+                ->where('review.traffic_cost_trend.message', null)
+                ->where('review.traffic_cost_trend.date_order', 'descending')
+                ->where('review.traffic_cost_trend.ad_spend_available', true)
+                ->where('review.traffic_cost_trend.ad_spend_reconciled', true)
+                ->where('review.traffic_cost_trend.ad_spend_coverage_percent', 25)
+                ->has('review.traffic_cost_trend.points', 6)
+                ->where('review.traffic_cost_trend.points.0.date', '2026-02-15')
+                ->where('review.traffic_cost_trend.points.0.sessions', 100)
+                ->where('review.traffic_cost_trend.points.0.cart_additions', 10)
+                ->where('review.traffic_cost_trend.points.0.reached_checkout', 4)
+                ->where('review.traffic_cost_trend.points.0.ad_spend', 20000)
+                ->where('review.traffic_cost_trend.points.0.cart_addition_cost', 2000)
+                ->where('review.traffic_cost_trend.points.0.checkout_cost', 5000)
+                ->where('review.traffic_cost_trend.points.3.date', '2026-02-12')
+                ->where('review.traffic_cost_trend.points.3.sessions', 0)
+                ->where('review.traffic_cost_trend.points.3.cart_additions', 0)
+                ->where('review.traffic_cost_trend.points.3.reached_checkout', 0)
+                ->where('review.traffic_cost_trend.points.3.ad_spend', 0)
+                ->where('review.traffic_cost_trend.points.3.cart_addition_cost', null)
+                ->where('review.traffic_cost_trend.points.3.checkout_cost', null)
+                ->where('review.traffic_cost_trend.points.4.date', '2026-02-11')
+                ->where('review.traffic_cost_trend.points.4.sessions', 50)
+                ->where('review.traffic_cost_trend.points.4.cart_addition_cost', null)
+                ->where('review.traffic_cost_trend.points.4.checkout_cost', null)
+                ->where('review.traffic_cost_trend.points.5.date', '2026-02-10')
+                ->where('review.traffic_cost_trend.points.5.ad_spend', 4000)
+                ->where('review.traffic_cost_trend.points.5.cart_addition_cost', 500)
+                ->where('review.traffic_cost_trend.points.5.checkout_cost', 2000)
                 ->where('review.funnel.stages.1.rate_percent', 16.22)
                 ->where('review.funnel.stages.3.sessions', 201)
                 ->where('review.model_sales.total_units', 10)
@@ -342,6 +396,24 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.model_sales.models.0.share_percent', 80));
 
         $this->assertNotSame($hidden->id, $current->id);
+    }
+
+    public function test_empty_review_returns_an_unavailable_traffic_cost_trend(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('campaign-themes.index', ['tab' => 'review']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('review.traffic_cost_trend.available', false)
+                ->where('review.traffic_cost_trend.pending', false)
+                ->where('review.traffic_cost_trend.stale', false)
+                ->where('review.traffic_cost_trend.message', '暂无已完成活动。')
+                ->where('review.traffic_cost_trend.ad_spend_available', false)
+                ->where('review.traffic_cost_trend.ad_spend_reconciled', false)
+                ->has('review.traffic_cost_trend.points', 0));
     }
 
     public function test_authorized_user_can_queue_only_one_manual_feishu_refresh(): void
@@ -437,6 +509,21 @@ class CampaignThemeOverviewTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         app(CampaignThemeOverviewService::class)->overview($organization, $store);
+    }
+
+    public function test_review_service_rejects_a_store_from_another_organization(): void
+    {
+        $organization = Organization::query()->create(['name' => 'Review Organization A', 'code' => 'campaign-review-a']);
+        $otherOrganization = Organization::query()->create(['name' => 'Review Organization B', 'code' => 'campaign-review-b']);
+        $store = $otherOrganization->stores()->create([
+            'name' => 'Review Store B',
+            'shopify_domain' => 'campaign-review-service-mismatch.myshopify.com',
+            'status' => 'active',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+
+        app(CampaignThemeReviewService::class)->review($organization, $store);
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */
