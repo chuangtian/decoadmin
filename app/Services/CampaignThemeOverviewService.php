@@ -10,6 +10,10 @@ use InvalidArgumentException;
 
 class CampaignThemeOverviewService
 {
+    public function __construct(
+        private CampaignActivityClassificationService $classification,
+    ) {}
+
     /** @return array<string, mixed> */
     public function overview(Organization $organization, Store $store): array
     {
@@ -54,7 +58,7 @@ class CampaignThemeOverviewService
                     'starts_on' => $startsOn,
                     'ends_on' => $endsOn,
                     'month' => $startsOn ? substr($startsOn, 0, 7) : null,
-                    'status' => $this->status($startsOn, $endsOn, $today),
+                    'status' => $this->classification->status($startsOn, $endsOn, $today),
                     'duration_days' => $startsOn && $endsOn
                         ? (int) CarbonImmutable::parse($startsOn)->diffInDays(CarbonImmutable::parse($endsOn)) + 1
                         : null,
@@ -125,7 +129,7 @@ class CampaignThemeOverviewService
                         ? round((float) $activity->conversion_rate * 100, 3)
                         : null,
                     'store_visits' => $activity->store_visits !== null ? (int) $activity->store_visits : null,
-                    'judgment' => $this->judgment($roi),
+                    'judgment' => $this->classification->judgment($roi),
                 ];
             })
             ->values()
@@ -156,33 +160,4 @@ class CampaignThemeOverviewService
         ];
     }
 
-    private function judgment(?float $roi): string
-    {
-        if ($roi === null) {
-            return 'insufficient_data';
-        }
-
-        if ($roi >= 6) {
-            return 'reusable';
-        }
-
-        if ($roi >= 5) {
-            return 'scalable';
-        }
-
-        return 'underperforming';
-    }
-
-    private function status(?string $startsOn, ?string $endsOn, string $today): string
-    {
-        if ($startsOn !== null && $startsOn > $today) {
-            return 'upcoming';
-        }
-
-        if ($endsOn !== null && $endsOn < $today) {
-            return 'completed';
-        }
-
-        return 'in_progress';
-    }
 }

@@ -48,6 +48,15 @@ class StoreFeishuDataLinkService
                 'campaign_view_id' => ['label' => '视图 View ID', 'env_key' => 'FEISHU_CAMPAIGN_VIEW_ID', 'secret' => false, 'placeholder' => '输入活动主题视图 View ID'],
             ],
         ],
+        'advertising_goals' => [
+            'title' => '广告目标',
+            'description' => '付费广告月度目标多维表格，用于当前店铺的广告目标页。',
+            'fields' => [
+                'advertising_goals_app_token' => ['label' => '多维表格 App Token', 'env_key' => 'FEISHU_ADVERTISING_GOALS_APP_TOKEN', 'secret' => true, 'placeholder' => '输入广告目标多维表格 App Token'],
+                'advertising_goals_table_id' => ['label' => '数据表 Table ID', 'env_key' => 'FEISHU_ADVERTISING_GOALS_TABLE_ID', 'secret' => false, 'placeholder' => '输入广告目标数据表 Table ID'],
+                'advertising_goals_view_id' => ['label' => '视图 View ID', 'env_key' => 'FEISHU_ADVERTISING_GOALS_VIEW_ID', 'secret' => false, 'placeholder' => '输入广告目标视图 View ID'],
+            ],
+        ],
         'seo_geo' => [
             'title' => 'SEO / GEO',
             'description' => 'SEO 日、周、月数据多维表格，用于自然流量数据同步。',
@@ -192,6 +201,27 @@ class StoreFeishuDataLinkService
             ->all();
     }
 
+    /** @return array{schema: string, section: string, configured: bool, has_configuration: bool, missing_fields: list<string>} */
+    public function sectionStatusForFrontend(Store $store, string $sectionKey): array
+    {
+        $section = $this->sectionDefinition($sectionKey);
+        $fieldKeys = array_keys($section['fields']);
+        $configuredKeys = $this->credentials($store)
+            ->filter(fn (StoreBusinessCredential $credential, string $key): bool => in_array($key, $fieldKeys, true)
+                && filled($credential->credential_value))
+            ->keys()
+            ->all();
+        $missingFields = array_values(array_diff($fieldKeys, $configuredKeys));
+
+        return [
+            'schema' => 'feishu-data-link-status-v1',
+            'section' => $sectionKey,
+            'configured' => $missingFields === [],
+            'has_configuration' => $configuredKeys !== [],
+            'missing_fields' => $missingFields,
+        ];
+    }
+
     /** @param array<string, mixed> $values */
     public function updateSection(Store $store, string $sectionKey, array $values, User $actor): void
     {
@@ -241,6 +271,43 @@ class StoreFeishuDataLinkService
                     'changed_keys' => $changedKeys,
                 ],
             ]);
+        });
+    }
+
+    public function clearSection(Store $store, string $sectionKey, User $actor): int
+    {
+        $section = $this->sectionDefinition($sectionKey);
+        $allowedKeys = array_keys($section['fields']);
+
+        return DB::transaction(function () use ($store, $sectionKey, $actor, $allowedKeys): int {
+            $deleted = StoreBusinessCredential::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('provider', self::PROVIDER)
+                ->whereIn('credential_key', $allowedKeys)
+                ->delete();
+
+            if ($deleted === 0) {
+                return 0;
+            }
+
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'user_id' => $actor->id,
+                'action' => 'store_feishu_data_links_cleared',
+                'subject_type' => Store::class,
+                'subject_id' => $store->id,
+                'old_values' => ['configured' => true],
+                'new_values' => ['configured' => false],
+                'metadata' => [
+                    'scope' => 'store',
+                    'section' => $sectionKey,
+                    'cleared_keys' => $allowedKeys,
+                ],
+            ]);
+
+            return $deleted;
         });
     }
 

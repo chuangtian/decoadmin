@@ -2,9 +2,12 @@
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import CampaignEfficiencyBubbleChart from '../../Components/CampaignThemes/CampaignEfficiencyBubbleChart.vue';
+import CampaignCalendarPanel from '../../Components/CampaignThemes/CampaignCalendarPanel.vue';
 import CampaignPerformanceTrendChart from '../../Components/CampaignThemes/CampaignPerformanceTrendChart.vue';
+import CampaignPlanningPanel from '../../Components/CampaignThemes/CampaignPlanningPanel.vue';
 import CampaignQualityRanking from '../../Components/CampaignThemes/CampaignQualityRanking.vue';
 import CampaignReviewPanel from '../../Components/CampaignThemes/CampaignReviewPanel.vue';
+import type { CampaignThemePlanning } from '../../Components/CampaignThemes/planningTypes';
 import type { CampaignThemeReview } from '../../Components/CampaignThemes/reviewTypes';
 import DualMetricTrendChart from '../../Components/CampaignThemes/DualMetricTrendChart.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -90,7 +93,9 @@ const props = defineProps<{
     };
     activeTab: TabKey;
     overview: CampaignThemeOverview;
+    planning: CampaignThemePlanning | null;
     review: CampaignThemeReview | null;
+    reviewDetailOpen: boolean;
     refreshStatus: CampaignRefreshStatus;
 }>();
 
@@ -123,7 +128,7 @@ const startRefreshPolling = () => {
 
     refreshPoller = setInterval(() => {
         router.reload({
-            only: ['overview', 'refreshStatus'],
+            only: ['overview', 'planning', 'refreshStatus'],
         });
     }, 2500);
 };
@@ -160,15 +165,15 @@ const startReportPolling = () => {
 const switchTab = (tab: TabKey) => {
     if (tab === activeTab.value) return;
 
-    if (tab === 'review') {
-        router.get('/campaign-themes', { tab: 'review' }, {
+    if (tab === 'review' || tab === 'planning' || tab === 'calendar') {
+        router.get('/campaign-themes', { tab }, {
             preserveScroll: true,
             replace: true,
         });
         return;
     }
 
-    if (tab === 'overview' && props.activeTab === 'review') {
+    if (tab === 'overview' && props.activeTab !== 'overview') {
         router.get('/campaign-themes', {}, {
             preserveScroll: true,
             replace: true,
@@ -518,8 +523,44 @@ const cards = computed(() => [
                 role="tabpanel"
                 aria-labelledby="campaign-tab-review"
             >
-                <CampaignReviewPanel v-if="review" :review="review" :currency="store.currency" />
+                <CampaignReviewPanel v-if="review" :review="review" :currency="store.currency" :initial-detail-open="reviewDetailOpen" />
                 <div v-else class="grid min-h-80 place-items-center rounded-3xl border border-slate-200 bg-white text-sm text-slate-400 shadow-sm">正在载入复盘分析…</div>
+            </section>
+
+            <section
+                v-else-if="activeTab === 'planning'"
+                id="campaign-panel-planning"
+                class="mt-6 min-w-0"
+                role="tabpanel"
+                aria-labelledby="campaign-tab-planning"
+            >
+                <CampaignPlanningPanel v-if="planning" :planning="planning" :currency="store.currency" />
+                <div v-else class="grid min-h-80 place-items-center rounded-3xl border border-slate-200 bg-white text-sm text-slate-400 shadow-sm">正在载入活动策划…</div>
+                <CampaignReviewPanel
+                    v-if="review && reviewDetailOpen"
+                    :review="review"
+                    :currency="store.currency"
+                    :initial-detail-open="true"
+                    detail-only
+                />
+            </section>
+
+            <section
+                v-else-if="activeTab === 'calendar'"
+                id="campaign-panel-calendar"
+                class="mt-6 min-w-0"
+                role="tabpanel"
+                aria-labelledby="campaign-tab-calendar"
+            >
+                <CampaignCalendarPanel v-if="planning" :planning="planning" />
+                <div v-else class="grid min-h-80 place-items-center rounded-3xl border border-slate-200 bg-white text-sm text-slate-400 shadow-sm">正在载入活动日历…</div>
+                <CampaignReviewPanel
+                    v-if="review && reviewDetailOpen"
+                    :review="review"
+                    :currency="store.currency"
+                    :initial-detail-open="true"
+                    detail-only
+                />
             </section>
 
             <section

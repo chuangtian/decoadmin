@@ -48,6 +48,11 @@ return [
         'amazon_sync_enabled' => (bool) env('FEISHU_AMAZON_SYNC_ENABLED', true),
         'amazon_sync_time' => env('FEISHU_AMAZON_SYNC_TIME', '09:00'),
         'amazon_sync_timezone' => env('FEISHU_AMAZON_SYNC_TIMEZONE', 'Asia/Shanghai'),
+        'paid_advertising_goal_sync_enabled' => (bool) env('FEISHU_PAID_ADVERTISING_GOAL_SYNC_ENABLED', true),
+        'paid_advertising_goal_sync_time' => env('FEISHU_PAID_ADVERTISING_GOAL_SYNC_TIME', '03:40'),
+        'paid_advertising_goal_sync_timezone' => env('FEISHU_PAID_ADVERTISING_GOAL_SYNC_TIMEZONE', 'Asia/Shanghai'),
+        'paid_advertising_goal_max_fields' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_FIELDS', 1000),
+        'paid_advertising_goal_max_records' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_RECORDS', 5000),
     ],
 
     'google_ads' => [

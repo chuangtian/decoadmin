@@ -24,10 +24,14 @@ export interface FeishuDataLinkSection {
 
 const props = defineProps<{
     sections: FeishuDataLinkSection[];
+    initialSection?: string;
     canUpdate: boolean;
 }>();
 
-const activeKey = ref(props.sections[0]?.key ?? '');
+const initialKey = props.sections.some((section) => section.key === props.initialSection)
+    ? props.initialSection as string
+    : props.sections[0]?.key ?? '';
+const activeKey = ref(initialKey);
 const values = reactive<Record<string, string>>({});
 const revealed = reactive<Record<string, boolean>>({});
 const revealLoading = reactive<Record<string, boolean>>({});

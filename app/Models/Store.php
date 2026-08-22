@@ -125,6 +125,16 @@ class Store extends Model
         return $this->hasMany(CampaignPlanningDocument::class);
     }
 
+    public function paidAdvertisingGoalBoards(): HasMany
+    {
+        return $this->hasMany(PaidAdvertisingGoalBoard::class);
+    }
+
+    public function paidAdvertisingGoalRecords(): HasMany
+    {
+        return $this->hasMany(PaidAdvertisingGoalRecord::class);
+    }
+
     public function financeEntries(): HasMany
     {
         return $this->hasMany(FinanceEntry::class);

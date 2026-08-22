@@ -5,12 +5,14 @@ namespace Tests\Feature;
 use App\Jobs\SyncFeishuCampaignActivitiesForStore;
 use App\Models\AuditLog;
 use App\Models\CampaignActivity;
+use App\Models\CampaignPlanningDocument;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
 use App\Services\Advertising\AdvertisingChannelSnapshotService;
 use App\Services\CampaignThemeOverviewService;
+use App\Services\CampaignThemePlanningService;
 use App\Services\CampaignThemeRefreshService;
 use App\Services\CampaignThemeReviewService;
 use App\Services\Feishu\CampaignActivitySyncService;
@@ -461,6 +463,95 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.channel_performance.message', '暂无已完成活动。'));
     }
 
+    public function test_planning_tab_returns_store_scoped_status_counts_and_date_descending_cards(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-22 12:00:00', 'America/Los_Angeles'));
+
+        try {
+            [$user, $organization, $store] = $this->context('viewer');
+            $otherStore = $organization->stores()->create([
+                'name' => 'Other Planning Store',
+                'shopify_domain' => 'other-planning.myshopify.com',
+                'status' => 'active',
+            ]);
+
+            $completed = $this->campaign($organization, $store, 'completed', 581100, 138080, 647, 0.00293, '2026-07-01', '2026-07-31', 4.21);
+            $completed->update([
+                'campaign_id' => 'MACFOX-2026-021',
+                'campaign_name' => '夏日街头骑行',
+                'main_title' => 'Macfox Summer Street Season',
+                'core_offer' => 'X1S、X7 立减优惠',
+                'campaign_summary' => '【结果】活动销售额达到目标。',
+            ]);
+            $current = $this->campaign($organization, $store, 'current', 0, 0, 0, null, '2026-08-20', '2026-08-25', null);
+            $future = $this->campaign($organization, $store, 'future', 0, 0, 0, null, '2026-09-01', '2026-09-05', null);
+            $this->campaign($organization, $otherStore, 'hidden', 999, 1, 1, 0.5, '2026-10-01', '2026-10-02', 99);
+
+            $this->actingAs($user)
+                ->withSession($this->contextSession($organization, $store))
+                ->get(route('campaign-themes.index', ['tab' => 'planning']))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('activeTab', 'planning')
+                    ->where('planning.schema', 'campaign-theme-planning-v1')
+                    ->where('planning.counts.total', 3)
+                    ->where('planning.counts.upcoming', 1)
+                    ->where('planning.counts.in_progress', 1)
+                    ->where('planning.counts.completed', 1)
+                    ->has('planning.activities', 3)
+                    ->where('planning.activities.0.id', $future->id)
+                    ->where('planning.activities.0.status', 'upcoming')
+                    ->where('planning.activities.1.id', $current->id)
+                    ->where('planning.activities.1.status', 'in_progress')
+                    ->where('planning.activities.2.id', $completed->id)
+                    ->where('planning.activities.2.name', '夏日街头骑行')
+                    ->where('planning.activities.2.core_offer', 'X1S、X7 立减优惠')
+                    ->where('planning.activities.2.summary', '【结果】活动销售额达到目标。')
+                    ->where('planning.activities.2.judgment', 'underperforming')
+                    ->where('review', null)
+                    ->where('reviewDetailOpen', false));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_explicit_in_progress_activity_opens_review_detail_without_falling_back(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+        $completed = $this->campaign($organization, $store, 'completed-review', 100000, 20000, 100, 0.003, null, null, 5.0);
+        $current = $this->campaign($organization, $store, 'current-review', 0, 0, 0, null, null, null, null);
+
+        CampaignPlanningDocument::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'campaign_activity_id' => $current->id,
+            'source_url' => 'https://example.feishu.cn/docx/current-review',
+            'title' => '进行中活动策划书',
+            'rendered_html' => '<article><h1>进行中活动策划书</h1><p>本地快照内容</p></article>',
+            'sync_status' => 'synced',
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('campaign-themes.index', [
+                'tab' => 'review',
+                'activity' => $current->id,
+                'detail' => 1,
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('activeTab', 'review')
+                ->where('reviewDetailOpen', true)
+                ->where('review.selected_activity_id', $current->id)
+                ->where('review.activity.id', $current->id)
+                ->where('review.activity.status', 'in_progress')
+                ->where('review.activity.planning_document_snapshot.available', true)
+                ->where('review.activity.planning_document_snapshot.rendered_html', '<article><h1>进行中活动策划书</h1><p>本地快照内容</p></article>')
+                ->has('review.activities', 2)
+                ->where('review.activities.0.id', $current->id)
+                ->where('review.activities.1.id', $completed->id));
+    }
+
     public function test_authorized_user_can_queue_only_one_manual_feishu_refresh(): void
     {
         Queue::fake();
@@ -569,6 +660,21 @@ class CampaignThemeOverviewTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         app(CampaignThemeReviewService::class)->review($organization, $store);
+    }
+
+    public function test_planning_service_rejects_a_store_from_another_organization(): void
+    {
+        $organization = Organization::query()->create(['name' => 'Planning Organization A', 'code' => 'campaign-planning-a']);
+        $otherOrganization = Organization::query()->create(['name' => 'Planning Organization B', 'code' => 'campaign-planning-b']);
+        $store = $otherOrganization->stores()->create([
+            'name' => 'Planning Store B',
+            'shopify_domain' => 'campaign-planning-service-mismatch.myshopify.com',
+            'status' => 'active',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+
+        app(CampaignThemePlanningService::class)->planning($organization, $store);
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */

@@ -1,4 +1,5 @@
 export type CampaignReviewJudgment = 'reusable' | 'scalable' | 'underperforming' | 'insufficient_data';
+export type CampaignReviewStatus = 'upcoming' | 'in_progress' | 'completed';
 
 export interface CampaignReviewActivityOption {
     id: number;
@@ -27,12 +28,18 @@ export interface CampaignThemeReview {
     comparison_activity_id: number | null;
     activity: null | CampaignReviewActivityOption & {
         campaign_id: string | null;
+        status: CampaignReviewStatus;
         judgment: CampaignReviewJudgment;
         main_title: string | null;
         subtitle: string | null;
         core_offer: string | null;
         planning_document_url: string | null;
-        planning_document_snapshot: null | { available: boolean; title: string | null; source_url: string | null };
+        planning_document_snapshot: null | {
+            available: boolean;
+            title: string | null;
+            source_url: string | null;
+            rendered_html: string | null;
+        };
         campaign_images: string[];
         email_images: string[];
         analysis: {

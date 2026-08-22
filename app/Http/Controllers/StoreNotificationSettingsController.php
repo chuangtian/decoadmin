@@ -65,6 +65,7 @@ class StoreNotificationSettingsController extends Controller
             'settings' => $settings->feishuForFrontend($store, $canUpdate),
             'tableSettings' => $settings->feishuTableForFrontend($store, $canUpdate),
             'dataLinks' => $dataLinks->catalogForFrontend($store, $canUpdate),
+            'activeDataLinkSection' => $request->string('section')->toString(),
             'canUpdate' => $canUpdate,
         ]);
     }

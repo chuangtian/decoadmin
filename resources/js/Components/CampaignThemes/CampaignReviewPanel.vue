@@ -1,23 +1,39 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import CampaignConversionFunnel from './CampaignConversionFunnel.vue';
 import CampaignChannelPerformance from './CampaignChannelPerformance.vue';
 import CampaignDailySalesChart from './CampaignDailySalesChart.vue';
 import CampaignModelSales from './CampaignModelSales.vue';
 import CampaignReviewAnalysis from './CampaignReviewAnalysis.vue';
 import CampaignTrafficCostChart from './CampaignTrafficCostChart.vue';
-import type { CampaignReviewActivityOption, CampaignReviewJudgment, CampaignThemeReview } from './reviewTypes';
+import type { CampaignReviewActivityOption, CampaignReviewJudgment, CampaignReviewStatus, CampaignThemeReview } from './reviewTypes';
 
-const props = defineProps<{ review: CampaignThemeReview; currency: string }>();
+const props = withDefaults(defineProps<{
+    review: CampaignThemeReview;
+    currency: string;
+    initialDetailOpen?: boolean;
+    detailOnly?: boolean;
+}>(), {
+    initialDetailOpen: false,
+    detailOnly: false,
+});
 const selectedImage = ref<string | null>(null);
 const changing = ref(false);
+const detailOpen = ref(Boolean(props.initialDetailOpen && props.review.activity));
+let previousBodyOverflow = '';
 
 const judgmentMeta: Record<CampaignReviewJudgment, { label: string; classes: string }> = {
     reusable: { label: '可复用', classes: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
     scalable: { label: '放量适销', classes: 'bg-orange-50 text-orange-700 ring-orange-200' },
     underperforming: { label: '承接不足', classes: 'bg-rose-50 text-rose-700 ring-rose-200' },
     insufficient_data: { label: '数据不足', classes: 'bg-slate-100 text-slate-600 ring-slate-200' },
+};
+
+const statusMeta: Record<CampaignReviewStatus, { label: string; classes: string }> = {
+    upcoming: { label: '未开始', classes: 'bg-amber-50 text-amber-700 ring-amber-200' },
+    in_progress: { label: '进行中', classes: 'bg-blue-50 text-blue-700 ring-blue-200' },
+    completed: { label: '已完成', classes: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
 };
 
 const metricDefinitions = [
@@ -70,10 +86,66 @@ const navigate = (activity: number | null, comparison: string | number) => {
 
 const selectActivity = (event: Event) => navigate(Number((event.target as HTMLSelectElement).value), 'auto');
 const selectComparison = (event: Event) => navigate(props.review.selected_activity_id, (event.target as HTMLSelectElement).value);
+
+const setBodyLock = (locked: boolean) => {
+    if (typeof document === 'undefined') return;
+
+    if (locked) {
+        previousBodyOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+    } else {
+        document.body.style.overflow = previousBodyOverflow;
+    }
+};
+
+const closeDetail = () => {
+    detailOpen.value = false;
+
+    if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+
+        if (['planning', 'calendar'].includes(url.searchParams.get('source') ?? '')) {
+            url.searchParams.delete('detail');
+            url.searchParams.delete('source');
+            url.searchParams.delete('activity');
+            url.searchParams.delete('compare');
+            window.history.replaceState(window.history.state, '', url.toString());
+            return;
+        }
+
+        url.searchParams.delete('detail');
+        url.searchParams.delete('source');
+        window.history.replaceState(window.history.state, '', url.toString());
+    }
+};
+
+const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+        if (selectedImage.value) selectedImage.value = null;
+        else if (detailOpen.value) closeDetail();
+    }
+};
+
+watch(() => props.initialDetailOpen, (open) => {
+    detailOpen.value = Boolean(open && props.review.activity);
+});
+
+watch(detailOpen, setBodyLock);
+
+onMounted(() => {
+    if (detailOpen.value) setBodyLock(true);
+    window.addEventListener('keydown', handleEscape);
+});
+
+onBeforeUnmount(() => {
+    setBodyLock(false);
+    window.removeEventListener('keydown', handleEscape);
+});
 </script>
 
 <template>
     <div v-if="review.activity" class="min-w-0 space-y-6" :class="changing ? 'pointer-events-none opacity-70' : ''">
+        <template v-if="!detailOnly">
         <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div class="grid min-w-0 gap-6 p-5 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_420px] sm:p-6">
                 <div class="min-w-0">
@@ -207,6 +279,79 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
             :diagnosis="review.activity.analysis.diagnosis"
             :optimization="review.activity.analysis.optimization"
         />
+        </template>
+
+        <Teleport to="body">
+            <div
+                v-if="detailOpen && review.activity"
+                class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6"
+                role="presentation"
+                @click.self="closeDetail"
+            >
+                <article
+                    class="flex max-h-[92vh] w-full max-w-6xl min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 shadow-2xl"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="campaign-review-detail-title"
+                >
+                    <header class="shrink-0 border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
+                        <div class="flex min-w-0 items-start justify-between gap-4">
+                            <div class="min-w-0">
+                                <div class="flex min-w-0 flex-wrap items-center gap-2.5">
+                                    <h2 id="campaign-review-detail-title" class="truncate text-2xl font-semibold text-slate-950" :title="review.activity.name">{{ review.activity.name }}</h2>
+                                    <span class="rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="statusMeta[review.activity.status].classes">{{ statusMeta[review.activity.status].label }}</span>
+                                </div>
+                                <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+                                    <span class="tabular-nums">▣ {{ period(review.activity) }}</span>
+                                    <span v-if="review.activity.core_offer" class="break-words">🎁 {{ review.activity.core_offer }}</span>
+                                </div>
+                            </div>
+                            <div class="flex shrink-0 items-center gap-3">
+                                <span class="hidden rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset sm:inline-flex" :class="judgmentMeta[review.activity.judgment].classes">{{ judgmentMeta[review.activity.judgment].label }}</span>
+                                <button type="button" class="grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-xl text-slate-500 transition hover:border-slate-300 hover:text-slate-900" aria-label="关闭活动详情" @click="closeDetail">×</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7 sm:py-6">
+                        <section>
+                            <div class="flex items-end justify-between gap-3">
+                                <div>
+                                    <h3 class="text-base font-semibold text-slate-950">核心指标</h3>
+                                    <p class="mt-1 text-xs text-slate-400">当前12项指标，与复盘分析页面保持同一数据口径</p>
+                                </div>
+                                <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">本地数据库</span>
+                            </div>
+                            <div class="mt-4 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                <article v-for="card in cards" :key="`detail-${card.key}`" class="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                    <p class="text-xs font-medium text-slate-500">{{ card.label }}</p>
+                                    <strong class="mt-2 block truncate text-xl font-semibold tabular-nums text-slate-950" :title="formatMetric(card.metric.value, card.format)">{{ formatMetric(card.metric.value, card.format) }}</strong>
+                                    <p v-if="review.comparison_activity && card.metric.change_percent !== null" class="mt-1.5 text-xs font-semibold tabular-nums" :class="card.metric.change_percent >= 0 ? 'text-emerald-600' : 'text-rose-600'">
+                                        {{ card.metric.change_percent >= 0 ? '+' : '' }}{{ card.metric.change_percent.toFixed(1) }}%
+                                    </p>
+                                    <p v-else-if="review.comparison_activity" class="mt-1.5 text-xs text-slate-400">对比 --</p>
+                                </article>
+                            </div>
+                        </section>
+
+                        <section class="mt-6">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <h3 class="text-base font-semibold text-slate-950">策划书</h3>
+                                    <p v-if="review.activity.planning_document_snapshot?.title" class="mt-1 text-xs text-slate-400">{{ review.activity.planning_document_snapshot.title }}</p>
+                                </div>
+                                <a v-if="review.activity.planning_document_url" :href="review.activity.planning_document_url" target="_blank" rel="noopener noreferrer" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700">查看飞书原文</a>
+                            </div>
+
+                            <div v-if="review.activity.planning_document_snapshot?.available && review.activity.planning_document_snapshot.rendered_html" class="campaign-planning-content mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-700 sm:p-7" v-html="review.activity.planning_document_snapshot.rendered_html" />
+                            <div v-else class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-400">
+                                {{ review.activity.planning_document_url ? '策划书本地快照尚未完成，可先查看飞书原文。' : '该活动暂未配置策划书。' }}
+                            </div>
+                        </section>
+                    </div>
+                </article>
+            </div>
+        </Teleport>
 
         <Teleport to="body">
             <div v-if="selectedImage" class="fixed inset-0 z-[100] grid place-items-center bg-slate-950/75 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="活动素材预览" @click.self="selectedImage = null">
@@ -224,3 +369,46 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
         </div>
     </section>
 </template>
+
+<style scoped>
+.campaign-planning-content :deep(.campaign-planning-document__title) {
+    margin-bottom: 1.25rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.3;
+    color: rgb(15 23 42);
+}
+
+.campaign-planning-content :deep(h1),
+.campaign-planning-content :deep(h2),
+.campaign-planning-content :deep(h3),
+.campaign-planning-content :deep(h4) {
+    margin-bottom: 0.65rem;
+    margin-top: 1.5rem;
+    font-weight: 700;
+    line-height: 1.4;
+    color: rgb(15 23 42);
+}
+
+.campaign-planning-content :deep(h1) { font-size: 1.4rem; }
+.campaign-planning-content :deep(h2) { font-size: 1.2rem; }
+.campaign-planning-content :deep(h3),
+.campaign-planning-content :deep(h4) { font-size: 1.05rem; }
+
+.campaign-planning-content :deep(p),
+.campaign-planning-content :deep(ul),
+.campaign-planning-content :deep(ol),
+.campaign-planning-content :deep(blockquote) {
+    margin: 0.7rem 0;
+}
+
+.campaign-planning-content :deep(ul) { list-style: disc; padding-left: 1.5rem; }
+.campaign-planning-content :deep(ol) { list-style: decimal; padding-left: 1.5rem; }
+.campaign-planning-content :deep(a) { color: rgb(4 120 87); text-decoration: underline; }
+.campaign-planning-content :deep(img) { max-width: 100%; height: auto; border-radius: 0.75rem; }
+.campaign-planning-content :deep(table) { width: 100%; border-collapse: collapse; }
+.campaign-planning-content :deep(th),
+.campaign-planning-content :deep(td) { border: 1px solid rgb(226 232 240); padding: 0.6rem; vertical-align: top; }
+.campaign-planning-content :deep(.campaign-planning-document__callout) { margin: 1rem 0; border-radius: 0.75rem; background: rgb(241 245 249); padding: 1rem; }
+.campaign-planning-content :deep(.campaign-planning-document__grid) { display: grid; gap: 1rem; }
+</style>

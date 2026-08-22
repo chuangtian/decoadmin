@@ -25,6 +25,7 @@ const props = defineProps<{
     settings: FeishuSettings;
     tableSettings: FeishuTableSettings;
     dataLinks: FeishuDataLinkSection[];
+    activeDataLinkSection: string;
     canUpdate: boolean;
 }>();
 
@@ -108,7 +109,7 @@ const toggleFeishu = (event: Event) => {
                 </div>
             </section>
 
-            <FeishuDataLinkSettings :sections="dataLinks" :can-update="canUpdate" />
+            <FeishuDataLinkSettings :sections="dataLinks" :initial-section="activeDataLinkSection" :can-update="canUpdate" />
         </div>
     </AppLayout>
 </template>

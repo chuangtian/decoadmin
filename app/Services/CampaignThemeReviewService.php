@@ -16,6 +16,7 @@ class CampaignThemeReviewService
     public function __construct(
         private ShopifyAnalyticsReportService $reports,
         private AdvertisingChannelSnapshotService $advertisingChannels,
+        private CampaignActivityClassificationService $classification,
     ) {}
 
     /** @return array<string, mixed> */
@@ -34,21 +35,52 @@ class CampaignThemeReviewService
             ->forOrganization($organization)
             ->forStore($store)
             ->where('sales_amount', '>', 0)
-            ->with(['planningDocumentSnapshot:id,campaign_activity_id,sync_status,source_url,title'])
             ->orderByDesc('starts_on')
             ->orderByDesc('id')
             ->limit(100)
             ->get();
 
-        $selected = $activityId === null
-            ? $activities->first()
-            : ($activities->firstWhere('id', $activityId) ?? $activities->first());
+        $selected = $activities->first();
+        if ($activityId !== null) {
+            $selected = CampaignActivity::query()
+                ->forOrganization($organization)
+                ->forStore($store)
+                ->find($activityId);
+
+            if ($selected && ! $activities->contains('id', $selected->id)) {
+                $activities->push($selected);
+                $activities = $activities->sort(function (CampaignActivity $left, CampaignActivity $right): int {
+                    $dateOrder = strcmp(
+                        $right->starts_on?->toDateString() ?? '',
+                        $left->starts_on?->toDateString() ?? '',
+                    );
+
+                    return $dateOrder !== 0 ? $dateOrder : $right->id <=> $left->id;
+                })->values();
+            }
+        }
+
+        $selected?->load(['planningDocumentSnapshot' => fn ($query) => $query->select([
+            'id',
+            'campaign_activity_id',
+            'sync_status',
+            'source_url',
+            'title',
+            'rendered_html',
+        ])]);
+
         $comparisonActivity = $this->comparisonActivity($activities, $selected, $comparison);
+        $today = CarbonImmutable::now($store->timezone ?: 'UTC')->toDateString();
 
         if (! $selected) {
             return [
                 'schema' => 'campaign-theme-review-v1',
-                'activities' => [],
+                'activities' => $activities->map(fn (CampaignActivity $activity): array => [
+                    'id' => (int) $activity->id,
+                    'name' => $this->activityName($activity),
+                    'starts_on' => $activity->starts_on?->toDateString(),
+                    'ends_on' => $activity->ends_on?->toDateString(),
+                ])->values()->all(),
                 'selected_activity_id' => null,
                 'comparison_activity_id' => null,
                 'activity' => null,
@@ -88,8 +120,9 @@ class CampaignThemeReviewService
                 $comparisonActivity,
                 $currentReports['funnel'] ?? null,
                 $comparisonReports['funnel'] ?? null,
+                $today,
             ),
-            'comparison_activity' => $comparisonActivity ? $this->activitySummary($comparisonActivity) : null,
+            'comparison_activity' => $comparisonActivity ? $this->activitySummary($comparisonActivity, $today) : null,
             'daily_sales' => $dailySales,
             'traffic_cost_trend' => $this->trafficCostTrend(
                 $currentReports['funnel_timeseries'] ?? null,
@@ -138,6 +171,7 @@ class CampaignThemeReviewService
         ?CampaignActivity $comparison,
         ?array $funnelReport,
         ?array $comparisonFunnelReport,
+        string $today,
     ): array {
         $metrics = $this->metrics($activity, $funnelReport);
         $comparisonMetrics = $comparison ? $this->metrics($comparison, $comparisonFunnelReport) : [];
@@ -154,7 +188,7 @@ class CampaignThemeReviewService
         }
 
         return [
-            ...$this->activitySummary($activity),
+            ...$this->activitySummary($activity, $today),
             'main_title' => $activity->main_title,
             'subtitle' => $activity->subtitle,
             'core_offer' => $activity->core_offer,
@@ -163,6 +197,7 @@ class CampaignThemeReviewService
                 'available' => $activity->planningDocumentSnapshot->sync_status === 'synced',
                 'title' => $activity->planningDocumentSnapshot->title,
                 'source_url' => $activity->planningDocumentSnapshot->source_url,
+                'rendered_html' => $activity->planningDocumentSnapshot->rendered_html,
             ] : null,
             'campaign_images' => $this->imageUrls($activity->campaign_images),
             'email_images' => $this->imageUrls($activity->email_content),
@@ -177,22 +212,20 @@ class CampaignThemeReviewService
     }
 
     /** @return array<string, mixed> */
-    private function activitySummary(CampaignActivity $activity): array
+    private function activitySummary(CampaignActivity $activity, string $today): array
     {
         $roi = $activity->roi !== null ? round((float) $activity->roi, 2) : null;
+        $startsOn = $activity->starts_on?->toDateString();
+        $endsOn = $activity->ends_on?->toDateString();
 
         return [
             'id' => (int) $activity->id,
             'campaign_id' => $activity->campaign_id,
             'name' => $this->activityName($activity),
-            'starts_on' => $activity->starts_on?->toDateString(),
-            'ends_on' => $activity->ends_on?->toDateString(),
-            'judgment' => match (true) {
-                $roi === null => 'insufficient_data',
-                $roi >= 6 => 'reusable',
-                $roi >= 5 => 'scalable',
-                default => 'underperforming',
-            },
+            'starts_on' => $startsOn,
+            'ends_on' => $endsOn,
+            'status' => $this->classification->status($startsOn, $endsOn, $today),
+            'judgment' => $this->classification->judgment($roi),
         ];
     }
 

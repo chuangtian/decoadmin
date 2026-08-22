@@ -10,6 +10,7 @@ defineProps<{ name: string; size?: number }>();
         <template v-else-if="name === 'shopify'"><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/><path d="M10 13c1-1 4-1 4 1s-4 1-4 3 3 2 4 1"/></template>
         <template v-else-if="name === 'app-center'"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></template>
         <template v-else-if="name === 'analytics'"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></template>
+        <template v-else-if="name === 'paid-advertising'"><path d="M4 10v4h4l8 4V6l-8 4H4Z"/><path d="m16 9 4-2v10l-4-2M6 14l1 6h4l-2-6"/></template>
         <template v-else-if="name === 'finance'"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 5V3h10v2M7 10h10M8 15h2M14 15h2"/></template>
         <template v-else-if="name === 'notifications'"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></template>
         <template v-else-if="name === 'collaboration'"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20a6 6 0 0 1 12 0M13 20a5 5 0 0 1 9 0"/></template>

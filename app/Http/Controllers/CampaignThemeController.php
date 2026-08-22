@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\CampaignThemeOverviewService;
+use App\Services\CampaignThemePlanningService;
 use App\Services\CampaignThemeRefreshService;
 use App\Services\CampaignThemeReviewService;
 use App\Support\CurrentOrganization;
@@ -19,6 +20,7 @@ class CampaignThemeController extends Controller
         CurrentOrganization $currentOrganization,
         CurrentStore $currentStore,
         CampaignThemeOverviewService $overview,
+        CampaignThemePlanningService $planning,
         CampaignThemeReviewService $review,
         CampaignThemeRefreshService $refresh,
     ): Response {
@@ -29,6 +31,9 @@ class CampaignThemeController extends Controller
             ? $request->string('tab')->toString()
             : 'overview';
         $comparison = $request->query('compare', 'auto');
+        $reviewDetailOpen = $request->boolean('detail');
+        $detailTabs = ['planning', 'calendar'];
+        $shouldLoadReview = $activeTab === 'review' || (in_array($activeTab, $detailTabs, true) && $reviewDetailOpen);
 
         return Inertia::render('CampaignThemes/Index', [
             'store' => [
@@ -39,7 +44,10 @@ class CampaignThemeController extends Controller
             ],
             'activeTab' => $activeTab,
             'overview' => $overview->overview($organization, $store),
-            'review' => $activeTab === 'review'
+            'planning' => in_array($activeTab, ['planning', 'calendar'], true)
+                ? $planning->planning($organization, $store)
+                : null,
+            'review' => $shouldLoadReview
                 ? $review->review(
                     $organization,
                     $store,
@@ -47,6 +55,7 @@ class CampaignThemeController extends Controller
                     is_numeric($comparison) ? (int) $comparison : (string) $comparison,
                 )
                 : null,
+            'reviewDetailOpen' => $reviewDetailOpen && $shouldLoadReview,
             'refreshStatus' => [
                 ...$refresh->status($store),
                 'can_run' => $request->user()->hasPermission('sync.run', $organization, $store),

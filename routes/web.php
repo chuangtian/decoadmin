@@ -21,6 +21,7 @@ use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
+use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
@@ -45,6 +46,7 @@ use App\Http\Controllers\WebhookEventController;
 use App\Http\Controllers\YouTubeAnalyticsOAuthController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::get('/health', HealthCheckController::class)->name('health');
 
@@ -120,6 +122,44 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/reports/{report}/pin', [ReportController::class, 'pin'])->middleware('permission:reports.view')->name('reports.pin');
     Route::get('/reports/{report}', [ReportController::class, 'show'])->middleware('permission:reports.view')->name('reports.show');
     Route::get('/reports/{report}/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
+    Route::get('/paid-advertising/goals', [PaidAdvertisingGoalController::class, 'index'])
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.goals');
+    Route::post('/paid-advertising/goals/refresh', [PaidAdvertisingGoalController::class, 'refresh'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.goals.refresh');
+    Route::get('/paid-advertising/goals/refresh/{syncRun}', [PaidAdvertisingGoalController::class, 'refreshStatus'])
+        ->whereUuid('syncRun')
+        ->middleware(['permission:sync.run', 'throttle:120,1'])
+        ->name('paid-advertising.goals.refresh-status');
+    Route::post('/paid-advertising/goals', [PaidAdvertisingGoalController::class, 'store'])
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.goals.store');
+    Route::put('/paid-advertising/goals/overall', [PaidAdvertisingGoalController::class, 'configureOverall'])
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.goals.overall.update');
+    Route::delete('/paid-advertising/goals/overall', [PaidAdvertisingGoalController::class, 'clearOverall'])
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.goals.overall.clear');
+    Route::delete('/paid-advertising/goals/{goalBoard}', [PaidAdvertisingGoalController::class, 'destroy'])
+        ->whereNumber('goalBoard')
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.goals.destroy');
+    Route::get('/paid-advertising/facebook', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Facebook Ads']))
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.facebook');
+    Route::get('/paid-advertising/google', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Google Ads']))
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.google');
+    Route::get('/paid-advertising/tiktok', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'TikTok Ads']))
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.tiktok');
+    Route::get('/paid-advertising/bing', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Bing Ads']))
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.bing');
+    Route::get('/paid-advertising/criteo', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Criteo']))
+        ->middleware('permission:reports.view')
+        ->name('paid-advertising.criteo');
     Route::get(
         '/campaign-planning-documents/{campaignPlanningDocument}/assets/{assetHash}',
         CampaignPlanningAssetController::class,

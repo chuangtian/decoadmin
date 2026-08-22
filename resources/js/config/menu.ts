@@ -54,6 +54,18 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '付费广告',
+        icon: 'paid-advertising',
+        children: [
+            { name: '广告目标', route: '/paid-advertising/goals', icon: 'analytics', permission: 'reports.view' },
+            { name: 'Facebook Ads', route: '/paid-advertising/facebook', icon: 'analytics', permission: 'reports.view' },
+            { name: 'Google Ads', route: '/paid-advertising/google', icon: 'analytics', permission: 'reports.view' },
+            { name: 'TikTok Ads', route: '/paid-advertising/tiktok', icon: 'analytics', permission: 'reports.view' },
+            { name: 'Bing Ads', route: '/paid-advertising/bing', icon: 'analytics', permission: 'reports.view' },
+            { name: 'Criteo', route: '/paid-advertising/criteo', icon: 'analytics', permission: 'reports.view' },
+        ],
+    },
+    {
         name: '店铺设置',
         icon: 'settings',
         children: [
