@@ -2,8 +2,10 @@
 import { router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import CampaignConversionFunnel from './CampaignConversionFunnel.vue';
+import CampaignChannelPerformance from './CampaignChannelPerformance.vue';
 import CampaignDailySalesChart from './CampaignDailySalesChart.vue';
 import CampaignModelSales from './CampaignModelSales.vue';
+import CampaignReviewAnalysis from './CampaignReviewAnalysis.vue';
 import CampaignTrafficCostChart from './CampaignTrafficCostChart.vue';
 import type { CampaignReviewActivityOption, CampaignReviewJudgment, CampaignThemeReview } from './reviewTypes';
 
@@ -179,6 +181,18 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
             :comparison-name="review.comparison_activity?.name || null"
         />
 
+        <CampaignChannelPerformance
+            :channels="review.channel_performance.channels || []"
+            :total-ad-spend="review.channel_performance.total_ad_spend || 0"
+            :total-attributed-sales="review.channel_performance.total_attributed_sales || 0"
+            :available="review.channel_performance.available"
+            :complete="review.channel_performance.complete"
+            :pending="review.channel_performance.pending"
+            :message="review.channel_performance.message"
+            :failed-channels="review.channel_performance.failed_channels || []"
+            :currency="currency"
+        />
+
         <CampaignModelSales
             :models="review.model_sales.models || []"
             :total-units="review.model_sales.total_units || 0"
@@ -188,10 +202,11 @@ const selectComparison = (event: Event) => navigate(props.review.selected_activi
             :comparison-available="review.model_sales.comparison_available"
         />
 
-        <section class="rounded-3xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-5">
-            <h2 class="text-sm font-semibold text-slate-700">等待口径或数据接入的板块</h2>
-            <p class="mt-2 text-sm leading-6 text-slate-500">广告渠道拆分花费与归因销售仍等待稳定口径，暂不展示数值，避免填充模拟数据。</p>
-        </section>
+        <CampaignReviewAnalysis
+            :summary="review.activity.analysis.summary"
+            :diagnosis="review.activity.analysis.diagnosis"
+            :optimization="review.activity.analysis.optimization"
+        />
 
         <Teleport to="body">
             <div v-if="selectedImage" class="fixed inset-0 z-[100] grid place-items-center bg-slate-950/75 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="活动素材预览" @click.self="selectedImage = null">

@@ -35,6 +35,11 @@ export interface CampaignThemeReview {
         planning_document_snapshot: null | { available: boolean; title: string | null; source_url: string | null };
         campaign_images: string[];
         email_images: string[];
+        analysis: {
+            summary: string | null;
+            diagnosis: string | null;
+            optimization: string | null;
+        };
         metrics: Record<string, CampaignReviewMetricValue>;
     };
     comparison_activity: CampaignReviewActivityOption | null;
@@ -76,6 +81,22 @@ export interface CampaignThemeReview {
     funnel: ReportState & {
         comparison_available: boolean;
         stages: Array<{ key: string; label: string; sessions: number; rate_percent: number; comparison_rate_percent: number | null }>;
+    };
+    channel_performance: ReportState & {
+        complete: boolean;
+        semantics: 'advertising_platform_attribution_share';
+        total_ad_spend: number;
+        total_attributed_sales: number;
+        failed_channels: string[];
+        channels: Array<{
+            key: string;
+            name: string;
+            ad_spend: number;
+            attributed_sales: number;
+            spend_share_percent: number;
+            sales_share_percent: number;
+            efficiency_roi: number | null;
+        }>;
     };
     model_sales: ReportState & {
         comparison_available: boolean;
