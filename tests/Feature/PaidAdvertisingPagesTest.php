@@ -83,10 +83,14 @@ class PaidAdvertisingPagesTest extends TestCase
             'store_id' => $store->id,
             'sync_type' => 'meta_ads',
             'status' => 'queued',
+            'last_metric_date' => '2026-08-22',
+            'data_synced_at' => '2026-08-22 12:34:56',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
+        DB::flushQueryLog();
+        DB::enableQueryLog();
         $statusResponse = $this->actingAs($user)
             ->withSession($session)
             ->getJson(route('paid-advertising.facebook.status'))
@@ -95,7 +99,15 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.configured', true)
             ->assertJsonPath('data.state', 'syncing')
             ->assertJsonPath('data.mode', 'priority')
+            ->assertJsonPath('data.last_metric_date', '2026-08-22')
+            ->assertJsonPath('data.data_synced_at', '2026-08-22T12:34:56+00:00')
             ->assertJsonMissing(['hidden-meta-token']);
+        $statusQueries = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $this->assertFalse(collect($statusQueries)->contains(
+            fn (array $query): bool => str_contains(strtolower((string) $query['query']), 'meta_ad_insights'),
+        ));
         $this->assertStringNotContainsString('hidden-meta-token', $statusResponse->getContent());
 
         $job = SyncJob::query()->create([

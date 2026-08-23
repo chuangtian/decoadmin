@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'organization_id', 'store_id', 'sync_type', 'status', 'watermark_at',
     'last_full_sync_at', 'last_incremental_sync_at', 'last_reconciled_at',
     'last_success_at', 'last_failed_at', 'last_job_id', 'consecutive_failures',
-    'next_sync_at', 'last_error_code', 'last_error',
+    'next_sync_at', 'last_metric_date', 'data_synced_at', 'last_error_code', 'last_error',
 ])]
 class StoreSyncState extends Model
 {
@@ -39,6 +39,8 @@ class StoreSyncState extends Model
             'last_success_at' => 'datetime',
             'last_failed_at' => 'datetime',
             'next_sync_at' => 'datetime',
+            'last_metric_date' => 'date',
+            'data_synced_at' => 'datetime',
             'consecutive_failures' => 'integer',
         ];
     }

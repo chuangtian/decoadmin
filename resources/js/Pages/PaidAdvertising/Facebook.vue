@@ -508,7 +508,7 @@ onBeforeUnmount(() => {
                         </article>
                     </div>
 
-                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                         <article v-for="card in detailCards" :key="card.key" class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm"><p class="text-xs font-medium text-slate-400">{{ card.label }}</p><p class="mt-2 truncate text-lg font-semibold text-slate-900">{{ card.value }}</p><p v-if="filters.compare === 'previous'" class="mt-2 truncate text-[11px] font-semibold" :class="deltaClass(card.key)">{{ deltaLabel(card.key) }}</p></article>
                     </div>
 
