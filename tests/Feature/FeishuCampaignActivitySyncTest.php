@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\CampaignActivity;
+use App\Models\FeishuBitableField;
+use App\Models\FeishuBitableRecord;
+use App\Models\FeishuBitableTable;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
@@ -35,7 +38,15 @@ class FeishuCampaignActivitySyncTest extends TestCase
         });
 
         $first = app(CampaignActivitySyncService::class)->syncStore($store);
-        $this->assertSame(['inserted' => 1, 'updated' => 0, 'skipped' => 0, 'records' => 1], $first);
+        $this->assertSame([
+            'inserted' => 1,
+            'updated' => 0,
+            'skipped' => 0,
+            'records' => 1,
+            'archived_tables' => 1,
+            'archived_fields' => count($this->headers()),
+            'archived_records' => 1,
+        ], $first);
 
         $activity = CampaignActivity::query()->sole();
         $this->assertSame($organization->id, $activity->organization_id);
@@ -72,15 +83,34 @@ class FeishuCampaignActivitySyncTest extends TestCase
         );
         $this->assertSame('rec_parent', $activity->parent_records[0]['record_id']);
         $this->assertSame('保留的新字段', $activity->unmapped_fields['未来新增字段']);
+        $this->assertDatabaseHas('feishu_bitable_tables', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'source_section' => 'campaign',
+            'source_table_id' => 'tbl_one',
+        ]);
+        $this->assertCount(count($this->headers()), FeishuBitableField::query()->get());
+        $this->assertSame(
+            '总统日',
+            FeishuBitableRecord::query()->sole()->fields_encrypted['活动名称'],
+        );
 
         $sales = 300000.0;
         $second = app(CampaignActivitySyncService::class)->syncStore($store);
-        $this->assertSame(['inserted' => 0, 'updated' => 1, 'skipped' => 0, 'records' => 1], $second);
+        $this->assertSame([
+            'inserted' => 0,
+            'updated' => 1,
+            'skipped' => 0,
+            'records' => 1,
+            'archived_tables' => 1,
+            'archived_fields' => count($this->headers()),
+            'archived_records' => 1,
+        ], $second);
         $this->assertDatabaseCount('campaign_activities', 1);
         $this->assertSame('300000.0000', CampaignActivity::query()->sole()->sales_amount);
     }
 
-    public function test_manual_campaign_sync_keeps_store_scopes_isolated_and_is_not_scheduled(): void
+    public function test_campaign_sync_keeps_store_scopes_isolated_and_is_scheduled_daily(): void
     {
         Storage::fake('public');
         Config::set('services.feishu_table.app_id', 'cli_test');
@@ -113,7 +143,94 @@ class FeishuCampaignActivitySyncTest extends TestCase
         $event = collect(app(Schedule::class)->events())
             ->first(fn ($event): bool => str_contains((string) $event->command, 'feishu:sync-campaign-activities'));
 
-        $this->assertNull($event, '活动主题同步必须仅允许手动执行，不能加入定时计划。');
+        $this->assertNotNull($event);
+        $this->assertSame('10 4 * * *', $event->expression);
+        $this->assertDatabaseCount('feishu_bitable_tables', 2);
+        $this->assertFalse(
+            FeishuBitableTable::query()
+                ->forOrganization($firstOrganization)
+                ->forStore($secondStore)
+                ->exists(),
+        );
+    }
+
+    public function test_app_token_only_archives_every_table_without_requiring_a_table_id(): void
+    {
+        Config::set('services.feishu_table.app_id', 'cli_test');
+        Config::set('services.feishu_table.app_secret', 'test-secret');
+        [$organization, $store] = $this->storeContext('archive');
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'campaign_app_token',
+            'credential_value' => 'app_archive',
+        ]);
+
+        Http::fake(function (Request $request) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+            if (str_ends_with($path, '/auth/v3/tenant_access_token/internal')) {
+                return Http::response(['code' => 0, 'tenant_access_token' => 'tenant-token']);
+            }
+
+            if (str_ends_with($path, '/apps/app_archive/tables')) {
+                return Http::response(['code' => 0, 'data' => [
+                    'has_more' => false,
+                    'items' => [
+                        ['table_id' => 'tbl_sales', 'name' => '销售周报'],
+                        ['table_id' => 'tbl_campaigns', 'name' => '活动主题'],
+                    ],
+                ]]);
+            }
+
+            if (str_ends_with($path, '/fields')) {
+                preg_match('#/tables/([^/]+)/fields$#', $path, $matches);
+
+                return Http::response(['code' => 0, 'data' => [
+                    'has_more' => false,
+                    'items' => [[
+                        'field_id' => 'fld_'.$matches[1],
+                        'field_name' => '数据',
+                        'type' => 2,
+                    ]],
+                ]]);
+            }
+
+            if (str_ends_with($path, '/records')) {
+                preg_match('#/tables/([^/]+)/records$#', $path, $matches);
+
+                return Http::response(['code' => 0, 'data' => [
+                    'has_more' => false,
+                    'items' => [[
+                        'record_id' => 'rec_'.$matches[1],
+                        'fields' => ['数据' => $matches[1]],
+                    ]],
+                ]]);
+            }
+
+            return Http::response(['code' => 404], 404);
+        });
+
+        $result = app(CampaignActivitySyncService::class)->syncStore($store);
+
+        $this->assertSame([
+            'inserted' => 0,
+            'updated' => 0,
+            'skipped' => 0,
+            'records' => 0,
+            'archived_tables' => 2,
+            'archived_fields' => 2,
+            'archived_records' => 2,
+        ], $result);
+        $this->assertDatabaseCount('feishu_bitable_tables', 2);
+        $this->assertDatabaseCount('feishu_bitable_fields', 2);
+        $this->assertDatabaseCount('feishu_bitable_records', 2);
+        $this->assertDatabaseCount('campaign_activities', 0);
+        $this->assertSame(
+            ['活动主题', '销售周报'],
+            FeishuBitableTable::query()->orderBy('name')->pluck('name')->all(),
+        );
     }
 
     /** @param callable(string): list<array<string, mixed>> $records */
@@ -126,11 +243,27 @@ class FeishuCampaignActivitySyncTest extends TestCase
                 return Http::response(['code' => 0, 'tenant_access_token' => 'tenant-token']);
             }
 
+            if (preg_match('#/apps/([^/]+)/tables$#', $path, $matches)) {
+                $suffix = str_replace('app_', '', $matches[1]);
+
+                return Http::response([
+                    'code' => 0,
+                    'data' => ['has_more' => false, 'items' => [[
+                        'table_id' => 'tbl_'.$suffix,
+                        'name' => '活动主题',
+                    ]]],
+                ]);
+            }
+
             if (str_ends_with($path, '/fields')) {
                 return Http::response([
                     'code' => 0,
                     'data' => ['has_more' => false, 'items' => collect($this->headers())->map(
-                        fn (string $header): array => ['field_name' => $header, 'type' => 1],
+                        fn (string $header, int $index): array => [
+                            'field_id' => 'fld_'.$index,
+                            'field_name' => $header,
+                            'type' => 1,
+                        ],
                     )->all()],
                 ]);
             }

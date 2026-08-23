@@ -21,6 +21,8 @@ class PaidAdvertisingGoalRefreshService
 
     public const SOURCE_GOAL_BOARD_CREATED = 'goal_board_created';
 
+    public const SOURCE_OVERALL_CONFIGURED = 'overall_configured';
+
     public const TARGET_OVERALL = 'overall';
 
     public const STATUS_QUEUED = 'queued';
@@ -32,6 +34,8 @@ class PaidAdvertisingGoalRefreshService
     public const STATUS_FAILED = 'failed';
 
     private const LOCK_SECONDS = 600;
+
+    private const INITIAL_SYNC_ESTIMATE_SECONDS = 300;
 
     public function __construct(private PaidAdvertisingGoalSyncService $sync) {}
 
@@ -92,18 +96,46 @@ class PaidAdvertisingGoalRefreshService
             ->firstOrFail();
     }
 
+    /** @return array<string, mixed>|null */
+    public function latestForTarget(
+        Organization $organization,
+        Store $store,
+        string $target,
+    ): ?array {
+        $run = PaidAdvertisingGoalSyncRun::query()
+            ->forOrganization($organization)
+            ->forStore($store)
+            ->where('target_key', $target)
+            ->latest('id')
+            ->first();
+
+        return $run instanceof PaidAdvertisingGoalSyncRun ? $this->present($run) : null;
+    }
+
     /**
      * @return array{
      *     id: string,
      *     tab: string,
      *     status: string,
-     *     result: array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int}|null,
-     *     message: string|null
+     *     result: array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, archived_tables: int, archived_fields: int, archived_records: int}|null,
+     *     message: string|null,
+     *     started_at: string|null,
+     *     finished_at: string|null,
+     *     duration_seconds: int|null,
+     *     initial_sync: bool,
+     *     estimated_finished_at: string|null
      * }
      */
     public function present(PaidAdvertisingGoalSyncRun $run): array
     {
         $result = is_array($run->result) ? $run->result : null;
+        $initialSync = in_array($run->trigger, [
+            self::SOURCE_GOAL_BOARD_CREATED,
+            self::SOURCE_OVERALL_CONFIGURED,
+        ], true);
+        $estimatedFinishedAt = $initialSync && in_array($run->status, [self::STATUS_QUEUED, self::STATUS_RUNNING], true)
+            ? ($run->started_at ?? $run->created_at)?->copy()->addSeconds(self::INITIAL_SYNC_ESTIMATE_SECONDS)
+            : null;
 
         return [
             'id' => $run->uuid,
@@ -116,8 +148,16 @@ class PaidAdvertisingGoalRefreshService
                 'updated' => (int) ($result['updated'] ?? 0),
                 'deleted' => (int) ($result['deleted'] ?? 0),
                 'skipped' => (int) ($result['skipped'] ?? 0),
+                'archived_tables' => (int) ($result['archived_tables'] ?? 0),
+                'archived_fields' => (int) ($result['archived_fields'] ?? 0),
+                'archived_records' => (int) ($result['archived_records'] ?? 0),
             ],
             'message' => $run->message,
+            'started_at' => $run->started_at?->toIso8601String(),
+            'finished_at' => $run->finished_at?->toIso8601String(),
+            'duration_seconds' => $this->durationSeconds($run),
+            'initial_sync' => $initialSync,
+            'estimated_finished_at' => $estimatedFinishedAt?->toIso8601String(),
         ];
     }
 
@@ -144,6 +184,9 @@ class PaidAdvertisingGoalRefreshService
                 'updated' => (int) ($result['updated'] ?? 0),
                 'deleted' => (int) ($result['deleted'] ?? 0),
                 'skipped' => (int) ($result['skipped'] ?? 0),
+                'archived_tables' => (int) ($result['archived_tables'] ?? 0),
+                'archived_fields' => (int) ($result['archived_fields'] ?? 0),
+                'archived_records' => (int) ($result['archived_records'] ?? 0),
             ],
             'error_code' => null,
             'message' => '当前页签飞书数据同步完成。',
@@ -170,6 +213,9 @@ class PaidAdvertisingGoalRefreshService
      *     updated: int,
      *     deleted: int,
      *     skipped: int,
+     *     archived_tables: int,
+     *     archived_fields: int,
+     *     archived_records: int,
      *     failed: int
      * }
      */
@@ -208,6 +254,9 @@ class PaidAdvertisingGoalRefreshService
                         'updated' => $syncResult['updated'],
                         'deleted' => $syncResult['deleted'],
                         'skipped' => $syncResult['skipped'],
+                        'archived_tables' => (int) ($syncResult['archived_tables'] ?? 0),
+                        'archived_fields' => (int) ($syncResult['archived_fields'] ?? 0),
+                        'archived_records' => (int) ($syncResult['archived_records'] ?? 0),
                     ],
                 ]);
 
@@ -219,6 +268,9 @@ class PaidAdvertisingGoalRefreshService
                     'updated' => $syncResult['updated'],
                     'deleted' => $syncResult['deleted'],
                     'skipped' => $syncResult['skipped'],
+                    'archived_tables' => (int) ($syncResult['archived_tables'] ?? 0),
+                    'archived_fields' => (int) ($syncResult['archived_fields'] ?? 0),
+                    'archived_records' => (int) ($syncResult['archived_records'] ?? 0),
                     'failed' => 0,
                 ];
             });
@@ -231,8 +283,20 @@ class PaidAdvertisingGoalRefreshService
             'updated' => 0,
             'deleted' => 0,
             'skipped' => 0,
+            'archived_tables' => 0,
+            'archived_fields' => 0,
+            'archived_records' => 0,
             'failed' => 0,
         ];
+    }
+
+    private function durationSeconds(PaidAdvertisingGoalSyncRun $run): ?int
+    {
+        if ($run->started_at === null) {
+            return null;
+        }
+
+        return max(0, (int) $run->started_at->diffInSeconds($run->finished_at ?? now()));
     }
 
     private function lockKey(Organization $organization, Store $store, string $target): string
@@ -246,7 +310,7 @@ class PaidAdvertisingGoalRefreshService
             throw new InvalidArgumentException('The store does not belong to the supplied organization.');
         }
 
-        if (! in_array($source, [self::SOURCE_MANUAL_REFRESH, self::SOURCE_GOAL_BOARD_CREATED], true)) {
+        if (! in_array($source, [self::SOURCE_MANUAL_REFRESH, self::SOURCE_GOAL_BOARD_CREATED, self::SOURCE_OVERALL_CONFIGURED], true)) {
             throw new InvalidArgumentException('Unsupported paid advertising goal refresh source.');
         }
     }

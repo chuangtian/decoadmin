@@ -2,6 +2,7 @@
 
 namespace App\Services\Feishu;
 
+use App\Models\FeishuBitableTable;
 use App\Models\PaidAdvertisingGoalBoard;
 use App\Models\PaidAdvertisingGoalField;
 use App\Models\PaidAdvertisingGoalRecord;
@@ -23,9 +24,16 @@ class PaidAdvertisingGoalSyncService
 
     private const GOOGLE_SOURCE_SUFFIX = ':google:';
 
+    private const OVERALL_ARCHIVE_SECTION = 'paid-ad-goals:overall';
+
+    private const BOARD_ARCHIVE_PREFIX = 'paid-ad-goals:board:';
+
+    private const META_WEEKLY_ARCHIVE_SECTION = 'paid-ad-goals:meta-weekly';
+
     public function __construct(
         private FeishuBitableClient $client,
         private StoreFeishuDataLinkService $dataLinks,
+        private FeishuBitableArchiveSyncService $archiveSync,
     ) {}
 
     /**
@@ -36,6 +44,9 @@ class PaidAdvertisingGoalSyncService
      *     updated: int,
      *     deleted: int,
      *     skipped: int,
+     *     archived_tables: int,
+     *     archived_fields: int,
+     *     archived_records: int,
      *     failed: int,
      *     failures: list<array{organization_id: int, store_id: int, board_id: int|null, error: string}>
      * }
@@ -49,6 +60,9 @@ class PaidAdvertisingGoalSyncService
             'updated' => 0,
             'deleted' => 0,
             'skipped' => 0,
+            'archived_tables' => 0,
+            'archived_fields' => 0,
+            'archived_records' => 0,
             'failed' => 0,
             'failures' => [],
         ];
@@ -88,22 +102,23 @@ class PaidAdvertisingGoalSyncService
         return $summary;
     }
 
-    /** @return array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int} */
+    /** @return array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
     public function syncOverall(Store $store): array
     {
         $values = $this->dataLinks->valuesForSync($store, 'advertising_goals');
 
-        return $this->syncSource(
-            $store,
-            null,
-            self::OVERALL_SOURCE_KEY,
-            (string) ($values['advertising_goals_app_token'] ?? ''),
-            (string) ($values['advertising_goals_table_id'] ?? ''),
-            (string) ($values['advertising_goals_view_id'] ?? ''),
-        );
+        $appToken = trim((string) ($values['advertising_goals_app_token'] ?? ''));
+
+        if ($appToken === '') {
+            throw new RuntimeException('当前总目标未配置飞书 App Token。');
+        }
+
+        $archive = $this->archiveSync->sync($store, self::OVERALL_ARCHIVE_SECTION, $appToken);
+
+        return $this->withArchive($this->syncOverallProjection($store), $archive);
     }
 
-    /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int} */
+    /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
     public function syncBoard(PaidAdvertisingGoalBoard $board): array
     {
         $board->update(['sync_status' => 'running', 'last_error' => null]);
@@ -113,11 +128,17 @@ class PaidAdvertisingGoalSyncService
             if ($board->type === PaidAdvertisingGoalService::TYPE_GOOGLE_ADS) {
                 $result = $this->syncGoogleBoard($store, $board);
             } else {
+                $appToken = trim((string) $board->feishu_app_token);
+                $archives = [$this->archiveSync->sync(
+                    $store,
+                    self::BOARD_ARCHIVE_PREFIX.(int) $board->id,
+                    $appToken,
+                )];
                 $results = [$this->syncSource(
                     $store,
                     $board,
                     'board:'.(int) $board->id,
-                    (string) $board->feishu_app_token,
+                    $appToken,
                     (string) $board->feishu_table_id,
                     (string) $board->feishu_view_id,
                 )];
@@ -125,6 +146,11 @@ class PaidAdvertisingGoalSyncService
                 $appToken = (string) ($metaWeekly['advertising_meta_weekly_app_token'] ?? '');
                 $tableId = (string) ($metaWeekly['advertising_meta_weekly_table_id'] ?? '');
                 if (filled($appToken) && filled($tableId)) {
+                    $archives[] = $this->archiveSync->sync(
+                        $store,
+                        self::META_WEEKLY_ARCHIVE_SECTION,
+                        $appToken,
+                    );
                     $results[] = $this->syncSource(
                         $store,
                         $board,
@@ -135,7 +161,7 @@ class PaidAdvertisingGoalSyncService
                         false,
                     );
                 }
-                $result = $this->mergeSyncResults($results);
+                $result = $this->withArchives($this->mergeSyncResults($results), $archives);
             }
             $board->update([
                 'sync_status' => 'completed',
@@ -154,7 +180,7 @@ class PaidAdvertisingGoalSyncService
         }
     }
 
-    /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int} */
+    /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
     private function syncGoogleBoard(Store $store, PaidAdvertisingGoalBoard $board): array
     {
         $token = trim((string) $board->feishu_app_token);
@@ -167,7 +193,16 @@ class PaidAdvertisingGoalSyncService
             $tables = $this->client->tables($token);
 
             if ($tables !== []) {
-                return $this->syncGoogleBitableBoard($store, $board, $token, $tables);
+                $archive = $this->archiveSync->sync(
+                    $store,
+                    self::BOARD_ARCHIVE_PREFIX.(int) $board->id,
+                    $token,
+                );
+
+                return $this->withArchive(
+                    $this->syncGoogleBitableBoard($store, $board, $token, $tables),
+                    $archive,
+                );
             }
         } catch (Throwable $bitableException) {
             Log::info('Google goal token is not a readable Feishu Bitable app.', [
@@ -182,7 +217,10 @@ class PaidAdvertisingGoalSyncService
             $sheets = $this->client->spreadsheetSheets($token);
 
             if ($sheets !== []) {
-                return $this->syncGoogleSpreadsheetBoard($store, $board, $token, $sheets);
+                return $this->withArchives(
+                    $this->syncGoogleSpreadsheetBoard($store, $board, $token, $sheets),
+                    [],
+                );
             }
         } catch (Throwable $spreadsheetException) {
             Log::info('Google goal token is not a readable Feishu spreadsheet.', [
@@ -523,7 +561,10 @@ class PaidAdvertisingGoalSyncService
             $result = $board ? $this->syncBoard($board) : $this->syncOverall($store);
             $summary['sources'] += (int) ($result['sources'] ?? 1);
 
-            foreach (['fields', 'inserted', 'updated', 'deleted', 'skipped'] as $metric) {
+            foreach ([
+                'fields', 'inserted', 'updated', 'deleted', 'skipped',
+                'archived_tables', 'archived_fields', 'archived_records',
+            ] as $metric) {
                 $summary[$metric] += $result[$metric];
             }
         } catch (Throwable $exception) {
@@ -567,6 +608,118 @@ class PaidAdvertisingGoalSyncService
         $records = $this->client->records($appToken, $tableId, $viewId);
 
         return $this->syncPayload($store, $board, $sourceKey, $fieldDefinitions, $records);
+    }
+
+    /** @return array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int} */
+    private function syncOverallProjection(Store $store): array
+    {
+        $tables = FeishuBitableTable::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->where('source_section', self::OVERALL_ARCHIVE_SECTION)
+            ->with(['fields', 'records'])
+            ->get();
+
+        $expectedFields = [
+            '日期', '月份', '总目标', '月度总目标', '总销售额', '退款', '月销售额总和', '月度目标销售额',
+            '项目', '渠道', '花费', '销售额', 'roi', 'roas',
+        ];
+        $table = $tables
+            ->sortByDesc(function (FeishuBitableTable $table) use ($expectedFields): int {
+                $names = $table->fields
+                    ->pluck('name')
+                    ->filter()
+                    ->map(fn (mixed $name): string => mb_strtolower(trim((string) $name)))
+                    ->all();
+
+                return collect($expectedFields)->sum(
+                    fn (string $expected): int => in_array(mb_strtolower($expected), $names, true) ? 1 : 0,
+                );
+            })
+            ->first(function (FeishuBitableTable $table) use ($expectedFields): bool {
+                $names = $table->fields
+                    ->pluck('name')
+                    ->filter()
+                    ->map(fn (mixed $name): string => mb_strtolower(trim((string) $name)))
+                    ->all();
+
+                return collect($expectedFields)->contains(
+                    fn (string $expected): bool => in_array(mb_strtolower($expected), $names, true),
+                );
+            });
+
+        if (! $table instanceof FeishuBitableTable) {
+            return $this->clearOverallProjection($store);
+        }
+
+        $maxFields = max(1, (int) config('services.feishu_table.paid_advertising_goal_max_fields', 1000));
+        $maxRecords = max(1, (int) config('services.feishu_table.paid_advertising_goal_max_records', 5000));
+        if ($table->fields->count() > $maxFields || $table->records->count() > $maxRecords) {
+            Log::info('Skipped paid advertising overall projection because the archived table exceeds the projection limit.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->id,
+                'source_table_id' => $table->source_table_id,
+                'fields' => $table->fields->count(),
+                'records' => $table->records->count(),
+            ]);
+
+            return $this->clearOverallProjection($store);
+        }
+
+        $fieldDefinitions = $table->fields
+            ->sortBy('field_order')
+            ->values()
+            ->map(function ($field): array {
+                $metadata = is_array($field->metadata_encrypted) ? $field->metadata_encrypted : [];
+
+                return array_merge($metadata, [
+                    'field_id' => $field->source_field_id,
+                    'field_name' => $field->name,
+                    'type' => $field->type,
+                    'is_primary' => $field->is_primary,
+                ]);
+            })
+            ->all();
+        $records = $table->records
+            ->map(fn ($record): array => [
+                'record_id' => $record->source_record_id,
+                'fields' => is_array($record->fields_encrypted) ? $record->fields_encrypted : [],
+                'created_time' => $record->source_created_at?->getTimestampMs(),
+                'last_modified_time' => $record->source_updated_at?->getTimestampMs(),
+            ])
+            ->all();
+
+        return $this->syncPayload(
+            $store,
+            null,
+            self::OVERALL_SOURCE_KEY,
+            $fieldDefinitions,
+            $records,
+        );
+    }
+
+    /** @return array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int} */
+    private function clearOverallProjection(Store $store): array
+    {
+        $recordsDeleted = PaidAdvertisingGoalRecord::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->where('source_key', self::OVERALL_SOURCE_KEY)
+            ->delete();
+        PaidAdvertisingGoalField::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->where('source_key', self::OVERALL_SOURCE_KEY)
+            ->delete();
+
+        return [
+            'fields' => 0,
+            'inserted' => 0,
+            'updated' => 0,
+            'deleted' => $recordsDeleted,
+            'skipped' => 0,
+            'records' => 0,
+        ];
     }
 
     /**
@@ -691,6 +844,36 @@ class PaidAdvertisingGoalSyncService
     }
 
     /**
+     * @param  array<string, int>  $result
+     * @param  array{tables: int, fields: int, records: int}  $archive
+     * @return array<string, int>
+     */
+    private function withArchive(array $result, array $archive): array
+    {
+        return $this->withArchives($result, [$archive]);
+    }
+
+    /**
+     * @param  array<string, int>  $result
+     * @param  list<array{tables: int, fields: int, records: int}>  $archives
+     * @return array<string, int>
+     */
+    private function withArchives(array $result, array $archives): array
+    {
+        $result['archived_tables'] = 0;
+        $result['archived_fields'] = 0;
+        $result['archived_records'] = 0;
+
+        foreach ($archives as $archive) {
+            $result['archived_tables'] += (int) $archive['tables'];
+            $result['archived_fields'] += (int) $archive['fields'];
+            $result['archived_records'] += (int) $archive['records'];
+        }
+
+        return $result;
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $fieldDefinitions
      */
     private function syncFields(
@@ -769,11 +952,9 @@ class PaidAdvertisingGoalSyncService
         $query = Store::query()
             ->where('status', 'active');
 
-        foreach (['advertising_goals_app_token', 'advertising_goals_table_id', 'advertising_goals_view_id'] as $key) {
-            $query->whereHas('businessCredentials', fn (Builder $credentials): Builder => $credentials
-                ->where('provider', 'feishu_data_links')
-                ->where('credential_key', $key));
-        }
+        $query->whereHas('businessCredentials', fn (Builder $credentials): Builder => $credentials
+            ->where('provider', 'feishu_data_links')
+            ->where('credential_key', 'advertising_goals_app_token'));
 
         return $query->when($storeId !== null, fn (Builder $query): Builder => $query->whereKey($storeId));
     }

@@ -372,6 +372,7 @@ interface GoalPage {
         personal_facebook: PersonalFacebookSummary | null;
         google_ads: GoogleAdsSummary | null;
     };
+    sync: SyncRun | null;
 }
 
 interface SyncRun {
@@ -385,8 +386,16 @@ interface SyncRun {
         updated: number;
         deleted: number;
         skipped: number;
+        archived_tables: number;
+        archived_fields: number;
+        archived_records: number;
     } | null;
     message: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    duration_seconds: number | null;
+    initial_sync: boolean;
+    estimated_finished_at: string | null;
 }
 
 const props = defineProps<{
@@ -412,6 +421,8 @@ const addDialogOpen = ref(false);
 const deleteTarget = ref<GoalTab | null>(null);
 const deleteProcessing = ref(false);
 const refreshProcessing = ref(false);
+const syncElapsedSeconds = ref(0);
+const activeSyncRun = ref<SyncRun | null>(props.goalPage.sync);
 const nameInput = ref<HTMLInputElement | null>(null);
 const addForm = useForm({
     name: '',
@@ -423,13 +434,15 @@ const addForm = useForm({
 const googleGoalSelected = computed(() => addForm.type === 'google_ads');
 const overallForm = useForm({
     feishu_app_token: '',
-    feishu_table_id: '',
-    feishu_view_id: '',
 });
 let refreshPollTimer: number | null = null;
 let refreshPollingCancelled = false;
 
+class SyncStatusUnavailableError extends Error {}
+class SyncStatusFatalError extends Error {}
+
 watch(() => props.goalPage.active_tab, (tab) => { activeTab.value = tab; });
+watch(() => props.goalPage.sync, (sync) => { activeSyncRun.value = sync; });
 watch(() => props.goalPage.tabs, (tabs) => {
     if (!tabs.some((tab) => tab.key === activeTab.value)) activeTab.value = 'overall';
 });
@@ -683,11 +696,11 @@ const csrfToken = () => {
     return cookie ? decodeURIComponent(cookie.slice('XSRF-TOKEN='.length)) : '';
 };
 
-const waitForNextStatusCheck = () => new Promise<void>((resolve) => {
+const waitForNextStatusCheck = (delay = 1500) => new Promise<void>((resolve) => {
     refreshPollTimer = window.setTimeout(() => {
         refreshPollTimer = null;
         resolve();
-    }, 1500);
+    }, delay);
 });
 
 const parseSyncResponse = async (response: Response): Promise<SyncRun> => {
@@ -700,15 +713,82 @@ const parseSyncResponse = async (response: Response): Promise<SyncRun> => {
     return payload.sync;
 };
 
+const fetchSyncStatus = async (syncId: string): Promise<SyncRun> => {
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+            const response = await fetch(`/paid-advertising/goals/refresh/${encodeURIComponent(syncId)}`, {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (!response.ok && response.status < 500 && ![408, 425, 429].includes(response.status)) {
+                throw new SyncStatusFatalError(`无法获取同步状态（HTTP ${response.status}），请刷新页面后重试。`);
+            }
+
+            return await parseSyncResponse(response);
+        } catch (error) {
+            if (error instanceof SyncStatusFatalError) throw error;
+
+            lastError = error;
+            if (attempt < 3) await waitForNextStatusCheck(1500);
+        }
+    }
+
+    throw new SyncStatusUnavailableError(
+        lastError instanceof Error
+            ? `同步仍在后台执行，状态查询暂时中断：${lastError.message}`
+            : '同步仍在后台执行，状态查询暂时中断。',
+    );
+};
+
 const completionMessage = (tabLabel: string, sync: SyncRun) => {
     const result = sync.result;
-    if (!result) return `${tabLabel}飞书数据同步完成。`;
+    const duration = formatSyncDuration(sync.duration_seconds ?? syncElapsedSeconds.value);
+    if (!result) return `${tabLabel}飞书数据同步完成，用时 ${duration}。`;
 
     const changed = result.inserted + result.updated + result.deleted;
-    if (changed === 0 && result.skipped === 0) return `${tabLabel}飞书数据已是最新。`;
+    const archive = `归档 ${result.archived_tables} 张表、${result.archived_fields} 个字段、${result.archived_records} 条记录`;
+    if (changed === 0 && result.skipped === 0) return `${tabLabel}飞书数据已是最新；${archive}，用时 ${duration}。`;
 
-    return `${tabLabel}同步完成：字段 ${result.fields}，新增 ${result.inserted}，更新 ${result.updated}，删除 ${result.deleted}，跳过 ${result.skipped}。`;
+    return `${tabLabel}同步完成：${archive}；业务字段 ${result.fields}，新增 ${result.inserted}，更新 ${result.updated}，删除 ${result.deleted}，跳过 ${result.skipped}；用时 ${duration}。`;
 };
+
+const formatSyncDuration = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainingSeconds = safeSeconds % 60;
+
+    if (hours > 0) return `${hours}小时 ${minutes}分 ${remainingSeconds}秒`;
+    if (minutes > 0) return `${minutes}分 ${remainingSeconds}秒`;
+
+    return `${remainingSeconds}秒`;
+};
+
+const showInitialSyncProgress = computed(() => (
+    refreshProcessing.value
+    && activeSyncRun.value?.initial_sync === true
+    && ['queued', 'running'].includes(activeSyncRun.value.status)
+));
+
+const estimatedFinishedAtLabel = computed(() => {
+    const value = activeSyncRun.value?.estimated_finished_at;
+    if (!value) return '约 5 分钟内';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '约 5 分钟内';
+
+    return `约 ${new Intl.DateTimeFormat('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).format(date)}`;
+});
 
 const reloadGoalRegion = (targetTab: string) => new Promise<void>((resolve) => {
     metricsLoading.value = true;
@@ -731,6 +811,7 @@ const refreshFromFeishu = async (requestedTab?: string) => {
     const targetTab = requestedTab ?? activeTab.value;
     const targetLabel = props.goalPage.tabs.find((tab) => tab.key === targetTab)?.label ?? '当前页签';
     refreshProcessing.value = true;
+    syncElapsedSeconds.value = 0;
     regionRefreshing.value = true;
     refreshPollingCancelled = false;
     try {
@@ -746,25 +827,25 @@ const refreshFromFeishu = async (requestedTab?: string) => {
             body: JSON.stringify({ tab: targetTab }),
         });
         let sync = await parseSyncResponse(response);
+        activeSyncRun.value = sync;
+        const syncStartedAt = sync.started_at ? Date.parse(sync.started_at) : Date.now();
         const pollingDeadline = Date.now() + (32 * 60 * 1000);
 
         while (!refreshPollingCancelled && ['queued', 'running'].includes(sync.status)) {
+            syncElapsedSeconds.value = sync.duration_seconds
+                ?? Math.max(0, Math.floor((Date.now() - syncStartedAt) / 1000));
             if (Date.now() >= pollingDeadline) {
-                throw new Error('同步时间较长，后台仍会继续执行，请稍后再查看。');
+                throw new Error(`同步时间较长，已运行 ${formatSyncDuration(syncElapsedSeconds.value)}，后台仍会继续执行，请稍后再查看。`);
             }
 
             await waitForNextStatusCheck();
             if (refreshPollingCancelled) return;
 
-            const statusResponse = await fetch(`/paid-advertising/goals/refresh/${encodeURIComponent(sync.id)}`, {
-                credentials: 'same-origin',
-                headers: {
-                    Accept: 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
-            });
-            sync = await parseSyncResponse(statusResponse);
+            sync = await fetchSyncStatus(sync.id);
+            activeSyncRun.value = sync;
         }
+
+        syncElapsedSeconds.value = sync.duration_seconds ?? syncElapsedSeconds.value;
 
         if (refreshPollingCancelled) return;
 
@@ -787,8 +868,8 @@ const refreshFromFeishu = async (requestedTab?: string) => {
     } catch (error) {
         if (!refreshPollingCancelled) {
             toast.add({
-                type: 'error',
-                title: '同步失败',
+                type: error instanceof SyncStatusUnavailableError ? 'warning' : 'error',
+                title: error instanceof SyncStatusUnavailableError ? '状态查询中断' : '同步失败',
                 message: error instanceof Error ? error.message : '无法启动同步，请稍后重试。',
                 duration: 7000,
             });
@@ -798,6 +879,18 @@ const refreshFromFeishu = async (requestedTab?: string) => {
         regionRefreshing.value = false;
     }
 };
+
+watch(() => props.goalPage.sync, (sync) => {
+    if (
+        !props.canRefresh
+        || refreshProcessing.value
+        || !sync
+        || sync.tab !== activeTab.value
+        || !['queued', 'running'].includes(sync.status)
+    ) return;
+
+    void refreshFromFeishu(sync.tab);
+}, { immediate: true });
 
 onBeforeUnmount(() => {
     refreshPollingCancelled = true;
@@ -880,10 +973,50 @@ const confirmDelete = () => {
                         @click="refreshFromFeishu()"
                     >
                         <svg class="h-4 w-4" :class="{ 'animate-spin': refreshProcessing }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.4 9A7 7 0 0 0 6.2 6.2L4 8m16 8-2.2 1.8A7 7 0 0 1 5.6 15"/></svg>
-                        {{ refreshProcessing ? '同步中…' : '刷新' }}
+                        {{ refreshProcessing ? `同步中 · ${formatSyncDuration(syncElapsedSeconds)}` : '同步' }}
                     </button>
                 </div>
             </header>
+
+            <div
+                v-if="showInitialSyncProgress && activeTab === 'overall'"
+                class="relative mt-6 overflow-hidden rounded-2xl border border-sky-200 bg-white px-6 py-7 shadow-sm sm:px-8"
+                role="status"
+                aria-live="polite"
+            >
+                <span class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400" />
+                <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                    <div class="flex items-start gap-4">
+                        <span class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-600">
+                            <svg class="h-7 w-7 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.4 9A7 7 0 0 0 6.2 6.2L4 8m16 8-2.2 1.8A7 7 0 0 1 5.6 15"/></svg>
+                        </span>
+                        <div>
+                            <div class="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                                <span class="text-blue-600">后台静默任务</span>
+                                <span class="rounded-full bg-blue-50 px-2.5 py-1 text-blue-600">可安全离开页面</span>
+                            </div>
+                            <h2 class="mt-2 text-xl font-semibold text-slate-950">正在同步飞书广告目标数据</h2>
+                            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">系统正在自动发现 App Token 下的全部数据表，并按当前店铺隔离归档。首次同步完成后，总目标页面会自动更新。</p>
+                        </div>
+                    </div>
+                    <div class="shrink-0 rounded-2xl bg-slate-50 px-5 py-4 lg:min-w-52">
+                        <p class="text-xs font-semibold text-slate-400">预计完成时间</p>
+                        <p class="mt-1 tabular-nums text-lg font-semibold text-slate-900">{{ estimatedFinishedAtLabel }}</p>
+                    </div>
+                </div>
+                <div class="mt-6 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <span class="block h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-blue-600 to-cyan-400" />
+                </div>
+            </div>
+            <div
+                v-else-if="showInitialSyncProgress"
+                class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm"
+                role="status"
+                aria-live="polite"
+            >
+                <span class="font-semibold text-sky-900">正在同步当前页签，并归档 App Token 下的全部飞书数据表；可安全离开此页面。</span>
+                <span class="tabular-nums text-sky-700">{{ estimatedFinishedAtLabel }} 完成</span>
+            </div>
 
             <section class="relative mt-8" :aria-busy="regionRefreshing">
                 <div :class="{ 'pointer-events-none select-none opacity-55': regionRefreshing }">
@@ -929,8 +1062,8 @@ const confirmDelete = () => {
                 >
                     <header class="border-b border-slate-100 px-5 py-5 sm:px-7">
                         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">总目标 · 当前店铺独立配置</p>
-                        <h2 class="mt-2 text-xl font-semibold text-slate-950">配置飞书表格</h2>
-                        <p class="mt-2 text-sm leading-6 text-slate-500">请填写 App Token、Table ID 和 View ID。三项均为必填，配置值将加密保存且不会在页面回显。</p>
+                        <h2 class="mt-2 text-xl font-semibold text-slate-950">配置飞书 App Token</h2>
+                        <p class="mt-2 text-sm leading-6 text-slate-500">只需填写 App Token。保存后会立即在后台自动发现并同步该 Token 下的全部数据表；配置值将加密保存且不会在页面回显。</p>
                     </header>
 
                     <div class="space-y-5 px-5 py-6 sm:px-7">
@@ -939,18 +1072,6 @@ const confirmDelete = () => {
                             <input v-model="overallForm.feishu_app_token" required type="password" autocomplete="off" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="输入 App Token" />
                             <span v-if="overallForm.errors.feishu_app_token" class="mt-1.5 block text-xs text-rose-600">{{ overallForm.errors.feishu_app_token }}</span>
                         </label>
-                        <div class="grid gap-5 sm:grid-cols-2">
-                            <label class="block">
-                                <span class="text-sm font-semibold text-slate-800">Table ID</span>
-                                <input v-model="overallForm.feishu_table_id" required autocomplete="off" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="输入 Table ID" />
-                                <span v-if="overallForm.errors.feishu_table_id" class="mt-1.5 block text-xs text-rose-600">{{ overallForm.errors.feishu_table_id }}</span>
-                            </label>
-                            <label class="block">
-                                <span class="text-sm font-semibold text-slate-800">View ID</span>
-                                <input v-model="overallForm.feishu_view_id" required autocomplete="off" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="输入 View ID" />
-                                <span v-if="overallForm.errors.feishu_view_id" class="mt-1.5 block text-xs text-rose-600">{{ overallForm.errors.feishu_view_id }}</span>
-                            </label>
-                        </div>
                     </div>
 
                     <footer class="flex justify-end border-t border-slate-100 bg-slate-50/60 px-5 py-4 sm:px-7">
@@ -958,8 +1079,8 @@ const confirmDelete = () => {
                     </footer>
                 </form>
                 <section v-else-if="activeTab === 'overall' && !goalPage.configuration.configured" class="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
-                    <h2 class="text-lg font-semibold text-slate-950">请配置飞书表格</h2>
-                    <p class="mt-2 text-sm text-slate-500">当前店铺尚未完整配置广告目标多维表格，请联系店铺管理员完成配置。</p>
+                    <h2 class="text-lg font-semibold text-slate-950">请配置飞书 App Token</h2>
+                    <p class="mt-2 text-sm text-slate-500">当前店铺尚未配置广告目标 App Token，请联系店铺管理员完成配置。</p>
                 </section>
                 <section v-else-if="activeTab === 'overall'" aria-label="总目标内容">
                     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" :class="{ 'animate-pulse opacity-60': metricsLoading }">

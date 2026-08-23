@@ -50,11 +50,9 @@ class StoreFeishuDataLinkService
         ],
         'advertising_goals' => [
             'title' => '广告目标',
-            'description' => '付费广告月度目标多维表格，用于当前店铺的广告目标页。',
+            'description' => '付费广告目标多维表格；系统会通过 App Token 自动发现并同步其中的全部数据表。',
             'fields' => [
                 'advertising_goals_app_token' => ['label' => '多维表格 App Token', 'env_key' => 'FEISHU_ADVERTISING_GOALS_APP_TOKEN', 'secret' => true, 'placeholder' => '输入广告目标多维表格 App Token'],
-                'advertising_goals_table_id' => ['label' => '数据表 Table ID', 'env_key' => 'FEISHU_ADVERTISING_GOALS_TABLE_ID', 'secret' => false, 'placeholder' => '输入广告目标数据表 Table ID'],
-                'advertising_goals_view_id' => ['label' => '视图 View ID', 'env_key' => 'FEISHU_ADVERTISING_GOALS_VIEW_ID', 'secret' => false, 'placeholder' => '输入广告目标视图 View ID'],
             ],
         ],
         'advertising_meta_weekly' => [
@@ -317,6 +315,21 @@ class StoreFeishuDataLinkService
 
             return $deleted;
         });
+    }
+
+    /** @param list<string> $credentialKeys */
+    public function clearCredentialKeys(Store $store, array $credentialKeys): int
+    {
+        if ($credentialKeys === []) {
+            return 0;
+        }
+
+        return StoreBusinessCredential::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('provider', self::PROVIDER)
+            ->whereIn('credential_key', $credentialKeys)
+            ->delete();
     }
 
     /** @return array{title: string, description: string, fields: array<string, array{label: string, env_key: string, secret: bool, placeholder: string}>} */

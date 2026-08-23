@@ -174,6 +174,22 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
             ->middleware(['permission:reports.view', 'throttle:120,1'])
             ->name("paid-advertising.{$advertisingChannel}.status");
     }
+    Route::get('/paid-advertising/google/data', [PaidAdvertisingChannelController::class, 'data'])
+        ->defaults('channel', 'google')
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.google.data');
+    Route::post('/paid-advertising/google/sync', [PaidAdvertisingChannelController::class, 'sync'])
+        ->defaults('channel', 'google')
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.google.sync');
+    Route::get('/paid-advertising/tiktok/data', [PaidAdvertisingChannelController::class, 'data'])
+        ->defaults('channel', 'tiktok')
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.tiktok.data');
+    Route::post('/paid-advertising/tiktok/sync', [PaidAdvertisingChannelController::class, 'sync'])
+        ->defaults('channel', 'tiktok')
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.tiktok.sync');
     Route::get(
         '/campaign-planning-documents/{campaignPlanningDocument}/assets/{assetHash}',
         CampaignPlanningAssetController::class,

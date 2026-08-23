@@ -2,10 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Jobs\SyncMetaAdsCampaignPeriod;
 use App\Jobs\SyncMetaAdsForStore;
 use App\Jobs\SyncPaidAdvertisingGoalTarget;
+use App\Models\AdvertisingChannelAccount;
+use App\Models\AdvertisingChannelDailyMetric;
 use App\Models\AuditLog;
+use App\Models\GoogleAdsCampaignDailyMetric;
+use App\Models\GoogleAdsKeywordDailyMetric;
+use App\Models\GoogleAdsSearchTermDailyMetric;
 use App\Models\MetaAd;
 use App\Models\MetaAdAccount;
 use App\Models\MetaAdCreative;
@@ -19,6 +25,8 @@ use App\Models\Role;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\SyncJob;
+use App\Models\TikTokAdsAdDailyMetric;
+use App\Models\TikTokAdsCampaignDailyMetric;
 use App\Models\User;
 use App\Services\Feishu\PaidAdvertisingGoalSyncService;
 use App\Services\PaidAdvertisingGoalRefreshService;
@@ -42,16 +50,343 @@ class PaidAdvertisingPagesTest extends TestCase
         [$user, $organization, $store] = $this->context('operator');
 
         foreach ($this->emptyPages() as $routeName => $title) {
+            $component = $routeName === 'paid-advertising.tiktok'
+                ? 'PaidAdvertising/TikTok'
+                : 'PaidAdvertising/Channel';
             $this->actingAs($user)
                 ->withSession($this->contextSession($organization, $store))
                 ->get(route($routeName))
                 ->assertOk()
                 ->assertInertia(fn (Assert $page) => $page
-                    ->component('PaidAdvertising/Channel')
+                    ->component($component)
                     ->where('channelStatus.label', $title)
                     ->where('channelStatus.configured', false)
                     ->where('channelStatus.state', 'not_configured'));
         }
+    }
+
+    public function test_google_ads_overview_reads_scoped_mysql_metrics_and_compares_previous_equal_period(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $otherStore = $this->addStore($user, $organization, 'Other Google Store', 'other-google.myshopify.com');
+        $this->configureGoogle($organization, $store);
+        $account = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'google',
+            'external_account_id' => '6442213333',
+            'name' => 'Macfox Google Ads account',
+            'status' => 'active',
+            'currency' => 'USD',
+            'timezone' => 'America/Los_Angeles',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $otherAccount = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'provider' => 'google',
+            'external_account_id' => '9999999999',
+            'name' => 'Other Google Account',
+            'status' => 'active',
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $this->createGoogleMetric($organization, $store, $account, '2026-08-20', 100, 500, 10, 20, 15, 550);
+        $this->createGoogleMetric($organization, $store, $account, '2026-08-13', 80, 320, 8, 10, 8);
+        $this->createGoogleMetric($organization, $otherStore, $otherAccount, '2026-08-20', 9000, 90000, 900, 900, 900);
+        $this->createGoogleCampaignMetric($organization, $store, $account, '2026-08-20', 'campaign-a', 'PMax Bikes', 60);
+        $this->createGoogleCampaignMetric($organization, $store, $account, '2026-08-20', 'campaign-b', 'Search Brand', 40);
+        $this->createGoogleCampaignMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'other-campaign', 'Other Store Campaign', 9000);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('paid-advertising.google', [
+                'account' => '6442213333',
+                'date_from' => '2026-08-17',
+                'date_to' => '2026-08-23',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('PaidAdvertising/Channel')
+                ->where('googleOverview.schema', 'google-ads-overview-v2')
+                ->where('googleOverview.filters.account', '6442213333')
+                ->where('googleOverview.comparison_period.date_from', '2026-08-10')
+                ->where('googleOverview.comparison_period.date_to', '2026-08-16')
+                ->where('googleOverview.current.spend', 100)
+                ->where('googleOverview.current.revenue', 500)
+                ->where('googleOverview.current.roas', 5)
+                ->where('googleOverview.current.cpa', 10)
+                ->where('googleOverview.current.add_to_cart', 20)
+                ->where('googleOverview.current.checkout', 15)
+                ->where('googleOverview.current.add_to_cart_cost', 5)
+                ->where('googleOverview.current.checkout_cost', 6.67)
+                ->where('googleOverview.current.impressions', 1000)
+                ->where('googleOverview.current.clicks', 100)
+                ->where('googleOverview.current.conversions', 10)
+                ->where('googleOverview.current.ctr', 10)
+                ->where('googleOverview.current.cpc', 1)
+                ->where('googleOverview.previous.spend', 80)
+                ->where('googleOverview.deltas.spend', 25)
+                ->where('googleOverview.deltas.cpc', 25)
+                ->has('googleOverview.trend', 1)
+                ->where('googleOverview.trend.0.date', '2026-08-20')
+                ->where('googleOverview.trend.0.spend', 100)
+                ->where('googleOverview.trend.0.revenue', 500)
+                ->where('googleOverview.trend.0.conversion_value', 550)
+                ->where('googleOverview.trend.0.roas', 5)
+                ->where('googleOverview.trend.0.roi', 5.5)
+                ->where('googleOverview.trend.0.ctr', 10)
+                ->where('googleOverview.trend.0.cpc', 1)
+                ->has('googleOverview.campaign_spend', 2)
+                ->where('googleOverview.campaign_spend.0.id', 'campaign-a')
+                ->where('googleOverview.campaign_spend.0.spend', 60)
+                ->where('googleOverview.campaign_spend.0.percentage', 60)
+                ->where('googleOverview.campaign_spend.1.id', 'campaign-b')
+                ->where('googleOverview.campaign_spend.1.percentage', 40)
+                ->has('googleOverview.campaigns', 2)
+                ->where('googleOverview.campaigns.0.id', 'campaign-a')
+                ->where('googleOverview.campaigns.0.name', 'PMax Bikes')
+                ->where('googleOverview.campaigns.0.channel_type', 'PMax')
+                ->where('googleOverview.campaigns.0.status', '运行中')
+                ->where('googleOverview.campaigns.0.spend', 60)
+                ->where('googleOverview.campaigns.0.revenue', 300)
+                ->where('googleOverview.campaigns.0.roas', 5)
+                ->where('googleOverview.campaigns.0.impressions', 1000)
+                ->where('googleOverview.campaigns.0.clicks', 100)
+                ->where('googleOverview.campaigns.0.ctr', 10)
+                ->where('googleOverview.campaigns.0.cpc', 0.6)
+                ->where('googleOverview.campaigns.0.conversions', 10)
+                ->where('googleOverview.campaigns.1.id', 'campaign-b')
+                ->where('googleOverview.funnel.0.value', 1000)
+                ->where('googleOverview.funnel.1.value', 100)
+                ->where('googleOverview.funnel.2.value', 10)
+                ->has('googleOverview.accounts', 1));
+    }
+
+    public function test_google_ads_manual_sync_queues_only_incremental_pipeline(): void
+    {
+        Queue::fake();
+        [$user, $organization, $store] = $this->context('store-admin');
+        $this->configureGoogle($organization, $store);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->postJson(route('paid-advertising.google.sync'))
+            ->assertAccepted()
+            ->assertJsonPath('sync.mode', 'incremental')
+            ->assertJsonPath('sync.queued', true);
+
+        Queue::assertPushed(SyncAdvertisingChannelForStore::class, fn (SyncAdvertisingChannelForStore $job): bool => $job->organizationId === $organization->id
+            && $job->storeId === $store->id
+            && $job->channel === 'google'
+            && $job->mode === 'incremental');
+    }
+
+    public function test_google_search_terms_and_keywords_read_scoped_mysql_with_search_sort_and_pagination(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $otherStore = $this->addStore($user, $organization, 'Other Google Tables Store', 'other-google-tables.myshopify.com');
+        $this->configureGoogle($organization, $store);
+        $account = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'google',
+            'external_account_id' => '6442213333',
+            'name' => 'Macfox Google Ads account',
+            'status' => 'active',
+            'currency' => 'USD',
+            'timezone' => 'America/Los_Angeles',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $otherAccount = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'provider' => 'google',
+            'external_account_id' => '9999999999',
+            'name' => 'Other Google Ads account',
+            'status' => 'active',
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-20', 'Macfox Ebike', 2, 20, 100, 10, 2);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'macfox ebike', 3, 30, 200, 20, 3);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'No Revenue', 5, 0, 50, 5, 0);
+        $this->createGoogleSearchTermMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'Macfox Ebike', 100, 5000, 10000, 1000, 100);
+        $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-20', 'macfox ebike', 4, 48, 400, 40, 4);
+        $this->createGoogleKeywordMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'macfox ebike', 999, 9999, 9999, 999, 99);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.google.data', [
+                'account' => $account->external_account_id,
+                'date_from' => '2026-08-17',
+                'date_to' => '2026-08-23',
+                'view' => 'search-terms',
+                'search' => 'macfox',
+                'sort' => 'roas',
+                'direction' => 'desc',
+                'page' => 1,
+                'per_page' => 10,
+            ]))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.schema', 'google-ads-performance-table-v1')
+            ->assertJsonPath('data.view', 'search-terms')
+            ->assertJsonPath('data.pagination.total', 1)
+            ->assertJsonPath('data.rows.0.search_term', 'macfox ebike')
+            ->assertJsonPath('data.rows.0.status_label', '已添加')
+            ->assertJsonPath('data.rows.0.spend', 5)
+            ->assertJsonPath('data.rows.0.revenue', 50)
+            ->assertJsonPath('data.rows.0.roas', 10)
+            ->assertJsonPath('data.rows.0.impressions', 300)
+            ->assertJsonPath('data.rows.0.clicks', 30)
+            ->assertJsonPath('data.rows.0.ctr', 10)
+            ->assertJsonPath('data.rows.0.conversions', 5);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.google.data', [
+                'account' => $account->external_account_id,
+                'date_from' => '2026-08-17',
+                'date_to' => '2026-08-23',
+                'view' => 'keywords',
+                'search' => 'Search Brand',
+                'sort' => 'spend',
+                'direction' => 'desc',
+                'page' => 1,
+                'per_page' => 10,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.view', 'keywords')
+            ->assertJsonPath('data.pagination.total', 1)
+            ->assertJsonPath('data.rows.0.keyword', 'macfox ebike')
+            ->assertJsonPath('data.rows.0.match_type_label', '精确')
+            ->assertJsonPath('data.rows.0.status_label', '启用')
+            ->assertJsonPath('data.rows.0.spend', 4)
+            ->assertJsonPath('data.rows.0.revenue', 48)
+            ->assertJsonPath('data.rows.0.roas', 12)
+            ->assertJsonPath('data.rows.0.impressions', 400)
+            ->assertJsonPath('data.rows.0.clicks', 40)
+            ->assertJsonPath('data.rows.0.ctr', 10)
+            ->assertJsonPath('data.rows.0.cpc', 0.1)
+            ->assertJsonPath('data.rows.0.conversions', 4);
+    }
+
+    public function test_tiktok_ads_overview_reads_scoped_mysql_metrics_and_previous_period(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $otherStore = $this->addStore($user, $organization, 'Other TikTok Store', 'other-tiktok.myshopify.com');
+        $this->configureTikTok($organization, $store);
+        $account = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'tiktok',
+            'external_account_id' => '7623302290988089361',
+            'name' => 'Macfox TikTok advertiser',
+            'status' => 'active',
+            'currency' => 'USD',
+            'timezone' => 'America/Los_Angeles',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $otherAccount = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'provider' => 'tiktok',
+            'external_account_id' => '9999999999999999999',
+            'name' => 'Other TikTok advertiser',
+            'status' => 'active',
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $this->createTikTokMetric($organization, $store, $account, '2026-08-20', 100, 500, 10, 20, 15);
+        $this->createTikTokMetric($organization, $store, $account, '2026-08-13', 80, 320, 8, 10, 8);
+        $this->createTikTokMetric($organization, $otherStore, $otherAccount, '2026-08-20', 9000, 90000, 900, 900, 900);
+        $this->createTikTokCampaignMetric($organization, $store, $account, '2026-08-20', 'campaign-a', 'TikTok Bikes', 60);
+        $this->createTikTokCampaignMetric($organization, $store, $account, '2026-08-20', 'campaign-b', 'TikTok Retargeting', 40);
+        $this->createTikTokCampaignMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'other-campaign', 'Other Store Campaign', 9000);
+        $this->createTikTokAdMetric($organization, $store, $account, '2026-08-20', 'ad-a', 'Freedom on two wheels', 25, 200);
+        $this->createTikTokAdMetric($organization, $store, $account, '2026-08-20', 'ad-b', 'Ride every street', 30, 120);
+        $this->createTikTokAdMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'other-ad', 'Other Store Creative', 9999, 99999);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('paid-advertising.tiktok', [
+                'account' => '7623302290988089361',
+                'date_from' => '2026-08-17',
+                'date_to' => '2026-08-23',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('PaidAdvertising/TikTok')
+                ->where('tiktokOverview.schema', 'tiktok-ads-overview-v1')
+                ->where('tiktokOverview.filters.account', '7623302290988089361')
+                ->where('tiktokOverview.comparison_period.date_from', '2026-08-10')
+                ->where('tiktokOverview.comparison_period.date_to', '2026-08-16')
+                ->where('tiktokOverview.current.spend', 100)
+                ->where('tiktokOverview.current.revenue', 500)
+                ->where('tiktokOverview.current.roas', 5)
+                ->where('tiktokOverview.current.cpa', 10)
+                ->where('tiktokOverview.current.add_to_cart', 20)
+                ->where('tiktokOverview.current.checkout', 15)
+                ->where('tiktokOverview.current.add_to_cart_cost', 5)
+                ->where('tiktokOverview.current.checkout_cost', 6.67)
+                ->where('tiktokOverview.current.impressions', 1000)
+                ->where('tiktokOverview.current.clicks', 100)
+                ->where('tiktokOverview.current.conversions', 10)
+                ->where('tiktokOverview.current.ctr', 10)
+                ->where('tiktokOverview.current.cpc', 1)
+                ->where('tiktokOverview.previous.spend', 80)
+                ->where('tiktokOverview.deltas.spend', 25)
+                ->has('tiktokOverview.trend', 1)
+                ->where('tiktokOverview.trend.0.date', '2026-08-20')
+                ->where('tiktokOverview.trend.0.spend', 100)
+                ->where('tiktokOverview.trend.0.revenue', 500)
+                ->where('tiktokOverview.trend.0.roi', 5)
+                ->where('tiktokOverview.trend.0.impressions', 1000)
+                ->where('tiktokOverview.trend.0.clicks', 100)
+                ->where('tiktokOverview.trend.0.conversions', 10)
+                ->has('tiktokOverview.previous_trend', 1)
+                ->where('tiktokOverview.previous_trend.0.date', '2026-08-13')
+                ->where('tiktokOverview.previous_trend.0.spend', 80)
+                ->where('tiktokOverview.previous_trend.0.roi', 4)
+                ->has('tiktokOverview.campaigns', 2)
+                ->where('tiktokOverview.campaigns.0.id', 'campaign-a')
+                ->where('tiktokOverview.campaigns.0.spend', 60)
+                ->where('tiktokOverview.campaigns.0.share', 60)
+                ->where('tiktokOverview.campaigns.1.id', 'campaign-b')
+                ->where('tiktokOverview.campaigns.1.share', 40)
+                ->has('tiktokOverview.campaign_details', 2)
+                ->where('tiktokOverview.campaign_details.0.id', 'campaign-a')
+                ->where('tiktokOverview.campaign_details.0.status', 'ENABLE')
+                ->where('tiktokOverview.campaign_details.0.spend', 60)
+                ->where('tiktokOverview.campaign_details.0.revenue', 300)
+                ->where('tiktokOverview.campaign_details.0.roas', 5)
+                ->where('tiktokOverview.campaign_details.0.clicks', 100)
+                ->where('tiktokOverview.campaign_details.0.ctr', 10)
+                ->where('tiktokOverview.campaign_details.0.conversions', 10)
+                ->where('tiktokOverview.campaign_details.0.cpc', 0.6)
+                ->has('tiktokOverview.creatives', 2)
+                ->where('tiktokOverview.creatives.0.id', 'ad-a')
+                ->where('tiktokOverview.creatives.0.name', 'Freedom on two wheels')
+                ->where('tiktokOverview.creatives.0.roas', 8)
+                ->where('tiktokOverview.creatives.0.video_plays', 400)
+                ->where('tiktokOverview.creatives.0.video_2s_rate', 40)
+                ->where('tiktokOverview.creatives.0.average_play_time', 2.5)
+                ->where('tiktokOverview.creatives.1.id', 'ad-b')
+                ->has('tiktokOverview.accounts', 1));
     }
 
     public function test_facebook_page_prompts_for_configuration_and_exposes_scoped_sync_status(): void
@@ -612,8 +947,6 @@ class PaidAdvertisingPagesTest extends TestCase
                 ->where('goalPage.configuration.has_configuration', false)
                 ->where('goalPage.configuration.missing_fields', [
                     'advertising_goals_app_token',
-                    'advertising_goals_table_id',
-                    'advertising_goals_view_id',
                 ])
                 ->where('goalPage.period.schema', 'paid-advertising-goal-period-v1')
                 ->where('goalPage.period.mode', 'month')
@@ -693,12 +1026,11 @@ class PaidAdvertisingPagesTest extends TestCase
 
     public function test_complete_goals_configuration_is_store_scoped_and_exposes_no_feishu_values(): void
     {
+        Queue::fake();
         [$user, $organization, $store] = $this->context('organization-admin');
         $otherStore = $this->addStore($user, $organization, 'Other Advertising Store', 'other-paid-advertising.myshopify.com');
         $values = [
             'feishu_app_token' => 'sensitive-goals-app-token',
-            'feishu_table_id' => 'tbl-goals-current',
-            'feishu_view_id' => 'vew-goals-current',
         ];
 
         $this->actingAs($user)
@@ -721,8 +1053,6 @@ class PaidAdvertisingPagesTest extends TestCase
             ->get(route('paid-advertising.goals'))
             ->assertOk()
             ->assertDontSee($values['feishu_app_token'])
-            ->assertDontSee($values['feishu_table_id'])
-            ->assertDontSee($values['feishu_view_id'])
             ->assertInertia(fn (Assert $page) => $page
                 ->where('store.id', $store->id)
                 ->where('goalPage.configuration.configured', true)
@@ -730,6 +1060,10 @@ class PaidAdvertisingPagesTest extends TestCase
                 ->where('goalPage.configuration.missing_fields', [])
                 ->where('goalPage.tabs.0.deletable', false)
                 ->where('goalPage.tabs.0.clearable', true)
+                ->where('goalPage.sync.tab', 'overall')
+                ->where('goalPage.sync.status', 'queued')
+                ->where('goalPage.sync.initial_sync', true)
+                ->whereType('goalPage.sync.estimated_finished_at', 'string')
                 ->where('canManage', true)
                 ->where('canRefresh', true));
 
@@ -745,13 +1079,9 @@ class PaidAdvertisingPagesTest extends TestCase
 
         $rawCredentials = DB::table('store_business_credentials')
             ->where('store_id', $store->id)
-            ->whereIn('credential_key', [
-                'advertising_goals_app_token',
-                'advertising_goals_table_id',
-                'advertising_goals_view_id',
-            ])
+            ->where('credential_key', 'advertising_goals_app_token')
             ->pluck('credential_value');
-        $this->assertCount(3, $rawCredentials);
+        $this->assertCount(1, $rawCredentials);
         foreach ($rawCredentials as $encryptedValue) {
             $this->assertStringNotContainsString('goals-current', (string) $encryptedValue);
             $this->assertStringNotContainsString('sensitive-goals-app-token', (string) $encryptedValue);
@@ -1315,12 +1645,11 @@ class PaidAdvertisingPagesTest extends TestCase
 
     public function test_confirmed_overall_clear_removes_data_configuration_and_daily_sync_source_but_keeps_the_tab(): void
     {
+        Queue::fake();
         [$user, $organization, $store] = $this->context('organization-admin');
         $otherStore = $this->addStore($user, $organization, 'Overall Isolation Store', 'overall-isolation.myshopify.com');
         $values = [
             'feishu_app_token' => 'overall-sensitive-token',
-            'feishu_table_id' => 'tbl-overall-targets',
-            'feishu_view_id' => 'vew-overall-targets',
         ];
 
         $this->actingAs($user)
@@ -1362,7 +1691,7 @@ class PaidAdvertisingPagesTest extends TestCase
             ->delete(route('paid-advertising.goals.overall.clear'), ['confirmed' => true])
             ->assertRedirect(route('paid-advertising.goals'));
         $this->assertDatabaseHas('paid_advertising_goal_records', ['id' => $record->id]);
-        $this->assertSame(3, StoreBusinessCredential::query()
+        $this->assertSame(1, StoreBusinessCredential::query()
             ->where('store_id', $store->id)
             ->whereIn('credential_key', [
                 'advertising_goals_app_token',
@@ -1393,7 +1722,7 @@ class PaidAdvertisingPagesTest extends TestCase
             ->sole();
         $this->assertSame(1, data_get($audit->old_values, 'records_deleted'));
         $this->assertSame(1, data_get($audit->old_values, 'fields_deleted'));
-        $this->assertSame(3, data_get($audit->old_values, 'credentials_deleted'));
+        $this->assertSame(1, data_get($audit->old_values, 'credentials_deleted'));
         $this->assertTrue((bool) data_get($audit->metadata, 'daily_sync_removed'));
         $this->assertTrue((bool) data_get($audit->metadata, 'fixed_tab_preserved'));
         $this->assertStringNotContainsString($values['feishu_app_token'], $audit->toJson());
@@ -1812,6 +2141,8 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('queued', true)
             ->assertJsonPath('sync.tab', 'overall')
             ->assertJsonPath('sync.status', 'queued')
+            ->assertJsonPath('sync.initial_sync', false)
+            ->assertJsonPath('sync.estimated_finished_at', null)
             ->assertJsonPath('sync.result', null);
         $syncRunUuid = $response->json('sync.id');
         $this->assertTrue(Str::isUuid($syncRunUuid));
@@ -2057,6 +2388,275 @@ class PaidAdvertisingPagesTest extends TestCase
         $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
 
         return $store;
+    }
+
+    private function configureGoogle(Organization $organization, Store $store): void
+    {
+        foreach ([
+            'client_id' => 'client-id',
+            'client_secret' => 'client-secret',
+            'refresh_token' => 'refresh-token',
+            'developer_token' => 'developer-token',
+            'customer_id' => '6442213333',
+        ] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'provider' => 'google_ads',
+                'credential_key' => $key,
+                'credential_value' => $value,
+            ]);
+        }
+    }
+
+    private function configureTikTok(Organization $organization, Store $store): void
+    {
+        foreach (['access_token' => 'tiktok-token', 'advertiser_ids' => '7623302290988089361'] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'provider' => 'tiktok_ads',
+                'credential_key' => $key,
+                'credential_value' => $value,
+            ]);
+        }
+    }
+
+    private function createTikTokMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        float $spend,
+        float $revenue,
+        float $conversions,
+        float $addToCart,
+        float $checkout,
+    ): void {
+        AdvertisingChannelDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'provider' => 'tiktok',
+            'external_account_id' => $account->external_account_id,
+            'metric_date' => $date,
+            'spend' => $spend,
+            'attributed_sales' => $revenue,
+            'impressions' => 1000,
+            'clicks' => 100,
+            'conversions' => $conversions,
+            'add_to_cart' => $addToCart,
+            'initiate_checkout' => $checkout,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createTikTokCampaignMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        string $campaignId,
+        string $campaignName,
+        float $spend,
+    ): void {
+        TikTokAdsCampaignDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'external_account_id' => $account->external_account_id,
+            'campaign_id' => $campaignId,
+            'campaign_name' => $campaignName,
+            'campaign_status' => 'ENABLE',
+            'objective_type' => 'WEB_CONVERSIONS',
+            'metric_date' => $date,
+            'spend' => $spend,
+            'attributed_sales' => $spend * 5,
+            'impressions' => 1000,
+            'clicks' => 100,
+            'conversions' => 10,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createTikTokAdMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        string $adId,
+        string $name,
+        float $spend,
+        float $revenue,
+    ): void {
+        TikTokAdsAdDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'external_account_id' => $account->external_account_id,
+            'campaign_id' => 'campaign-a',
+            'campaign_name' => 'TikTok Bikes',
+            'adgroup_id' => 'group-a',
+            'ad_id' => $adId,
+            'ad_name' => $name,
+            'ad_text' => 'Full TikTok advertising copy.',
+            'ad_texts' => ['Full TikTok advertising copy.', 'Second copy variant.'],
+            'ad_format' => 'VIDEO',
+            'video_id' => 'video-'.$adId,
+            'metric_date' => $date,
+            'spend' => $spend,
+            'attributed_sales' => $revenue,
+            'impressions' => 1000,
+            'clicks' => 100,
+            'conversions' => 5,
+            'video_play_actions' => 400,
+            'video_watched_2s' => 160,
+            'average_video_play' => 2.5,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createGoogleMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        float $spend,
+        float $revenue,
+        float $conversions,
+        float $addToCart,
+        float $checkout,
+        ?float $conversionValueByConversionDate = null,
+    ): void {
+        AdvertisingChannelDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'provider' => 'google',
+            'external_account_id' => $account->external_account_id,
+            'metric_date' => $date,
+            'spend' => $spend,
+            'attributed_sales' => $revenue,
+            'conversion_value_by_conversion_date' => $conversionValueByConversionDate ?? $revenue,
+            'impressions' => 1000,
+            'clicks' => 100,
+            'conversions' => $conversions,
+            'add_to_cart' => $addToCart,
+            'initiate_checkout' => $checkout,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createGoogleCampaignMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        string $campaignId,
+        string $campaignName,
+        float $spend,
+    ): void {
+        GoogleAdsCampaignDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'external_account_id' => $account->external_account_id,
+            'campaign_id' => $campaignId,
+            'campaign_name' => $campaignName,
+            'campaign_status' => 'ENABLED',
+            'advertising_channel_type' => 'PERFORMANCE_MAX',
+            'metric_date' => $date,
+            'spend' => $spend,
+            'impressions' => 1000,
+            'clicks' => 100,
+            'conversions' => 10,
+            'conversions_value' => $spend * 5,
+            'conversion_value_by_conversion_date' => $spend * 5.5,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createGoogleSearchTermMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        string $searchTerm,
+        float $spend,
+        float $revenue,
+        int $impressions,
+        int $clicks,
+        float $conversions,
+    ): void {
+        $normalized = strtolower(trim($searchTerm));
+        GoogleAdsSearchTermDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'external_account_id' => $account->external_account_id,
+            'metric_date' => $date,
+            'dimension_key' => hash('sha256', $normalized.'|'.$date),
+            'source_type' => 'standard',
+            'search_term' => $searchTerm,
+            'normalized_search_term' => $normalized,
+            'matched_keyword' => 'macfox ebike',
+            'match_type' => 'EXACT',
+            'status' => 'ADDED',
+            'campaign_id' => 'campaign-search',
+            'campaign_name' => 'Search Brand',
+            'ad_group_id' => 'ad-group-search',
+            'ad_group_name' => 'Brand Exact',
+            'spend' => $spend,
+            'revenue' => $revenue,
+            'impressions' => $impressions,
+            'clicks' => $clicks,
+            'conversions' => $conversions,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createGoogleKeywordMetric(
+        Organization $organization,
+        Store $store,
+        AdvertisingChannelAccount $account,
+        string $date,
+        string $keyword,
+        float $spend,
+        float $revenue,
+        int $impressions,
+        int $clicks,
+        float $conversions,
+    ): void {
+        GoogleAdsKeywordDailyMetric::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'advertising_channel_account_id' => $account->id,
+            'external_account_id' => $account->external_account_id,
+            'metric_date' => $date,
+            'dimension_key' => hash('sha256', $keyword.'|campaign-keyword|ad-group-keyword'),
+            'criterion_id' => 'criterion-1',
+            'keyword' => $keyword,
+            'normalized_keyword' => strtolower(trim($keyword)),
+            'match_type' => 'EXACT',
+            'status' => 'ENABLED',
+            'campaign_id' => 'campaign-keyword',
+            'campaign_name' => 'Search Brand',
+            'ad_group_id' => 'ad-group-keyword',
+            'ad_group_name' => 'Brand Exact',
+            'spend' => $spend,
+            'revenue' => $revenue,
+            'impressions' => $impressions,
+            'clicks' => $clicks,
+            'conversions' => $conversions,
+            'raw_payload' => [],
+            'synced_at' => now(),
+        ]);
     }
 
     /** @return array{name: string, type: string, feishu_app_token: string, feishu_table_id: string, feishu_view_id: string} */

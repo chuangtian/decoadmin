@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\FeishuBitableTable;
 use App\Models\Organization;
 use App\Models\PaidAdvertisingGoalBoard;
 use App\Models\PaidAdvertisingGoalField;
@@ -26,6 +27,13 @@ class PaidAdvertisingGoalService
 
     private const FEISHU_SECTION = 'advertising_goals';
 
+    private const FEISHU_ARCHIVE_SECTION = 'paid-ad-goals:overall';
+
+    private const LEGACY_OVERALL_CREDENTIAL_KEYS = [
+        'advertising_goals_table_id',
+        'advertising_goals_view_id',
+    ];
+
     private const MAX_BOARDS_PER_STORE = 50;
 
     public function __construct(
@@ -33,6 +41,7 @@ class PaidAdvertisingGoalService
         private PaidAdvertisingGoalMetricsService $metrics,
         private PaidAdvertisingPersonalFacebookMetricsService $personalFacebookMetrics,
         private PaidAdvertisingGoogleAdsMetricsService $googleAdsMetrics,
+        private PaidAdvertisingGoalRefreshService $refresh,
     ) {}
 
     /**
@@ -114,6 +123,7 @@ class PaidAdvertisingGoalService
                         ? $this->googleAdsMetrics->summary($organization, $store, $activeBoard, $period)
                         : null,
             ],
+            'sync' => $this->refresh->latestForTarget($organization, $store, $activeTab),
         ];
     }
 
@@ -123,9 +133,8 @@ class PaidAdvertisingGoalService
         $this->assertScope($organization, $store);
         $this->dataLinks->updateSection($store, self::FEISHU_SECTION, [
             'advertising_goals_app_token' => $values['feishu_app_token'],
-            'advertising_goals_table_id' => $values['feishu_table_id'],
-            'advertising_goals_view_id' => $values['feishu_view_id'],
         ], $actor);
+        $this->dataLinks->clearCredentialKeys($store, self::LEGACY_OVERALL_CREDENTIAL_KEYS);
     }
 
     public function clearOverall(Organization $organization, Store $store, User $actor): void
@@ -148,7 +157,13 @@ class PaidAdvertisingGoalService
                 ->forStore($store)
                 ->where('target_key', PaidAdvertisingGoalRefreshService::TARGET_OVERALL)
                 ->delete();
+            $archivedTableCount = FeishuBitableTable::query()
+                ->forOrganization($organization)
+                ->forStore($store)
+                ->where('source_section', self::FEISHU_ARCHIVE_SECTION)
+                ->delete();
             $credentialCount = $this->dataLinks->clearSection($store, self::FEISHU_SECTION, $actor);
+            $legacyCredentialCount = $this->dataLinks->clearCredentialKeys($store, self::LEGACY_OVERALL_CREDENTIAL_KEYS);
 
             AuditLog::query()->create([
                 'organization_id' => $organization->id,
@@ -162,7 +177,8 @@ class PaidAdvertisingGoalService
                     'records_deleted' => $recordCount,
                     'fields_deleted' => $fieldCount,
                     'sync_runs_deleted' => $syncRunCount,
-                    'credentials_deleted' => $credentialCount,
+                    'archived_tables_deleted' => $archivedTableCount,
+                    'credentials_deleted' => $credentialCount + $legacyCredentialCount,
                 ],
                 'new_values' => ['configured' => false],
                 'metadata' => [
