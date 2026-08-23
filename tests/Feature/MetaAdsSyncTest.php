@@ -104,11 +104,12 @@ class MetaAdsSyncTest extends TestCase
         $this->assertNotNull($state->last_full_sync_at);
         $this->assertNull($state->last_incremental_sync_at);
         $this->assertSame(
-            (string) MetaAdInsight::query()
+            CarbonImmutable::parse((string) MetaAdInsight::query()
                 ->where('level', 'account')
                 ->where('granularity', 'day')
                 ->latest('date_stop')
-                ->value('date_stop'),
+                ->value('date_stop'))
+                ->toDateString(),
             $state->last_metric_date?->toDateString(),
         );
         $this->assertNotNull($state->data_synced_at);

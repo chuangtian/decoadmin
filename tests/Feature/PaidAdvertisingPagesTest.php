@@ -100,7 +100,7 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.state', 'syncing')
             ->assertJsonPath('data.mode', 'priority')
             ->assertJsonPath('data.last_metric_date', '2026-08-22')
-            ->assertJsonPath('data.data_synced_at', '2026-08-22T12:34:56.000000Z')
+            ->assertJsonPath('data.data_synced_at', '2026-08-22T12:34:56+00:00')
             ->assertJsonMissing(['hidden-meta-token']);
         $statusQueries = DB::getQueryLog();
         DB::disableQueryLog();

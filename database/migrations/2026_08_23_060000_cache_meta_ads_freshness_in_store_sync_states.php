@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -19,6 +20,30 @@ return new class extends Migration
                 'meta_insights_scope_latest_daily_index',
             );
         });
+
+        DB::table('store_sync_states')
+            ->where('sync_type', 'meta_ads')
+            ->orderBy('id')
+            ->get(['id', 'organization_id', 'store_id'])
+            ->each(function (object $state): void {
+                $freshness = DB::table('meta_ad_insights')
+                    ->where('organization_id', $state->organization_id)
+                    ->where('store_id', $state->store_id)
+                    ->where('level', 'account')
+                    ->where('granularity', 'day')
+                    ->orderByDesc('date_stop')
+                    ->orderByDesc('synced_at')
+                    ->first(['date_stop', 'synced_at']);
+
+                if ($freshness) {
+                    DB::table('store_sync_states')
+                        ->where('id', $state->id)
+                        ->update([
+                            'last_metric_date' => $freshness->date_stop,
+                            'data_synced_at' => $freshness->synced_at,
+                        ]);
+                }
+            });
     }
 
     public function down(): void
