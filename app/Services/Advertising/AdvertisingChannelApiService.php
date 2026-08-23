@@ -4,6 +4,7 @@ namespace App\Services\Advertising;
 
 use App\Models\Store;
 use App\Services\StoreBusinessCredentialService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Response;
 use RuntimeException;
@@ -14,11 +15,11 @@ class AdvertisingChannelApiService
 {
     private const META_API = 'https://graph.facebook.com/v21.0';
 
-    private const GOOGLE_ADS_API = 'https://googleads.googleapis.com/v23';
+    private const GOOGLE_ADS_API = 'https://googleads.googleapis.com/v24';
 
     private const TIKTOK_API = 'https://business-api.tiktok.com/open_api/v1.3';
 
-    private const CRITEO_API = 'https://api.criteo.com/2025-01';
+    private const CRITEO_API = 'https://api.criteo.com/2026-01';
 
     private const BING_REPORTING_API = 'https://reporting.api.bingads.microsoft.com/Reporting/v13';
 
@@ -53,6 +54,34 @@ class AdvertisingChannelApiService
     public function channelKeys(): array
     {
         return array_keys(self::CHANNEL_NAMES);
+    }
+
+    /**
+     * Return account discovery plus normalized daily rows for the shared
+     * history importer. Meta keeps its richer dedicated entity pipeline.
+     *
+     * @return array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>}
+     */
+    public function syncPayload(Store $store, string $key, string $from, string $to): array
+    {
+        if (! in_array($key, ['google', 'tiktok', 'bing', 'criteo'], true)) {
+            throw new RuntimeException('Unsupported advertising history platform.');
+        }
+        if (! $this->configured($store, $key)) {
+            throw new RuntimeException('Advertising credential unavailable.');
+        }
+
+        $payload = match ($key) {
+            'google' => $this->google($store, $from, $to),
+            'tiktok' => $this->tiktok($store, $from, $to),
+            'bing' => $this->bing($store, $from, $to),
+            'criteo' => $this->criteo($store, $from, $to),
+        };
+
+        return [
+            'accounts' => (array) ($payload['accounts'] ?? []),
+            'daily_metrics' => (array) ($payload['daily_metrics'] ?? []),
+        ];
     }
 
     /** @return array{key: string, name: string, configured: bool, available: bool, ad_spend: float, attributed_sales: float, message: string|null} */
@@ -175,20 +204,54 @@ class AdvertisingChannelApiService
             $headers['login-customer-id'] = $loginCustomerId;
         }
 
-        $query = "SELECT segments.date, metrics.cost_micros, metrics.conversions_value FROM customer WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
+        $query = "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, segments.date, metrics.cost_micros, metrics.conversions_value, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
         $response = $this->http->withHeaders($headers)->acceptJson()->timeout(30)
             ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", ['query' => $query]);
         $this->assertSuccessful($response, 'Google Ads');
 
         $spend = 0.0;
         $sales = 0.0;
+        $daily = [];
+        $account = [
+            'external_account_id' => $customerId,
+            'name' => null,
+            'currency' => null,
+            'timezone' => null,
+            'status' => 'active',
+            'raw_payload' => ['customer_id' => $customerId],
+        ];
         foreach ((array) $response->json('results', []) as $row) {
             $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
-            $spend += $this->number($metrics['costMicros'] ?? 0) / 1_000_000;
-            $sales += $this->number($metrics['conversionsValue'] ?? 0);
+            $customer = is_array($row) && is_array($row['customer'] ?? null) ? $row['customer'] : [];
+            $segments = is_array($row) && is_array($row['segments'] ?? null) ? $row['segments'] : [];
+            $rowSpend = $this->number($metrics['costMicros'] ?? 0) / 1_000_000;
+            $rowSales = $this->number($metrics['conversionsValue'] ?? 0);
+            $spend += $rowSpend;
+            $sales += $rowSales;
+            $account = [
+                ...$account,
+                'external_account_id' => trim((string) ($customer['id'] ?? $customerId)),
+                'name' => $customer['descriptiveName'] ?? null,
+                'currency' => $customer['currencyCode'] ?? null,
+                'timezone' => $customer['timeZone'] ?? null,
+                'raw_payload' => $customer ?: ['customer_id' => $customerId],
+            ];
+            $date = trim((string) ($segments['date'] ?? ''));
+            if ($date !== '') {
+                $daily[] = $this->dailyRow(
+                    (string) $account['external_account_id'],
+                    $date,
+                    $rowSpend,
+                    $rowSales,
+                    $metrics['impressions'] ?? 0,
+                    $metrics['clicks'] ?? 0,
+                    $metrics['conversions'] ?? 0,
+                    $row,
+                );
+            }
         }
 
-        return $this->totals($spend, $sales);
+        return [...$this->totals($spend, $sales), 'accounts' => [$account], 'daily_metrics' => $daily];
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
@@ -206,6 +269,8 @@ class AdvertisingChannelApiService
 
         $spend = 0.0;
         $sales = 0.0;
+        $accounts = [];
+        $daily = [];
         foreach ($advertiserIds as $advertiserId) {
             $response = $this->http->withHeaders(['Access-Token' => $token])->acceptJson()->timeout(30)
                 ->get(self::TIKTOK_API.'/report/integrated/get/', [
@@ -213,7 +278,7 @@ class AdvertisingChannelApiService
                     'report_type' => 'BASIC',
                     'data_level' => 'AUCTION_ADVERTISER',
                     'dimensions' => json_encode(['stat_time_day'], JSON_THROW_ON_ERROR),
-                    'metrics' => json_encode(['spend', 'complete_payment', 'complete_payment_roas'], JSON_THROW_ON_ERROR),
+                    'metrics' => json_encode(['spend', 'complete_payment', 'complete_payment_roas', 'impressions', 'clicks'], JSON_THROW_ON_ERROR),
                     'start_date' => $from,
                     'end_date' => $to,
                     'page' => 1,
@@ -224,15 +289,39 @@ class AdvertisingChannelApiService
                 throw new RuntimeException('TikTok report unavailable.');
             }
 
+            $accounts[] = [
+                'external_account_id' => (string) $advertiserId,
+                'name' => null,
+                'currency' => null,
+                'timezone' => null,
+                'status' => 'active',
+                'raw_payload' => ['advertiser_id' => (string) $advertiserId],
+            ];
+
             foreach ((array) $response->json('data.list', []) as $row) {
                 $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+                $dimensions = is_array($row) && is_array($row['dimensions'] ?? null) ? $row['dimensions'] : [];
                 $rowSpend = $this->number($metrics['spend'] ?? 0);
+                $rowSales = $rowSpend * $this->number($metrics['complete_payment_roas'] ?? 0);
                 $spend += $rowSpend;
-                $sales += $rowSpend * $this->number($metrics['complete_payment_roas'] ?? 0);
+                $sales += $rowSales;
+                $date = trim((string) ($dimensions['stat_time_day'] ?? ''));
+                if ($date !== '') {
+                    $daily[] = $this->dailyRow(
+                        (string) $advertiserId,
+                        substr($date, 0, 10),
+                        $rowSpend,
+                        $rowSales,
+                        $metrics['impressions'] ?? 0,
+                        $metrics['clicks'] ?? 0,
+                        $metrics['complete_payment'] ?? 0,
+                        $row,
+                    );
+                }
             }
         }
 
-        return $this->totals($spend, $sales);
+        return [...$this->totals($spend, $sales), 'accounts' => $accounts, 'daily_metrics' => $daily];
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
@@ -270,29 +359,55 @@ class AdvertisingChannelApiService
             throw new RuntimeException('Criteo advertiser unavailable.');
         }
 
-        $metrics = ['AdvertiserCost', 'RevenueGeneratedPc7d', 'RevenueGeneratedPv24h'];
-        $response = $this->http->withToken($token)->withHeaders(['Accept' => 'text/csv'])->timeout(35)
-            ->post(self::CRITEO_API.'/statistics/report', [
-                'advertiserIds' => $advertiserIds->implode(','),
-                'startDate' => $from,
-                'endDate' => $to,
-                'dimensions' => ['Day'],
-                'metrics' => $metrics,
-                'currency' => 'USD',
-                'timezone' => 'UTC',
-                'format' => 'csv',
-            ]);
-        $this->assertSuccessful($response, 'Criteo report');
-
         $spend = 0.0;
         $sales = 0.0;
-        foreach ($this->csv($response->body()) as $row) {
-            $spend += $this->number($row['AdvertiserCost'] ?? 0);
-            $sales += $this->number($row['RevenueGeneratedPc7d'] ?? 0)
-                + $this->number($row['RevenueGeneratedPv24h'] ?? 0);
+        $accounts = [];
+        $daily = [];
+        $metrics = ['AdvertiserCost', 'RevenueGeneratedPc7d', 'RevenueGeneratedPv24h', 'Displays', 'Clicks'];
+        foreach ($advertiserIds as $advertiserId) {
+            $response = $this->http->withToken($token)->withHeaders(['Accept' => 'text/csv'])->timeout(35)
+                ->post(self::CRITEO_API.'/statistics/report', [
+                    'advertiserIds' => (string) $advertiserId,
+                    'startDate' => $from,
+                    'endDate' => $to,
+                    'dimensions' => ['Day'],
+                    'metrics' => $metrics,
+                    'currency' => 'USD',
+                    'timezone' => 'UTC',
+                    'format' => 'csv',
+                ]);
+            $this->assertSuccessful($response, 'Criteo report');
+            $accounts[] = [
+                'external_account_id' => (string) $advertiserId,
+                'name' => null,
+                'currency' => 'USD',
+                'timezone' => 'UTC',
+                'status' => 'active',
+                'raw_payload' => ['advertiser_id' => (string) $advertiserId],
+            ];
+            foreach ($this->csv($response->body()) as $row) {
+                $rowSpend = $this->number($row['AdvertiserCost'] ?? 0);
+                $rowSales = $this->number($row['RevenueGeneratedPc7d'] ?? 0)
+                    + $this->number($row['RevenueGeneratedPv24h'] ?? 0);
+                $spend += $rowSpend;
+                $sales += $rowSales;
+                $date = trim((string) ($row['Day'] ?? ''));
+                if ($date !== '') {
+                    $daily[] = $this->dailyRow(
+                        (string) $advertiserId,
+                        substr($date, 0, 10),
+                        $rowSpend,
+                        $rowSales,
+                        $row['Displays'] ?? 0,
+                        $row['Clicks'] ?? 0,
+                        0,
+                        $row,
+                    );
+                }
+            }
         }
 
-        return $this->totals($spend, $sales);
+        return [...$this->totals($spend, $sales), 'accounts' => $accounts, 'daily_metrics' => $daily];
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
@@ -337,8 +452,8 @@ class AdvertisingChannelApiService
             'FormatVersion' => '2.0',
             'ReportName' => 'CampaignChannelPeriodPerformance',
             'ReturnOnlyCompleteData' => false,
-            'Aggregation' => 'Summary',
-            'Columns' => ['AccountId', 'Spend', 'Revenue'],
+            'Aggregation' => 'Daily',
+            'Columns' => ['TimePeriod', 'AccountId', 'AccountName', 'CurrencyCode', 'Spend', 'Revenue', 'Impressions', 'Clicks', 'Conversions'],
             'Scope' => ['AccountIds' => [$accountId]],
             'Time' => [
                 'CustomDateRangeStart' => $this->bingDate($from),
@@ -381,10 +496,34 @@ class AdvertisingChannelApiService
         $body = $this->unzipIfNeeded($download->body(), (string) $download->header('content-type'), $downloadUrl);
         $rows = $this->csv($body, true);
 
-        return $this->totals(
-            collect($rows)->sum(fn (array $row): float => $this->number($row['Spend'] ?? 0)),
-            collect($rows)->sum(fn (array $row): float => $this->number($row['Revenue'] ?? 0)),
-        );
+        $daily = collect($rows)->map(function (array $row) use ($accountId): array {
+            return $this->dailyRow(
+                trim((string) ($row['AccountId'] ?? $accountId)),
+                trim((string) ($row['TimePeriod'] ?? '')),
+                $row['Spend'] ?? 0,
+                $row['Revenue'] ?? 0,
+                $row['Impressions'] ?? 0,
+                $row['Clicks'] ?? 0,
+                $row['Conversions'] ?? 0,
+                $row,
+            );
+        })->filter(fn (array $row): bool => $row['date'] !== '')->values()->all();
+
+        return [
+            ...$this->totals(
+                collect($rows)->sum(fn (array $row): float => $this->number($row['Spend'] ?? 0)),
+                collect($rows)->sum(fn (array $row): float => $this->number($row['Revenue'] ?? 0)),
+            ),
+            'accounts' => [[
+                'external_account_id' => (string) $accountId,
+                'name' => $rows[0]['AccountName'] ?? null,
+                'currency' => $rows[0]['CurrencyCode'] ?? null,
+                'timezone' => null,
+                'status' => 'active',
+                'raw_payload' => ['account_id' => $accountId, 'customer_id' => $customerId],
+            ]],
+            'daily_metrics' => $daily,
+        ];
     }
 
     private function configured(Store $store, string $key): bool
@@ -517,6 +656,35 @@ class AdvertisingChannelApiService
         return [
             'ad_spend' => round(max(0, $spend), 2),
             'attributed_sales' => round(max(0, $sales), 2),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function dailyRow(
+        string $accountId,
+        string $date,
+        mixed $spend,
+        mixed $sales,
+        mixed $impressions,
+        mixed $clicks,
+        mixed $conversions,
+        array $rawPayload,
+    ): array {
+        try {
+            $normalizedDate = trim($date) === '' ? '' : CarbonImmutable::parse($date)->toDateString();
+        } catch (Throwable) {
+            $normalizedDate = '';
+        }
+
+        return [
+            'external_account_id' => $accountId,
+            'date' => $normalizedDate,
+            'spend' => round(max(0, $this->number($spend)), 6),
+            'attributed_sales' => round(max(0, $this->number($sales)), 6),
+            'impressions' => max(0, (int) round($this->number($impressions))),
+            'clicks' => max(0, (int) round($this->number($clicks))),
+            'conversions' => round(max(0, $this->number($conversions)), 6),
+            'raw_payload' => $rawPayload,
         ];
     }
 

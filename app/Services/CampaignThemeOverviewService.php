@@ -159,5 +159,4 @@ class CampaignThemeOverviewService
             'performance' => $performance,
         ];
     }
-
 }

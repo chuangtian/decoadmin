@@ -101,6 +101,8 @@ return [
         'redis:default' => 60,
         'redis:shopify-sync' => 120,
         'redis:notifications' => 180,
+        'redis:meta-ads-poll' => 30,
+        'redis:meta-ads' => 120,
     ],
 
     /*
@@ -222,6 +224,38 @@ return [
             'rest' => 0,
             'nice' => 0,
         ],
+        'supervisor-meta-ads' => [
+            'connection' => 'redis',
+            'queue' => ['meta-ads-poll', 'meta-ads'],
+            'balance' => false,
+            'processes' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+            'minProcesses' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+            'maxTime' => 3600,
+            'maxJobs' => 20,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_META_ADS_TIMEOUT', 1800),
+            'backoff' => [60, 300, 900],
+            'sleep' => 1,
+            'rest' => 0,
+            'nice' => 0,
+        ],
+        'supervisor-advertising-sync' => [
+            'connection' => 'redis',
+            'queue' => ['advertising-sync'],
+            'balance' => false,
+            'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+            'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+            'maxTime' => 3600,
+            'maxJobs' => 50,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_ADVERTISING_SYNC_TIMEOUT', 1800),
+            'backoff' => [120, 600, 1200],
+            'sleep' => 1,
+            'rest' => 0,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -230,6 +264,14 @@ return [
                 'processes' => (int) env('HORIZON_PROCESSES', 10),
                 'minProcesses' => (int) env('HORIZON_PROCESSES', 10),
             ],
+            'supervisor-meta-ads' => [
+                'processes' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+            ],
+            'supervisor-advertising-sync' => [
+                'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+            ],
         ],
 
         'staging' => [
@@ -237,11 +279,27 @@ return [
                 'processes' => (int) env('HORIZON_PROCESSES', 5),
                 'minProcesses' => (int) env('HORIZON_PROCESSES', 5),
             ],
+            'supervisor-meta-ads' => [
+                'processes' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+            ],
+            'supervisor-advertising-sync' => [
+                'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+            ],
         ],
 
         'local' => [
             'supervisor-shopify' => [
                 'processes' => (int) env('HORIZON_PROCESSES', 3),
+            ],
+            'supervisor-meta-ads' => [
+                'processes' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_META_ADS_PROCESSES', 2),
+            ],
+            'supervisor-advertising-sync' => [
+                'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+                'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
             ],
         ],
     ],

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\MicrosoftAdsOAuthException;
+use App\Services\Advertising\AdvertisingChannelLifecycleService;
 use App\Services\MicrosoftAds\MicrosoftAdsOAuthService;
 use App\Support\CurrentStore;
 use Illuminate\Http\RedirectResponse;
@@ -26,7 +27,7 @@ class MicrosoftAdsOAuthController extends Controller
         return redirect()->away($authorization['authorization_url']);
     }
 
-    public function callback(Request $request, CurrentStore $currentStore, MicrosoftAdsOAuthService $oauth): RedirectResponse
+    public function callback(Request $request, CurrentStore $currentStore, MicrosoftAdsOAuthService $oauth, AdvertisingChannelLifecycleService $lifecycle): RedirectResponse
     {
         $store = $currentStore->require();
         $this->authorize('update', $store);
@@ -42,6 +43,8 @@ class MicrosoftAdsOAuthController extends Controller
         } catch (MicrosoftAdsOAuthException $exception) {
             return to_route('store-settings.credentials')->with('error', $exception->getMessage());
         }
+
+        $lifecycle->restartIfConfigured($store, 'bing_ads');
 
         return to_route('store-settings.credentials')->with('success', 'Microsoft Ads 已连接。');
     }

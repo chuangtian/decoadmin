@@ -33,6 +33,31 @@ Schedule::command('shopify:check-connections')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+if (config('services.meta_ads.sync_enabled', true)) {
+    Schedule::command('meta-ads:sync --mode=incremental')
+        ->name('meta-ads:hourly-insight-sync')
+        ->hourlyAt(10)
+        ->onOneServer()
+        ->withoutOverlapping(10);
+
+    Schedule::command('meta-ads:sync --mode=structure')
+        ->name('meta-ads:daily-structure-sync')
+        ->dailyAt((string) config('services.meta_ads.structure_sync_time', '02:35'))
+        ->timezone((string) config('services.meta_ads.structure_sync_timezone', 'UTC'))
+        ->onOneServer()
+        ->withoutOverlapping(120);
+}
+
+if (config('services.advertising_sync.enabled', true)) {
+    foreach (['google' => 17, 'tiktok' => 29, 'bing' => 41, 'criteo' => 53] as $channel => $minute) {
+        Schedule::command("advertising-channels:sync {$channel} --mode=incremental")
+            ->name("advertising-channels:{$channel}:hourly-store-sync")
+            ->hourlyAt($minute)
+            ->onOneServer()
+            ->withoutOverlapping(45);
+    }
+}
+
 if (config('services.feishu_table.amazon_sync_enabled', true)) {
     Schedule::command('feishu:sync-amazon-daily-sales')
         ->name('feishu:amazon-daily-sales-sync')

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateStoreBusinessCredentialRequest;
 use App\Models\Store;
+use App\Services\Advertising\AdvertisingChannelLifecycleService;
+use App\Services\MetaAds\MetaAdsLifecycleService;
 use App\Services\StoreBusinessCredentialService;
 use App\Support\CurrentStore;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +24,7 @@ class StoreBusinessCredentialController extends Controller
         return Inertia::render('Stores/Settings/Credentials', [
             'store' => $this->storeSummary($store),
             'credentialProviders' => $credentials->catalogForFrontend($store),
+            'initialProvider' => $request->string('provider')->toString(),
             'canUpdate' => $request->user()->hasPermission('store.update', $store->organization, $store),
         ]);
     }
@@ -40,22 +43,51 @@ class StoreBusinessCredentialController extends Controller
         ]);
     }
 
-    public function update(UpdateStoreBusinessCredentialRequest $request, string $provider, string $credentialKey, CurrentStore $currentStore, StoreBusinessCredentialService $credentials): RedirectResponse
-    {
+    public function update(
+        UpdateStoreBusinessCredentialRequest $request,
+        string $provider,
+        string $credentialKey,
+        CurrentStore $currentStore,
+        StoreBusinessCredentialService $credentials,
+        MetaAdsLifecycleService $metaAds,
+        AdvertisingChannelLifecycleService $advertisingChannels,
+    ): RedirectResponse {
         $store = $currentStore->require();
         $this->authorize('update', $store);
         $definition = $credentials->fieldDefinition($provider, $credentialKey);
-        $credentials->update($store, $provider, $credentialKey, $request->validated('value'), $request->user());
+        $value = $request->validated('value');
+        $credential = $credentials->update($store, $provider, $credentialKey, $value, $request->user());
+
+        if ($provider === 'meta_ads' && $credentialKey === 'access_token' && filled(trim((string) $value)) && $credential) {
+            $metaAds->restartFullSync($store, $credential);
+        } elseif ($credential) {
+            $advertisingChannels->restartIfConfigured($store, $provider);
+        }
 
         return back()->with('success', $definition['label'].' 已保存。');
     }
 
-    public function destroy(Request $request, string $provider, string $credentialKey, CurrentStore $currentStore, StoreBusinessCredentialService $credentials): RedirectResponse
-    {
+    public function destroy(
+        Request $request,
+        string $provider,
+        string $credentialKey,
+        CurrentStore $currentStore,
+        StoreBusinessCredentialService $credentials,
+        MetaAdsLifecycleService $metaAds,
+        AdvertisingChannelLifecycleService $advertisingChannels,
+    ): RedirectResponse {
         $store = $currentStore->require();
         $this->authorize('update', $store);
         $definition = $credentials->fieldDefinition($provider, $credentialKey);
-        $credentials->clear($store, $provider, $credentialKey, $request->user());
+        if ($provider === 'meta_ads' && $credentialKey === 'access_token') {
+            $request->validate(['confirmed' => ['accepted']]);
+            $metaAds->clear($store, $request->user());
+        } elseif ($advertisingChannels->supportsProvider($provider)) {
+            $request->validate(['confirmed' => ['accepted']]);
+            $advertisingChannels->clearCredential($store, $provider, $credentialKey, $request->user());
+        } else {
+            $credentials->clear($store, $provider, $credentialKey, $request->user());
+        }
 
         return back()->with('success', $definition['label'].' 已清除。');
     }
