@@ -2,7 +2,6 @@
 
 namespace App\Services\MetaAds;
 
-use App\Models\MetaAdInsight;
 use App\Models\MetaAdSyncShard;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
@@ -51,17 +50,10 @@ class MetaAdsStatusService
             ->where('mode', 'priority')
             ->where('status', 'completed')
             ->exists();
-        $freshness = MetaAdInsight::query()
-            ->forOrganization((int) $store->organization_id)
-            ->forStore((int) $store->getKey())
-            ->selectRaw('MAX(date_stop) as metric_date, MAX(synced_at) as synced_at')
-            ->first();
         $data = [
             'data_ready' => $priorityReady || (bool) $state?->last_success_at,
-            'last_metric_date' => filled($freshness?->metric_date)
-                ? CarbonImmutable::parse($freshness->metric_date)->toDateString()
-                : null,
-            'data_synced_at' => $freshness?->synced_at?->toIso8601String(),
+            'last_metric_date' => $state?->last_metric_date?->toDateString(),
+            'data_synced_at' => $state?->data_synced_at?->toIso8601String(),
         ];
 
         if (($state && in_array($state->status, ['queued', 'running'], true))

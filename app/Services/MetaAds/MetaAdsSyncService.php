@@ -1808,7 +1808,16 @@ class MetaAdsSyncService
     /** @param array<string, int|string|bool> $result */
     private function completeJob(SyncJob $job, array $result): void
     {
-        DB::transaction(function () use ($job, $result): void {
+        $freshness = MetaAdInsight::query()
+            ->forOrganization((int) $job->organization_id)
+            ->forStore((int) $job->store_id)
+            ->where('level', 'account')
+            ->where('granularity', 'day')
+            ->latest('date_stop')
+            ->latest('synced_at')
+            ->first(['date_stop', 'synced_at']);
+
+        DB::transaction(function () use ($freshness, $job, $result): void {
             $finishedAt = now();
             $records = (int) ($result['records_count'] ?? 0);
             $job->forceFill([
@@ -1842,6 +1851,10 @@ class MetaAdsSyncService
                 'last_error_code' => null,
                 'last_error' => null,
             ];
+            if ($freshness) {
+                $attributes['last_metric_date'] = $freshness->date_stop;
+                $attributes['data_synced_at'] = $freshness->synced_at;
+            }
             if ($job->mode === 'incremental') {
                 $attributes['last_incremental_sync_at'] = $finishedAt;
                 $attributes['last_reconciled_at'] = $finishedAt;
