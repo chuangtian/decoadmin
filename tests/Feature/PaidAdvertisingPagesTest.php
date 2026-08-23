@@ -9,6 +9,8 @@ use App\Jobs\SyncPaidAdvertisingGoalTarget;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
 use App\Models\AuditLog;
+use App\Models\FeishuBitableRecord;
+use App\Models\FeishuBitableTable;
 use App\Models\GoogleAdsCampaignDailyMetric;
 use App\Models\GoogleAdsKeywordDailyMetric;
 use App\Models\GoogleAdsSearchTermDailyMetric;
@@ -165,6 +167,100 @@ class PaidAdvertisingPagesTest extends TestCase
                 ->where('googleOverview.funnel.1.value', 100)
                 ->where('googleOverview.funnel.2.value', 10)
                 ->has('googleOverview.accounts', 1));
+    }
+
+    public function test_google_ads_weekly_report_reads_google_week_table_independently_from_top_date_filters(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $otherStore = $this->addStore($user, $organization, 'Other Weekly Store', 'other-weekly.myshopify.com');
+        $table = FeishuBitableTable::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'source_section' => 'paid-ad-goals:overall',
+            'source_table_id' => 'tbl-google-weekly',
+            'name' => 'Google周数据',
+            'synced_at' => CarbonImmutable::parse('2026-08-24 03:40:00'),
+        ]);
+        $otherTable = FeishuBitableTable::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'source_section' => 'paid-ad-goals:overall',
+            'source_table_id' => 'tbl-other-google-weekly',
+            'name' => 'Google周数据',
+            'synced_at' => CarbonImmutable::parse('2026-08-24 03:40:00'),
+        ]);
+        $createWeek = function (FeishuBitableTable $source, Store $sourceStore, string $start, string $label, array $metrics, string $recordId) use ($organization): void {
+            FeishuBitableRecord::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $sourceStore->id,
+                'feishu_bitable_table_id' => $source->id,
+                'source_record_id' => $recordId,
+                'fields_encrypted' => [
+                    '记录日期' => CarbonImmutable::parse($start, 'Asia/Shanghai')->getTimestamp() * 1000,
+                    '周' => [['text' => $label, 'type' => 'text']],
+                    '费用' => $metrics[0],
+                    '转化价值' => $metrics[1],
+                    'ROI' => $metrics[2],
+                    '加购数' => $metrics[3],
+                    '结账数' => $metrics[4],
+                    '单次加购成本' => $metrics[5],
+                    '单次结账成本' => $metrics[6],
+                    '成交数' => $metrics[7],
+                    '单次转化成本' => $metrics[8],
+                ],
+                'synced_at' => now(),
+            ]);
+        };
+
+        $createWeek($table, $store, '2026-07-27', '31周 07.27~08.02', [30967.33, 250867.12, 8.101025, 1736.57, 1165.17, 17.832469, 26.577521, 166.18, 186.348117], 'rec-week-31');
+        $createWeek($table, $store, '2026-08-03', '32周 08.03~08.09', [33631.83, 221563.04, 6.587897, 1564.01, 954.19, 21.50359, 35.246471, 140.64, 239.134172], 'rec-week-32');
+        $createWeek($table, $store, '2026-08-10', '33周 08.10~08.16', [34727.53, 235311.42, 6.775933, 1887.49, 1094.91, 18.398789, 31.717246, 202.21, 171.739924], 'rec-week-33');
+        $createWeek($otherTable, $otherStore, '2026-08-17', '34周 08.17~08.23', [999999, 999999, 1, 999999, 999999, 1, 1, 999999, 1], 'rec-other-week-34');
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.google.data', [
+                'view' => 'weekly',
+                'week' => '2026-08-10',
+                'date_from' => '2026-08-17',
+                'date_to' => '2026-08-23',
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.schema', 'google-ads-weekly-report-v1')
+            ->assertJsonPath('data.source_table', 'Google周数据')
+            ->assertJsonCount(3, 'data.weeks')
+            ->assertJsonPath('data.weeks.0.label', '33周 08.10~08.16')
+            ->assertJsonPath('data.selected_week.key', '2026-08-10')
+            ->assertJsonPath('data.previous_week.key', '2026-08-03')
+            ->assertJsonPath('data.values.spend', 34727.53)
+            ->assertJsonPath('data.values.revenue', 235311.42)
+            ->assertJsonPath('data.values.roi', 6.78)
+            ->assertJsonPath('data.values.add_to_cart', 1887.49)
+            ->assertJsonPath('data.values.checkout', 1094.91)
+            ->assertJsonPath('data.values.conversions', 202.21)
+            ->assertJsonPath('data.values.cpa', 171.74)
+            ->assertJsonPath('data.changes.spend', 3.3)
+            ->assertJsonPath('data.changes.revenue', 6.2)
+            ->assertJsonPath('data.changes.roi', 2.9)
+            ->assertJsonPath('data.changes.add_to_cart', 20.7)
+            ->assertJsonPath('data.changes.checkout', 14.7)
+            ->assertJsonPath('data.changes.add_to_cart_cost', -14.4)
+            ->assertJsonPath('data.changes.checkout_cost', -10)
+            ->assertJsonPath('data.changes.conversions', 43.8)
+            ->assertJsonCount(3, 'data.history')
+            ->assertJsonPath('data.history.0.label', '31周 07.27~08.02')
+            ->assertJsonPath('data.history.2.label', '33周 08.10~08.16')
+            ->assertJsonPath('data.history.2.values.cpa', 171.74);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.google.data', ['view' => 'weekly', 'week' => '2026-08-03']))
+            ->assertOk()
+            ->assertJsonPath('data.selected_week.label', '32周 08.03~08.09')
+            ->assertJsonPath('data.previous_week.label', '31周 07.27~08.02')
+            ->assertJsonPath('data.values.spend', 33631.83)
+            ->assertJsonCount(2, 'data.history')
+            ->assertJsonPath('data.history.1.label', '32周 08.03~08.09');
     }
 
     public function test_google_ads_manual_sync_queues_only_incremental_pipeline(): void

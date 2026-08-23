@@ -2,6 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import GoogleAdsWeeklyReport from '../../Components/PaidAdvertising/GoogleAdsWeeklyReport.vue';
 import { useToast } from '../../composables/useToast';
 import GooglePerformanceTable from './GooglePerformanceTable.vue';
 
@@ -50,6 +51,24 @@ type GooglePerformanceTablePayload = {
     rows: Array<Record<string, string | number | null>>;
     pagination: { page: number; per_page: number; total: number; last_page: number };
 };
+type WeeklyMetricKey = 'spend' | 'revenue' | 'roi' | 'conversions' | 'add_to_cart' | 'checkout' | 'add_to_cart_cost' | 'checkout_cost' | 'cpa';
+type GoogleWeeklyReport = {
+    schema: 'google-ads-weekly-report-v1';
+    available: boolean;
+    source_table: string | null;
+    source_synced_at: string | null;
+    weeks: Array<{ key: string; label: string; date_from: string; date_to: string }>;
+    selected_week: { key: string; label: string; date_from: string; date_to: string } | null;
+    previous_week: { key: string; label: string; date_from: string; date_to: string } | null;
+    values: Record<WeeklyMetricKey, number> | null;
+    previous_values: Record<WeeklyMetricKey, number> | null;
+    changes: Record<WeeklyMetricKey, number | null> | null;
+    history: Array<{
+        key: string; label: string; date_from: string; date_to: string;
+        values: Record<WeeklyMetricKey, number>;
+    }>;
+    message: string | null;
+};
 
 const props = defineProps<{
     store: { id: number; name: string };
@@ -85,10 +104,13 @@ const performanceLoading = ref(false);
 const performanceSearch = ref('');
 const performanceSort = ref('roas');
 const performanceDirection = ref<'asc' | 'desc'>('desc');
+const weeklyReport = ref<GoogleWeeklyReport | null>(null);
+const weeklyLoading = ref(false);
 const toast = useToast();
 let poller: ReturnType<typeof setInterval> | null = null;
 let performanceSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let performanceRequestId = 0;
+let weeklyRequestId = 0;
 
 const isGoogle = computed(() => status.value.channel === 'google');
 const polling = computed(() => ['pending', 'syncing', 'backfilling'].includes(status.value.state));
@@ -414,11 +436,35 @@ const applyFilters = () => {
 const isPerformanceView = (value: string): value is PerformanceView => value === 'search-terms' || value === 'keywords';
 const selectTab = (tab: string) => {
     activeTab.value = tab;
+    if (tab === 'weekly') {
+        if (!weeklyReport.value) loadWeeklyReport();
+        return;
+    }
     if (!isPerformanceView(tab)) return;
     performanceSearch.value = '';
     performanceSort.value = tab === 'keywords' ? 'spend' : 'roas';
     performanceDirection.value = 'desc';
     loadPerformance(1);
+};
+const loadWeeklyReport = async (week?: string) => {
+    if (!isGoogle.value) return;
+    const requestId = ++weeklyRequestId;
+    weeklyLoading.value = true;
+    try {
+        const params = new URLSearchParams({ view: 'weekly' });
+        if (week) params.set('week', week);
+        const response = await fetch(`/paid-advertising/google/data?${params.toString()}`, {
+            credentials: 'same-origin', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (!response.ok) throw new Error('周报数据加载失败。');
+        const payload = (await response.json() as { data: GoogleWeeklyReport }).data;
+        if (requestId !== weeklyRequestId) return;
+        weeklyReport.value = payload;
+    } catch (error) {
+        if (requestId === weeklyRequestId) toast.error(error instanceof Error ? error.message : '周报数据加载失败。');
+    } finally {
+        if (requestId === weeklyRequestId) weeklyLoading.value = false;
+    }
 };
 const loadPerformance = async (page = 1) => {
     if (!isGoogle.value || !isPerformanceView(activeTab.value)) return;
@@ -945,6 +991,13 @@ onBeforeUnmount(() => {
                     @update:search="updatePerformanceSearch"
                     @sort="sortPerformance"
                     @page="loadPerformance"
+                />
+                <GoogleAdsWeeklyReport
+                    v-else-if="activeTab === 'weekly'"
+                    :report="weeklyReport"
+                    :loading="weeklyLoading"
+                    :currency="overview.currency"
+                    @select="loadWeeklyReport"
                 />
 
                 <section v-else class="min-h-[420px] rounded-3xl border border-slate-200 bg-white shadow-sm" />
