@@ -21,6 +21,8 @@ use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
+use App\Http\Controllers\PaidAdvertisingChannelController;
+use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
@@ -46,7 +48,6 @@ use App\Http\Controllers\WebhookEventController;
 use App\Http\Controllers\YouTubeAnalyticsOAuthController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/health', HealthCheckController::class)->name('health');
 
@@ -145,21 +146,34 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->whereNumber('goalBoard')
         ->middleware(['permission:store.update', 'throttle:30,1'])
         ->name('paid-advertising.goals.destroy');
-    Route::get('/paid-advertising/facebook', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Facebook Ads']))
+    Route::get('/paid-advertising/facebook', [PaidAdvertisingFacebookController::class, 'index'])
         ->middleware('permission:reports.view')
         ->name('paid-advertising.facebook');
-    Route::get('/paid-advertising/google', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Google Ads']))
-        ->middleware('permission:reports.view')
-        ->name('paid-advertising.google');
-    Route::get('/paid-advertising/tiktok', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'TikTok Ads']))
-        ->middleware('permission:reports.view')
-        ->name('paid-advertising.tiktok');
-    Route::get('/paid-advertising/bing', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Bing Ads']))
-        ->middleware('permission:reports.view')
-        ->name('paid-advertising.bing');
-    Route::get('/paid-advertising/criteo', fn () => Inertia::render('PaidAdvertising/Empty', ['title' => 'Criteo']))
-        ->middleware('permission:reports.view')
-        ->name('paid-advertising.criteo');
+    Route::get('/paid-advertising/facebook/status', [PaidAdvertisingFacebookController::class, 'status'])
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.facebook.status');
+    Route::get('/paid-advertising/facebook/data', [PaidAdvertisingFacebookController::class, 'data'])
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.facebook.data');
+    Route::get('/paid-advertising/facebook/creatives', [PaidAdvertisingFacebookController::class, 'creatives'])
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.facebook.creatives');
+    Route::get('/paid-advertising/facebook/copies', [PaidAdvertisingFacebookController::class, 'copies'])
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.facebook.copies');
+    Route::post('/paid-advertising/facebook/sync', [PaidAdvertisingFacebookController::class, 'sync'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.facebook.sync');
+    foreach (['google', 'tiktok', 'bing', 'criteo'] as $advertisingChannel) {
+        Route::get("/paid-advertising/{$advertisingChannel}", [PaidAdvertisingChannelController::class, 'index'])
+            ->defaults('channel', $advertisingChannel)
+            ->middleware('permission:reports.view')
+            ->name("paid-advertising.{$advertisingChannel}");
+        Route::get("/paid-advertising/{$advertisingChannel}/status", [PaidAdvertisingChannelController::class, 'status'])
+            ->defaults('channel', $advertisingChannel)
+            ->middleware(['permission:reports.view', 'throttle:120,1'])
+            ->name("paid-advertising.{$advertisingChannel}.status");
+    }
     Route::get(
         '/campaign-planning-documents/{campaignPlanningDocument}/assets/{assetHash}',
         CampaignPlanningAssetController::class,

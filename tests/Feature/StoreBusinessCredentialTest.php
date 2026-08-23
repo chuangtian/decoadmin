@@ -2,15 +2,22 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SyncMetaAdsForStore;
+use App\Models\MetaAdAccount;
+use App\Models\MetaAdSyncShard;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
+use App\Models\StoreSyncState;
+use App\Models\SyncJob;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -20,6 +27,7 @@ class StoreBusinessCredentialTest extends TestCase
 
     public function test_admin_can_store_reveal_preserve_and_clear_an_encrypted_credential(): void
     {
+        Queue::fake();
         [$user, $organization, $store] = $this->context('organization-admin');
         $session = $this->contextSession($organization, $store);
         $token = 'EAA123456DZD';
@@ -31,6 +39,56 @@ class StoreBusinessCredentialTest extends TestCase
 
         $this->assertNotSame($token, DB::table('store_business_credentials')->value('credential_value'));
         $this->assertSame($token, StoreBusinessCredential::query()->value('credential_value'));
+        Queue::assertPushed(SyncMetaAdsForStore::class, fn (SyncMetaAdsForStore $job): bool => $job->organizationId === $organization->id
+            && $job->storeId === $store->id
+            && $job->mode === 'priority'
+            && filled($job->credentialVersion));
+        $this->assertDatabaseHas('store_sync_states', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'sync_type' => 'meta_ads',
+            'status' => 'queued',
+        ]);
+
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_test',
+            'name' => 'Test Meta account',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $syncJob = SyncJob::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'type' => 'meta_ads',
+            'direction' => 'pull',
+            'mode' => 'full',
+            'status' => 'running',
+        ]);
+        MetaAdSyncShard::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'sync_job_id' => $syncJob->id,
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_ad_account_id' => $account->id,
+            'shard_key' => 'test-shard',
+            'kind' => 'campaigns',
+            'mode' => 'full',
+            'status' => 'queued',
+        ]);
+        StoreSyncState::query()->where('store_id', $store->id)->where('sync_type', 'meta_ads')->update([
+            'status' => 'running',
+            'last_job_id' => $syncJob->id,
+        ]);
+
+        $parameters = ['provider' => 'meta_ads', 'credentialKey' => 'access_token'];
+        $this->actingAs($user)->withSession($session)
+            ->deleteJson(route('store-settings.credentials.destroy', $parameters))
+            ->assertJsonValidationErrors('confirmed');
+        $this->assertDatabaseHas('store_business_credentials', ['store_id' => $store->id, 'provider' => 'meta_ads']);
 
         $this->actingAs($user)->withSession($session)
             ->get(route('store-settings.credentials'))
@@ -58,10 +116,14 @@ class StoreBusinessCredentialTest extends TestCase
         $this->assertStringNotContainsString($token, DB::table('audit_logs')->get()->toJson());
 
         $this->actingAs($user)->withSession($session)
-            ->delete(route('store-settings.credentials.destroy', ['provider' => 'meta_ads', 'credentialKey' => 'access_token']))
+            ->delete(route('store-settings.credentials.destroy', $parameters), ['confirmed' => true])
             ->assertRedirect()
             ->assertSessionHas('success');
         $this->assertDatabaseCount('store_business_credentials', 0);
+        $this->assertDatabaseMissing('meta_ad_accounts', ['store_id' => $store->id]);
+        $this->assertDatabaseMissing('meta_ad_sync_shards', ['store_id' => $store->id]);
+        $this->assertDatabaseMissing('store_sync_states', ['store_id' => $store->id, 'sync_type' => 'meta_ads']);
+        $this->assertDatabaseMissing('sync_jobs', ['store_id' => $store->id, 'type' => 'meta_ads']);
     }
 
     public function test_viewer_cannot_reveal_or_change_a_business_credential(): void

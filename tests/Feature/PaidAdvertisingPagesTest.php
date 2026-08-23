@@ -2,8 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SyncMetaAdsCampaignPeriod;
+use App\Jobs\SyncMetaAdsForStore;
 use App\Jobs\SyncPaidAdvertisingGoalTarget;
 use App\Models\AuditLog;
+use App\Models\MetaAd;
+use App\Models\MetaAdAccount;
+use App\Models\MetaAdCreative;
+use App\Models\MetaAdInsight;
 use App\Models\Organization;
 use App\Models\PaidAdvertisingGoalBoard;
 use App\Models\PaidAdvertisingGoalField;
@@ -12,6 +18,7 @@ use App\Models\PaidAdvertisingGoalSyncRun;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
+use App\Models\SyncJob;
 use App\Models\User;
 use App\Services\Feishu\PaidAdvertisingGoalSyncService;
 use App\Services\PaidAdvertisingGoalRefreshService;
@@ -30,7 +37,7 @@ class PaidAdvertisingPagesTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_with_reports_permission_can_open_each_remaining_empty_paid_advertising_page(): void
+    public function test_user_with_reports_permission_can_open_each_advertising_channel_status_page(): void
     {
         [$user, $organization, $store] = $this->context('operator');
 
@@ -40,9 +47,530 @@ class PaidAdvertisingPagesTest extends TestCase
                 ->get(route($routeName))
                 ->assertOk()
                 ->assertInertia(fn (Assert $page) => $page
-                    ->component('PaidAdvertising/Empty')
-                    ->where('title', $title));
+                    ->component('PaidAdvertising/Channel')
+                    ->where('channelStatus.label', $title)
+                    ->where('channelStatus.configured', false)
+                    ->where('channelStatus.state', 'not_configured'));
         }
+    }
+
+    public function test_facebook_page_prompts_for_configuration_and_exposes_scoped_sync_status(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('paid-advertising.facebook'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('PaidAdvertising/Facebook')
+                ->where('store.id', $store->id)
+                ->where('metaAdsStatus.schema', 'meta-ads-sync-status-v2')
+                ->where('metaAdsStatus.configured', false)
+                ->where('metaAdsStatus.state', 'not_configured')
+                ->where('metaAdsStatus.settings_url', route('store-settings.credentials', ['provider' => 'meta_ads'])));
+
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'meta_ads',
+            'credential_key' => 'access_token',
+            'credential_value' => 'hidden-meta-token',
+        ]);
+        DB::table('store_sync_states')->insert([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'sync_type' => 'meta_ads',
+            'status' => 'queued',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $statusResponse = $this->actingAs($user)
+            ->withSession($session)
+            ->getJson(route('paid-advertising.facebook.status'))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.configured', true)
+            ->assertJsonPath('data.state', 'syncing')
+            ->assertJsonPath('data.mode', 'priority')
+            ->assertJsonMissing(['hidden-meta-token']);
+        $this->assertStringNotContainsString('hidden-meta-token', $statusResponse->getContent());
+
+        $job = SyncJob::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'type' => 'meta_ads',
+            'direction' => 'pull',
+            'mode' => 'full',
+            'status' => 'running',
+            'total_items' => 100,
+            'processed_items' => 20,
+            'started_at' => now()->subMinutes(5),
+        ]);
+        DB::table('store_sync_states')->where('store_id', $store->id)->where('sync_type', 'meta_ads')->update([
+            'status' => 'running',
+            'last_job_id' => $job->id,
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->getJson(route('paid-advertising.facebook.status'))
+            ->assertOk()
+            ->assertJsonPath('data.progress_percent', 20)
+            ->assertJsonPath('data.completed_shards', 20)
+            ->assertJsonPath('data.total_shards', 100)
+            ->assertJson(fn ($json) => $json->whereType('data.eta_seconds', 'integer')->etc());
+    }
+
+    public function test_facebook_overview_reads_only_current_stores_account_level_daily_insights(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $otherStore = $this->addStore($user, $organization, 'Other Store', 'other-facebook.myshopify.com');
+        $session = $this->contextSession($organization, $store);
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_current',
+            'name' => 'Macfox-3',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $otherAccount = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'meta_account_id' => 'act_other',
+            'name' => 'Other Account',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        $this->createMetaInsight($organization, $store, $account, '2026-08-20', 'account', 'day', 30, 60, 3, 300, 240, 30, 6);
+        $this->createMetaInsight($organization, $store, $account, '2026-08-21', 'account', 'day', 50, 100, 2, 500, 400, 50, 10);
+        $this->createMetaInsight($organization, $store, $account, '2026-08-22', 'account', 'day', 100, 500, 5, 1000, 800, 100, 20);
+        $this->createMetaInsight($organization, $store, $account, '2026-08-22', 'campaign', 'day', 999, 9999, 99, 9999, 9999, 999, 999);
+        $this->createMetaInsight($organization, $store, $account, '2026-08-22', 'campaign', 'day', 333, 3333, 33, 3333, 3333, 333, 333, 'campaign-two', 'Secondary Campaign');
+        $this->createMetaInsight($organization, $store, $account, '2026-08-22', 'account', 'hour', 888, 8888, 88, 8888, 8888, 888, 888);
+        $this->createMetaInsight($organization, $otherStore, $otherAccount, '2026-08-22', 'account', 'day', 777, 7777, 77, 7777, 7777, 777, 777);
+        $this->createMetaInsight($organization, $otherStore, $otherAccount, '2026-08-22', 'campaign', 'day', 5000, 5000, 50, 5000, 5000, 500, 500, 'other-campaign', 'Other Store Campaign');
+        MetaAdInsight::query()
+            ->where('store_id', $store->id)
+            ->where('meta_ad_account_id', $account->id)
+            ->update(['account_external_id' => 'current']);
+        MetaAdInsight::query()
+            ->where('store_id', $store->id)
+            ->where('level', 'account')
+            ->where('granularity', 'day')
+            ->whereDate('date_start', '2026-08-20')
+            ->update(['add_to_cart' => 5, 'initiate_checkout' => 2]);
+        MetaAdInsight::query()
+            ->where('store_id', $store->id)
+            ->where('level', 'account')
+            ->where('granularity', 'day')
+            ->whereDate('date_start', '2026-08-21')
+            ->update(['add_to_cart' => 10, 'initiate_checkout' => 5]);
+        MetaAdInsight::query()
+            ->where('store_id', $store->id)
+            ->where('level', 'account')
+            ->where('granularity', 'day')
+            ->whereDate('date_start', '2026-08-22')
+            ->update(['add_to_cart' => 20, 'initiate_checkout' => 10]);
+
+        $query = [
+            'account' => 'act_current',
+            'date_from' => '2026-08-21',
+            'date_to' => '2026-08-22',
+            'compare' => 'previous',
+        ];
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('paid-advertising.facebook', $query))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('PaidAdvertising/Facebook')
+                ->where('canSync', true)
+                ->has('overview.accounts', 1)
+                ->where('overview.accounts.0.id', 'act_current')
+                ->where('overview.summary.spend', 150)
+                ->where('overview.summary.purchase_value', 600)
+                ->where('overview.summary.purchases', 7)
+                ->where('overview.summary.roas', 4)
+                ->where('overview.summary.ctr', 10)
+                ->where('overview.summary.add_to_cart', 30)
+                ->where('overview.summary.initiate_checkout', 15)
+                ->where('overview.summary.cost_per_add_to_cart', 5)
+                ->where('overview.summary.cost_per_checkout', 10)
+                ->where('overview.comparison.spend', 30)
+                ->where('overview.deltas.spend', 400)
+                ->has('overview.daily', 2)
+                ->where('overview.daily.0.ctr', 10)
+                ->where('overview.daily.0.cpc', 1)
+                ->has('overview.comparison_daily', 1)
+                ->where('overview.comparison_daily.0.date', '2026-08-20')
+                ->where('overview.campaign_spend.total_spend', 1332)
+                ->has('overview.campaign_spend.items', 2)
+                ->where('overview.campaign_spend.items.0.name', 'campaign-2026-08-22')
+                ->where('overview.campaign_spend.items.0.share', 75)
+                ->where('overview.campaign_spend.items.1.name', 'Secondary Campaign')
+                ->where('overview.campaign_spend.items.1.share', 25)
+                ->where('overview.campaigns.total', 2)
+                ->where('overview.campaigns.limit', 100)
+                ->where('overview.campaigns.truncated', false)
+                ->has('overview.campaigns.items', 2)
+                ->where('overview.campaigns.items.0.spend', 999)
+                ->where('overview.campaigns.items.0.roas', 10.01)
+                ->where('overview.campaigns.items.0.ctr', 9.99)
+                ->where('overview.campaigns.items.0.cpc', 1)
+                ->where('overview.campaigns.items.0.frequency', null)
+                ->where('overview.campaigns.items.0.purchases', 99));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->getJson(route('paid-advertising.facebook.data', $query))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.summary.spend', 150)
+            ->assertJsonPath('data.summary.purchase_value', 600)
+            ->assertJsonPath('data.summary.add_to_cart', 30)
+            ->assertJsonPath('data.summary.cost_per_checkout', 10)
+            ->assertJsonPath('data.daily.0.date', '2026-08-21')
+            ->assertJsonPath('data.daily.0.ctr', 10)
+            ->assertJsonPath('data.daily.0.cpc', 1)
+            ->assertJsonPath('data.comparison_daily.0.date', '2026-08-20')
+            ->assertJsonPath('data.campaign_spend.total_spend', 1332)
+            ->assertJsonPath('data.campaign_spend.items.0.spend', 999)
+            ->assertJsonPath('data.campaigns.total', 2)
+            ->assertJsonPath('data.campaigns.items.0.name', 'campaign-2026-08-22')
+            ->assertJsonPath('data.campaigns.items.1.name', 'Secondary Campaign')
+            ->assertJsonCount(1, 'data.accounts')
+            ->assertJsonMissing(['act_other', 7777, 'Other Store Campaign']);
+    }
+
+    public function test_facebook_campaigns_merge_legacy_account_id_variants_and_use_exact_period_frequency(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_279',
+            'name' => 'Macfox-3',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        $this->createMetaInsight($organization, $store, $account, '2026-08-20', 'campaign', 'day', 100, 600, 2, 1000, 500, 50, 40, 'campaign-shared', 'Shared Campaign');
+        $this->createMetaInsight($organization, $store, $account, '2026-08-21', 'campaign', 'day', 50, 100, 1, 500, 250, 25, 20, 'campaign-shared', 'Shared Campaign');
+        MetaAdInsight::query()
+            ->where('entity_id', 'campaign-shared')
+            ->whereDate('date_start', '2026-08-20')
+            ->update(['account_external_id' => '279']);
+        $this->createMetaInsight(
+            $organization,
+            $store,
+            $account,
+            '2026-08-20',
+            'campaign',
+            'period',
+            150,
+            700,
+            3,
+            1500,
+            259,
+            75,
+            60,
+            'campaign-shared',
+            'Shared Campaign',
+            '2026-08-21',
+            5.8,
+        );
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.facebook.data', [
+                'account' => 'act_279',
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-21',
+                'compare' => 'none',
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.campaigns.total', 1)
+            ->assertJsonPath('data.campaigns.items.0.id', 'campaign-shared')
+            ->assertJsonPath('data.campaigns.items.0.spend', 150)
+            ->assertJsonPath('data.campaigns.items.0.purchase_value', 700)
+            ->assertJsonPath('data.campaigns.items.0.roas', 4.67)
+            ->assertJsonPath('data.campaigns.items.0.impressions', 1500)
+            ->assertJsonPath('data.campaigns.items.0.clicks', 75)
+            ->assertJsonPath('data.campaigns.items.0.ctr', 5)
+            ->assertJsonPath('data.campaigns.items.0.cpc', 2)
+            ->assertJsonPath('data.campaigns.items.0.frequency', 5.8)
+            ->assertJsonPath('data.campaigns.items.0.purchases', 3)
+            ->assertJsonPath('data.campaign_spend.total_spend', 150);
+    }
+
+    public function test_facebook_all_accounts_does_not_use_a_partial_period_snapshot(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $firstAccount = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_first',
+            'name' => 'First Account',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $secondAccount = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_second',
+            'name' => 'Second Account',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        $this->createMetaInsight($organization, $store, $firstAccount, '2026-08-20', 'campaign', 'day', 100, 600, 2, 1000, 500, 50, 40, 'campaign-first', 'First Campaign');
+        $this->createMetaInsight($organization, $store, $secondAccount, '2026-08-20', 'campaign', 'day', 200, 800, 4, 2000, 1000, 100, 80, 'campaign-second', 'Second Campaign');
+        $this->createMetaInsight(
+            $organization,
+            $store,
+            $firstAccount,
+            '2026-08-20',
+            'campaign',
+            'period',
+            999,
+            9999,
+            99,
+            9999,
+            999,
+            999,
+            999,
+            'campaign-first',
+            'First Campaign',
+            '2026-08-20',
+            9.9,
+        );
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.facebook.data', [
+                'account' => 'all',
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-20',
+                'compare' => 'none',
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.campaigns.total', 2)
+            ->assertJsonPath('data.campaigns.items.0.id', 'campaign-second')
+            ->assertJsonPath('data.campaigns.items.0.spend', 200)
+            ->assertJsonPath('data.campaigns.items.0.frequency', null)
+            ->assertJsonPath('data.campaigns.items.1.id', 'campaign-first')
+            ->assertJsonPath('data.campaigns.items.1.spend', 100)
+            ->assertJsonPath('data.campaigns.items.1.frequency', null)
+            ->assertJsonPath('data.campaign_spend.total_spend', 300);
+    }
+
+    public function test_facebook_manual_sync_is_scoped_and_queues_incremental_without_clearing_data(): void
+    {
+        Queue::fake();
+        [$user, $organization, $store] = $this->context('store-admin');
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'meta_ads',
+            'credential_key' => 'access_token',
+            'credential_value' => 'manual-meta-token',
+        ]);
+        MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_manual',
+            'name' => 'Manual Account',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->postJson(route('paid-advertising.facebook.sync'), [
+                'account' => 'act_manual',
+                'date_from' => '2026-08-01',
+                'date_to' => '2026-08-23',
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('sync.queued', true)
+            ->assertJsonPath('sync.mode', 'incremental')
+            ->assertJsonPath('sync.period_queued', true);
+
+        Queue::assertPushed(SyncMetaAdsCampaignPeriod::class, fn (SyncMetaAdsCampaignPeriod $job): bool => $job->organizationId === $organization->id
+            && $job->storeId === $store->id
+            && $job->account === 'act_manual'
+            && $job->since === '2026-08-01'
+            && $job->until === '2026-08-23');
+
+        Queue::assertPushed(SyncMetaAdsForStore::class, fn (SyncMetaAdsForStore $job): bool => $job->organizationId === $organization->id
+            && $job->storeId === $store->id
+            && $job->mode === 'incremental'
+            && $job->reconcileIncremental === false);
+        $this->assertDatabaseHas('meta_ad_accounts', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_manual',
+        ]);
+    }
+
+    public function test_facebook_creative_library_is_paginated_ranked_and_store_scoped(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $otherStore = $this->addStore($user, $organization, 'Other Store', 'other-creatives.myshopify.com');
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_current',
+            'name' => 'Macfox-3',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $otherAccount = MetaAdAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'meta_account_id' => 'act_other',
+            'name' => 'Other Account',
+            'account_status' => 1,
+            'currency' => 'USD',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+
+        foreach ([
+            [$store, $account, 'ad-best', 'creative-best', '最佳素材', 100, 1000, 10, 1000, 100, true],
+            [$store, $account, 'ad-second', 'creative-second', '第二素材', 100, 500, 5, 500, 25, false],
+            [$otherStore, $otherAccount, 'ad-other', 'creative-other', '其他店铺素材', 1, 9999, 99, 999, 999, false],
+        ] as [$targetStore, $targetAccount, $adId, $creativeId, $title, $spend, $revenue, $purchases, $impressions, $clicks, $video]) {
+            MetaAdCreative::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $targetStore->id,
+                'meta_ad_account_id' => $targetAccount->id,
+                'meta_creative_id' => $creativeId,
+                'name' => $title,
+                'title' => $title,
+                'body' => $adId === 'ad-second' ? null : '素材文案 '.$title,
+                'image_url' => 'https://example.test/'.$creativeId.'.jpg',
+                'thumbnail_url' => 'https://example.test/'.$creativeId.'-thumb.jpg',
+                'asset_feed_spec' => $video ? ['videos' => [['video_id' => 'video-1']]] : ['images' => [['hash' => 'image-1']]],
+                'raw_payload' => ['private' => 'never-return-this'],
+                'last_seen_at' => now(),
+                'synced_at' => now(),
+            ]);
+            MetaAd::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $targetStore->id,
+                'meta_ad_account_id' => $targetAccount->id,
+                'meta_ad_id' => $adId,
+                'meta_campaign_id' => 'campaign-'.$adId,
+                'meta_creative_id' => $creativeId,
+                'name' => '广告 '.$title,
+                'raw_payload' => [],
+                'last_seen_at' => now(),
+                'synced_at' => now(),
+            ]);
+            MetaAdInsight::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $targetStore->id,
+                'meta_ad_account_id' => $targetAccount->id,
+                'level' => 'ad',
+                'entity_id' => $adId,
+                'account_external_id' => $targetAccount->meta_account_id === 'act_current' ? 'current' : 'other',
+                'account_name' => $targetAccount->name,
+                'meta_campaign_id' => 'campaign-'.$adId,
+                'campaign_name' => '系列 '.$title,
+                'meta_ad_id' => $adId,
+                'ad_name' => '广告 '.$title,
+                'date_start' => '2026-08-22',
+                'date_stop' => '2026-08-22',
+                'granularity' => 'day',
+                'hourly_range' => '',
+                'spend' => $spend,
+                'purchase_value' => $revenue,
+                'purchases' => $purchases,
+                'impressions' => $impressions,
+                'clicks' => $clicks,
+                'raw_payload' => [],
+                'synced_at' => now(),
+            ]);
+        }
+
+        $response = $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.facebook.creatives', [
+                'account' => 'act_current',
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-23',
+            ]))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.schema', 'meta-ads-creative-library-v1')
+            ->assertJsonPath('data.pagination.per_page', 6)
+            ->assertJsonPath('data.pagination.total', 2)
+            ->assertJsonPath('data.items.0.ad_id', 'ad-best')
+            ->assertJsonPath('data.items.0.title', '最佳素材')
+            ->assertJsonPath('data.items.0.format', '视频素材')
+            ->assertJsonPath('data.items.0.roas', 10)
+            ->assertJsonPath('data.items.0.ctr', 10)
+            ->assertJsonPath('data.items.0.revenue', 1000)
+            ->assertJsonPath('data.items.1.ad_id', 'ad-second')
+            ->assertJsonMissing(['其他店铺素材', 'never-return-this']);
+
+        $this->assertStringNotContainsString('never-return-this', $response->getContent());
+
+        $copyResponse = $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->getJson(route('paid-advertising.facebook.copies', [
+                'account' => 'act_current',
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-23',
+            ]))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.schema', 'meta-ads-copy-library-v1')
+            ->assertJsonPath('data.pagination.total', 1)
+            ->assertJsonPath('data.items.0.ad_id', 'ad-best')
+            ->assertJsonPath('data.items.0.body', '素材文案 最佳素材')
+            ->assertJsonMissing(['ad-second', '其他店铺素材', 'never-return-this']);
+
+        $this->assertStringNotContainsString('never-return-this', $copyResponse->getContent());
+    }
+
+    public function test_user_without_sync_permission_cannot_submit_facebook_sync(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->postJson(route('paid-advertising.facebook.sync'))
+            ->assertForbidden();
     }
 
     public function test_goals_page_always_has_the_current_stores_overall_tab_and_prompts_for_missing_feishu_configuration(): void
@@ -1473,7 +2001,6 @@ class PaidAdvertisingPagesTest extends TestCase
     private function emptyPages(): array
     {
         return [
-            'paid-advertising.facebook' => 'Facebook Ads',
             'paid-advertising.google' => 'Google Ads',
             'paid-advertising.tiktok' => 'TikTok Ads',
             'paid-advertising.bing' => 'Bing Ads',
@@ -1484,7 +2011,7 @@ class PaidAdvertisingPagesTest extends TestCase
     /** @return list<string> */
     private function routeNames(): array
     {
-        return ['paid-advertising.goals', ...array_keys($this->emptyPages())];
+        return ['paid-advertising.goals', 'paid-advertising.facebook', ...array_keys($this->emptyPages())];
     }
 
     /** @return array{User, Organization, Store} */
@@ -1614,6 +2141,53 @@ class PaidAdvertisingPagesTest extends TestCase
                 '月度目标销售额' => (string) $monthlyTarget,
                 ...$details,
             ],
+            'synced_at' => now(),
+        ]);
+    }
+
+    private function createMetaInsight(
+        Organization $organization,
+        Store $store,
+        MetaAdAccount $account,
+        string $date,
+        string $level,
+        string $granularity,
+        float $spend,
+        float $purchaseValue,
+        float $purchases,
+        int $impressions,
+        int $reach,
+        int $clicks,
+        int $linkClicks,
+        ?string $campaignId = null,
+        ?string $campaignName = null,
+        ?string $dateStop = null,
+        ?float $frequency = null,
+    ): void {
+        $entityId = $level === 'account' ? $account->meta_account_id : ($campaignId ?? 'campaign-'.$date);
+        MetaAdInsight::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'meta_ad_account_id' => $account->id,
+            'level' => $level,
+            'entity_id' => $entityId,
+            'account_external_id' => $account->meta_account_id,
+            'account_name' => $account->name,
+            'meta_campaign_id' => $level === 'campaign' ? $entityId : null,
+            'campaign_name' => $level === 'campaign' ? $campaignName : null,
+            'date_start' => $date,
+            'date_stop' => $dateStop ?? $date,
+            'granularity' => $granularity,
+            'hourly_range' => $granularity === 'hour' ? '00:00:00 - 00:59:59' : '',
+            'spend' => $spend,
+            'purchase_value' => $purchaseValue,
+            'purchases' => $purchases,
+            'impressions' => $impressions,
+            'reach' => $reach,
+            'clicks' => $clicks,
+            'inline_link_clicks' => $linkClicks,
+            'frequency' => $frequency,
+            'raw_payload' => [],
             'synced_at' => now(),
         ]);
     }

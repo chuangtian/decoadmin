@@ -125,6 +125,7 @@ const clear = () => {
 
     clearProcessing.value = true;
     router.delete(endpoint(field), {
+        data: { confirmed: true },
         preserveScroll: true,
         onSuccess: () => {
             values[field.key] = '';
@@ -221,7 +222,14 @@ const clear = () => {
             <div v-if="clearTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" @click.self="closeClearDialog" @keydown.esc="closeClearDialog">
                 <section class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" :aria-labelledby="`${provider.key}-clear-title`">
                     <h2 :id="`${provider.key}-clear-title`" class="text-lg font-semibold text-slate-950">清除 {{ clearTarget.label }}？</h2>
-                    <p class="mt-2 text-sm leading-6 text-slate-600">清除后，当前店铺将无法使用这项 {{ provider.title }} 凭证。此操作无法撤销。</p>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">
+                        <template v-if="['meta_ads', 'tiktok_ads', 'google_ads', 'bing_ads', 'criteo'].includes(provider.key)">
+                            清除后将删除当前店铺的这项凭证、该渠道全部广告数据和同步记录，并取消当前队列任务；必要凭证不完整时，此店铺也不会再参加每小时自动同步。此操作无法撤销。
+                        </template>
+                        <template v-else>
+                            清除后，当前店铺将无法使用这项 {{ provider.title }} 凭证。此操作无法撤销。
+                        </template>
+                    </p>
                     <div class="mt-6 flex justify-end gap-3">
                         <button ref="clearCancelButton" type="button" :disabled="clearProcessing" class="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" @click="closeClearDialog">取消</button>
                         <button type="button" :disabled="clearProcessing" class="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60" @click="clear">{{ clearProcessing ? '清除中…' : '确认清除' }}</button>

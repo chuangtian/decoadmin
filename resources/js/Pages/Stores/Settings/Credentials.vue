@@ -32,10 +32,13 @@ type CredentialProvider = {
 const props = defineProps<{
     store: { id: number; name: string; shopify_domain: string };
     credentialProviders: CredentialProvider[];
+    initialProvider: string;
     canUpdate: boolean;
 }>();
 
-const activeKey = ref(props.credentialProviders[0]?.key ?? '');
+const activeKey = ref(props.credentialProviders.some((provider) => provider.key === props.initialProvider)
+    ? props.initialProvider
+    : props.credentialProviders[0]?.key ?? '');
 const activeProvider = computed(() => props.credentialProviders.find((provider) => provider.key === activeKey.value) ?? props.credentialProviders[0]);
 
 watch(() => props.credentialProviders, (providers) => {

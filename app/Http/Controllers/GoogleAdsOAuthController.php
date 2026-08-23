@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\GoogleAdsOAuthException;
+use App\Services\Advertising\AdvertisingChannelLifecycleService;
 use App\Services\GoogleAds\GoogleAdsOAuthService;
 use App\Support\CurrentStore;
 use Illuminate\Http\RedirectResponse;
@@ -26,7 +27,7 @@ class GoogleAdsOAuthController extends Controller
         return redirect()->away($authorization['authorization_url']);
     }
 
-    public function callback(Request $request, CurrentStore $currentStore, GoogleAdsOAuthService $oauth): RedirectResponse
+    public function callback(Request $request, CurrentStore $currentStore, GoogleAdsOAuthService $oauth, AdvertisingChannelLifecycleService $lifecycle): RedirectResponse
     {
         $store = $currentStore->require();
         $this->authorize('update', $store);
@@ -42,6 +43,8 @@ class GoogleAdsOAuthController extends Controller
         } catch (GoogleAdsOAuthException $exception) {
             return to_route('store-settings.credentials')->with('error', $exception->getMessage());
         }
+
+        $lifecycle->restartIfConfigured($store, 'google_ads');
 
         return to_route('store-settings.credentials')->with('success', 'Google Ads 已连接。');
     }

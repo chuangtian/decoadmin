@@ -95,6 +95,46 @@ class Store extends Model
         return $this->hasMany(StoreBusinessCredential::class);
     }
 
+    public function metaAdAccounts(): HasMany
+    {
+        return $this->hasMany(MetaAdAccount::class);
+    }
+
+    public function metaAdCampaigns(): HasMany
+    {
+        return $this->hasMany(MetaAdCampaign::class);
+    }
+
+    public function metaAdSets(): HasMany
+    {
+        return $this->hasMany(MetaAdSet::class);
+    }
+
+    public function metaAds(): HasMany
+    {
+        return $this->hasMany(MetaAd::class);
+    }
+
+    public function metaAdCreatives(): HasMany
+    {
+        return $this->hasMany(MetaAdCreative::class);
+    }
+
+    public function metaAdInsights(): HasMany
+    {
+        return $this->hasMany(MetaAdInsight::class);
+    }
+
+    public function advertisingChannelAccounts(): HasMany
+    {
+        return $this->hasMany(AdvertisingChannelAccount::class);
+    }
+
+    public function advertisingChannelDailyMetrics(): HasMany
+    {
+        return $this->hasMany(AdvertisingChannelDailyMetric::class);
+    }
+
     public function alerts(): HasMany
     {
         return $this->hasMany(StoreAlert::class);
