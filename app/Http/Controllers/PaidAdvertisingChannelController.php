@@ -6,6 +6,7 @@ use App\Services\Advertising\AdvertisingChannelManualSyncService;
 use App\Services\Advertising\AdvertisingChannelStatusService;
 use App\Services\Advertising\GoogleAdsOverviewService;
 use App\Services\Advertising\GoogleAdsPerformanceTableService;
+use App\Services\Advertising\GoogleAdsWeeklyReportService;
 use App\Services\Advertising\TikTokAdsOverviewService;
 use App\Support\CurrentStore;
 use Illuminate\Http\JsonResponse;
@@ -51,6 +52,7 @@ class PaidAdvertisingChannelController extends Controller
         CurrentStore $currentStore,
         GoogleAdsOverviewService $googleOverview,
         GoogleAdsPerformanceTableService $googlePerformance,
+        GoogleAdsWeeklyReportService $googleWeeklyReport,
         TikTokAdsOverviewService $tiktokOverview,
     ): JsonResponse {
         abort_unless(in_array($channel, ['google', 'tiktok'], true), 404);
@@ -58,13 +60,19 @@ class PaidAdvertisingChannelController extends Controller
             'account' => ['sometimes', 'string', 'max:128', 'regex:/^[0-9]+$/'],
             'date_from' => ['sometimes', 'required_with:date_to', 'date_format:Y-m-d'],
             'date_to' => ['sometimes', 'required_with:date_from', 'date_format:Y-m-d', 'after_or_equal:date_from'],
-            'view' => ['sometimes', 'string', 'in:search-terms,keywords'],
+            'view' => ['sometimes', 'string', 'in:search-terms,keywords,weekly'],
+            'week' => ['sometimes', 'date_format:Y-m-d'],
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
             'sort' => ['sometimes', 'string', 'max:40'],
             'direction' => ['sometimes', 'string', 'in:asc,desc'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:10', 'max:100'],
         ]);
+
+        if ($channel === 'google' && ($filters['view'] ?? null) === 'weekly') {
+            return response()->json(['data' => $googleWeeklyReport->forStore($currentStore->require(), $filters)])
+                ->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
+        }
 
         if ($channel === 'google' && isset($filters['view'])) {
             return response()->json(['data' => $googlePerformance->forStore($currentStore->require(), $filters)])
