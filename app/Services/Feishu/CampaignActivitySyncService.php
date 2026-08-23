@@ -62,6 +62,7 @@ class CampaignActivitySyncService
         private FeishuBitableClient $client,
         private StoreFeishuDataLinkService $dataLinks,
         private CampaignImageStorageService $imageStorage,
+        private FeishuBitableArchiveSyncService $archiveSync,
     ) {}
 
     /**
@@ -70,6 +71,9 @@ class CampaignActivitySyncService
      *     inserted: int,
      *     updated: int,
      *     skipped: int,
+     *     archived_tables: int,
+     *     archived_fields: int,
+     *     archived_records: int,
      *     failed: int,
      *     failures: list<array{store_id: int, organization_id: int, error: string}>
      * }
@@ -81,6 +85,9 @@ class CampaignActivitySyncService
             'inserted' => 0,
             'updated' => 0,
             'skipped' => 0,
+            'archived_tables' => 0,
+            'archived_fields' => 0,
+            'archived_records' => 0,
             'failed' => 0,
             'failures' => [],
         ];
@@ -97,6 +104,9 @@ class CampaignActivitySyncService
                         $summary['inserted'] += $result['inserted'];
                         $summary['updated'] += $result['updated'];
                         $summary['skipped'] += $result['skipped'];
+                        $summary['archived_tables'] += $result['archived_tables'];
+                        $summary['archived_fields'] += $result['archived_fields'];
+                        $summary['archived_records'] += $result['archived_records'];
                     } catch (Throwable $exception) {
                         $summary['failed']++;
                         $error = $this->safeError($exception);
@@ -118,7 +128,7 @@ class CampaignActivitySyncService
         return $summary;
     }
 
-    /** @return array{inserted: int, updated: int, skipped: int, records: int} */
+    /** @return array{inserted: int, updated: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
     public function syncStore(Store $store): array
     {
         $credentials = $this->dataLinks->valuesForSync($store, 'campaign');
@@ -126,8 +136,22 @@ class CampaignActivitySyncService
         $tableId = trim((string) ($credentials['campaign_table_id'] ?? ''));
         $viewId = trim((string) ($credentials['campaign_view_id'] ?? ''));
 
-        if ($appToken === '' || $tableId === '') {
-            throw new RuntimeException('当前店铺未完整配置活动主题飞书多维表格。');
+        if ($appToken === '') {
+            throw new RuntimeException('当前店铺未配置活动主题飞书 App Token。');
+        }
+
+        $archive = $this->archiveSync->sync($store, 'campaign', $appToken);
+
+        if ($tableId === '') {
+            return [
+                'inserted' => 0,
+                'updated' => 0,
+                'skipped' => 0,
+                'records' => 0,
+                'archived_tables' => $archive['tables'],
+                'archived_fields' => $archive['fields'],
+                'archived_records' => $archive['records'],
+            ];
         }
 
         $fields = $this->client->fields($appToken, $tableId);
@@ -191,6 +215,9 @@ class CampaignActivitySyncService
             'updated' => $updated,
             'skipped' => $skipped,
             'records' => count($records),
+            'archived_tables' => $archive['tables'],
+            'archived_fields' => $archive['fields'],
+            'archived_records' => $archive['records'],
         ];
     }
 
@@ -200,10 +227,7 @@ class CampaignActivitySyncService
             ->where('status', 'active')
             ->whereHas('businessCredentials', fn (Builder $credentials): Builder => $credentials
                 ->where('provider', 'feishu_data_links')
-                ->where('credential_key', 'campaign_app_token'))
-            ->whereHas('businessCredentials', fn (Builder $credentials): Builder => $credentials
-                ->where('provider', 'feishu_data_links')
-                ->where('credential_key', 'campaign_table_id'));
+                ->where('credential_key', 'campaign_app_token'));
 
         if ($storeId !== null) {
             $query->whereKey($storeId);

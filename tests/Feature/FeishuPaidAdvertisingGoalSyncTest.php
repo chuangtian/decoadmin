@@ -41,7 +41,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->fakeFeishu(
             function (string $appToken, string $viewId) use (&$phase): array {
                 if ($appToken === 'app_overall') {
-                    $this->assertSame('vew_overall', $viewId);
+                    $this->assertSame('', $viewId);
 
                     return [[
                         'record_id' => 'rec_overall',
@@ -52,7 +52,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
                 }
 
                 $this->assertSame('app_board', $appToken);
-                $this->assertSame('vew_board', $viewId);
+                $this->assertContains($viewId, ['', 'vew_board']);
 
                 return $phase === 1 ? [[
                     'record_id' => 'rec_board',
@@ -166,10 +166,18 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->overallCredentials($firstStore, 'app_first', 'tbl_first', 'vew_first');
         $this->overallCredentials($secondStore, 'app_second', 'tbl_second', 'vew_second');
         $secondStore->update(['status' => 'inactive']);
-        $this->fakeFeishu(fn (string $appToken, string $_viewId): array => [[
-            'record_id' => 'shared_record',
-            'fields' => ['来源' => $appToken],
-        ]]);
+        $this->fakeFeishu(
+            fn (string $appToken, string $_viewId): array => [[
+                'record_id' => 'shared_record',
+                'fields' => ['总目标' => $appToken],
+            ]],
+            fn (string $_appToken): array => [[
+                'field_id' => 'fld_total',
+                'field_name' => '总目标',
+                'type' => 2,
+                'is_primary' => true,
+            ]],
+        );
 
         $result = app(PaidAdvertisingGoalSyncService::class)->syncConfiguredSources();
 
@@ -180,7 +188,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $record = PaidAdvertisingGoalRecord::query()->sole();
         $this->assertSame($firstOrganization->id, $record->organization_id);
         $this->assertSame($firstStore->id, $record->store_id);
-        $this->assertSame(['来源' => 'app_first'], $record->fields_encrypted);
+        $this->assertSame(['总目标' => 'app_first'], $record->fields_encrypted);
         $this->assertFalse(
             PaidAdvertisingGoalRecord::query()
                 ->forOrganization($secondOrganization)
@@ -209,7 +217,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->fakeFeishu(
             function (string $appToken, string $viewId): array {
                 if ($appToken === 'app_personal') {
-                    $this->assertSame('vew_personal', $viewId);
+                    $this->assertContains($viewId, ['', 'vew_personal']);
 
                     return [[
                         'record_id' => 'rec_personal',
@@ -446,15 +454,13 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
             }
 
             if (preg_match('#/apps/([^/]+)/tables$#', $path, $matches) === 1) {
-                if ($tables === null) {
-                    return Http::response(['code' => 1254043, 'msg' => 'resource not found'], 400);
-                }
-
                 return Http::response([
                     'code' => 0,
                     'data' => [
                         'has_more' => false,
-                        'items' => $tables($matches[1]),
+                        'items' => $tables
+                            ? $tables($matches[1])
+                            : [['table_id' => 'tbl_auto', 'name' => '自动发现表']],
                     ],
                 ]);
             }
@@ -537,9 +543,9 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         return [$organization, $store];
     }
 
-    private function overallCredentials(Store $store, string $appToken, string $tableId, string $viewId): void
+    private function overallCredentials(Store $store, string $appToken, string $_tableId, string $_viewId): void
     {
-        foreach (['advertising_goals_app_token' => $appToken, 'advertising_goals_table_id' => $tableId, 'advertising_goals_view_id' => $viewId] as $key => $value) {
+        foreach (['advertising_goals_app_token' => $appToken] as $key => $value) {
             StoreBusinessCredential::query()->create([
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->id,

@@ -75,20 +75,36 @@ class CampaignThemeRefreshService
         $this->putStatus($store, [
             ...$current,
             'status' => 'running',
-            'message' => '正在从飞书更新活动数据及图片。',
+            'message' => '正在归档 App Token 下的全部飞书数据表，并更新活动数据及图片。',
             'started_at' => now()->toIso8601String(),
             'finished_at' => null,
         ]);
     }
 
-    /** @param array{inserted: int, updated: int, skipped: int, records: int} $result */
+    /** @param array{inserted: int, updated: int, skipped: int, records: int, archived_tables?: int, archived_fields?: int, archived_records?: int} $result */
     public function markCompleted(Store $store, ?int $actorId, array $result): void
     {
         $finishedAt = now()->toIso8601String();
+        $message = (int) ($result['archived_tables'] ?? 0) > 0
+            ? sprintf(
+                '更新完成：已归档 %d 张表、%d 个字段、%d 条记录；活动新增 %d，更新 %d，跳过 %d。',
+                (int) $result['archived_tables'],
+                (int) ($result['archived_fields'] ?? 0),
+                (int) ($result['archived_records'] ?? 0),
+                $result['inserted'],
+                $result['updated'],
+                $result['skipped'],
+            )
+            : sprintf(
+                '更新完成：新增 %d，更新 %d，跳过 %d。',
+                $result['inserted'],
+                $result['updated'],
+                $result['skipped'],
+            );
         $this->putStatus($store, [
             ...$this->status($store),
             'status' => 'completed',
-            'message' => sprintf('更新完成：新增 %d，更新 %d，跳过 %d。', $result['inserted'], $result['updated'], $result['skipped']),
+            'message' => $message,
             'finished_at' => $finishedAt,
         ]);
 
@@ -107,6 +123,9 @@ class CampaignThemeRefreshService
                 'inserted' => $result['inserted'],
                 'updated' => $result['updated'],
                 'skipped' => $result['skipped'],
+                'archived_tables' => (int) ($result['archived_tables'] ?? 0),
+                'archived_fields' => (int) ($result['archived_fields'] ?? 0),
+                'archived_records' => (int) ($result['archived_records'] ?? 0),
             ],
         ]);
     }

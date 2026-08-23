@@ -150,11 +150,11 @@ let creativeRequest: AbortController | null = null;
 let copyRequest: AbortController | null = null;
 
 const tabs = [
-    { key: 'overview', label: '总览' },
-    { key: 'trend', label: '趋势分析' },
-    { key: 'campaigns', label: '广告系列' },
-    { key: 'creative', label: '优质素材' },
-    { key: 'copy', label: '优质文案' },
+    { key: 'overview', label: '总览', icon: '▥' },
+    { key: 'trend', label: '趋势分析', icon: '↗' },
+    { key: 'campaigns', label: '广告系列', icon: '▤' },
+    { key: 'creative', label: '优质素材', icon: '◈' },
+    { key: 'copy', label: '优质文案', icon: '✎' },
 ];
 
 const isActive = computed(() => ['pending', 'syncing', 'backfilling'].includes(status.value.state));
@@ -438,39 +438,53 @@ onBeforeUnmount(() => {
     <Head title="Facebook Ads" />
     <AppLayout :breadcrumbs="[{ label: '工作台', href: '/dashboard' }, { label: '付费广告' }, { label: 'Facebook Ads' }]">
         <div class="mx-auto max-w-[1500px] space-y-6">
-            <header class="flex flex-col gap-5 border-b border-slate-200 pb-6 2xl:flex-row 2xl:items-end 2xl:justify-between">
+            <header class="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">当前店铺 · {{ store.name }}</p>
                     <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Facebook Ads</h1>
                     <p class="mt-2 text-sm text-slate-500">账户：{{ selectedAccountName }}</p>
                 </div>
+                <span class="inline-flex w-fit items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold" :class="status.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">
+                    <i class="h-2 w-2 rounded-full" :class="status.configured ? 'bg-emerald-500' : 'bg-amber-500'" />
+                    {{ status.configured ? '凭证已配置' : '尚未配置' }}
+                </span>
+            </header>
 
-                <div v-if="status.configured && dashboardReady" class="flex w-full flex-wrap items-end gap-3 2xl:w-auto">
-                    <label class="min-w-[18rem] text-xs font-semibold text-slate-500">
-                        广告账户
-                        <select v-model="filters.account" class="mt-1.5 h-12 w-full rounded-xl border-slate-200 bg-white text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500" @change="loadOverview()">
+            <section v-if="status.configured && dashboardReady" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_minmax(150px,0.65fr)_auto] lg:items-end">
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-500">广告账户</span>
+                        <select v-model="filters.account" class="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 outline-none ring-blue-500 focus:ring-2" @change="loadOverview()">
                             <option value="all">全部广告账户</option>
                             <option v-for="account in overview.accounts" :key="account.id" :value="account.id">{{ account.label }}</option>
                         </select>
                     </label>
-                    <div class="text-xs font-semibold text-slate-500">
-                        统计日期
-                        <div class="mt-1.5 flex h-12 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
-                            <input v-model="filters.date_from" aria-label="起始日期" type="date" class="h-10 min-w-0 border-0 bg-transparent px-1 text-sm font-normal text-slate-800 focus:ring-0" @change="loadOverview()" />
+                    <div>
+                        <span class="mb-2 block text-sm font-medium text-slate-500">统计日期</span>
+                        <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 ring-blue-500 focus-within:ring-2">
+                            <input v-model="filters.date_from" aria-label="起始日期" type="date" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none focus:ring-0" @change="loadOverview()" />
                             <span class="text-slate-300">—</span>
-                            <input v-model="filters.date_to" aria-label="截止日期" type="date" class="h-10 min-w-0 border-0 bg-transparent px-1 text-sm font-normal text-slate-800 focus:ring-0" @change="loadOverview()" />
+                            <input v-model="filters.date_to" aria-label="截止日期" type="date" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none focus:ring-0" @change="loadOverview()" />
                         </div>
                     </div>
-                    <label class="min-w-[10.5rem] text-xs font-semibold text-slate-500">
-                        数据对比
-                        <select v-model="filters.compare" class="mt-1.5 h-12 w-full rounded-xl border-slate-200 bg-white text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500" @change="loadOverview()"><option value="previous">对比上一时段</option><option value="none">不对比</option></select>
+                    <label class="block">
+                        <span class="mb-2 block text-sm font-medium text-slate-500">数据对比</span>
+                        <select v-model="filters.compare" class="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 outline-none ring-blue-500 focus:ring-2" @change="loadOverview()">
+                            <option value="previous">对比上一时段</option>
+                            <option value="none">不对比</option>
+                        </select>
                     </label>
-                    <button type="button" class="inline-flex h-12 items-center gap-2 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50" :disabled="syncButtonBusy || !canSync" :title="canSync ? '静默同步当前店铺的 Meta Ads 数据' : '当前账号没有执行同步的权限'" @click="requestSync">
+                    <button type="button" class="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50" :disabled="syncButtonBusy || !canSync" :title="canSync ? '静默同步当前店铺的 Meta Ads 数据' : '当前账号没有执行同步的权限'" @click="requestSync">
                         <svg class="h-4 w-4" :class="syncButtonBusy ? 'animate-spin' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 1 0 2 5.3"/><path d="M20 4v7h-7"/></svg>
                         {{ syncButtonBusy ? '同步中' : '同步' }}
                     </button>
                 </div>
-            </header>
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500">
+                    <span>当前账户：{{ selectedAccountName }} · 币种 {{ currency }}</span>
+                    <span v-if="filters.compare === 'previous' && overview.comparison_period">对比上一周期：{{ overview.comparison_period.date_from }} — {{ overview.comparison_period.date_to }}</span>
+                    <span v-else>未启用数据对比</span>
+                </div>
+            </section>
 
             <section v-if="status.state === 'not_configured'" class="overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-sm">
                 <div class="grid gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -495,9 +509,12 @@ onBeforeUnmount(() => {
             </section>
 
             <template v-else-if="dashboardReady">
-                <div class="flex gap-1 overflow-x-auto border-b border-slate-200">
-                    <button v-for="tab in tabs" :key="tab.key" type="button" class="relative shrink-0 px-5 py-3 text-sm font-semibold transition" :class="activeTab === tab.key ? 'text-blue-600' : 'text-slate-500 hover:text-slate-800'" @click="activeTab = tab.key">{{ tab.label }}<span v-if="activeTab === tab.key" class="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-blue-600" /></button>
-                </div>
+                <nav class="flex gap-2 overflow-x-auto border-b border-slate-200 pb-3">
+                    <button v-for="tab in tabs" :key="tab.key" type="button" class="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition" :class="activeTab === tab.key ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm' : 'border-slate-200 bg-white text-slate-500 hover:text-slate-800'" @click="activeTab = tab.key">
+                        <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-lg bg-slate-100 px-1 text-xs" :class="activeTab === tab.key ? 'bg-blue-600 text-white' : ''">{{ tab.icon }}</span>
+                        {{ tab.label }}
+                    </button>
+                </nav>
 
                 <section v-if="activeTab === 'overview'" class="space-y-5" :class="loading ? 'pointer-events-none opacity-60' : ''" aria-live="polite">
                     <div v-if="isActive || status.state === 'partial_failed'" class="flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm ring-1" :class="status.state === 'partial_failed' ? 'bg-amber-50 text-amber-800 ring-amber-200' : 'bg-blue-50 text-blue-800 ring-blue-100'"><span>{{ isActive ? status.message : '最近数据可用，历史数据回填未完全成功。' }}</span><span class="text-xs font-semibold">{{ isActive ? etaLabel : '请检查 Token 后重新同步' }}</span></div>

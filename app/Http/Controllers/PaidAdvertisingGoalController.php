@@ -94,16 +94,28 @@ class PaidAdvertisingGoalController extends Controller
         CurrentOrganization $currentOrganization,
         CurrentStore $currentStore,
         PaidAdvertisingGoalService $goals,
+        PaidAdvertisingGoalRefreshService $refresh,
     ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        $actor = $request->user();
         $goals->configureOverall(
-            $currentOrganization->require(),
-            $currentStore->require(),
-            $request->user(),
+            $organization,
+            $store,
+            $actor,
             $request->validated(),
         );
 
+        $refresh->enqueue(
+            $organization,
+            $store,
+            $actor,
+            PaidAdvertisingGoalRefreshService::SOURCE_OVERALL_CONFIGURED,
+            PaidAdvertisingGoalRefreshService::TARGET_OVERALL,
+        );
+
         return to_route('paid-advertising.goals', $this->goalPageRedirectQuery($request))
-            ->with('success', '总目标飞书表格已配置，数据将每天自动同步一次。');
+            ->with('success', 'App Token 已保存，首次数据同步已在后台启动。');
     }
 
     public function clearOverall(

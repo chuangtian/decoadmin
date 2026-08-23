@@ -5,10 +5,15 @@ namespace App\Services\Advertising;
 use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
+use App\Models\GoogleAdsCampaignDailyMetric;
+use App\Models\GoogleAdsKeywordDailyMetric;
+use App\Models\GoogleAdsSearchTermDailyMetric;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
+use App\Models\TikTokAdsAdDailyMetric;
+use App\Models\TikTokAdsCampaignDailyMetric;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -164,7 +169,7 @@ class AdvertisingChannelSyncService
         return $chunks;
     }
 
-    /** @param array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>} $payload */
+    /** @param array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>, campaign_daily_metrics?: list<array<string, mixed>>, ad_daily_metrics?: list<array<string, mixed>>, search_term_daily_metrics?: list<array<string, mixed>>, keyword_daily_metrics?: list<array<string, mixed>>} $payload */
     private function persist(Store $store, string $channel, array $payload): int
     {
         return DB::transaction(function () use ($store, $channel, $payload): int {
@@ -176,6 +181,26 @@ class AdvertisingChannelSyncService
                 $accountId = trim((string) ($metric['external_account_id'] ?? ''));
                 if ($accountId !== '' && ! $accounts->has($accountId)) {
                     $accounts->put($accountId, ['external_account_id' => $accountId]);
+                }
+            }
+            foreach ((array) ($payload['campaign_daily_metrics'] ?? []) as $metric) {
+                $accountId = trim((string) ($metric['external_account_id'] ?? ''));
+                if ($accountId !== '' && ! $accounts->has($accountId)) {
+                    $accounts->put($accountId, ['external_account_id' => $accountId]);
+                }
+            }
+            foreach ((array) ($payload['ad_daily_metrics'] ?? []) as $metric) {
+                $accountId = trim((string) ($metric['external_account_id'] ?? ''));
+                if ($accountId !== '' && ! $accounts->has($accountId)) {
+                    $accounts->put($accountId, ['external_account_id' => $accountId]);
+                }
+            }
+            foreach (['search_term_daily_metrics', 'keyword_daily_metrics'] as $metricGroup) {
+                foreach ((array) ($payload[$metricGroup] ?? []) as $metric) {
+                    $accountId = trim((string) ($metric['external_account_id'] ?? ''));
+                    if ($accountId !== '' && ! $accounts->has($accountId)) {
+                        $accounts->put($accountId, ['external_account_id' => $accountId]);
+                    }
                 }
             }
 
@@ -222,9 +247,15 @@ class AdvertisingChannelSyncService
                     'metric_date' => $date,
                     'spend' => max(0, (float) ($metric['spend'] ?? 0)),
                     'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                    'conversion_value_by_conversion_date' => max(0, (float) ($metric['conversion_value_by_conversion_date'] ?? 0)),
                     'impressions' => max(0, (int) ($metric['impressions'] ?? 0)),
                     'clicks' => max(0, (int) ($metric['clicks'] ?? 0)),
                     'conversions' => max(0, (float) ($metric['conversions'] ?? 0)),
+                    'all_conversions' => max(0, (float) ($metric['all_conversions'] ?? 0)),
+                    'all_conversions_value' => max(0, (float) ($metric['all_conversions_value'] ?? 0)),
+                    'all_conversions_value_by_conversion_date' => max(0, (float) ($metric['all_conversions_value_by_conversion_date'] ?? 0)),
+                    'add_to_cart' => max(0, (float) ($metric['add_to_cart'] ?? 0)),
+                    'initiate_checkout' => max(0, (float) ($metric['initiate_checkout'] ?? 0)),
                     'raw_payload' => json_encode($metric['raw_payload'] ?? $metric, JSON_THROW_ON_ERROR),
                     'synced_at' => $timestamp,
                     'created_at' => $timestamp,
@@ -235,10 +266,204 @@ class AdvertisingChannelSyncService
             AdvertisingChannelDailyMetric::query()->upsert(
                 $rows,
                 ['organization_id', 'store_id', 'provider', 'external_account_id', 'metric_date'],
-                ['advertising_channel_account_id', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                ['advertising_channel_account_id', 'spend', 'attributed_sales', 'conversion_value_by_conversion_date', 'impressions', 'clicks', 'conversions', 'all_conversions', 'all_conversions_value', 'all_conversions_value_by_conversion_date', 'add_to_cart', 'initiate_checkout', 'raw_payload', 'synced_at', 'updated_at'],
             );
 
-            return count($accounts) + count($rows);
+            $campaignRows = collect((array) ($payload['campaign_daily_metrics'] ?? []))
+                ->map(function (array $metric) use ($store, $channel, $accountIds, $timestamp): ?array {
+                    $externalId = trim((string) ($metric['external_account_id'] ?? ''));
+                    $campaignId = trim((string) ($metric['campaign_id'] ?? ''));
+                    $date = trim((string) ($metric['date'] ?? ''));
+                    $accountId = $accountIds->get($externalId);
+                    if (! $accountId || $campaignId === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                        return null;
+                    }
+
+                    $base = [
+                        'organization_id' => (int) $store->organization_id,
+                        'store_id' => (int) $store->getKey(),
+                        'advertising_channel_account_id' => (int) $accountId,
+                        'external_account_id' => $externalId,
+                        'campaign_id' => $campaignId,
+                        'campaign_name' => $this->text($metric['campaign_name'] ?? null, 500),
+                        'campaign_status' => $this->text($metric['campaign_status'] ?? null, 50),
+                        'metric_date' => $date,
+                        'spend' => max(0, (float) ($metric['spend'] ?? 0)),
+                        'impressions' => max(0, (int) ($metric['impressions'] ?? 0)),
+                        'clicks' => max(0, (int) ($metric['clicks'] ?? 0)),
+                        'conversions' => max(0, (float) ($metric['conversions'] ?? 0)),
+                        'raw_payload' => json_encode($metric['raw_payload'] ?? $metric, JSON_THROW_ON_ERROR),
+                        'synced_at' => $timestamp,
+                        'created_at' => $timestamp,
+                        'updated_at' => $timestamp,
+                    ];
+
+                    return $channel === 'tiktok' ? [
+                        ...$base,
+                        'objective_type' => $this->text($metric['objective_type'] ?? null, 100),
+                        'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                    ] : [
+                        ...$base,
+                        'advertising_channel_type' => $this->text($metric['advertising_channel_type'] ?? null, 100),
+                        'conversions_value' => max(0, (float) ($metric['conversions_value'] ?? 0)),
+                        'conversion_value_by_conversion_date' => max(0, (float) ($metric['conversion_value_by_conversion_date'] ?? 0)),
+                        'all_conversions' => max(0, (float) ($metric['all_conversions'] ?? 0)),
+                        'all_conversions_value' => max(0, (float) ($metric['all_conversions_value'] ?? 0)),
+                        'all_conversions_value_by_conversion_date' => max(0, (float) ($metric['all_conversions_value_by_conversion_date'] ?? 0)),
+                    ];
+                })->filter()->values()->all();
+
+            if ($channel === 'google') {
+                GoogleAdsCampaignDailyMetric::query()->upsert(
+                    $campaignRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
+                    ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'advertising_channel_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversions_value', 'conversion_value_by_conversion_date', 'all_conversions', 'all_conversions_value', 'all_conversions_value_by_conversion_date', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            } elseif ($channel === 'tiktok') {
+                TikTokAdsCampaignDailyMetric::query()->upsert(
+                    $campaignRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
+                    ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'objective_type', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            }
+
+            $adRows = [];
+            if ($channel === 'tiktok') {
+                $adRows = collect((array) ($payload['ad_daily_metrics'] ?? []))
+                    ->map(function (array $metric) use ($store, $accountIds, $timestamp): ?array {
+                        $externalId = trim((string) ($metric['external_account_id'] ?? ''));
+                        $adId = trim((string) ($metric['ad_id'] ?? ''));
+                        $date = trim((string) ($metric['date'] ?? ''));
+                        $accountId = $accountIds->get($externalId);
+                        if (! $accountId || $adId === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                            return null;
+                        }
+
+                        return [
+                            'organization_id' => (int) $store->organization_id,
+                            'store_id' => (int) $store->getKey(),
+                            'advertising_channel_account_id' => (int) $accountId,
+                            'external_account_id' => $externalId,
+                            'campaign_id' => $this->text($metric['campaign_id'] ?? null, 128),
+                            'campaign_name' => $this->text($metric['campaign_name'] ?? null, 500),
+                            'adgroup_id' => $this->text($metric['adgroup_id'] ?? null, 128),
+                            'ad_id' => $adId,
+                            'ad_name' => $this->text($metric['ad_name'] ?? null, 500),
+                            'ad_text' => $this->text($metric['ad_text'] ?? null, 65535),
+                            'ad_texts' => json_encode(array_values((array) ($metric['ad_texts'] ?? [])), JSON_THROW_ON_ERROR),
+                            'ad_format' => $this->text($metric['ad_format'] ?? null, 100),
+                            'video_id' => $this->text($metric['video_id'] ?? null, 128),
+                            'metric_date' => $date,
+                            'spend' => max(0, (float) ($metric['spend'] ?? 0)),
+                            'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                            'impressions' => max(0, (int) ($metric['impressions'] ?? 0)),
+                            'clicks' => max(0, (int) ($metric['clicks'] ?? 0)),
+                            'conversions' => max(0, (float) ($metric['conversions'] ?? 0)),
+                            'video_play_actions' => max(0, (int) ($metric['video_play_actions'] ?? 0)),
+                            'video_watched_2s' => max(0, (int) ($metric['video_watched_2s'] ?? 0)),
+                            'average_video_play' => max(0, (float) ($metric['average_video_play'] ?? 0)),
+                            'raw_payload' => json_encode($metric['raw_payload'] ?? $metric, JSON_THROW_ON_ERROR),
+                            'synced_at' => $timestamp,
+                            'created_at' => $timestamp,
+                            'updated_at' => $timestamp,
+                        ];
+                    })->filter()->values()->all();
+
+                TikTokAdsAdDailyMetric::query()->upsert(
+                    $adRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'ad_id', 'metric_date'],
+                    ['advertising_channel_account_id', 'campaign_id', 'campaign_name', 'adgroup_id', 'ad_name', 'ad_text', 'ad_texts', 'ad_format', 'video_id', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'video_play_actions', 'video_watched_2s', 'average_video_play', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            }
+
+            $searchTermRows = [];
+            $keywordRows = [];
+            if ($channel === 'google') {
+                $searchTermRows = collect((array) ($payload['search_term_daily_metrics'] ?? []))
+                    ->map(function (array $metric) use ($store, $accountIds, $timestamp): ?array {
+                        $externalId = trim((string) ($metric['external_account_id'] ?? ''));
+                        $date = trim((string) ($metric['date'] ?? ''));
+                        $dimensionKey = trim((string) ($metric['dimension_key'] ?? ''));
+                        $searchTerm = trim((string) ($metric['search_term'] ?? ''));
+                        $accountId = $accountIds->get($externalId);
+                        if (! $accountId || $dimensionKey === '' || $searchTerm === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                            return null;
+                        }
+
+                        return [
+                            'organization_id' => (int) $store->organization_id,
+                            'store_id' => (int) $store->getKey(),
+                            'advertising_channel_account_id' => (int) $accountId,
+                            'external_account_id' => $externalId,
+                            'metric_date' => $date,
+                            'dimension_key' => mb_substr($dimensionKey, 0, 64),
+                            'source_type' => $this->text($metric['source_type'] ?? 'STANDARD', 40) ?? 'STANDARD',
+                            'search_term' => $searchTerm,
+                            'normalized_search_term' => mb_strtolower($searchTerm),
+                            'status' => $this->text($metric['status'] ?? null, 50),
+                            'matched_keyword' => $this->text($metric['matched_keyword'] ?? null, 65535),
+                            'match_type' => $this->text($metric['match_type'] ?? null, 50),
+                            'campaign_id' => $this->text($metric['campaign_id'] ?? null, 128),
+                            'campaign_name' => $this->text($metric['campaign_name'] ?? null, 500),
+                            'ad_group_id' => $this->text($metric['ad_group_id'] ?? null, 128),
+                            'ad_group_name' => $this->text($metric['ad_group_name'] ?? null, 500),
+                            'advertising_channel_type' => $this->text($metric['advertising_channel_type'] ?? null, 100),
+                            ...$this->performanceMetricValues($metric),
+                            'raw_payload' => json_encode($metric['raw_payload'] ?? $metric, JSON_THROW_ON_ERROR),
+                            'synced_at' => $timestamp,
+                            'created_at' => $timestamp,
+                            'updated_at' => $timestamp,
+                        ];
+                    })->filter()->values()->all();
+
+                $keywordRows = collect((array) ($payload['keyword_daily_metrics'] ?? []))
+                    ->map(function (array $metric) use ($store, $accountIds, $timestamp): ?array {
+                        $externalId = trim((string) ($metric['external_account_id'] ?? ''));
+                        $date = trim((string) ($metric['date'] ?? ''));
+                        $dimensionKey = trim((string) ($metric['dimension_key'] ?? ''));
+                        $keyword = trim((string) ($metric['keyword'] ?? ''));
+                        $accountId = $accountIds->get($externalId);
+                        if (! $accountId || $dimensionKey === '' || $keyword === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                            return null;
+                        }
+
+                        return [
+                            'organization_id' => (int) $store->organization_id,
+                            'store_id' => (int) $store->getKey(),
+                            'advertising_channel_account_id' => (int) $accountId,
+                            'external_account_id' => $externalId,
+                            'metric_date' => $date,
+                            'dimension_key' => mb_substr($dimensionKey, 0, 64),
+                            'criterion_id' => $this->text($metric['criterion_id'] ?? null, 128),
+                            'keyword' => $keyword,
+                            'normalized_keyword' => mb_strtolower($keyword),
+                            'match_type' => $this->text($metric['match_type'] ?? null, 50),
+                            'status' => $this->text($metric['status'] ?? null, 50),
+                            'campaign_id' => $this->text($metric['campaign_id'] ?? null, 128),
+                            'campaign_name' => $this->text($metric['campaign_name'] ?? null, 500),
+                            'ad_group_id' => $this->text($metric['ad_group_id'] ?? null, 128),
+                            'ad_group_name' => $this->text($metric['ad_group_name'] ?? null, 500),
+                            ...$this->performanceMetricValues($metric),
+                            'raw_payload' => json_encode($metric['raw_payload'] ?? $metric, JSON_THROW_ON_ERROR),
+                            'synced_at' => $timestamp,
+                            'created_at' => $timestamp,
+                            'updated_at' => $timestamp,
+                        ];
+                    })->filter()->values()->all();
+
+                GoogleAdsSearchTermDailyMetric::query()->upsert(
+                    $searchTermRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'metric_date', 'dimension_key'],
+                    ['advertising_channel_account_id', 'source_type', 'search_term', 'normalized_search_term', 'status', 'matched_keyword', 'match_type', 'campaign_id', 'campaign_name', 'ad_group_id', 'ad_group_name', 'advertising_channel_type', 'spend', 'revenue', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+                GoogleAdsKeywordDailyMetric::query()->upsert(
+                    $keywordRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'metric_date', 'dimension_key'],
+                    ['advertising_channel_account_id', 'criterion_id', 'keyword', 'normalized_keyword', 'match_type', 'status', 'campaign_id', 'campaign_name', 'ad_group_id', 'ad_group_name', 'spend', 'revenue', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            }
+
+            return count($accounts) + count($rows) + count($campaignRows) + count($adRows) + count($searchTermRows) + count($keywordRows);
         });
     }
 
@@ -398,5 +623,17 @@ class AdvertisingChannelSyncService
         $value = trim((string) $value);
 
         return $value === '' ? null : mb_substr($value, 0, $limit);
+    }
+
+    /** @return array{spend: float, revenue: float, impressions: int, clicks: int, conversions: float} */
+    private function performanceMetricValues(array $metric): array
+    {
+        return [
+            'spend' => max(0, (float) ($metric['spend'] ?? 0)),
+            'revenue' => max(0, (float) ($metric['revenue'] ?? 0)),
+            'impressions' => max(0, (int) ($metric['impressions'] ?? 0)),
+            'clicks' => max(0, (int) ($metric['clicks'] ?? 0)),
+            'conversions' => max(0, (float) ($metric['conversions'] ?? 0)),
+        ];
     }
 }

@@ -23,14 +23,12 @@ class ConfigurePaidAdvertisingOverallGoalRequest extends FormRequest
     {
         return [
             'feishu_app_token' => ['required', 'string', 'max:4096'],
-            'feishu_table_id' => ['required', 'string', 'max:1024'],
-            'feishu_view_id' => ['required', 'string', 'max:1024'],
         ];
     }
 
     protected function prepareForValidation(): void
     {
-        foreach (['feishu_app_token', 'feishu_table_id', 'feishu_view_id'] as $key) {
+        foreach (['feishu_app_token'] as $key) {
             $this->merge([$key => trim((string) $this->input($key))]);
         }
     }

@@ -69,11 +69,20 @@ if (config('services.feishu_table.amazon_sync_enabled', true)) {
 
 if (config('services.feishu_table.paid_advertising_goal_sync_enabled', true)) {
     Schedule::command('feishu:sync-paid-advertising-goals')
-        ->name('feishu:paid-advertising-goal-sync')
+        ->name('feishu:paid-advertising-goals-and-all-tables-sync')
         ->dailyAt((string) config('services.feishu_table.paid_advertising_goal_sync_time', '03:40'))
         ->timezone((string) config('services.feishu_table.paid_advertising_goal_sync_timezone', 'Asia/Shanghai'))
         ->onOneServer()
         ->withoutOverlapping(120);
+}
+
+if (config('services.feishu_table.campaign_sync_enabled', true)) {
+    Schedule::command('feishu:sync-campaign-activities')
+        ->name('feishu:campaign-activities-and-all-tables-sync')
+        ->dailyAt((string) config('services.feishu_table.campaign_sync_time', '04:10'))
+        ->timezone((string) config('services.feishu_table.campaign_sync_timezone', 'Asia/Shanghai'))
+        ->onOneServer()
+        ->withoutOverlapping(180);
 }
 
 if (config('shopify.scheduled_sync.enabled')) {

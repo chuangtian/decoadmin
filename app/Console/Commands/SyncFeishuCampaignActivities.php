@@ -9,7 +9,7 @@ class SyncFeishuCampaignActivities extends Command
 {
     protected $signature = 'feishu:sync-campaign-activities {--store= : 仅同步指定店铺 ID}';
 
-    protected $description = '手动从每个店铺配置的飞书多维表格同步活动主题数据';
+    protected $description = '同步每个店铺 App Token 下的全部飞书数据表及活动主题数据';
 
     public function handle(CampaignActivitySyncService $sync): int
     {
@@ -24,8 +24,11 @@ class SyncFeishuCampaignActivities extends Command
 
         $result = $sync->syncConfiguredStores($storeId ?: null);
         $this->components->info(sprintf(
-            '飞书活动主题数据同步完成：店铺 %d，新增 %d，更新 %d，跳过 %d，失败 %d。',
+            '飞书全表及活动主题数据同步完成：店铺 %d，归档表 %d，字段 %d，记录 %d；活动新增 %d，更新 %d，跳过 %d，失败 %d。',
             $result['stores'],
+            $result['archived_tables'],
+            $result['archived_fields'],
+            $result['archived_records'],
             $result['inserted'],
             $result['updated'],
             $result['skipped'],

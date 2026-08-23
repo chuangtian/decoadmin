@@ -8,24 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'organization_id', 'store_id', 'advertising_channel_account_id', 'provider',
-    'external_account_id', 'metric_date', 'spend', 'attributed_sales', 'conversion_value_by_conversion_date',
-    'impressions', 'clicks', 'conversions', 'all_conversions', 'all_conversions_value',
-    'all_conversions_value_by_conversion_date', 'add_to_cart', 'initiate_checkout', 'raw_payload', 'synced_at',
+    'organization_id', 'store_id', 'advertising_channel_account_id', 'external_account_id',
+    'campaign_id', 'campaign_name', 'campaign_status', 'advertising_channel_type', 'metric_date',
+    'spend', 'impressions', 'clicks', 'conversions', 'conversions_value',
+    'conversion_value_by_conversion_date', 'all_conversions', 'all_conversions_value',
+    'all_conversions_value_by_conversion_date', 'raw_payload', 'synced_at',
 ])]
-class AdvertisingChannelDailyMetric extends Model
+class GoogleAdsCampaignDailyMetric extends Model
 {
     use ScopesToOrganizationStore;
-
-    public function organization(): BelongsTo
-    {
-        return $this->belongsTo(Organization::class);
-    }
-
-    public function store(): BelongsTo
-    {
-        return $this->belongsTo(Store::class);
-    }
 
     public function account(): BelongsTo
     {
@@ -37,16 +28,14 @@ class AdvertisingChannelDailyMetric extends Model
         return [
             'metric_date' => 'date',
             'spend' => 'decimal:6',
-            'attributed_sales' => 'decimal:6',
-            'conversion_value_by_conversion_date' => 'decimal:6',
             'impressions' => 'integer',
             'clicks' => 'integer',
             'conversions' => 'decimal:6',
+            'conversions_value' => 'decimal:6',
+            'conversion_value_by_conversion_date' => 'decimal:6',
             'all_conversions' => 'decimal:6',
             'all_conversions_value' => 'decimal:6',
             'all_conversions_value_by_conversion_date' => 'decimal:6',
-            'add_to_cart' => 'decimal:6',
-            'initiate_checkout' => 'decimal:6',
             'raw_payload' => 'array',
             'synced_at' => 'datetime',
         ];

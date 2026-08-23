@@ -17,6 +17,10 @@ class AdvertisingChannelApiService
 
     private const GOOGLE_ADS_API = 'https://googleads.googleapis.com/v24';
 
+    private const GOOGLE_ADD_TO_CART_ACTION = 'Google Shopping App Add To Cart';
+
+    private const GOOGLE_BEGIN_CHECKOUT_ACTION = 'Google Shopping App Begin Checkout';
+
     private const TIKTOK_API = 'https://business-api.tiktok.com/open_api/v1.3';
 
     private const CRITEO_API = 'https://api.criteo.com/2026-01';
@@ -60,7 +64,7 @@ class AdvertisingChannelApiService
      * Return account discovery plus normalized daily rows for the shared
      * history importer. Meta keeps its richer dedicated entity pipeline.
      *
-     * @return array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>}
+     * @return array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>, campaign_daily_metrics: list<array<string, mixed>>, ad_daily_metrics: list<array<string, mixed>>, search_term_daily_metrics: list<array<string, mixed>>, keyword_daily_metrics: list<array<string, mixed>>}
      */
     public function syncPayload(Store $store, string $key, string $from, string $to): array
     {
@@ -81,6 +85,10 @@ class AdvertisingChannelApiService
         return [
             'accounts' => (array) ($payload['accounts'] ?? []),
             'daily_metrics' => (array) ($payload['daily_metrics'] ?? []),
+            'campaign_daily_metrics' => (array) ($payload['campaign_daily_metrics'] ?? []),
+            'ad_daily_metrics' => (array) ($payload['ad_daily_metrics'] ?? []),
+            'search_term_daily_metrics' => (array) ($payload['search_term_daily_metrics'] ?? []),
+            'keyword_daily_metrics' => (array) ($payload['keyword_daily_metrics'] ?? []),
         ];
     }
 
@@ -204,7 +212,7 @@ class AdvertisingChannelApiService
             $headers['login-customer-id'] = $loginCustomerId;
         }
 
-        $query = "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, segments.date, metrics.cost_micros, metrics.conversions_value, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
+        $query = "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, segments.date, metrics.cost_micros, metrics.conversions_value, metrics.conversions_value_by_conversion_date, metrics.all_conversions, metrics.all_conversions_value, metrics.all_conversions_value_by_conversion_date, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
         $response = $this->http->withHeaders($headers)->acceptJson()->timeout(30)
             ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", ['query' => $query]);
         $this->assertSuccessful($response, 'Google Ads');
@@ -238,7 +246,7 @@ class AdvertisingChannelApiService
             ];
             $date = trim((string) ($segments['date'] ?? ''));
             if ($date !== '') {
-                $daily[] = $this->dailyRow(
+                $daily[$date] = $this->dailyRow(
                     (string) $account['external_account_id'],
                     $date,
                     $rowSpend,
@@ -247,14 +255,215 @@ class AdvertisingChannelApiService
                     $metrics['clicks'] ?? 0,
                     $metrics['conversions'] ?? 0,
                     $row,
+                    [
+                        'conversion_value_by_conversion_date' => $metrics['conversionsValueByConversionDate'] ?? 0,
+                        'all_conversions' => $metrics['allConversions'] ?? 0,
+                        'all_conversions_value' => $metrics['allConversionsValue'] ?? 0,
+                        'all_conversions_value_by_conversion_date' => $metrics['allConversionsValueByConversionDate'] ?? 0,
+                    ],
                 );
             }
         }
 
-        return [...$this->totals($spend, $sales), 'accounts' => [$account], 'daily_metrics' => $daily];
+        $actionNames = [self::GOOGLE_ADD_TO_CART_ACTION, self::GOOGLE_BEGIN_CHECKOUT_ACTION];
+        $quotedActionNames = collect($actionNames)
+            ->map(fn (string $name): string => "'".str_replace("'", "\\'", $name)."'")
+            ->implode(', ');
+        $conversionQuery = "SELECT segments.date, segments.conversion_action_name, metrics.all_conversions FROM customer WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND segments.conversion_action_name IN ({$quotedActionNames}) ORDER BY segments.date ASC";
+        $conversionResponse = $this->http->withHeaders($headers)->acceptJson()->timeout(30)
+            ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", ['query' => $conversionQuery]);
+        $this->assertSuccessful($conversionResponse, 'Google Ads conversions');
+
+        foreach ((array) $conversionResponse->json('results', []) as $row) {
+            $segments = is_array($row) && is_array($row['segments'] ?? null) ? $row['segments'] : [];
+            $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+            $date = trim((string) ($segments['date'] ?? ''));
+            $actionName = trim((string) ($segments['conversionActionName'] ?? ''));
+            if ($date === '' || ! in_array($actionName, $actionNames, true)) {
+                continue;
+            }
+            if (! isset($daily[$date])) {
+                $daily[$date] = $this->dailyRow(
+                    (string) $account['external_account_id'],
+                    $date,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    [],
+                );
+            }
+            $key = $actionName === self::GOOGLE_ADD_TO_CART_ACTION ? 'add_to_cart' : 'initiate_checkout';
+            $daily[$date][$key] = round(
+                (float) ($daily[$date][$key] ?? 0) + max(0, $this->number($metrics['allConversions'] ?? 0)),
+                6,
+            );
+            $daily[$date]['raw_payload']['conversion_actions'][$actionName] = $row;
+        }
+
+        $campaignQuery = "SELECT customer.id, campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.conversions_value_by_conversion_date, metrics.all_conversions, metrics.all_conversions_value, metrics.all_conversions_value_by_conversion_date FROM campaign WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.status = 'ENABLED' ORDER BY segments.date ASC";
+        $campaignResponse = $this->http->withHeaders($headers)->acceptJson()->timeout(30)
+            ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", ['query' => $campaignQuery]);
+        $this->assertSuccessful($campaignResponse, 'Google Ads campaigns');
+
+        $campaignDaily = [];
+        foreach ((array) $campaignResponse->json('results', []) as $row) {
+            $campaign = is_array($row) && is_array($row['campaign'] ?? null) ? $row['campaign'] : [];
+            $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+            $segments = is_array($row) && is_array($row['segments'] ?? null) ? $row['segments'] : [];
+            $campaignId = trim((string) ($campaign['id'] ?? ''));
+            $date = trim((string) ($segments['date'] ?? ''));
+            if ($campaignId === '' || $date === '') {
+                continue;
+            }
+
+            $campaignDaily[] = [
+                'external_account_id' => trim((string) data_get($row, 'customer.id', $account['external_account_id'])),
+                'campaign_id' => $campaignId,
+                'campaign_name' => $campaign['name'] ?? null,
+                'campaign_status' => $campaign['status'] ?? null,
+                'advertising_channel_type' => $campaign['advertisingChannelType'] ?? null,
+                'date' => $date,
+                'spend' => round(max(0, $this->number($metrics['costMicros'] ?? 0) / 1_000_000), 6),
+                'impressions' => max(0, (int) round($this->number($metrics['impressions'] ?? 0))),
+                'clicks' => max(0, (int) round($this->number($metrics['clicks'] ?? 0))),
+                'conversions' => round(max(0, $this->number($metrics['conversions'] ?? 0)), 6),
+                'conversions_value' => round(max(0, $this->number($metrics['conversionsValue'] ?? 0)), 6),
+                'conversion_value_by_conversion_date' => round(max(0, $this->number($metrics['conversionsValueByConversionDate'] ?? 0)), 6),
+                'all_conversions' => round(max(0, $this->number($metrics['allConversions'] ?? 0)), 6),
+                'all_conversions_value' => round(max(0, $this->number($metrics['allConversionsValue'] ?? 0)), 6),
+                'all_conversions_value_by_conversion_date' => round(max(0, $this->number($metrics['allConversionsValueByConversionDate'] ?? 0)), 6),
+                'raw_payload' => $row,
+            ];
+        }
+
+        $searchTermQuery = "SELECT customer.id, segments.date, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, campaign.id, campaign.name, campaign.advertising_channel_type, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND metrics.conversions_value > 0 ORDER BY segments.date ASC";
+        $searchTermRows = $this->googleSearch($customerId, $headers, $searchTermQuery, 'Google Ads search terms');
+        $pmaxSearchTermQuery = "SELECT customer.id, segments.date, campaign_search_term_view.search_term, campaign.id, campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign_search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.advertising_channel_type = 'PERFORMANCE_MAX' AND metrics.conversions_value > 0 ORDER BY segments.date ASC";
+        $pmaxSearchTermRows = $this->googleSearch($customerId, $headers, $pmaxSearchTermQuery, 'Google Ads Performance Max search terms');
+
+        $searchTermDaily = collect($searchTermRows)->map(function (array $row) use ($account): ?array {
+            return $this->googleSearchTermRow($row, (string) $account['external_account_id'], false);
+        })->merge(collect($pmaxSearchTermRows)->map(function (array $row) use ($account): ?array {
+            return $this->googleSearchTermRow($row, (string) $account['external_account_id'], true);
+        }))->filter()->values()->all();
+
+        $keywordQuery = "SELECT customer.id, segments.date, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, campaign.id, campaign.name, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND ad_group_criterion.status != 'REMOVED' AND metrics.cost_micros > 0 ORDER BY segments.date ASC";
+        $keywordRows = $this->googleSearch($customerId, $headers, $keywordQuery, 'Google Ads keywords');
+        $keywordDaily = collect($keywordRows)->map(function (array $row) use ($account): ?array {
+            $criterion = is_array($row['adGroupCriterion'] ?? null) ? $row['adGroupCriterion'] : [];
+            $keyword = trim((string) data_get($criterion, 'keyword.text', ''));
+            $date = trim((string) data_get($row, 'segments.date', ''));
+            if ($keyword === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                return null;
+            }
+            $campaignId = trim((string) data_get($row, 'campaign.id', ''));
+            $adGroupId = trim((string) data_get($row, 'adGroup.id', ''));
+            $criterionId = trim((string) ($criterion['criterionId'] ?? ''));
+            $metrics = is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+
+            return [
+                'external_account_id' => trim((string) data_get($row, 'customer.id', $account['external_account_id'])),
+                'date' => $date,
+                'dimension_key' => hash('sha256', implode('|', [$criterionId, $campaignId, $adGroupId, mb_strtolower($keyword)])),
+                'criterion_id' => $criterionId ?: null,
+                'keyword' => $keyword,
+                'normalized_keyword' => mb_strtolower($keyword),
+                'match_type' => data_get($criterion, 'keyword.matchType'),
+                'status' => $criterion['status'] ?? null,
+                'campaign_id' => $campaignId ?: null,
+                'campaign_name' => data_get($row, 'campaign.name'),
+                'ad_group_id' => $adGroupId ?: null,
+                'ad_group_name' => data_get($row, 'adGroup.name'),
+                ...$this->googlePerformanceMetrics($metrics),
+                'raw_payload' => $row,
+            ];
+        })->filter()->values()->all();
+
+        return [
+            ...$this->totals($spend, $sales),
+            'accounts' => [$account],
+            'daily_metrics' => array_values($daily),
+            'campaign_daily_metrics' => $campaignDaily,
+            'search_term_daily_metrics' => $searchTermDaily,
+            'keyword_daily_metrics' => $keywordDaily,
+        ];
     }
 
-    /** @return array{ad_spend: float, attributed_sales: float} */
+    /** @return list<array<string, mixed>> */
+    private function googleSearch(string $customerId, array $headers, string $query, string $label): array
+    {
+        $rows = [];
+        $pageToken = null;
+        for ($page = 0; $page < 100; $page++) {
+            // Google Ads API v19+ fixes the search page size at 10,000 and
+            // rejects requests that explicitly send pageSize.
+            $body = ['query' => $query];
+            if ($pageToken !== null) {
+                $body['pageToken'] = $pageToken;
+            }
+            $response = $this->http->withHeaders($headers)->acceptJson()->timeout(45)
+                ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", $body);
+            $this->assertSuccessful($response, $label);
+            $pageRows = array_values(array_filter((array) $response->json('results', []), 'is_array'));
+            array_push($rows, ...$pageRows);
+            $pageToken = trim((string) $response->json('nextPageToken', '')) ?: null;
+            if ($pageToken === null) {
+                break;
+            }
+        }
+
+        return $rows;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function googleSearchTermRow(array $row, string $fallbackAccount, bool $pmax): ?array
+    {
+        $term = trim((string) data_get($row, $pmax ? 'campaignSearchTermView.searchTerm' : 'searchTermView.searchTerm', ''));
+        $date = trim((string) data_get($row, 'segments.date', ''));
+        if ($term === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return null;
+        }
+        $campaignId = trim((string) data_get($row, 'campaign.id', ''));
+        $adGroupId = trim((string) data_get($row, 'adGroup.id', ''));
+        $matchedKeyword = $pmax ? null : data_get($row, 'segments.keyword.info.text');
+        $matchType = $pmax ? 'PERFORMANCE_MAX' : data_get($row, 'segments.keyword.info.matchType');
+        $metrics = is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+
+        return [
+            'external_account_id' => trim((string) data_get($row, 'customer.id', $fallbackAccount)),
+            'date' => $date,
+            'dimension_key' => hash('sha256', implode('|', [$pmax ? 'pmax' : 'standard', mb_strtolower($term), $campaignId, $adGroupId, (string) $matchedKeyword])),
+            'source_type' => $pmax ? 'PERFORMANCE_MAX' : 'STANDARD',
+            'search_term' => $term,
+            'normalized_search_term' => mb_strtolower($term),
+            'status' => $pmax ? 'PERFORMANCE_MAX' : data_get($row, 'searchTermView.status'),
+            'matched_keyword' => $matchedKeyword,
+            'match_type' => $matchType,
+            'campaign_id' => $campaignId ?: null,
+            'campaign_name' => data_get($row, 'campaign.name'),
+            'ad_group_id' => $adGroupId ?: null,
+            'ad_group_name' => data_get($row, 'adGroup.name'),
+            'advertising_channel_type' => data_get($row, 'campaign.advertisingChannelType'),
+            ...$this->googlePerformanceMetrics($metrics),
+            'raw_payload' => $row,
+        ];
+    }
+
+    /** @return array{spend: float, revenue: float, impressions: int, clicks: int, conversions: float} */
+    private function googlePerformanceMetrics(array $metrics): array
+    {
+        return [
+            'spend' => round(max(0, $this->number($metrics['costMicros'] ?? 0) / 1_000_000), 6),
+            'revenue' => round(max(0, $this->number($metrics['conversionsValue'] ?? 0)), 6),
+            'impressions' => max(0, (int) round($this->number($metrics['impressions'] ?? 0))),
+            'clicks' => max(0, (int) round($this->number($metrics['clicks'] ?? 0))),
+            'conversions' => round(max(0, $this->number($metrics['conversions'] ?? 0)), 6),
+        ];
+    }
+
+    /** @return array{ad_spend: float, attributed_sales: float, accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>, campaign_daily_metrics: list<array<string, mixed>>, ad_daily_metrics: list<array<string, mixed>>} */
     private function tiktok(Store $store, string $from, string $to): array
     {
         $token = $this->required($store, 'tiktok_ads', 'access_token');
@@ -271,23 +480,24 @@ class AdvertisingChannelApiService
         $sales = 0.0;
         $accounts = [];
         $daily = [];
+        $campaignDaily = [];
+        $adDaily = [];
         foreach ($advertiserIds as $advertiserId) {
-            $response = $this->http->withHeaders(['Access-Token' => $token])->acceptJson()->timeout(30)
-                ->get(self::TIKTOK_API.'/report/integrated/get/', [
-                    'advertiser_id' => $advertiserId,
-                    'report_type' => 'BASIC',
-                    'data_level' => 'AUCTION_ADVERTISER',
-                    'dimensions' => json_encode(['stat_time_day'], JSON_THROW_ON_ERROR),
-                    'metrics' => json_encode(['spend', 'complete_payment', 'complete_payment_roas', 'impressions', 'clicks'], JSON_THROW_ON_ERROR),
-                    'start_date' => $from,
-                    'end_date' => $to,
-                    'page' => 1,
-                    'page_size' => 90,
-                ]);
-            $this->assertSuccessful($response, 'TikTok Ads');
-            if ((int) $response->json('code', -1) !== 0) {
-                throw new RuntimeException('TikTok report unavailable.');
-            }
+            $dailyRows = $this->tiktokReport($token, (string) $advertiserId, 'AUCTION_ADVERTISER', ['stat_time_day'], $from, $to);
+            $campaignRows = $this->tiktokReport($token, (string) $advertiserId, 'AUCTION_CAMPAIGN', ['campaign_id', 'stat_time_day'], $from, $to);
+            $adRows = $this->tiktokReport($token, (string) $advertiserId, 'AUCTION_AD', ['ad_id', 'stat_time_day'], $from, $to);
+            $adInformation = $this->tiktokAdInformation(
+                $token,
+                (string) $advertiserId,
+                collect($adRows)->map(fn (array $row): string => trim((string) data_get($row, 'dimensions.ad_id', '')))->filter()->unique()->values()->all(),
+            );
+            $campaignNames = $this->tiktokCampaignNames(
+                $token,
+                (string) $advertiserId,
+                collect($campaignRows)->map(fn (array $row): string => trim((string) data_get($row, 'dimensions.campaign_id', '')))
+                    ->merge(collect($adInformation)->map(fn (array $ad): string => trim((string) ($ad['campaign_id'] ?? ''))))
+                    ->filter()->unique()->values()->all(),
+            );
 
             $accounts[] = [
                 'external_account_id' => (string) $advertiserId,
@@ -298,7 +508,7 @@ class AdvertisingChannelApiService
                 'raw_payload' => ['advertiser_id' => (string) $advertiserId],
             ];
 
-            foreach ((array) $response->json('data.list', []) as $row) {
+            foreach ($dailyRows as $row) {
                 $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
                 $dimensions = is_array($row) && is_array($row['dimensions'] ?? null) ? $row['dimensions'] : [];
                 $rowSpend = $this->number($metrics['spend'] ?? 0);
@@ -307,7 +517,7 @@ class AdvertisingChannelApiService
                 $sales += $rowSales;
                 $date = trim((string) ($dimensions['stat_time_day'] ?? ''));
                 if ($date !== '') {
-                    $daily[] = $this->dailyRow(
+                    $normalized = $this->dailyRow(
                         (string) $advertiserId,
                         substr($date, 0, 10),
                         $rowSpend,
@@ -317,11 +527,190 @@ class AdvertisingChannelApiService
                         $metrics['complete_payment'] ?? 0,
                         $row,
                     );
+                    $normalized['add_to_cart'] = round(max(0, $this->number($metrics['web_event_add_to_cart'] ?? 0)), 6);
+                    $normalized['initiate_checkout'] = round(max(0, $this->number($metrics['initiate_checkout'] ?? 0)), 6);
+                    $daily[] = $normalized;
+                }
+            }
+
+            foreach ($campaignRows as $row) {
+                $metrics = is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+                $dimensions = is_array($row['dimensions'] ?? null) ? $row['dimensions'] : [];
+                $campaignId = trim((string) ($dimensions['campaign_id'] ?? ''));
+                $date = substr(trim((string) ($dimensions['stat_time_day'] ?? '')), 0, 10);
+                if ($campaignId === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    continue;
+                }
+                $rowSpend = max(0, $this->number($metrics['spend'] ?? 0));
+                $campaign = $campaignNames[$campaignId] ?? [];
+                $campaignDaily[] = [
+                    'external_account_id' => (string) $advertiserId,
+                    'campaign_id' => $campaignId,
+                    'campaign_name' => $campaign['campaign_name'] ?? null,
+                    'campaign_status' => $campaign['operation_status'] ?? null,
+                    'objective_type' => $campaign['objective_type'] ?? null,
+                    'date' => $date,
+                    'spend' => round($rowSpend, 6),
+                    'attributed_sales' => round($rowSpend * max(0, $this->number($metrics['complete_payment_roas'] ?? 0)), 6),
+                    'impressions' => max(0, (int) round($this->number($metrics['impressions'] ?? 0))),
+                    'clicks' => max(0, (int) round($this->number($metrics['clicks'] ?? 0))),
+                    'conversions' => round(max(0, $this->number($metrics['complete_payment'] ?? 0)), 6),
+                    'raw_payload' => $row,
+                ];
+            }
+
+            foreach ($adRows as $row) {
+                $metrics = is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+                $dimensions = is_array($row['dimensions'] ?? null) ? $row['dimensions'] : [];
+                $adId = trim((string) ($dimensions['ad_id'] ?? ''));
+                $date = substr(trim((string) ($dimensions['stat_time_day'] ?? '')), 0, 10);
+                if ($adId === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    continue;
+                }
+
+                $ad = $adInformation[$adId] ?? [];
+                $campaignId = trim((string) ($ad['campaign_id'] ?? ''));
+                $rowSpend = max(0, $this->number($metrics['spend'] ?? 0));
+                $adTexts = collect((array) ($ad['ad_texts'] ?? []))
+                    ->map(fn (mixed $text): string => trim((string) $text))->filter()->unique()->values()->all();
+                $adDaily[] = [
+                    'external_account_id' => (string) $advertiserId,
+                    'campaign_id' => $campaignId !== '' ? $campaignId : null,
+                    'campaign_name' => $campaignNames[$campaignId]['campaign_name'] ?? null,
+                    'adgroup_id' => $ad['adgroup_id'] ?? null,
+                    'ad_id' => $adId,
+                    'ad_name' => $ad['ad_name'] ?? null,
+                    'ad_text' => $ad['ad_text'] ?? null,
+                    'ad_texts' => $adTexts,
+                    'ad_format' => $ad['ad_format'] ?? $ad['creative_type'] ?? null,
+                    'video_id' => $ad['video_id'] ?? null,
+                    'date' => $date,
+                    'spend' => round($rowSpend, 6),
+                    'attributed_sales' => round($rowSpend * max(0, $this->number($metrics['complete_payment_roas'] ?? 0)), 6),
+                    'impressions' => max(0, (int) round($this->number($metrics['impressions'] ?? 0))),
+                    'clicks' => max(0, (int) round($this->number($metrics['clicks'] ?? 0))),
+                    'conversions' => round(max(0, $this->number($metrics['complete_payment'] ?? 0)), 6),
+                    'video_play_actions' => max(0, (int) round($this->number($metrics['video_play_actions'] ?? 0))),
+                    'video_watched_2s' => max(0, (int) round($this->number($metrics['video_watched_2s'] ?? 0))),
+                    'average_video_play' => round(max(0, $this->number($metrics['average_video_play'] ?? 0)), 6),
+                    'raw_payload' => ['report' => $row, 'ad' => $ad],
+                ];
+            }
+        }
+
+        return [
+            ...$this->totals($spend, $sales),
+            'accounts' => $accounts,
+            'daily_metrics' => $daily,
+            'campaign_daily_metrics' => $campaignDaily,
+            'ad_daily_metrics' => $adDaily,
+        ];
+    }
+
+    /** @param list<string> $adIds @return array<string, array<string, mixed>> */
+    private function tiktokAdInformation(string $token, string $advertiserId, array $adIds): array
+    {
+        $ads = [];
+        foreach (array_chunk($adIds, 100) as $ids) {
+            try {
+                $response = $this->http->withHeaders(['Access-Token' => $token])->acceptJson()->timeout(30)
+                    ->get(self::TIKTOK_API.'/ad/get/', [
+                        'advertiser_id' => $advertiserId,
+                        'filtering' => json_encode(['ad_ids' => array_values($ids)], JSON_THROW_ON_ERROR),
+                        'fields' => json_encode([
+                            'ad_id', 'ad_name', 'ad_text', 'ad_texts', 'campaign_id', 'adgroup_id',
+                            'ad_format', 'creative_type', 'video_id',
+                        ], JSON_THROW_ON_ERROR),
+                        'page' => 1,
+                        'page_size' => 100,
+                    ]);
+                $this->assertSuccessful($response, 'TikTok ad information');
+                if ((int) $response->json('code', -1) !== 0) {
+                    continue;
+                }
+                foreach ((array) $response->json('data.list', []) as $ad) {
+                    if (! is_array($ad)) {
+                        continue;
+                    }
+                    $id = trim((string) ($ad['ad_id'] ?? ''));
+                    if ($id !== '') {
+                        $ads[$id] = $ad;
+                    }
+                }
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return $ads;
+    }
+
+    /** @param list<string> $dimensions @return list<array<string, mixed>> */
+    private function tiktokReport(string $token, string $advertiserId, string $dataLevel, array $dimensions, string $from, string $to): array
+    {
+        $metrics = [
+            'spend', 'impressions', 'clicks', 'ctr', 'cpc', 'conversion', 'cost_per_conversion',
+            'conversion_rate', 'complete_payment', 'complete_payment_roas', 'initiate_checkout',
+            'web_event_add_to_cart', 'video_play_actions', 'video_watched_2s', 'video_watched_6s',
+            'average_video_play',
+        ];
+        $rows = [];
+        for ($page = 1; $page <= 50; $page++) {
+            $response = $this->http->withHeaders(['Access-Token' => $token])->acceptJson()->timeout(30)
+                ->get(self::TIKTOK_API.'/report/integrated/get/', [
+                    'advertiser_id' => $advertiserId,
+                    'report_type' => 'BASIC',
+                    'data_level' => $dataLevel,
+                    'dimensions' => json_encode($dimensions, JSON_THROW_ON_ERROR),
+                    'metrics' => json_encode($metrics, JSON_THROW_ON_ERROR),
+                    'start_date' => $from,
+                    'end_date' => $to,
+                    'page' => $page,
+                    'page_size' => 1000,
+                ]);
+            $this->assertSuccessful($response, 'TikTok Ads');
+            if ((int) $response->json('code', -1) !== 0) {
+                throw new RuntimeException('TikTok report unavailable.');
+            }
+            $pageRows = array_values(array_filter((array) $response->json('data.list', []), 'is_array'));
+            array_push($rows, ...$pageRows);
+            $totalPages = max(1, (int) $response->json('data.page_info.total_page', 1));
+            if ($page >= $totalPages || count($pageRows) === 0) {
+                break;
+            }
+        }
+
+        return $rows;
+    }
+
+    /** @param list<string> $campaignIds @return array<string, array<string, mixed>> */
+    private function tiktokCampaignNames(string $token, string $advertiserId, array $campaignIds): array
+    {
+        $campaigns = [];
+        foreach (array_chunk($campaignIds, 100) as $ids) {
+            $response = $this->http->withHeaders(['Access-Token' => $token])->acceptJson()->timeout(30)
+                ->get(self::TIKTOK_API.'/campaign/get/', [
+                    'advertiser_id' => $advertiserId,
+                    'filtering' => json_encode(['campaign_ids' => array_values($ids)], JSON_THROW_ON_ERROR),
+                    'page' => 1,
+                    'page_size' => 100,
+                ]);
+            $this->assertSuccessful($response, 'TikTok campaign names');
+            if ((int) $response->json('code', -1) !== 0) {
+                continue;
+            }
+            foreach ((array) $response->json('data.list', []) as $campaign) {
+                if (! is_array($campaign)) {
+                    continue;
+                }
+                $id = trim((string) ($campaign['campaign_id'] ?? ''));
+                if ($id !== '') {
+                    $campaigns[$id] = $campaign;
                 }
             }
         }
 
-        return [...$this->totals($spend, $sales), 'accounts' => $accounts, 'daily_metrics' => $daily];
+        return $campaigns;
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
@@ -560,9 +949,29 @@ class AdvertisingChannelApiService
 
     private function assertSuccessful(Response $response, string $provider): void
     {
-        if (! $response->successful()) {
-            throw new RuntimeException("{$provider} request failed.");
+        if ($response->successful()) {
+            return;
         }
+
+        $payload = $response->json();
+        $status = is_array($payload) ? trim((string) data_get($payload, 'error.status', '')) : '';
+        $apiCode = '';
+
+        foreach ((array) data_get($payload, 'error.details', []) as $detail) {
+            foreach ((array) data_get($detail, 'errors', []) as $error) {
+                foreach ((array) data_get($error, 'errorCode', []) as $code) {
+                    if (is_scalar($code) && trim((string) $code) !== '') {
+                        $apiCode = trim((string) $code);
+                        break 3;
+                    }
+                }
+            }
+        }
+
+        $context = collect([$status, $apiCode])->filter()->unique()->implode('/');
+        $suffix = $context !== '' ? ", {$context}" : '';
+
+        throw new RuntimeException("{$provider} request failed (HTTP {$response->status()}{$suffix}).");
     }
 
     private function metaPurchaseValue(mixed $values): float
@@ -669,6 +1078,7 @@ class AdvertisingChannelApiService
         mixed $clicks,
         mixed $conversions,
         array $rawPayload,
+        array $extraMetrics = [],
     ): array {
         try {
             $normalizedDate = trim($date) === '' ? '' : CarbonImmutable::parse($date)->toDateString();
@@ -681,9 +1091,15 @@ class AdvertisingChannelApiService
             'date' => $normalizedDate,
             'spend' => round(max(0, $this->number($spend)), 6),
             'attributed_sales' => round(max(0, $this->number($sales)), 6),
+            'conversion_value_by_conversion_date' => round(max(0, $this->number($extraMetrics['conversion_value_by_conversion_date'] ?? 0)), 6),
             'impressions' => max(0, (int) round($this->number($impressions))),
             'clicks' => max(0, (int) round($this->number($clicks))),
             'conversions' => round(max(0, $this->number($conversions)), 6),
+            'all_conversions' => round(max(0, $this->number($extraMetrics['all_conversions'] ?? 0)), 6),
+            'all_conversions_value' => round(max(0, $this->number($extraMetrics['all_conversions_value'] ?? 0)), 6),
+            'all_conversions_value_by_conversion_date' => round(max(0, $this->number($extraMetrics['all_conversions_value_by_conversion_date'] ?? 0)), 6),
+            'add_to_cart' => 0.0,
+            'initiate_checkout' => 0.0,
             'raw_payload' => $rawPayload,
         ];
     }
