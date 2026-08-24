@@ -93,6 +93,11 @@ return [
         'archive_max_tables' => (int) env('FEISHU_ARCHIVE_MAX_TABLES', 100),
         'archive_max_fields_per_table' => (int) env('FEISHU_ARCHIVE_MAX_FIELDS_PER_TABLE', 1000),
         'archive_max_records_per_table' => (int) env('FEISHU_ARCHIVE_MAX_RECORDS_PER_TABLE', 50000),
+        'spreadsheet_archive_max_rows' => (int) env('FEISHU_SPREADSHEET_ARCHIVE_MAX_ROWS', 10000),
+        'spreadsheet_archive_max_columns' => (int) env('FEISHU_SPREADSHEET_ARCHIVE_MAX_COLUMNS', 200),
+        'natural_traffic_sync_enabled' => (bool) env('FEISHU_NATURAL_TRAFFIC_SYNC_ENABLED', true),
+        'natural_traffic_sync_time' => env('FEISHU_NATURAL_TRAFFIC_SYNC_TIME', '04:25'),
+        'natural_traffic_sync_timezone' => env('FEISHU_NATURAL_TRAFFIC_SYNC_TIMEZONE', 'Asia/Shanghai'),
         'amazon_sync_enabled' => (bool) env('FEISHU_AMAZON_SYNC_ENABLED', true),
         'amazon_sync_time' => env('FEISHU_AMAZON_SYNC_TIME', '09:00'),
         'amazon_sync_timezone' => env('FEISHU_AMAZON_SYNC_TIMEZONE', 'Asia/Shanghai'),
@@ -117,6 +122,19 @@ return [
     'google_search_console' => [
         'redirect_uri' => env('GOOGLE_SEARCH_CONSOLE_REDIRECT_URI'),
         'state_ttl_minutes' => (int) env('GOOGLE_SEARCH_CONSOLE_OAUTH_STATE_TTL_MINUTES', 10),
+        'default_site_url' => env('GSC_SITE_URL', 'https://macfoxbike.com/'),
+        'sync_enabled' => (bool) env('SEO_ANALYTICS_SYNC_ENABLED', true),
+        'sync_time' => env('SEO_ANALYTICS_SYNC_TIME', '04:40'),
+        'sync_timezone' => env('SEO_ANALYTICS_SYNC_TIMEZONE', 'America/Los_Angeles'),
+        'backfill_months' => (int) env('SEO_ANALYTICS_BACKFILL_MONTHS', 16),
+        'overlap_days' => (int) env('SEO_ANALYTICS_OVERLAP_DAYS', 7),
+        'data_delay_days' => (int) env('SEO_ANALYTICS_DATA_DELAY_DAYS', 2),
+        'detail_row_limit' => (int) env('SEO_ANALYTICS_DETAIL_ROW_LIMIT', 25000),
+    ],
+
+    'google_analytics' => [
+        'default_property_id' => env('GA4_PROPERTY_ID', '354777547'),
+        'channel_dimension' => env('GA4_SEO_CHANNEL_DIMENSION', 'sessionCustomChannelGroup:14917938318'),
     ],
 
     'youtube_analytics' => [

@@ -314,7 +314,7 @@ interface GoogleAdsSummary {
         time_variance: number | null;
         time_progress: number | null;
     };
-    source_fields: Record<string, string>;
+    source_fields: Record<string, string | null>;
     efficiency: {
         schema: 'paid-advertising-google-efficiency-v1';
         available: boolean;
@@ -932,22 +932,22 @@ const confirmDelete = () => {
 
 <template>
     <Head title="广告目标" />
-    <AppLayout :breadcrumbs="[{ label: '付费广告' }, { label: '广告目标' }]">
-        <div class="mx-auto max-w-7xl">
-            <header class="flex flex-wrap items-start justify-between gap-5">
+    <AppLayout :breadcrumbs="[{ label: '工作台', href: '/dashboard' }, { label: '付费广告' }, { label: '广告目标' }]">
+        <div class="mx-auto max-w-[1500px]">
+            <header class="flex flex-col gap-5 border-b border-slate-200 pb-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">当前店铺 · {{ store.name }}</p>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">当前店铺 · {{ store.name }}</p>
                     <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">广告目标</h1>
                     <p class="mt-2 text-sm text-slate-500">各付费广告渠道的月度目标进度汇总。</p>
                 </div>
-                <div class="flex flex-wrap items-center justify-end gap-2.5">
+                <div class="flex shrink-0 flex-wrap items-center justify-end gap-2.5">
                     <button
                         type="button"
-                        class="group inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                        class="group inline-flex h-12 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3.5 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                         aria-label="选择统计时间"
                         @click="openPeriodDialog"
                     >
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 transition group-hover:bg-white">
+                        <span class="grid h-8 w-8 place-items-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 transition group-hover:bg-white">
                             <svg class="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg>
                         </span>
                         <span>
@@ -959,7 +959,7 @@ const confirmDelete = () => {
                     <button
                         v-if="canManage"
                         type="button"
-                        class="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-200"
+                        class="inline-flex h-12 items-center gap-2 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-200"
                         @click="openAddDialog"
                     >
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -969,7 +969,7 @@ const confirmDelete = () => {
                         v-if="canRefresh"
                         type="button"
                         :disabled="refreshProcessing"
-                        class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                         @click="refreshFromFeishu()"
                     >
                         <svg class="h-4 w-4" :class="{ 'animate-spin': refreshProcessing }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.4 9A7 7 0 0 0 6.2 6.2L4 8m16 8-2.2 1.8A7 7 0 0 1 5.6 15"/></svg>
@@ -1018,7 +1018,7 @@ const confirmDelete = () => {
                 <span class="tabular-nums text-sky-700">{{ estimatedFinishedAtLabel }} 完成</span>
             </div>
 
-            <section class="relative mt-8" :aria-busy="regionRefreshing">
+            <section class="relative mt-6" :aria-busy="regionRefreshing">
                 <div :class="{ 'pointer-events-none select-none opacity-55': regionRefreshing }">
                     <div class="overflow-x-auto border-b border-slate-200">
                         <nav class="flex min-w-max gap-1" aria-label="广告目标导航" role="tablist">

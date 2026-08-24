@@ -422,6 +422,79 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->assertSame('completed', $board->fresh()->sync_status);
     }
 
+    public function test_overall_google_goal_token_imports_every_spreadsheet_sheet_for_the_configured_store(): void
+    {
+        Config::set('services.feishu_table.app_id', 'paid_goal_test');
+        Config::set('services.feishu_table.app_secret', 'paid-goal-secret');
+        [$organization, $store] = $this->storeContext('overall-google-spreadsheet');
+        [, $otherStore] = $this->storeContext('other-overall-google-spreadsheet');
+        $this->overallCredentials($store, 'overall_sheet_token', '', '');
+        $this->fakeFeishu(
+            fn (string $_appToken, string $_viewId): array => throw new \RuntimeException('不应读取多维表格记录。'),
+            null,
+            fn (string $token): array => throw new \RuntimeException("{$token} 不是多维表格 Token。"),
+            fn (string $token): array => [
+                [
+                    'sheet_id' => 'sales-target',
+                    'title' => '销售目标',
+                    'grid_properties' => ['row_count' => 3, 'column_count' => 3],
+                ],
+                [
+                    'sheet_id' => 'brand-learning',
+                    'title' => '品牌学习',
+                    'grid_properties' => ['row_count' => 2, 'column_count' => 2],
+                ],
+            ],
+            function (string $token, string $sheetId): array {
+                $this->assertSame('overall_sheet_token', $token);
+
+                return $sheetId === 'sales-target'
+                    ? [
+                        ['日期', '今日销售额($)', '本月销售额目标($)'],
+                        ['2026/08/23', 18478.09, 1500000],
+                        ['2026/08/24', 20000, 1500000],
+                    ]
+                    : [
+                        ['日期', '品牌词'],
+                        ['2026/08/23', 'Macfox'],
+                    ];
+            },
+        );
+
+        $result = app(PaidAdvertisingGoalSyncService::class)->syncConfiguredSources($store->id);
+
+        $this->assertSame(2, $result['sources']);
+        $this->assertSame(5, $result['fields']);
+        $this->assertSame(3, $result['inserted']);
+        $this->assertSame(0, $result['failed']);
+        $this->assertDatabaseCount('paid_advertising_goal_fields', 5);
+        $this->assertDatabaseCount('paid_advertising_goal_records', 3);
+        $this->assertDatabaseHas('paid_advertising_goal_records', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'goal_board_id' => null,
+            'source_key' => 'overall:google:sheet:sales-target',
+            'source_record_id' => 'row:2',
+        ]);
+        $this->assertDatabaseHas('paid_advertising_goal_records', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'goal_board_id' => null,
+            'source_key' => 'overall:google:sheet:brand-learning',
+            'source_record_id' => 'row:2',
+        ]);
+        $record = PaidAdvertisingGoalRecord::query()
+            ->where('source_key', 'overall:google:sheet:sales-target')
+            ->where('source_record_id', 'row:2')
+            ->sole();
+        $this->assertSame([
+            '日期' => '2026/08/23',
+            '今日销售额($)' => 18478.09,
+            '本月销售额目标($)' => 1500000,
+        ], $record->fields_encrypted);
+        $this->assertFalse(PaidAdvertisingGoalRecord::query()->forStore($otherStore)->exists());
+    }
+
     public function test_paid_advertising_goal_sync_runs_daily_at_three_forty_in_beijing(): void
     {
         $event = collect(app(Schedule::class)->events())

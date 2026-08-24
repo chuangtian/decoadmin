@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
+use App\Models\BingAdsCampaignDailyMetric;
 use App\Models\GoogleAdsCampaignDailyMetric;
 use App\Models\GoogleAdsKeywordDailyMetric;
 use App\Models\GoogleAdsSearchTermDailyMetric;
@@ -14,6 +15,7 @@ use App\Models\StoreBusinessCredential;
 use App\Models\TikTokAdsAdDailyMetric;
 use App\Models\TikTokAdsCampaignDailyMetric;
 use App\Models\User;
+use App\Services\Advertising\AdvertisingChannelApiService;
 use App\Services\Advertising\AdvertisingChannelLifecycleService;
 use App\Services\Advertising\AdvertisingChannelStatusService;
 use App\Services\Advertising\AdvertisingChannelSyncService;
@@ -23,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use Tests\TestCase;
 
 class AdvertisingChannelSyncTest extends TestCase
@@ -390,6 +393,50 @@ class AdvertisingChannelSyncTest extends TestCase
             && $job->storeId === $store->id);
     }
 
+    public function test_bing_priority_sync_persists_scoped_campaign_daily_metrics(): void
+    {
+        Queue::fake();
+        [$store] = $this->bingStore();
+        $api = Mockery::mock(AdvertisingChannelApiService::class);
+        $api->shouldReceive('syncPayload')->once()->with($store, 'bing', '2026-08-17', '2026-08-23')->andReturn([
+            'accounts' => [[
+                'external_account_id' => '187016548', 'name' => 'Macfox Bing Ads', 'currency' => 'USD',
+            ]],
+            'daily_metrics' => [[
+                'external_account_id' => '187016548', 'date' => '2026-08-22', 'spend' => 329.12,
+                'attributed_sales' => 3225.38, 'impressions' => 9482, 'clicks' => 166, 'conversions' => 2,
+            ]],
+            'campaign_daily_metrics' => [[
+                'external_account_id' => '187016548', 'campaign_id' => 'campaign-brand',
+                'campaign_name' => 'Search Brand', 'campaign_status' => 'Active', 'campaign_type' => 'Search & content',
+                'date' => '2026-08-22', 'spend' => 170.25, 'attributed_sales' => 1800,
+                'impressions' => 5000, 'clicks' => 90, 'conversions' => 1,
+            ]],
+            'ad_daily_metrics' => [],
+            'search_term_daily_metrics' => [],
+            'keyword_daily_metrics' => [],
+        ]);
+        $this->app->instance(AdvertisingChannelApiService::class, $api);
+        $sync = app(AdvertisingChannelSyncService::class);
+
+        $sync->sync($store, 'bing', 'priority', $sync->credentialVersion($store, 'bing'));
+
+        $campaign = BingAdsCampaignDailyMetric::query()->sole();
+        $this->assertSame((int) $store->organization_id, $campaign->organization_id);
+        $this->assertSame((int) $store->id, $campaign->store_id);
+        $this->assertSame('187016548', $campaign->external_account_id);
+        $this->assertSame('campaign-brand', $campaign->campaign_id);
+        $this->assertSame('Search Brand', $campaign->campaign_name);
+        $this->assertSame('Search & content', $campaign->campaign_type);
+        $this->assertSame('170.250000', $campaign->spend);
+        $this->assertSame('1800.000000', $campaign->attributed_sales);
+        $this->assertSame(5000, $campaign->impressions);
+        $this->assertSame(90, $campaign->clicks);
+        Queue::assertPushed(SyncAdvertisingChannelForStore::class, fn (SyncAdvertisingChannelForStore $job): bool => $job->channel === 'bing'
+            && $job->mode === 'backfill'
+            && $job->storeId === $store->id);
+    }
+
     /** @return array{Store, User} */
     private function googleStore(string $organizationName = 'Google Org', string $domain = 'google.myshopify.com'): array
     {
@@ -443,6 +490,37 @@ class AdvertisingChannelSyncTest extends TestCase
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,
                 'provider' => 'tiktok_ads',
+                'credential_key' => $key,
+                'credential_value' => $value,
+                'updated_by' => $user->id,
+            ]);
+        }
+
+        return [$store, $user];
+    }
+
+    /** @return array{Store, User} */
+    private function bingStore(): array
+    {
+        $organization = Organization::query()->create([
+            'name' => 'Bing Org',
+            'code' => 'bing-org-'.uniqid(),
+        ]);
+        $store = $organization->stores()->create([
+            'name' => 'Bing Store',
+            'shopify_domain' => 'bing.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+        $user = User::factory()->create();
+        foreach ([
+            'client_id' => 'client-id', 'client_secret' => 'client-secret', 'refresh_token' => 'refresh-token',
+            'developer_token' => 'developer-token', 'account_id' => '187016548',
+        ] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'provider' => 'bing_ads',
                 'credential_key' => $key,
                 'credential_value' => $value,
                 'updated_by' => $user->id,

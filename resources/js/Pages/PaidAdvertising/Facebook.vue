@@ -438,19 +438,19 @@ onBeforeUnmount(() => {
     <Head title="Facebook Ads" />
     <AppLayout :breadcrumbs="[{ label: '工作台', href: '/dashboard' }, { label: '付费广告' }, { label: 'Facebook Ads' }]">
         <div class="mx-auto max-w-[1500px] space-y-6">
-            <header class="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+            <header class="flex flex-col gap-5 border-b border-slate-200 pb-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">当前店铺 · {{ store.name }}</p>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">当前店铺 · {{ store.name }}</p>
                     <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Facebook Ads</h1>
                     <p class="mt-2 text-sm text-slate-500">账户：{{ selectedAccountName }}</p>
                 </div>
-                <span class="inline-flex w-fit items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold" :class="status.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">
+                <span class="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold" :class="status.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">
                     <i class="h-2 w-2 rounded-full" :class="status.configured ? 'bg-emerald-500' : 'bg-amber-500'" />
                     {{ status.configured ? '凭证已配置' : '尚未配置' }}
                 </span>
             </header>
 
-            <section v-if="status.configured && dashboardReady" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <section v-if="status.configured && dashboardReady" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_minmax(150px,0.65fr)_auto] lg:items-end">
                     <label class="block">
                         <span class="mb-2 block text-sm font-medium text-slate-500">广告账户</span>

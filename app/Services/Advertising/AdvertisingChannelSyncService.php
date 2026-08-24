@@ -5,6 +5,8 @@ namespace App\Services\Advertising;
 use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
+use App\Models\BingAdsCampaignDailyMetric;
+use App\Models\CriteoCampaignDailyMetric;
 use App\Models\GoogleAdsCampaignDailyMetric;
 use App\Models\GoogleAdsKeywordDailyMetric;
 use App\Models\GoogleAdsSearchTermDailyMetric;
@@ -45,7 +47,7 @@ class AdvertisingChannelSyncService
             return;
         }
 
-        [$since, $until] = $this->period($store, $mode);
+        [$since, $until] = $this->period($store, $mode, $channel);
         $chunks = $this->chunks($since, $until);
         $job = $this->startJob($store, $channel, $mode, $since, $until, count($chunks), $credentialVersion);
 
@@ -127,9 +129,10 @@ class AdvertisingChannelSyncService
     }
 
     /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */
-    private function period(Store $store, string $mode): array
+    private function period(Store $store, string $mode, string $channel): array
     {
-        $now = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfHour();
+        $timezone = $channel === 'criteo' ? 'UTC' : ($store->timezone ?: 'UTC');
+        $now = CarbonImmutable::now($timezone)->startOfHour();
         $priorityDays = max(1, (int) config('services.advertising_sync.priority_days', 7));
         $rollingDays = max(1, (int) config('services.advertising_sync.rolling_days', 3));
 
@@ -298,11 +301,30 @@ class AdvertisingChannelSyncService
                         'updated_at' => $timestamp,
                     ];
 
-                    return $channel === 'tiktok' ? [
-                        ...$base,
-                        'objective_type' => $this->text($metric['objective_type'] ?? null, 100),
-                        'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
-                    ] : [
+                    if ($channel === 'tiktok') {
+                        return [
+                            ...$base,
+                            'objective_type' => $this->text($metric['objective_type'] ?? null, 100),
+                            'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                        ];
+                    }
+
+                    if ($channel === 'bing') {
+                        return [
+                            ...$base,
+                            'campaign_type' => $this->text($metric['campaign_type'] ?? null, 100),
+                            'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                        ];
+                    }
+
+                    if ($channel === 'criteo') {
+                        return [
+                            ...$base,
+                            'attributed_sales' => max(0, (float) ($metric['attributed_sales'] ?? 0)),
+                        ];
+                    }
+
+                    return [
                         ...$base,
                         'advertising_channel_type' => $this->text($metric['advertising_channel_type'] ?? null, 100),
                         'conversions_value' => max(0, (float) ($metric['conversions_value'] ?? 0)),
@@ -324,6 +346,18 @@ class AdvertisingChannelSyncService
                     $campaignRows,
                     ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
                     ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'objective_type', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            } elseif ($channel === 'bing') {
+                BingAdsCampaignDailyMetric::query()->upsert(
+                    $campaignRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
+                    ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'campaign_type', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
+                );
+            } elseif ($channel === 'criteo') {
+                CriteoCampaignDailyMetric::query()->upsert(
+                    $campaignRows,
+                    ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
+                    ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'spend', 'attributed_sales', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
                 );
             }
 

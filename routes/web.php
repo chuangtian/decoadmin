@@ -19,6 +19,7 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
+use App\Http\Controllers\NaturalTrafficController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
 use App\Http\Controllers\PaidAdvertisingChannelController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyConnectionDisconnectController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
@@ -123,6 +125,68 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/reports/{report}/pin', [ReportController::class, 'pin'])->middleware('permission:reports.view')->name('reports.pin');
     Route::get('/reports/{report}', [ReportController::class, 'show'])->middleware('permission:reports.view')->name('reports.show');
     Route::get('/reports/{report}/export/{format}', [ReportController::class, 'export'])->middleware('permission:reports.export')->name('reports.export');
+    foreach (array_keys(NaturalTrafficController::CHANNELS) as $naturalTrafficChannel) {
+        Route::get("/natural-traffic/{$naturalTrafficChannel}", NaturalTrafficController::class)
+            ->defaults('channel', $naturalTrafficChannel)
+            ->middleware('permission:reports.view')
+            ->name("natural-traffic.{$naturalTrafficChannel}");
+    }
+    foreach (array_diff(array_keys(NaturalTrafficController::CHANNELS), ['seo-geo']) as $naturalTrafficChannel) {
+        Route::post("/natural-traffic/{$naturalTrafficChannel}/refresh", [NaturalTrafficController::class, 'refreshChannel'])
+            ->defaults('channel', $naturalTrafficChannel)
+            ->middleware(['permission:sync.run', 'throttle:6,1'])
+            ->name("natural-traffic.{$naturalTrafficChannel}.refresh");
+    }
+    Route::post('/natural-traffic/seo-geo/refresh', [NaturalTrafficController::class, 'refresh'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('natural-traffic.seo-geo.refresh');
+    Route::post('/natural-traffic/seo-geo/overview/refresh', [NaturalTrafficController::class, 'refreshOverview'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('natural-traffic.seo-geo.overview.refresh');
+    Route::get('/natural-traffic/seo-geo/overview/sync-status/{syncRun}', [NaturalTrafficController::class, 'overviewSyncStatus'])
+        ->whereUuid('syncRun')
+        ->middleware(['permission:sync.run', 'throttle:120,1'])
+        ->name('natural-traffic.seo-geo.overview.sync-status');
+    Route::get('/natural-traffic/seo-geo/source-details', [NaturalTrafficController::class, 'sourceDetails'])
+        ->middleware(['permission:reports.view', 'throttle:180,1'])
+        ->name('natural-traffic.seo-geo.source-details');
+    Route::get('/reputation/overview', [ReputationController::class, 'overview'])
+        ->middleware('permission:reports.view')
+        ->name('reputation.overview');
+    Route::get('/reputation/risks', [ReputationController::class, 'riskSync'])
+        ->middleware('permission:reports.view')
+        ->name('reputation.risks');
+    Route::post('/reputation/sync', [ReputationController::class, 'sync'])
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('reputation.sync');
+    Route::get('/reputation/sync/{syncRun}', [ReputationController::class, 'syncStatus'])
+        ->whereUuid('syncRun')
+        ->middleware(['permission:sync.run', 'throttle:120,1'])
+        ->name('reputation.sync-status');
+    Route::put('/reputation/goals', [ReputationController::class, 'upsertGoals'])
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.goals.update');
+    Route::post('/reputation/mentions', [ReputationController::class, 'storeMention'])
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.mentions.store');
+    Route::patch('/reputation/mentions/{reputationMention}', [ReputationController::class, 'updateMention'])
+        ->whereUuid('reputationMention')
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.mentions.update');
+    Route::post('/reputation/risks', [ReputationController::class, 'storeRisk'])
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.risks.store');
+    Route::patch('/reputation/risks/{reputationRisk}', [ReputationController::class, 'updateRisk'])
+        ->whereUuid('reputationRisk')
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.risks.update');
+    Route::post('/reputation/resources', [ReputationController::class, 'storeResource'])
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.resources.store');
+    Route::patch('/reputation/resources/{reputationResource}', [ReputationController::class, 'updateResource'])
+        ->whereUuid('reputationResource')
+        ->middleware(['permission:alerts.manage', 'throttle:30,1'])
+        ->name('reputation.resources.update');
     Route::get('/paid-advertising/goals', [PaidAdvertisingGoalController::class, 'index'])
         ->middleware('permission:reports.view')
         ->name('paid-advertising.goals');
@@ -182,6 +246,12 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->defaults('channel', 'google')
         ->middleware(['permission:sync.run', 'throttle:6,1'])
         ->name('paid-advertising.google.sync');
+    Route::put('/paid-advertising/google/goals/feishu', [PaidAdvertisingChannelController::class, 'updateGoogleGoalFeishu'])
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.google.goals.feishu.update');
+    Route::delete('/paid-advertising/google/goals/feishu', [PaidAdvertisingChannelController::class, 'clearGoogleGoalFeishu'])
+        ->middleware(['permission:store.update', 'throttle:30,1'])
+        ->name('paid-advertising.google.goals.feishu.clear');
     Route::get('/paid-advertising/tiktok/data', [PaidAdvertisingChannelController::class, 'data'])
         ->defaults('channel', 'tiktok')
         ->middleware(['permission:reports.view', 'throttle:120,1'])
@@ -190,6 +260,22 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->defaults('channel', 'tiktok')
         ->middleware(['permission:sync.run', 'throttle:6,1'])
         ->name('paid-advertising.tiktok.sync');
+    Route::get('/paid-advertising/bing/data', [PaidAdvertisingChannelController::class, 'data'])
+        ->defaults('channel', 'bing')
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.bing.data');
+    Route::post('/paid-advertising/bing/sync', [PaidAdvertisingChannelController::class, 'sync'])
+        ->defaults('channel', 'bing')
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.bing.sync');
+    Route::get('/paid-advertising/criteo/data', [PaidAdvertisingChannelController::class, 'data'])
+        ->defaults('channel', 'criteo')
+        ->middleware(['permission:reports.view', 'throttle:120,1'])
+        ->name('paid-advertising.criteo.data');
+    Route::post('/paid-advertising/criteo/sync', [PaidAdvertisingChannelController::class, 'sync'])
+        ->defaults('channel', 'criteo')
+        ->middleware(['permission:sync.run', 'throttle:6,1'])
+        ->name('paid-advertising.criteo.sync');
     Route::get(
         '/campaign-planning-documents/{campaignPlanningDocument}/assets/{assetHash}',
         CampaignPlanningAssetController::class,

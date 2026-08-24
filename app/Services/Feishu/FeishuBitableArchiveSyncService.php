@@ -70,15 +70,42 @@ class FeishuBitableArchiveSyncService
     }
 
     /** @return array{fields: int, records: int} */
+    public function syncTableById(
+        Store $store,
+        string $sourceSection,
+        string $appToken,
+        string $sourceTableId,
+        ?string $viewId = null,
+    ): array {
+        $sourceSection = trim($sourceSection);
+        $appToken = trim($appToken);
+        $sourceTableId = trim($sourceTableId);
+
+        if ($sourceSection === '' || $appToken === '' || $sourceTableId === '') {
+            throw new RuntimeException('飞书数据表归档缺少数据来源、App Token 或 Table ID。');
+        }
+
+        $definition = collect($this->client->tables($appToken))
+            ->first(fn (array $table): bool => trim((string) ($table['table_id'] ?? $table['id'] ?? '')) === $sourceTableId);
+
+        if (! is_array($definition)) {
+            throw new RuntimeException("未在飞书多维表格中找到数据表 {$sourceTableId}。");
+        }
+
+        return $this->syncTable($store, $sourceSection, $appToken, $sourceTableId, $definition, $viewId);
+    }
+
+    /** @return array{fields: int, records: int} */
     private function syncTable(
         Store $store,
         string $sourceSection,
         string $appToken,
         string $sourceTableId,
         array $tableDefinition,
+        ?string $viewId = null,
     ): array {
         $fields = $this->client->fields($appToken, $sourceTableId);
-        $records = $this->client->records($appToken, $sourceTableId, textFieldAsArray: true);
+        $records = $this->client->records($appToken, $sourceTableId, $viewId, textFieldAsArray: true);
         $maxFields = max(1, (int) config('services.feishu_table.archive_max_fields_per_table', 1000));
         $maxRecords = max(1, (int) config('services.feishu_table.archive_max_records_per_table', 50000));
 

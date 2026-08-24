@@ -100,6 +100,7 @@ return [
         'redis:shopify-webhook' => 10,
         'redis:default' => 60,
         'redis:shopify-sync' => 120,
+        'redis:analytics-sync' => 3600,
         'redis:notifications' => 180,
         'redis:meta-ads-poll' => 30,
         'redis:meta-ads' => 120,
@@ -256,6 +257,22 @@ return [
             'rest' => 0,
             'nice' => 0,
         ],
+        'supervisor-seo-analytics' => [
+            'connection' => 'redis',
+            'queue' => ['analytics-sync'],
+            'balance' => false,
+            'processes' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+            'minProcesses' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+            'maxTime' => 7200,
+            'maxJobs' => 10,
+            'memory' => 384,
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_SEO_ANALYTICS_TIMEOUT', 3600),
+            'backoff' => [120, 600, 1200],
+            'sleep' => 1,
+            'rest' => 0,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -272,6 +289,10 @@ return [
                 'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
                 'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
             ],
+            'supervisor-seo-analytics' => [
+                'processes' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+                'minProcesses' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+            ],
         ],
 
         'staging' => [
@@ -287,6 +308,10 @@ return [
                 'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
                 'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
             ],
+            'supervisor-seo-analytics' => [
+                'processes' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+                'minProcesses' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+            ],
         ],
 
         'local' => [
@@ -300,6 +325,10 @@ return [
             'supervisor-advertising-sync' => [
                 'processes' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
                 'minProcesses' => (int) env('HORIZON_ADVERTISING_SYNC_PROCESSES', 2),
+            ],
+            'supervisor-seo-analytics' => [
+                'processes' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
+                'minProcesses' => (int) env('HORIZON_SEO_ANALYTICS_PROCESSES', 1),
             ],
         ],
     ],

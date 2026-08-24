@@ -24,6 +24,8 @@ class PaidAdvertisingGoalSyncService
 
     private const GOOGLE_SOURCE_SUFFIX = ':google:';
 
+    private const OVERALL_GOOGLE_SOURCE_PREFIX = 'overall:google:';
+
     private const OVERALL_ARCHIVE_SECTION = 'paid-ad-goals:overall';
 
     private const BOARD_ARCHIVE_PREFIX = 'paid-ad-goals:board:';
@@ -113,9 +115,46 @@ class PaidAdvertisingGoalSyncService
             throw new RuntimeException('当前总目标未配置飞书 App Token。');
         }
 
-        $archive = $this->archiveSync->sync($store, self::OVERALL_ARCHIVE_SECTION, $appToken);
+        try {
+            $tables = $this->client->tables($appToken);
 
-        return $this->withArchive($this->syncOverallProjection($store), $archive);
+            if ($tables !== []) {
+                $archive = $this->archiveSync->sync($store, self::OVERALL_ARCHIVE_SECTION, $appToken);
+                $result = $this->withArchive($this->syncOverallProjection($store), $archive);
+                $result['deleted'] += $this->deleteStaleGoogleSources($store, null, []);
+
+                return $result;
+            }
+        } catch (Throwable $bitableException) {
+            Log::info('Overall goal token is not a readable Feishu Bitable app.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->id,
+                'error' => $this->safeError($bitableException),
+            ]);
+        }
+
+        try {
+            $sheets = $this->client->spreadsheetSheets($appToken);
+
+            if ($sheets !== []) {
+                $result = $this->withArchives(
+                    $this->syncGoogleSpreadsheetBoard($store, null, $appToken, $sheets),
+                    [],
+                );
+                $cleared = $this->clearOverallProjection($store);
+                $result['deleted'] += $cleared['deleted'];
+
+                return $result;
+            }
+        } catch (Throwable $spreadsheetException) {
+            Log::info('Overall goal token is not a readable Feishu spreadsheet.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->id,
+                'error' => $this->safeError($spreadsheetException),
+            ]);
+        }
+
+        throw new RuntimeException('无法识别该飞书 Token，请确认它属于可访问的多维表格或电子表格。');
     }
 
     /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
@@ -293,7 +332,7 @@ class PaidAdvertisingGoalSyncService
      */
     private function syncGoogleSpreadsheetBoard(
         Store $store,
-        PaidAdvertisingGoalBoard $board,
+        ?PaidAdvertisingGoalBoard $board,
         string $spreadsheetToken,
         array $sheets,
     ): array {
@@ -517,14 +556,20 @@ class PaidAdvertisingGoalSyncService
     /** @param list<string> $currentSourceKeys */
     private function deleteStaleGoogleSources(
         Store $store,
-        PaidAdvertisingGoalBoard $board,
+        ?PaidAdvertisingGoalBoard $board,
         array $currentSourceKeys,
     ): int {
-        $sourcePrefix = 'board:'.(int) $board->id.self::GOOGLE_SOURCE_SUFFIX;
+        $sourcePrefix = $board
+            ? 'board:'.(int) $board->id.self::GOOGLE_SOURCE_SUFFIX
+            : self::OVERALL_GOOGLE_SOURCE_PREFIX;
         $staleRecords = PaidAdvertisingGoalRecord::query()
             ->forOrganization((int) $store->organization_id)
             ->forStore((int) $store->id)
-            ->where('goal_board_id', $board->id)
+            ->when(
+                $board,
+                fn (Builder $query): Builder => $query->where('goal_board_id', $board->id),
+                fn (Builder $query): Builder => $query->whereNull('goal_board_id'),
+            )
             ->where('source_key', 'like', $sourcePrefix.'%')
             ->whereNotIn('source_key', $currentSourceKeys);
         $staleRecordCount = (clone $staleRecords)->count();
@@ -532,7 +577,11 @@ class PaidAdvertisingGoalSyncService
         PaidAdvertisingGoalField::query()
             ->forOrganization((int) $store->organization_id)
             ->forStore((int) $store->id)
-            ->where('goal_board_id', $board->id)
+            ->when(
+                $board,
+                fn (Builder $query): Builder => $query->where('goal_board_id', $board->id),
+                fn (Builder $query): Builder => $query->whereNull('goal_board_id'),
+            )
             ->where('source_key', 'like', $sourcePrefix.'%')
             ->whereNotIn('source_key', $currentSourceKeys)
             ->delete();
@@ -540,9 +589,11 @@ class PaidAdvertisingGoalSyncService
         return $staleRecordCount;
     }
 
-    private function googleSourceKey(PaidAdvertisingGoalBoard $board, string $kind, string $sourceId): string
+    private function googleSourceKey(?PaidAdvertisingGoalBoard $board, string $kind, string $sourceId): string
     {
-        $prefix = 'board:'.(int) $board->id.self::GOOGLE_SOURCE_SUFFIX;
+        $prefix = $board
+            ? 'board:'.(int) $board->id.self::GOOGLE_SOURCE_SUFFIX
+            : self::OVERALL_GOOGLE_SOURCE_PREFIX;
         $availableLength = 80 - strlen($prefix);
         $sourceSegment = $kind.':'.$sourceId;
         $sourceSegment = mb_strlen($sourceSegment) <= $availableLength

@@ -13,41 +13,37 @@ use Throwable;
 
 class PaidAdvertisingGoogleAdsMetricsService
 {
-    private const DATE_FIELD = '日期';
+    private const FIELD_LABELS = [
+        'date' => '日期',
+        'daily_sales' => '今日销售额',
+        'monthly_sales' => '本月已完成销售额',
+        'monthly_target' => '本月销售额目标',
+        'daily_needed' => '日均还需完成',
+        'daily_achievement_rate' => '日均达成率',
+        'completion_rate' => '月目标完成率',
+        'time_variance' => '月时间对比完成度',
+        'time_progress' => '月时间进度',
+    ];
 
-    private const DAILY_SALES_FIELD = '今日销售额($)';
-
-    private const MONTHLY_SALES_FIELD = '本月已完成销售额($)';
-
-    private const MONTHLY_TARGET_FIELD = '本月销售额目标($)';
-
-    private const DAILY_NEEDED_FIELD = '日均还需完成($)';
-
-    private const DAILY_ACHIEVEMENT_RATE_FIELD = '日均达成率';
-
-    private const COMPLETION_RATE_FIELD = '月目标当前完成率';
-
-    private const TIME_VARIANCE_FIELD = '月时间对比完成度';
-
-    private const TIME_PROGRESS_FIELD = '月时间进度';
+    private const FIELD_ALIASES = [
+        'date' => ['记录日期', '日期'],
+        'daily_sales' => ['今日销售额', '今日销售', '今日营收', '今日'],
+        'monthly_sales' => ['本月已完成销售额', '本月已完成', '已完成销售', '月累计'],
+        'monthly_target' => ['本月销售额目标', '销售额目标', '本月目标', '月目标'],
+        'daily_needed' => ['日均还需完成', '日均还需', '日均需完成'],
+        'daily_achievement_rate' => ['日均达成率', '日均达成', '日均完成率'],
+        'completion_rate' => ['月目标当前完成率', '月目标当前完成', '目标完成率', '完成率'],
+        'time_variance' => ['月时间对比完成度', '月时间对比', '时间对比完成'],
+        'time_progress' => ['月时间进度', '时间进度'],
+    ];
 
     private const SALES_SHEET_TITLE = '销售目标';
+
+    private const OVERALL_GOOGLE_SOURCE_PREFIX = 'overall:google:';
 
     private const DEFAULT_TARGET_ROAS = 3.7;
 
     private const MAX_RECORDS = 5000;
-
-    private const REQUIRED_FIELDS = [
-        self::DATE_FIELD,
-        self::DAILY_SALES_FIELD,
-        self::MONTHLY_SALES_FIELD,
-        self::MONTHLY_TARGET_FIELD,
-        self::DAILY_NEEDED_FIELD,
-        self::DAILY_ACHIEVEMENT_RATE_FIELD,
-        self::COMPLETION_RATE_FIELD,
-        self::TIME_VARIANCE_FIELD,
-        self::TIME_PROGRESS_FIELD,
-    ];
 
     /**
      * @param  array{date_from: string, date_to: string, timezone: string, label?: string}  $period
@@ -56,7 +52,7 @@ class PaidAdvertisingGoogleAdsMetricsService
     public function summary(
         Organization $organization,
         Store $store,
-        PaidAdvertisingGoalBoard $board,
+        ?PaidAdvertisingGoalBoard $board,
         array $period,
     ): array {
         $this->assertScope($organization, $store, $board);
@@ -67,20 +63,22 @@ class PaidAdvertisingGoogleAdsMetricsService
                 $store,
                 null,
                 null,
-                self::REQUIRED_FIELDS,
+                array_values(self::FIELD_LABELS),
                 '尚未在当前目标页签的同步数据中找到“销售目标”工作表。',
                 period: $period,
             );
         }
 
-        $missingFields = array_values(array_diff(self::REQUIRED_FIELDS, $source['fields']));
-        $rows = $this->datedRows($organization, $store, $source['source_key'])
-            ->filter(fn (array $row): bool => $row['date'] >= $period['date_from']
-                && $row['date'] <= $period['date_to'])
+        $fieldMap = $source['field_map'];
+        $missingFields = collect(self::FIELD_LABELS)
+            ->filter(fn (string $label, string $key): bool => $fieldMap[$key] === null)
+            ->values()
+            ->all();
+        $rows = $this->datedRows($organization, $store, $source['source_key'], $fieldMap['date'])
             ->sortByDesc('date')
             ->values();
-        $row = $rows->first(fn (array $row): bool => $this->hasGoalValue($row['fields']));
-        $details = $this->details($rows, $source['columns'], $period);
+        $row = $rows->first(fn (array $row): bool => $this->hasGoalValue($row['fields'], $fieldMap));
+        $details = $this->details($rows, $source['columns'], $fieldMap['date']);
 
         if (! is_array($row)) {
             return $this->result(
@@ -88,31 +86,25 @@ class PaidAdvertisingGoogleAdsMetricsService
                 $source['sheet_title'],
                 null,
                 $missingFields,
-                '所选时间范围内暂无可用的 Google 广告目标同步数据。',
+                '暂无可用的 Google 广告目标同步数据。',
                 period: $period,
                 efficiency: $this->efficiency(null, $source['fields']),
                 details: $details,
+                sourceFields: $fieldMap,
             );
         }
 
-        $dailySales = $this->roundedNumeric($row['fields'][self::DAILY_SALES_FIELD] ?? null);
-        $monthlySales = $this->roundedNumeric($row['fields'][self::MONTHLY_SALES_FIELD] ?? null);
-        $monthlyTarget = $this->roundedNumeric($row['fields'][self::MONTHLY_TARGET_FIELD] ?? null);
-        $completionRate = $this->percentage($row['fields'][self::COMPLETION_RATE_FIELD] ?? null)
-            ?? $this->ratio($monthlySales, $monthlyTarget);
-        $timeProgress = $this->percentage($row['fields'][self::TIME_PROGRESS_FIELD] ?? null)
-            ?? $this->monthProgress($row['date']);
-        $timeVariance = $this->percentage($row['fields'][self::TIME_VARIANCE_FIELD] ?? null)
-            ?? ($completionRate !== null && $timeProgress !== null
-                ? round($completionRate - $timeProgress, 2)
-                : null);
-        $dailyNeeded = $this->roundedNumeric($row['fields'][self::DAILY_NEEDED_FIELD] ?? null)
-            ?? $this->dailyNeeded($monthlySales, $monthlyTarget, $row['date']);
-        $dailyAchievementRate = $this->percentage($row['fields'][self::DAILY_ACHIEVEMENT_RATE_FIELD] ?? null)
-            ?? $this->ratio($dailySales, $dailyNeeded);
+        $dailySales = $this->numericField($row['fields'], $fieldMap['daily_sales']);
+        $monthlySales = $this->numericField($row['fields'], $fieldMap['monthly_sales']);
+        $monthlyTarget = $this->numericField($row['fields'], $fieldMap['monthly_target']);
+        $dailyNeeded = $this->numericField($row['fields'], $fieldMap['daily_needed']);
+        $dailyAchievementRate = $this->percentageField($row['fields'], $fieldMap['daily_achievement_rate']);
+        $completionRate = $this->percentageField($row['fields'], $fieldMap['completion_rate']);
+        $timeVariance = $this->percentageField($row['fields'], $fieldMap['time_variance']);
+        $timeProgress = $this->percentageField($row['fields'], $fieldMap['time_progress']);
         $message = $missingFields === []
             ? null
-            : '飞书“销售目标”工作表缺少字段：'.implode('、', $missingFields).'。缺失指标已尽量按相同口径计算。';
+            : '飞书“销售目标”工作表缺少字段：'.implode('、', $missingFields).'。缺失指标不会按 0 或其他口径推算。';
 
         return $this->result(
             $store,
@@ -134,23 +126,43 @@ class PaidAdvertisingGoogleAdsMetricsService
             $period,
             $this->efficiency($row, $source['fields']),
             $details,
+            $fieldMap,
         );
     }
 
+    /** @return array<string, mixed> */
+    public function overallSummary(Organization $organization, Store $store): array
+    {
+        $timezone = $store->timezone ?: 'UTC';
+        $today = CarbonImmutable::now($timezone);
+
+        return $this->summary($organization, $store, null, [
+            'date_from' => $today->startOfMonth()->toDateString(),
+            'date_to' => $today->endOfMonth()->toDateString(),
+            'timezone' => $timezone,
+            'label' => $today->format('Y-m'),
+        ]);
+    }
+
     /**
-     * @return array{source_key: string, sheet_title: string|null, fields: list<string>, columns: list<array{key: string, label: string, kind: string}>}|null
+     * @return array{source_key: string, sheet_title: string|null, fields: list<string>, columns: list<array{key: string, label: string, kind: string}>, field_map: array<string, string|null>}|null
      */
     private function salesSource(
         Organization $organization,
         Store $store,
-        PaidAdvertisingGoalBoard $board,
+        ?PaidAdvertisingGoalBoard $board,
     ): ?array {
-        $sourcePrefix = 'board:'.(int) $board->id.':google:';
-        $groups = PaidAdvertisingGoalField::query()
+        $sourcePrefix = $board === null
+            ? self::OVERALL_GOOGLE_SOURCE_PREFIX
+            : 'board:'.(int) $board->id.':google:';
+        $query = PaidAdvertisingGoalField::query()
             ->forOrganization($organization)
             ->forStore($store)
-            ->where('goal_board_id', $board->id)
-            ->where('source_key', 'like', $sourcePrefix.'%')
+            ->where('source_key', 'like', $sourcePrefix.'%');
+        $board === null
+            ? $query->whereNull('goal_board_id')
+            : $query->where('goal_board_id', $board->id);
+        $groups = $query
             ->orderBy('field_order')
             ->get(['source_key', 'name', 'property_encrypted'])
             ->groupBy('source_key');
@@ -164,10 +176,13 @@ class PaidAdvertisingGoogleAdsMetricsService
                 ->map(fn (PaidAdvertisingGoalField $field): mixed => data_get($field->property_encrypted, 'sheet_title'))
                 ->first(fn (mixed $title): bool => is_string($title) && trim($title) !== '');
 
+            $fieldNames = $fields->pluck('name')->filter()->unique()->values()->all();
+
             return [
                 'source_key' => $sourceKey,
                 'sheet_title' => is_string($sheetTitle) ? trim($sheetTitle) : null,
-                'fields' => $fields->pluck('name')->filter()->unique()->values()->all(),
+                'fields' => $fieldNames,
+                'field_map' => $this->resolveFieldMap($fieldNames),
                 'columns' => $fields
                     ->filter(fn (PaidAdvertisingGoalField $field): bool => is_string($field->name) && trim($field->name) !== '')
                     ->unique('name')
@@ -181,14 +196,14 @@ class PaidAdvertisingGoogleAdsMetricsService
             ];
         })->values();
 
-        $source = $mapped->first(fn (array $source): bool => $source['sheet_title'] === self::SALES_SHEET_TITLE)
-            ?? $mapped->sortByDesc(fn (array $source): int => count(array_intersect(self::REQUIRED_FIELDS, $source['fields'])))
-                ->first(fn (array $source): bool => in_array(self::DATE_FIELD, $source['fields'], true)
-                    && count(array_intersect([
-                        self::DAILY_SALES_FIELD,
-                        self::MONTHLY_SALES_FIELD,
-                        self::MONTHLY_TARGET_FIELD,
-                    ], $source['fields'])) >= 2);
+        $source = $mapped->first(fn (array $source): bool => str_contains((string) $source['sheet_title'], self::SALES_SHEET_TITLE))
+            ?? $mapped->sortByDesc(fn (array $source): int => count(array_filter($source['field_map'])))
+                ->first(fn (array $source): bool => $source['field_map']['date'] !== null
+                    && count(array_filter([
+                        $source['field_map']['daily_sales'],
+                        $source['field_map']['monthly_sales'],
+                        $source['field_map']['monthly_target'],
+                    ])) >= 2);
 
         return is_array($source) ? $source : null;
     }
@@ -196,8 +211,12 @@ class PaidAdvertisingGoogleAdsMetricsService
     /**
      * @return Collection<int, array{key: string, date: string, fields: array<string, mixed>, synced_at: string|null}>
      */
-    private function datedRows(Organization $organization, Store $store, string $sourceKey): Collection
+    private function datedRows(Organization $organization, Store $store, string $sourceKey, ?string $dateField): Collection
     {
+        if ($dateField === null) {
+            return collect();
+        }
+
         return PaidAdvertisingGoalRecord::query()
             ->forOrganization($organization)
             ->forStore($store)
@@ -206,13 +225,13 @@ class PaidAdvertisingGoogleAdsMetricsService
             ->orderByDesc('id')
             ->limit(self::MAX_RECORDS)
             ->get()
-            ->map(function (PaidAdvertisingGoalRecord $record): ?array {
+            ->map(function (PaidAdvertisingGoalRecord $record) use ($dateField): ?array {
                 $fields = $record->fields_encrypted;
                 if (! is_array($fields)) {
                     return null;
                 }
 
-                $date = $this->date($fields[self::DATE_FIELD] ?? null);
+                $date = $this->date($fields[$dateField] ?? null);
                 if ($date === null) {
                     return null;
                 }
@@ -300,19 +319,18 @@ class PaidAdvertisingGoogleAdsMetricsService
     /**
      * @param  Collection<int, array{key: string, date: string, fields: array<string, mixed>, synced_at: string|null}>  $rows
      * @param  list<array{key: string, label: string, kind: string}>  $columns
-     * @param  array{date_from: string, date_to: string, timezone: string, label?: string}  $period
      * @return array<string, mixed>
      */
-    private function details(Collection $rows, array $columns, array $period): array
+    private function details(Collection $rows, array $columns, ?string $dateField): array
     {
         return [
             'schema' => 'paid-advertising-google-target-details-v1',
-            'period_label' => $period['label'] ?? null,
+            'period_label' => '全部同步记录',
             'columns' => $columns,
-            'rows' => $rows->map(function (array $row) use ($columns): array {
+            'rows' => $rows->map(function (array $row) use ($columns, $dateField): array {
                 $values = [];
                 foreach ($columns as $column) {
-                    $value = $column['key'] === self::DATE_FIELD
+                    $value = $column['key'] === $dateField
                         ? $row['date']
                         : ($row['fields'][$column['key']] ?? null);
                     $values[$column['key']] = $this->detailValue($value, $column['kind']);
@@ -332,7 +350,7 @@ class PaidAdvertisingGoogleAdsMetricsService
     {
         $normalized = $this->normalizedFieldName($name);
 
-        if ($name === self::DATE_FIELD || str_contains($normalized, '日期')) {
+        if (str_contains($normalized, '日期')) {
             return 'date';
         }
         if (str_contains($normalized, 'roas')) {
@@ -341,12 +359,15 @@ class PaidAdvertisingGoogleAdsMetricsService
         if (str_contains($normalized, '达成率')
             || str_contains($normalized, '完成率')
             || str_contains($normalized, '时间进度')
-            || str_contains($normalized, '对比完成度')) {
+            || str_contains($normalized, '时间对比')) {
             return 'percentage';
         }
         if (str_contains($normalized, '销售额')
+            || str_contains($normalized, '营收')
             || str_contains($normalized, '花费')
-            || str_contains($normalized, '消耗')) {
+            || str_contains($normalized, '消耗')
+            || str_contains($normalized, '金额')
+            || str_contains($normalized, '需完成')) {
             return 'currency';
         }
 
@@ -424,16 +445,104 @@ class PaidAdvertisingGoogleAdsMetricsService
         return mb_strtolower(preg_replace('/[\s_\-（）()$¥￥]/u', '', trim($name)) ?? trim($name));
     }
 
-    /** @param array<string, mixed> $fields */
-    private function hasGoalValue(array $fields): bool
+    /**
+     * @param  list<string>  $fields
+     * @return array<string, string|null>
+     */
+    private function resolveFieldMap(array $fields): array
     {
-        foreach ([self::DAILY_SALES_FIELD, self::MONTHLY_SALES_FIELD, self::MONTHLY_TARGET_FIELD] as $field) {
-            if ($this->numeric($fields[$field] ?? null) !== null) {
+        $resolved = [];
+
+        foreach (self::FIELD_ALIASES as $key => $aliases) {
+            $resolved[$key] = $this->matchingAliasField($fields, $aliases, $key);
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param  list<string>  $fields
+     * @param  list<string>  $aliases
+     */
+    private function matchingAliasField(array $fields, array $aliases, string $key): ?string
+    {
+        $normalizedAliases = array_map(fn (string $alias): string => $this->normalizedFieldName($alias), $aliases);
+
+        foreach ($normalizedAliases as $alias) {
+            foreach ($fields as $field) {
+                if ($this->normalizedFieldName($field) === $alias && $this->fieldAllowedFor($field, $key)) {
+                    return $field;
+                }
+            }
+        }
+
+        foreach ($normalizedAliases as $alias) {
+            foreach ($fields as $field) {
+                if (str_contains($this->normalizedFieldName($field), $alias) && $this->fieldAllowedFor($field, $key)) {
+                    return $field;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function fieldAllowedFor(string $field, string $key): bool
+    {
+        $name = $this->normalizedFieldName($field);
+
+        return match ($key) {
+            'date' => str_contains($name, '日期'),
+            'daily_sales' => ! str_contains($name, '日期')
+                && ! str_contains($name, '目标')
+                && ! str_contains($name, '率')
+                && (str_contains($name, '今日') || str_contains($name, '当天')),
+            'monthly_sales' => ! str_contains($name, '目标')
+                && ! str_contains($name, '率')
+                && (str_contains($name, '本月')
+                    || str_contains($name, '月累计')
+                    || str_contains($name, '已完成销售')),
+            'monthly_target' => str_contains($name, '目标')
+                && ! str_contains($name, '完成率'),
+            'daily_needed' => str_contains($name, '日均')
+                && (str_contains($name, '还需') || str_contains($name, '需完成')),
+            'daily_achievement_rate' => str_contains($name, '日均')
+                && (str_contains($name, '达成') || str_contains($name, '完成')),
+            'completion_rate' => ! str_contains($name, '日均')
+                && (str_contains($name, '完成率')
+                    || (str_contains($name, '目标') && str_contains($name, '完成'))),
+            'time_variance' => str_contains($name, '时间') && str_contains($name, '对比'),
+            'time_progress' => str_contains($name, '时间') && str_contains($name, '进度'),
+            default => true,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     * @param  array<string, string|null>  $fieldMap
+     */
+    private function hasGoalValue(array $fields, array $fieldMap): bool
+    {
+        foreach (['daily_sales', 'monthly_sales', 'monthly_target'] as $key) {
+            $field = $fieldMap[$key] ?? null;
+            if ($field !== null && $this->numeric($fields[$field] ?? null) !== null) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** @param array<string, mixed> $fields */
+    private function numericField(array $fields, ?string $field): ?float
+    {
+        return $field === null ? null : $this->roundedNumeric($fields[$field] ?? null);
+    }
+
+    /** @param array<string, mixed> $fields */
+    private function percentageField(array $fields, ?string $field): ?float
+    {
+        return $field === null ? null : $this->percentage($fields[$field] ?? null);
     }
 
     private function date(mixed $value): ?string
@@ -547,45 +656,6 @@ class PaidAdvertisingGoogleAdsMetricsService
         return round($percentage, 2);
     }
 
-    private function ratio(?float $numerator, ?float $denominator): ?float
-    {
-        return $numerator !== null && $denominator !== null && $denominator > 0
-            ? round(($numerator / $denominator) * 100, 2)
-            : null;
-    }
-
-    private function monthProgress(string $date): ?float
-    {
-        try {
-            $day = CarbonImmutable::parse($date, 'UTC');
-
-            return round(($day->day / $day->daysInMonth) * 100, 2);
-        } catch (Throwable) {
-            return null;
-        }
-    }
-
-    private function dailyNeeded(?float $monthlySales, ?float $monthlyTarget, string $date): ?float
-    {
-        if ($monthlySales === null || $monthlyTarget === null) {
-            return null;
-        }
-
-        try {
-            $day = CarbonImmutable::parse($date, 'UTC');
-            $remainingDays = $day->daysInMonth - $day->day;
-            $remainingAmount = max($monthlyTarget - $monthlySales, 0);
-
-            if ($remainingDays <= 0) {
-                return $remainingAmount === 0.0 ? 0.0 : null;
-            }
-
-            return round($remainingAmount / $remainingDays, 2);
-        } catch (Throwable) {
-            return null;
-        }
-    }
-
     /**
      * @param  list<string>  $missingFields
      * @param  array<string, float|null>|null  $values
@@ -602,6 +672,7 @@ class PaidAdvertisingGoogleAdsMetricsService
         ?array $period = null,
         ?array $efficiency = null,
         ?array $details = null,
+        ?array $sourceFields = null,
     ): array {
         $values ??= [
             'daily_sales' => null,
@@ -633,20 +704,11 @@ class PaidAdvertisingGoogleAdsMetricsService
             'message' => $message,
             'pace_status' => $paceStatus,
             'values' => $values,
-            'source_fields' => [
-                'daily_sales' => self::DAILY_SALES_FIELD,
-                'monthly_sales' => self::MONTHLY_SALES_FIELD,
-                'monthly_target' => self::MONTHLY_TARGET_FIELD,
-                'daily_needed' => self::DAILY_NEEDED_FIELD,
-                'daily_achievement_rate' => self::DAILY_ACHIEVEMENT_RATE_FIELD,
-                'completion_rate' => self::COMPLETION_RATE_FIELD,
-                'time_variance' => self::TIME_VARIANCE_FIELD,
-                'time_progress' => self::TIME_PROGRESS_FIELD,
-            ],
+            'source_fields' => $sourceFields ?? array_fill_keys(array_keys(self::FIELD_LABELS), null),
             'efficiency' => $efficiency ?? $this->efficiency(null, []),
             'details' => $details ?? [
                 'schema' => 'paid-advertising-google-target-details-v1',
-                'period_label' => $period['label'] ?? null,
+                'period_label' => '全部同步记录',
                 'columns' => [],
                 'rows' => [],
                 'total' => 0,
@@ -657,10 +719,12 @@ class PaidAdvertisingGoogleAdsMetricsService
     private function assertScope(
         Organization $organization,
         Store $store,
-        PaidAdvertisingGoalBoard $board,
+        ?PaidAdvertisingGoalBoard $board,
     ): void {
         abort_unless((int) $store->organization_id === (int) $organization->id, 404);
-        abort_unless((int) $board->organization_id === (int) $organization->id, 404);
-        abort_unless((int) $board->store_id === (int) $store->id, 404);
+        if ($board !== null) {
+            abort_unless((int) $board->organization_id === (int) $organization->id, 404);
+            abort_unless((int) $board->store_id === (int) $store->id, 404);
+        }
     }
 }

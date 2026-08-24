@@ -2,6 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import GoogleAdsGoalTemplate from '../../Components/PaidAdvertising/GoogleAdsGoalTemplate.vue';
 import GoogleAdsWeeklyReport from '../../Components/PaidAdvertising/GoogleAdsWeeklyReport.vue';
 import { useToast } from '../../composables/useToast';
 import GooglePerformanceTable from './GooglePerformanceTable.vue';
@@ -69,12 +70,51 @@ type GoogleWeeklyReport = {
     }>;
     message: string | null;
 };
+type GoogleGoalFeishuStatus = {
+    schema: 'feishu-data-link-status-v1';
+    section: 'advertising_goals';
+    configured: boolean;
+    has_configuration: boolean;
+    missing_fields: string[];
+};
+type GoogleGoalSummary = {
+    schema: 'paid-advertising-google-ads-summary-v1';
+    available: boolean;
+    source: 'database_sync';
+    source_sheet: string | null;
+    currency: string;
+    as_of_date: string | null;
+    synced_at: string | null;
+    missing_fields: string[];
+    message: string | null;
+    pace_status: 'ahead' | 'behind';
+    values: {
+        daily_sales: number | null; monthly_sales: number | null; monthly_target: number | null;
+        daily_needed: number | null; daily_achievement_rate: number | null; completion_rate: number | null;
+        time_variance: number | null; time_progress: number | null;
+    };
+    source_fields: Record<string, string | null>;
+    efficiency: {
+        schema: 'paid-advertising-google-efficiency-v1'; available: boolean; message: string | null;
+        values: { current_roas: number | null; target_roas: number | null; achievement_rate: number | null; monthly_spend: number | null };
+        source_fields: Record<string, string | null>;
+    };
+    details: {
+        schema: 'paid-advertising-google-target-details-v1'; period_label: string | null;
+        columns: Array<{ key: string; label: string; kind: 'date' | 'currency' | 'percentage' | 'roas' | 'text' }>;
+        rows: Array<{ key: string; date: string; values: Record<string, string | number | null> }>;
+        total: number;
+    };
+};
 
 const props = defineProps<{
     store: { id: number; name: string };
     channelStatus: ChannelStatus;
     googleOverview: GoogleOverview | null;
     canSync: boolean;
+    googleGoalFeishu: GoogleGoalFeishuStatus | null;
+    googleGoalSummary: GoogleGoalSummary | null;
+    canManageGoogleGoalFeishu: boolean;
 }>();
 const status = ref(props.channelStatus);
 const overview = ref(props.googleOverview);
@@ -106,6 +146,11 @@ const performanceSort = ref('roas');
 const performanceDirection = ref<'asc' | 'desc'>('desc');
 const weeklyReport = ref<GoogleWeeklyReport | null>(null);
 const weeklyLoading = ref(false);
+const googleGoalFeishu = ref(props.googleGoalFeishu);
+const googleGoalSummary = ref(props.googleGoalSummary);
+const googleGoalAppToken = ref('');
+const googleGoalSaving = ref(false);
+const googleGoalClearing = ref(false);
 const toast = useToast();
 let poller: ReturnType<typeof setInterval> | null = null;
 let performanceSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -585,6 +630,62 @@ const requestSync = async () => {
         manualSyncing.value = false;
     }
 };
+const saveGoogleGoalFeishu = async () => {
+    const appToken = googleGoalAppToken.value.trim();
+    if (!appToken || googleGoalSaving.value || !props.canManageGoogleGoalFeishu) return;
+    googleGoalSaving.value = true;
+    try {
+        const response = await fetch('/paid-advertising/google/goals/feishu', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({ app_token: appToken }),
+        });
+        const payload = await response.json().catch(() => null) as { message?: string; data?: GoogleGoalFeishuStatus } | null;
+        if (!response.ok) throw new Error(payload?.message || '飞书 App Token 保存失败。');
+        if (payload?.data) googleGoalFeishu.value = payload.data;
+        googleGoalSummary.value = null;
+        googleGoalAppToken.value = '';
+        toast.success(payload?.message || '飞书 App Token 已保存。');
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : '飞书 App Token 保存失败。');
+    } finally {
+        googleGoalSaving.value = false;
+    }
+};
+const clearGoogleGoalFeishu = async () => {
+    if (googleGoalClearing.value || !props.canManageGoogleGoalFeishu) return;
+    if (!window.confirm('确认清除当前店铺的 Google Ads 目标飞书 App Token？')) return;
+    googleGoalClearing.value = true;
+    try {
+        const response = await fetch('/paid-advertising/google/goals/feishu', {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({ confirmed: true }),
+        });
+        const payload = await response.json().catch(() => null) as { message?: string; data?: GoogleGoalFeishuStatus } | null;
+        if (!response.ok) throw new Error(payload?.message || '飞书 App Token 清除失败。');
+        if (payload?.data) googleGoalFeishu.value = payload.data;
+        googleGoalSummary.value = null;
+        googleGoalAppToken.value = '';
+        toast.success(payload?.message || '飞书 App Token 已清除。');
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : '飞书 App Token 清除失败。');
+    } finally {
+        googleGoalClearing.value = false;
+    }
+};
 
 onMounted(() => { if (polling.value) { refreshStatus(); startPolling(); } });
 onBeforeUnmount(() => {
@@ -999,6 +1100,44 @@ onBeforeUnmount(() => {
                     :currency="overview.currency"
                     @select="loadWeeklyReport"
                 />
+
+                <section v-else-if="activeTab === 'goals'" class="relative min-h-[420px]">
+                    <template v-if="googleGoalFeishu?.configured">
+                        <button
+                            v-if="canManageGoogleGoalFeishu"
+                            type="button"
+                            class="absolute right-5 top-5 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-xl leading-none text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="googleGoalClearing"
+                            aria-label="清除飞书 App Token"
+                            title="清除飞书 App Token"
+                            @click="clearGoogleGoalFeishu"
+                        >
+                            {{ googleGoalClearing ? '…' : '×' }}
+                        </button>
+                        <GoogleAdsGoalTemplate :summary="googleGoalSummary" board-name="销售目标" />
+                    </template>
+                    <div v-else class="flex min-h-[420px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
+                        <span class="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-blue-600 ring-1 ring-blue-100">⌁</span>
+                        <p class="mt-6 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Google Ads 目标数据源</p>
+                        <h2 class="mt-3 text-2xl font-semibold tracking-tight text-slate-950">设置飞书 App Token</h2>
+                        <p class="mt-3 max-w-xl text-sm leading-7 text-slate-500">配置当前店铺的飞书多维表格 App Token，系统会自动发现并同步其中的目标数据表。</p>
+                        <form v-if="canManageGoogleGoalFeishu" class="mt-7 flex w-full max-w-2xl flex-col gap-3 sm:flex-row" @submit.prevent="saveGoogleGoalFeishu">
+                            <label class="sr-only" for="google-goal-feishu-token">飞书 App Token</label>
+                            <input
+                                id="google-goal-feishu-token"
+                                v-model="googleGoalAppToken"
+                                type="password"
+                                autocomplete="off"
+                                class="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none ring-blue-500 placeholder:text-slate-400 focus:ring-2"
+                                placeholder="输入飞书多维表格 App Token"
+                            />
+                            <button type="submit" class="inline-flex h-12 items-center justify-center rounded-xl bg-slate-950 px-7 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50" :disabled="googleGoalSaving || !googleGoalAppToken.trim()">
+                                {{ googleGoalSaving ? '保存中…' : '保存' }}
+                            </button>
+                        </form>
+                        <p v-else class="mt-7 rounded-xl bg-amber-50 px-5 py-3 text-sm text-amber-700">当前账号没有修改店铺配置的权限，请联系店铺管理员设置。</p>
+                    </div>
+                </section>
 
                 <section v-else class="min-h-[420px] rounded-3xl border border-slate-200 bg-white shadow-sm" />
             </template>
