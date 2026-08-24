@@ -85,6 +85,31 @@ if (config('services.feishu_table.campaign_sync_enabled', true)) {
         ->withoutOverlapping(180);
 }
 
+if (config('services.feishu_table.natural_traffic_sync_enabled', true)) {
+    Schedule::command('natural-traffic:sync')
+        ->name('natural-traffic:daily-local-database-sync')
+        ->dailyAt((string) config('services.feishu_table.natural_traffic_sync_time', '04:25'))
+        ->timezone((string) config('services.feishu_table.natural_traffic_sync_timezone', 'Asia/Shanghai'))
+        ->onOneServer()
+        ->withoutOverlapping(180);
+}
+
+Schedule::command('reputation:sync')
+    ->name('reputation:daily-local-database-sync')
+    ->dailyAt('04:55')
+    ->timezone('Asia/Shanghai')
+    ->onOneServer()
+    ->withoutOverlapping(180);
+
+if (config('services.google_search_console.sync_enabled', true)) {
+    Schedule::command('seo-analytics:sync --mode=incremental')
+        ->name('seo-analytics:daily-local-database-sync')
+        ->dailyAt((string) config('services.google_search_console.sync_time', '04:40'))
+        ->timezone((string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles'))
+        ->onOneServer()
+        ->withoutOverlapping(120);
+}
+
 if (config('shopify.scheduled_sync.enabled')) {
     Schedule::command('shopify:sync-reconcile --mode=incremental')
         ->name('shopify:incremental-sync')

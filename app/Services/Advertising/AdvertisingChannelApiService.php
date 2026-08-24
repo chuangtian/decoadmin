@@ -25,6 +25,8 @@ class AdvertisingChannelApiService
 
     private const CRITEO_API = 'https://api.criteo.com/2026-01';
 
+    private const CRITEO_TIMEZONE = 'UTC';
+
     private const BING_REPORTING_API = 'https://reporting.api.bingads.microsoft.com/Reporting/v13';
 
     /** @var array<string, string> */
@@ -39,6 +41,7 @@ class AdvertisingChannelApiService
     public function __construct(
         private HttpFactory $http,
         private StoreBusinessCredentialService $credentials,
+        private BingConversionGoalClassifier $bingConversionGoals,
     ) {}
 
     /**
@@ -718,8 +721,9 @@ class AdvertisingChannelApiService
     {
         $clientId = $this->required($store, 'criteo', 'api_key');
         $clientSecret = $this->required($store, 'criteo', 'client_secret');
-        $advertiserIds = collect(explode(',', (string) $this->credentials->value($store, 'criteo', 'advertiser_id')))
-            ->map(fn (string $id): string => trim($id))
+        $advertisers = collect(explode(',', (string) $this->credentials->value($store, 'criteo', 'advertiser_id')))
+            ->map(fn (string $id): array => ['id' => trim($id), 'name' => null])
+            ->filter(fn (array $advertiser): bool => $advertiser['id'] !== '')
             ->filter()
             ->values();
 
@@ -734,17 +738,20 @@ class AdvertisingChannelApiService
             throw new RuntimeException('Criteo token unavailable.');
         }
 
-        if ($advertiserIds->isEmpty()) {
+        if ($advertisers->isEmpty()) {
             $advertiserResponse = $this->http->withToken($token)->acceptJson()->timeout(20)
                 ->get(self::CRITEO_API.'/advertisers/me');
             $this->assertSuccessful($advertiserResponse, 'Criteo advertisers');
-            $advertiserIds = collect($advertiserResponse->json('data', []))
-                ->map(fn (mixed $item): string => is_array($item) ? trim((string) ($item['id'] ?? '')) : '')
-                ->filter()
+            $advertisers = collect($advertiserResponse->json('data', []))
+                ->map(fn (mixed $item): array => is_array($item) ? [
+                    'id' => trim((string) ($item['id'] ?? '')),
+                    'name' => trim((string) data_get($item, 'attributes.advertiserName', '')) ?: null,
+                ] : ['id' => '', 'name' => null])
+                ->filter(fn (array $advertiser): bool => $advertiser['id'] !== '')
                 ->values();
         }
 
-        if ($advertiserIds->isEmpty()) {
+        if ($advertisers->isEmpty()) {
             throw new RuntimeException('Criteo advertiser unavailable.');
         }
 
@@ -752,8 +759,18 @@ class AdvertisingChannelApiService
         $sales = 0.0;
         $accounts = [];
         $daily = [];
-        $metrics = ['AdvertiserCost', 'RevenueGeneratedPc7d', 'RevenueGeneratedPv24h', 'Displays', 'Clicks'];
-        foreach ($advertiserIds as $advertiserId) {
+        $campaignDaily = [];
+        $metrics = [
+            'AdvertiserCost',
+            'RevenueGeneratedPc7d',
+            'RevenueGeneratedPv24h',
+            'Displays',
+            'Clicks',
+            'SalesPc7d',
+            'SalesPv24h',
+        ];
+        foreach ($advertisers as $advertiser) {
+            $advertiserId = (string) $advertiser['id'];
             $response = $this->http->withToken($token)->withHeaders(['Accept' => 'text/csv'])->timeout(35)
                 ->post(self::CRITEO_API.'/statistics/report', [
                     'advertiserIds' => (string) $advertiserId,
@@ -762,15 +779,15 @@ class AdvertisingChannelApiService
                     'dimensions' => ['Day'],
                     'metrics' => $metrics,
                     'currency' => 'USD',
-                    'timezone' => 'UTC',
+                    'timezone' => self::CRITEO_TIMEZONE,
                     'format' => 'csv',
                 ]);
             $this->assertSuccessful($response, 'Criteo report');
             $accounts[] = [
                 'external_account_id' => (string) $advertiserId,
-                'name' => null,
+                'name' => $advertiser['name'],
                 'currency' => 'USD',
-                'timezone' => 'UTC',
+                'timezone' => self::CRITEO_TIMEZONE,
                 'status' => 'active',
                 'raw_payload' => ['advertiser_id' => (string) $advertiserId],
             ];
@@ -778,6 +795,8 @@ class AdvertisingChannelApiService
                 $rowSpend = $this->number($row['AdvertiserCost'] ?? 0);
                 $rowSales = $this->number($row['RevenueGeneratedPc7d'] ?? 0)
                     + $this->number($row['RevenueGeneratedPv24h'] ?? 0);
+                $rowConversions = $this->number($row['SalesPc7d'] ?? 0)
+                    + $this->number($row['SalesPv24h'] ?? 0);
                 $spend += $rowSpend;
                 $sales += $rowSales;
                 $date = trim((string) ($row['Day'] ?? ''));
@@ -789,14 +808,54 @@ class AdvertisingChannelApiService
                         $rowSales,
                         $row['Displays'] ?? 0,
                         $row['Clicks'] ?? 0,
-                        0,
+                        $rowConversions,
                         $row,
                     );
                 }
             }
+
+            $campaignResponse = $this->http->withToken($token)->withHeaders(['Accept' => 'text/csv'])->timeout(35)
+                ->post(self::CRITEO_API.'/statistics/report', [
+                    'advertiserIds' => (string) $advertiserId,
+                    'startDate' => $from,
+                    'endDate' => $to,
+                    'dimensions' => ['CampaignId', 'Campaign', 'Day'],
+                    'metrics' => $metrics,
+                    'currency' => 'USD',
+                    'timezone' => self::CRITEO_TIMEZONE,
+                    'format' => 'csv',
+                ]);
+            $this->assertSuccessful($campaignResponse, 'Criteo campaign report');
+            foreach ($this->csv($campaignResponse->body()) as $row) {
+                $date = trim((string) ($row['Day'] ?? ''));
+                $campaignId = trim((string) ($row['CampaignId'] ?? ''));
+                if ($date === '' || $campaignId === '') {
+                    continue;
+                }
+
+                $campaignDaily[] = [
+                    'external_account_id' => (string) $advertiserId,
+                    'campaign_id' => $campaignId,
+                    'campaign_name' => trim((string) ($row['Campaign'] ?? '')) ?: null,
+                    'date' => substr($date, 0, 10),
+                    'spend' => $this->number($row['AdvertiserCost'] ?? 0),
+                    'attributed_sales' => $this->number($row['RevenueGeneratedPc7d'] ?? 0)
+                        + $this->number($row['RevenueGeneratedPv24h'] ?? 0),
+                    'impressions' => max(0, (int) round($this->number($row['Displays'] ?? 0))),
+                    'clicks' => max(0, (int) round($this->number($row['Clicks'] ?? 0))),
+                    'conversions' => $this->number($row['SalesPc7d'] ?? 0)
+                        + $this->number($row['SalesPv24h'] ?? 0),
+                    'raw_payload' => $row,
+                ];
+            }
         }
 
-        return [...$this->totals($spend, $sales), 'accounts' => $accounts, 'daily_metrics' => $daily];
+        return [
+            ...$this->totals($spend, $sales),
+            'accounts' => $accounts,
+            'daily_metrics' => $daily,
+            'campaign_daily_metrics' => $campaignDaily,
+        ];
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
@@ -839,10 +898,10 @@ class AdvertisingChannelApiService
             'ExcludeReportHeader' => true,
             'Format' => 'Csv',
             'FormatVersion' => '2.0',
-            'ReportName' => 'CampaignChannelPeriodPerformance',
+            'ReportName' => 'BingAccountDailyPerformance',
             'ReturnOnlyCompleteData' => false,
             'Aggregation' => 'Daily',
-            'Columns' => ['TimePeriod', 'AccountId', 'AccountName', 'CurrencyCode', 'Spend', 'Revenue', 'Impressions', 'Clicks', 'Conversions'],
+            'Columns' => ['TimePeriod', 'AccountId', 'AccountName', 'CurrencyCode', 'Spend', 'Revenue', 'Impressions', 'Clicks'],
             'Scope' => ['AccountIds' => [$accountId]],
             'Time' => [
                 'CustomDateRangeStart' => $this->bingDate($from),
@@ -850,53 +909,107 @@ class AdvertisingChannelApiService
             ],
         ];
 
-        $submit = $this->http->withHeaders($headers)->acceptJson()->timeout(25)
-            ->post(self::BING_REPORTING_API.'/GenerateReport/Submit', ['ReportRequest' => $request]);
-        $this->assertSuccessful($submit, 'Bing report submit');
-        $reportId = trim((string) $submit->json('ReportRequestId', ''));
-        if ($reportId === '') {
-            throw new RuntimeException('Bing report id unavailable.');
-        }
+        $rows = $this->bingReportRows($headers, $request, ['Spend', 'Revenue']);
+        $conversionRows = $this->bingReportRows($headers, [
+            'Type' => 'AccountPerformanceReportRequest',
+            'ExcludeColumnHeaders' => false,
+            'ExcludeReportFooter' => true,
+            'ExcludeReportHeader' => true,
+            'Format' => 'Csv',
+            'FormatVersion' => '2.0',
+            'ReportName' => 'BingAccountConversionGoalDailyPerformance',
+            'ReturnOnlyCompleteData' => false,
+            'Aggregation' => 'Daily',
+            'Columns' => ['TimePeriod', 'AccountId', 'Goal', 'GoalType', 'AllConversionsQualified'],
+            'Scope' => ['AccountIds' => [$accountId]],
+            'Time' => [
+                'CustomDateRangeStart' => $this->bingDate($from),
+                'CustomDateRangeEnd' => $this->bingDate($to),
+            ],
+        ], ['Goal', 'AllConversionsQualified']);
+        $goalTotals = $this->bingConversionGoals->totalsByDate($conversionRows);
+        $campaignRows = $this->bingReportRows($headers, [
+            'Type' => 'CampaignPerformanceReportRequest',
+            'ExcludeColumnHeaders' => false,
+            'ExcludeReportFooter' => true,
+            'ExcludeReportHeader' => true,
+            'Format' => 'Csv',
+            'FormatVersion' => '2.0',
+            'ReportName' => 'BingCampaignDailyPerformance',
+            'ReturnOnlyCompleteData' => false,
+            'Aggregation' => 'Daily',
+            'Columns' => [
+                'TimePeriod', 'AccountId', 'CampaignId', 'CampaignName', 'CampaignStatus', 'CampaignType',
+                'Spend', 'Revenue', 'Impressions', 'Clicks', 'Ctr', 'AverageCpc', 'Conversions',
+            ],
+            'Scope' => ['AccountIds' => [$accountId]],
+            'Time' => [
+                'CustomDateRangeStart' => $this->bingDate($from),
+                'CustomDateRangeEnd' => $this->bingDate($to),
+            ],
+        ], ['CampaignId', 'Spend']);
 
-        $downloadUrl = '';
-        for ($attempt = 0; $attempt < 15; $attempt++) {
-            usleep(1_500_000);
-            $poll = $this->http->withHeaders($headers)->acceptJson()->timeout(20)
-                ->post(self::BING_REPORTING_API.'/GenerateReport/Poll', ['ReportRequestId' => $reportId]);
-            if (! $poll->successful()) {
-                continue;
-            }
-            $status = (string) $poll->json('ReportRequestStatus.Status', '');
-            if ($status === 'Error') {
-                throw new RuntimeException('Bing report failed.');
-            }
-            if ($status === 'Success') {
-                $downloadUrl = trim((string) $poll->json('ReportRequestStatus.ReportDownloadUrl', ''));
-                break;
-            }
-        }
-
-        if ($downloadUrl === '') {
-            throw new RuntimeException('Bing report timeout.');
-        }
-
-        $download = $this->http->timeout(30)->get($downloadUrl);
-        $this->assertSuccessful($download, 'Bing report download');
-        $body = $this->unzipIfNeeded($download->body(), (string) $download->header('content-type'), $downloadUrl);
-        $rows = $this->csv($body, true);
-
-        $daily = collect($rows)->map(function (array $row) use ($accountId): array {
-            return $this->dailyRow(
+        $daily = collect($rows)->mapWithKeys(function (array $row) use ($accountId, $goalTotals): array {
+            $dailyRow = $this->dailyRow(
                 trim((string) ($row['AccountId'] ?? $accountId)),
                 trim((string) ($row['TimePeriod'] ?? '')),
                 $row['Spend'] ?? 0,
                 $row['Revenue'] ?? 0,
                 $row['Impressions'] ?? 0,
                 $row['Clicks'] ?? 0,
-                $row['Conversions'] ?? 0,
-                $row,
+                0,
+                ['account_performance' => $row],
             );
-        })->filter(fn (array $row): bool => $row['date'] !== '')->values()->all();
+            $goals = $goalTotals[$dailyRow['date']] ?? $this->bingConversionGoals->emptyTotals();
+            $dailyRow['conversions'] = $goals['purchase'];
+            $dailyRow['add_to_cart'] = $goals['add_to_cart'];
+            $dailyRow['initiate_checkout'] = $goals['checkout'];
+            $dailyRow['raw_payload']['conversion_goals'] = $goals['rows'];
+
+            return $dailyRow['date'] !== '' ? [$dailyRow['date'] => $dailyRow] : [];
+        });
+        foreach ($goalTotals as $date => $goals) {
+            if ($daily->has($date)) {
+                continue;
+            }
+            $daily->put($date, $this->dailyRow(
+                (string) $accountId,
+                $date,
+                0,
+                0,
+                0,
+                0,
+                $goals['purchase'],
+                ['conversion_goals' => $goals['rows']],
+                [
+                    'add_to_cart' => $goals['add_to_cart'],
+                    'initiate_checkout' => $goals['checkout'],
+                ],
+            ));
+        }
+
+        $campaignDaily = collect($campaignRows)->map(function (array $row) use ($accountId): ?array {
+            $campaignId = trim((string) ($row['CampaignId'] ?? ''));
+            $date = trim((string) ($row['TimePeriod'] ?? ''));
+            if ($campaignId === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                return null;
+            }
+
+            return [
+                'external_account_id' => trim((string) ($row['AccountId'] ?? $accountId)),
+                'campaign_id' => $campaignId,
+                'campaign_name' => trim((string) ($row['CampaignName'] ?? '')) ?: null,
+                'campaign_status' => trim((string) ($row['CampaignStatus'] ?? '')) ?: null,
+                'campaign_type' => trim((string) ($row['CampaignType'] ?? '')) ?: null,
+                'date' => $date,
+                'spend' => round(max(0, $this->number($row['Spend'] ?? 0)), 6),
+                'attributed_sales' => round(max(0, $this->number($row['Revenue'] ?? 0)), 6),
+                'impressions' => max(0, (int) round($this->number($row['Impressions'] ?? 0))),
+                'clicks' => max(0, (int) round($this->number($row['Clicks'] ?? 0))),
+                'conversions' => round(max(0, $this->number($row['Conversions'] ?? 0)), 6),
+                'raw_payload' => $row,
+            ];
+        })->filter()->values()->all();
 
         return [
             ...$this->totals(
@@ -911,7 +1024,8 @@ class AdvertisingChannelApiService
                 'status' => 'active',
                 'raw_payload' => ['account_id' => $accountId, 'customer_id' => $customerId],
             ]],
-            'daily_metrics' => $daily,
+            'daily_metrics' => $daily->sortKeys()->values()->all(),
+            'campaign_daily_metrics' => $campaignDaily,
         ];
     }
 
@@ -997,13 +1111,60 @@ class AdvertisingChannelApiService
         return ['Day' => $day, 'Month' => $month, 'Year' => $year];
     }
 
+    /**
+     * @param  array<string, string>  $headers
+     * @param  array<string, mixed>  $request
+     * @param  list<string>  $requiredHeaders
+     * @return list<array<string, string>>
+     */
+    private function bingReportRows(array $headers, array $request, array $requiredHeaders): array
+    {
+        $submit = $this->http->withHeaders($headers)->acceptJson()->timeout(25)
+            ->post(self::BING_REPORTING_API.'/GenerateReport/Submit', ['ReportRequest' => $request]);
+        $this->assertSuccessful($submit, 'Bing report submit');
+        $reportId = trim((string) $submit->json('ReportRequestId', ''));
+        if ($reportId === '') {
+            throw new RuntimeException('Bing report id unavailable.');
+        }
+
+        $downloadUrl = '';
+        for ($attempt = 0; $attempt < 15; $attempt++) {
+            usleep(1_500_000);
+            $poll = $this->http->withHeaders($headers)->acceptJson()->timeout(20)
+                ->post(self::BING_REPORTING_API.'/GenerateReport/Poll', ['ReportRequestId' => $reportId]);
+            if (! $poll->successful()) {
+                continue;
+            }
+            $status = (string) $poll->json('ReportRequestStatus.Status', '');
+            if ($status === 'Error') {
+                throw new RuntimeException('Bing report failed.');
+            }
+            if ($status === 'Success') {
+                $downloadUrl = trim((string) $poll->json('ReportRequestStatus.ReportDownloadUrl', ''));
+                break;
+            }
+        }
+
+        if ($downloadUrl === '') {
+            throw new RuntimeException('Bing report timeout.');
+        }
+
+        $download = $this->http->timeout(30)->get($downloadUrl);
+        $this->assertSuccessful($download, 'Bing report download');
+        $body = $this->unzipIfNeeded($download->body(), (string) $download->header('content-type'), $downloadUrl);
+
+        return $this->csv($body, $requiredHeaders);
+    }
+
     /** @return list<array<string, string>> */
-    private function csv(string $csv, bool $findHeader = false): array
+    private function csv(string $csv, array $requiredHeaders = []): array
     {
         $lines = preg_split('/\r\n|\r|\n/', trim($csv)) ?: [];
         $lines = array_values(array_filter($lines, fn (string $line): bool => trim($line) !== ''));
-        if ($findHeader) {
-            $offset = collect($lines)->search(fn (string $line): bool => str_contains($line, 'Spend') && str_contains($line, 'Revenue'));
+        if ($requiredHeaders !== []) {
+            $offset = collect($lines)->search(
+                fn (string $line): bool => collect($requiredHeaders)->every(fn (string $header): bool => str_contains($line, $header)),
+            );
             $lines = is_int($offset) ? array_slice($lines, $offset) : $lines;
         }
         if (count($lines) < 2) {
@@ -1011,7 +1172,11 @@ class AdvertisingChannelApiService
         }
 
         $delimiter = str_contains($lines[0], ';') ? ';' : ',';
-        $headers = array_map('trim', str_getcsv($lines[0], $delimiter, '"', ''));
+        $headers = array_map(function (string $header): string {
+            $withoutBom = preg_replace('/^\xEF\xBB\xBF/', '', $header) ?? $header;
+
+            return trim($withoutBom, "\"' \t\n\r\0\x0B");
+        }, str_getcsv($lines[0], $delimiter, '"', ''));
 
         return collect(array_slice($lines, 1))->map(function (string $line) use ($headers, $delimiter): array {
             $values = str_getcsv($line, $delimiter, '"', '');
@@ -1098,8 +1263,8 @@ class AdvertisingChannelApiService
             'all_conversions' => round(max(0, $this->number($extraMetrics['all_conversions'] ?? 0)), 6),
             'all_conversions_value' => round(max(0, $this->number($extraMetrics['all_conversions_value'] ?? 0)), 6),
             'all_conversions_value_by_conversion_date' => round(max(0, $this->number($extraMetrics['all_conversions_value_by_conversion_date'] ?? 0)), 6),
-            'add_to_cart' => 0.0,
-            'initiate_checkout' => 0.0,
+            'add_to_cart' => round(max(0, $this->number($extraMetrics['add_to_cart'] ?? 0)), 6),
+            'initiate_checkout' => round(max(0, $this->number($extraMetrics['initiate_checkout'] ?? 0)), 6),
             'raw_payload' => $rawPayload,
         ];
     }

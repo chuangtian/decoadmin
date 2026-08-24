@@ -66,6 +66,25 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '自然流量',
+        icon: 'analytics',
+        children: [
+            { name: 'SEO / GEO', route: '/natural-traffic/seo-geo', icon: 'analytics', permission: 'reports.view' },
+            { name: '品牌官媒', route: '/natural-traffic/brand-media', icon: 'analytics', permission: 'reports.view' },
+            { name: '红人运营', route: '/natural-traffic/influencer-operations', icon: 'analytics', permission: 'reports.view' },
+            { name: 'EDM 邮件', route: '/natural-traffic/edm-email', icon: 'analytics', permission: 'reports.view' },
+            { name: '联盟营销', route: '/natural-traffic/affiliate-marketing', icon: 'analytics', permission: 'reports.view' },
+        ],
+    },
+    {
+        name: '舆情监控',
+        icon: 'reports',
+        children: [
+            { name: '舆情总览', route: '/reputation/overview', icon: 'analytics', permission: 'reports.view' },
+            { name: '风险同步', route: '/reputation/risks', icon: 'status', permission: 'reports.view' },
+        ],
+    },
+    {
         name: '店铺设置',
         icon: 'settings',
         children: [

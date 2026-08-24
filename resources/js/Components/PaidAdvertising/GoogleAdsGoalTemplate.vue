@@ -22,7 +22,7 @@ interface GoogleAdsSummary {
         time_variance: number | null;
         time_progress: number | null;
     };
-    source_fields: Record<string, string>;
+    source_fields: Record<string, string | null>;
     efficiency: {
         schema: 'paid-advertising-google-efficiency-v1';
         available: boolean;
@@ -68,7 +68,15 @@ const currencyFormatter = computed(() => new Intl.NumberFormat('en-US', {
 const completionRate = computed(() => props.summary?.values.completion_rate ?? 0);
 const completionWidth = computed(() => `${Math.min(Math.max(completionRate.value, 0), 100)}%`);
 const complete = computed(() => completionRate.value >= 100);
-const ahead = computed(() => props.summary?.pace_status === 'ahead');
+const emptyMessage = computed(() => props.summary?.message || '请先同步当前页签，并确认飞书中包含“销售目标”工作表及对应字段。');
+const ahead = computed(() => {
+    const completion = props.summary?.values.completion_rate;
+    const progress = props.summary?.values.time_progress;
+
+    return completion !== null && completion !== undefined
+        && progress !== null && progress !== undefined
+        && completion > progress;
+});
 const ringStyle = computed(() => {
     const degrees = Math.min(Math.max(completionRate.value, 0), 100) * 3.6;
     const color = complete.value ? 'rgb(16 185 129)' : 'rgb(37 99 235)';
@@ -112,11 +120,11 @@ function detailValue(value: string | number | null, kind: string): string {
         :class="{ 'animate-pulse opacity-60': loading }"
         aria-labelledby="google-goal-title"
     >
-        <header class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+        <header class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 !pr-20 sm:px-6 sm:!pr-24">
             <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Google 广告目标 · {{ boardName || '当前页签' }}</p>
                 <h2 id="google-goal-title" class="mt-1.5 text-lg font-semibold text-slate-950">月度销售目标进度</h2>
-                <p class="mt-1 text-sm text-slate-500">按当前统计时间读取“销售目标”工作表中最后一条有效同步记录。</p>
+                <p class="mt-1 text-sm text-slate-500">固定读取“销售目标”工作表最新有效同步记录，不随页面统计时间变化。</p>
             </div>
             <div v-if="summary?.as_of_date" class="flex flex-wrap items-center gap-2 text-xs font-semibold">
                 <span class="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700">数据日期 {{ summary.as_of_date }}</span>
@@ -124,7 +132,7 @@ function detailValue(value: string | number | null, kind: string): string {
             </div>
         </header>
 
-        <div v-if="summary?.available" class="p-5 sm:p-6">
+        <div v-if="summary" class="p-5 sm:p-6">
             <div class="grid gap-4 xl:grid-cols-[1.15fr_0.9fr_0.85fr]">
                 <article class="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/80 via-white to-white p-5">
                     <span class="absolute inset-x-0 top-0 h-1 bg-blue-500" />
@@ -176,7 +184,7 @@ function detailValue(value: string | number | null, kind: string): string {
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <p class="text-sm font-semibold text-slate-800">日均还需完成</p>
-                            <p class="mt-1 text-xs text-slate-400">按当前目标余额与剩余天数</p>
+                            <p class="mt-1 text-xs text-slate-400">飞书工作表已计算字段</p>
                         </div>
                         <span class="grid h-10 w-10 place-items-center rounded-xl bg-orange-100 text-orange-700 ring-1 ring-orange-200">
                             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M17 7.5c0-1.7-2.2-3-5-3s-5 1.3-5 3 2.2 3 5 3 5 1.3 5 3-2.2 3-5 3-5-1.3-5-3"/></svg>
@@ -234,7 +242,7 @@ function detailValue(value: string | number | null, kind: string): string {
                         <p class="text-xs font-semibold uppercase tracking-[0.15em] text-violet-600">Efficiency</p>
                         <h3 id="google-efficiency-title" class="mt-1 text-base font-semibold text-slate-900">广告效率目标</h3>
                     </div>
-                    <span class="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">取当前统计周期最后一条记录</span>
+                    <span class="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">取销售目标表最新有效记录</span>
                 </div>
 
                 <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -291,7 +299,7 @@ function detailValue(value: string | number | null, kind: string): string {
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
                     <div>
                         <h3 id="google-details-title" class="text-base font-semibold text-slate-900">目标明细（销售目标）</h3>
-                        <p class="mt-1 text-xs text-slate-400">直接展示飞书公式计算后同步入库的字段值，按日期从新到旧排列。</p>
+                        <p class="mt-1 text-xs text-slate-400">展示已同步入库的全部销售目标记录，按日期从新到旧排列，不随页面统计时间变化。</p>
                     </div>
                     <div class="flex items-center gap-2 text-xs font-medium">
                         <span v-if="summary.details.period_label" class="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700">{{ summary.details.period_label }}</span>
@@ -327,11 +335,11 @@ function detailValue(value: string | number | null, kind: string): string {
                         </tbody>
                     </table>
                 </div>
-                <div v-else class="px-6 py-12 text-center text-sm text-slate-400">当前统计时间内没有销售目标明细。</div>
+                <div v-else class="px-6 py-12 text-center text-sm text-slate-400">暂无已同步的销售目标明细。</div>
             </section>
 
             <footer class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 text-xs text-slate-400">
-                <span>数据来源 · 当前页签同步数据库{{ summary.source_sheet ? ` / ${summary.source_sheet}` : '' }}</span>
+                <span>数据来源 · 当前页签同步数据库{{ summary.source_sheet ? ` / ${summary.source_sheet}` : '' }} · 固定取最新有效记录</span>
                 <span v-if="summary.synced_at">最近同步 · {{ summary.synced_at }}</span>
             </footer>
         </div>
@@ -341,7 +349,7 @@ function detailValue(value: string | number | null, kind: string): string {
                 <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 19V9m7 10V5m7 14v-7M3 19h18"/></svg>
             </div>
             <h3 class="mt-4 text-base font-semibold text-slate-800">暂无 Google 目标数据</h3>
-            <p class="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{{ summary?.message || '请先同步当前页签，并确认飞书中包含“销售目标”工作表及对应字段。' }}</p>
+            <p class="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{{ emptyMessage }}</p>
         </div>
     </section>
 </template>

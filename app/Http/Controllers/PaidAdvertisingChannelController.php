@@ -2,12 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ClearGoogleAdsGoalFeishuRequest;
+use App\Http\Requests\UpdateGoogleAdsGoalFeishuRequest;
 use App\Services\Advertising\AdvertisingChannelManualSyncService;
 use App\Services\Advertising\AdvertisingChannelStatusService;
+use App\Services\Advertising\BingAdsOverviewService;
+use App\Services\Advertising\CriteoAdsOverviewService;
 use App\Services\Advertising\GoogleAdsOverviewService;
 use App\Services\Advertising\GoogleAdsPerformanceTableService;
 use App\Services\Advertising\GoogleAdsWeeklyReportService;
 use App\Services\Advertising\TikTokAdsOverviewService;
+use App\Services\PaidAdvertisingGoalRefreshService;
+use App\Services\PaidAdvertisingGoalService;
+use App\Services\PaidAdvertisingGoogleAdsMetricsService;
+use App\Services\StoreFeishuDataLinkService;
+use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,15 +28,32 @@ class PaidAdvertisingChannelController extends Controller
     public function index(
         Request $request,
         string $channel,
+        CurrentOrganization $currentOrganization,
         CurrentStore $currentStore,
         AdvertisingChannelStatusService $status,
+        BingAdsOverviewService $bingOverview,
+        CriteoAdsOverviewService $criteoOverview,
         GoogleAdsOverviewService $googleOverview,
         TikTokAdsOverviewService $tiktokOverview,
+        StoreFeishuDataLinkService $dataLinks,
+        PaidAdvertisingGoogleAdsMetricsService $googleGoalMetrics,
     ): Response {
+        $organization = $currentOrganization->require();
         $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
         $payload = $status->forStore($store, $channel);
+        $googleGoalFeishu = $channel === 'google'
+            ? $dataLinks->sectionStatusForFrontend($store, 'advertising_goals')
+            : null;
 
-        return Inertia::render($channel === 'tiktok' ? 'PaidAdvertising/TikTok' : 'PaidAdvertising/Channel', [
+        $component = match ($channel) {
+            'tiktok' => 'PaidAdvertising/TikTok',
+            'bing' => 'PaidAdvertising/Bing',
+            'criteo' => 'PaidAdvertising/Criteo',
+            default => 'PaidAdvertising/Channel',
+        };
+
+        return Inertia::render($component, [
             'store' => ['id' => $store->getKey(), 'name' => $store->name],
             'channelStatus' => $payload,
             'googleOverview' => $channel === 'google'
@@ -36,8 +62,68 @@ class PaidAdvertisingChannelController extends Controller
             'tiktokOverview' => $channel === 'tiktok'
                 ? $tiktokOverview->forStore($store, $request->only(['account', 'date_from', 'date_to']))
                 : null,
+            'bingOverview' => $channel === 'bing'
+                ? $bingOverview->forStore($store, $request->only(['account', 'date_from', 'date_to']))
+                : null,
+            'criteoOverview' => $channel === 'criteo'
+                ? $criteoOverview->forStore($store)
+                : null,
             'canSync' => $request->user()?->hasPermission('sync.run', $store->organization, $store) ?? false,
+            'googleGoalFeishu' => $googleGoalFeishu,
+            'googleGoalSummary' => $channel === 'google' && ($googleGoalFeishu['configured'] ?? false)
+                ? $googleGoalMetrics->overallSummary($organization, $store)
+                : null,
+            'canManageGoogleGoalFeishu' => $channel === 'google'
+                && ($request->user()?->hasPermission('store.update', $store->organization, $store) ?? false),
         ]);
+    }
+
+    public function updateGoogleGoalFeishu(
+        UpdateGoogleAdsGoalFeishuRequest $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        PaidAdvertisingGoalService $goals,
+        PaidAdvertisingGoalRefreshService $refresh,
+        StoreFeishuDataLinkService $dataLinks,
+    ): JsonResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+
+        $goals->configureOverall($organization, $store, $request->user(), [
+            'feishu_app_token' => $request->validated('app_token'),
+        ]);
+        $run = $refresh->enqueue(
+            $organization,
+            $store,
+            $request->user(),
+            PaidAdvertisingGoalRefreshService::SOURCE_OVERALL_CONFIGURED,
+            PaidAdvertisingGoalRefreshService::TARGET_OVERALL,
+        );
+
+        return response()->json([
+            'message' => '飞书 App Token 已保存，目标数据同步已在后台启动。',
+            'data' => $dataLinks->sectionStatusForFrontend($store, 'advertising_goals'),
+            'sync' => $refresh->present($run),
+        ], 202)->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
+    }
+
+    public function clearGoogleGoalFeishu(
+        ClearGoogleAdsGoalFeishuRequest $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        PaidAdvertisingGoalService $goals,
+        StoreFeishuDataLinkService $dataLinks,
+    ): JsonResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        $goals->clearOverall($organization, $store, $request->user());
+
+        return response()->json([
+            'message' => '当前店铺的飞书 App Token 已清除。',
+            'data' => $dataLinks->sectionStatusForFrontend($store, 'advertising_goals'),
+        ])->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
     }
 
     public function status(string $channel, CurrentStore $currentStore, AdvertisingChannelStatusService $status): JsonResponse
@@ -50,12 +136,14 @@ class PaidAdvertisingChannelController extends Controller
         Request $request,
         string $channel,
         CurrentStore $currentStore,
+        BingAdsOverviewService $bingOverview,
+        CriteoAdsOverviewService $criteoOverview,
         GoogleAdsOverviewService $googleOverview,
         GoogleAdsPerformanceTableService $googlePerformance,
         GoogleAdsWeeklyReportService $googleWeeklyReport,
         TikTokAdsOverviewService $tiktokOverview,
     ): JsonResponse {
-        abort_unless(in_array($channel, ['google', 'tiktok'], true), 404);
+        abort_unless(in_array($channel, ['google', 'tiktok', 'bing', 'criteo'], true), 404);
         $filters = $request->validate([
             'account' => ['sometimes', 'string', 'max:128', 'regex:/^[0-9]+$/'],
             'date_from' => ['sometimes', 'required_with:date_to', 'date_format:Y-m-d'],
@@ -79,7 +167,16 @@ class PaidAdvertisingChannelController extends Controller
                 ->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
         }
 
-        $overview = $channel === 'tiktok' ? $tiktokOverview : $googleOverview;
+        if ($channel === 'criteo') {
+            return response()->json(['data' => $criteoOverview->forStore($currentStore->require())])
+                ->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
+        }
+
+        $overview = match ($channel) {
+            'tiktok' => $tiktokOverview,
+            'bing' => $bingOverview,
+            default => $googleOverview,
+        };
 
         return response()->json(['data' => $overview->forStore($currentStore->require(), $filters)])
             ->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
@@ -91,10 +188,14 @@ class PaidAdvertisingChannelController extends Controller
         AdvertisingChannelManualSyncService $manualSync,
         AdvertisingChannelStatusService $status,
     ): JsonResponse {
-        abort_unless(in_array($channel, ['google', 'tiktok'], true), 404);
+        abort_unless(in_array($channel, ['google', 'tiktok', 'bing', 'criteo'], true), 404);
         $store = $currentStore->require();
-        $label = $channel === 'tiktok' ? 'TikTok Ads' : 'Google Ads';
-        $provider = $channel === 'tiktok' ? 'tiktok_ads' : 'google_ads';
+        [$label, $provider] = match ($channel) {
+            'tiktok' => ['TikTok Ads', 'tiktok_ads'],
+            'bing' => ['Bing Ads', 'bing_ads'],
+            'criteo' => ['Criteo', 'criteo'],
+            default => ['Google Ads', 'google_ads'],
+        };
         $result = $manualSync->queue($store, $channel);
         if (! $result['configured']) {
             return response()->json([

@@ -145,12 +145,18 @@ class PaidAdvertisingGoalService
             $recordCount = PaidAdvertisingGoalRecord::query()
                 ->forOrganization($organization)
                 ->forStore($store)
-                ->where('source_key', 'overall')
+                ->whereNull('goal_board_id')
+                ->where(fn ($query) => $query
+                    ->where('source_key', PaidAdvertisingGoalRefreshService::TARGET_OVERALL)
+                    ->orWhere('source_key', 'like', PaidAdvertisingGoalRefreshService::TARGET_OVERALL.':%'))
                 ->delete();
             $fieldCount = PaidAdvertisingGoalField::query()
                 ->forOrganization($organization)
                 ->forStore($store)
-                ->where('source_key', PaidAdvertisingGoalRefreshService::TARGET_OVERALL)
+                ->whereNull('goal_board_id')
+                ->where(fn ($query) => $query
+                    ->where('source_key', PaidAdvertisingGoalRefreshService::TARGET_OVERALL)
+                    ->orWhere('source_key', 'like', PaidAdvertisingGoalRefreshService::TARGET_OVERALL.':%'))
                 ->delete();
             $syncRunCount = PaidAdvertisingGoalSyncRun::query()
                 ->forOrganization($organization)
