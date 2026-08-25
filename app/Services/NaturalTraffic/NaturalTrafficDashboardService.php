@@ -5,11 +5,17 @@ namespace App\Services\NaturalTraffic;
 use App\Models\Customer;
 use App\Models\FeishuBitableTable;
 use App\Models\Store;
+use App\Services\StoreBusinessCredentialService;
+use App\Services\YouTubeAnalytics\YouTubeAnalyticsSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 class NaturalTrafficDashboardService
 {
+    private const INSTAGRAM_OUTLIER_THRESHOLD = 100000;
+
+    public function __construct(private StoreBusinessCredentialService $credentials) {}
+
     /** @param array<string, mixed> $filters @return array<string, mixed> */
     public function forChannel(Store $store, string $channel, array $filters = []): array
     {
@@ -27,27 +33,34 @@ class NaturalTrafficDashboardService
     /** @param array<string, mixed> $period @return array<string, mixed> */
     private function brandMedia(Store $store, array $period): array
     {
-        $source = $this->source($store, ['natural-traffic:social']);
+        $source = $this->source($store, [
+            'natural-traffic:social',
+            BrandSocialCsvImportService::SOURCE_SECTION,
+            YouTubeAnalyticsSyncService::SOURCE_SECTION,
+        ]);
         $all = collect($source['records'])->map(fn (array $row): array => $this->socialRow($row));
         $period = $this->latestAvailablePeriod($period, $all, ['views', 'likes', 'comments', 'shares']);
-        $current = $this->within($all, $period['date_from'], $period['date_to']);
-        $previous = $this->within($all, $period['compare_from'], $period['compare_to']);
+        $currentAll = $this->within($all, $period['date_from'], $period['date_to']);
+        $previousAll = $this->within($all, $period['compare_from'], $period['compare_to']);
+        $current = $currentAll->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
+        $previous = $previousAll->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
         $metrics = ['posts', 'views', 'likes', 'comments', 'shares'];
         $totals = $this->sums($current, $metrics);
         $previousTotals = $this->sums($previous, $metrics);
-        $platforms = $current->groupBy(fn (array $row): string => $row['platform'] ?: '未分类')
-            ->map(function (Collection $rows, string $platform) use ($metrics): array {
-                $totals = $this->sums($rows, $metrics);
-                $engagement = $totals['likes'] + $totals['comments'] + $totals['shares'];
+        $platforms = collect(['Instagram', 'Facebook', 'YouTube'])->map(function (string $platform) use ($all, $current, $metrics): array {
+            $rows = $current->where('platform', $platform);
+            $totals = $this->sums($rows, $metrics);
+            $engagement = $totals['likes'] + $totals['comments'] + $totals['shares'];
 
-                return [
-                    'platform' => $platform,
-                    ...$totals,
-                    'reach' => round($rows->sum('reach'), 2),
-                    'clicks' => round($rows->sum('clicks'), 2),
-                    'engagement_rate' => $totals['views'] > 0 ? round($engagement / $totals['views'] * 100, 2) : 0,
-                ];
-            })->sortByDesc('views')->values()->all();
+            return [
+                'platform' => $platform,
+                'available' => $all->contains(fn (array $row): bool => $row['platform'] === $platform),
+                ...$totals,
+                'reach' => round($rows->sum('reach'), 2),
+                'clicks' => round($rows->sum('clicks'), 2),
+                'engagement_rate' => $totals['views'] > 0 ? round($engagement / $totals['views'] * 100, 2) : 0,
+            ];
+        })->all();
         $trends = $this->trend($current, $metrics, 'date');
         $daily = $current->filter(fn (array $row): bool => filled($row['date']))
             ->groupBy('date')->map(function (Collection $rows, string $date) use ($metrics): array {
@@ -62,18 +75,21 @@ class NaturalTrafficDashboardService
                         : 0,
                 ];
             })->sortKeys()->values()->all();
-        $weeklyReports = $current->filter(fn (array $row): bool => filled($row['date']))
+        $weeklyReports = $currentAll->filter(fn (array $row): bool => filled($row['date']))
             ->groupBy(fn (array $row): string => CarbonImmutable::parse($row['date'])->startOfWeek()->toDateString())
             ->map(function (Collection $rows, string $week) use ($metrics): array {
-                $totals = $this->sums($rows, $metrics);
-                $included = $rows->filter(fn (array $row): bool => (float) $row['views'] <= 100000);
-                $excluded = $rows->filter(fn (array $row): bool => (float) $row['views'] > 100000);
-                $includedTotals = $this->sums($included, $metrics);
+                $rawTotals = $this->sums($rows, $metrics);
+                $included = $rows->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
+                $excluded = $rows->filter(fn (array $row): bool => $row['excluded_from_aggregates']);
+                $totals = $this->sums($included, $metrics);
+                $includedTotals = $totals;
                 $interactions = $includedTotals['likes'] + $includedTotals['comments'];
 
                 return [
                     'week' => $week,
                     ...$totals,
+                    'all_posts' => $rawTotals['posts'],
+                    'all_views' => $rawTotals['views'],
                     'included_posts' => $includedTotals['posts'],
                     'excluded_posts' => $excluded->sum('posts'),
                     'included_views' => $includedTotals['views'],
@@ -89,16 +105,17 @@ class NaturalTrafficDashboardService
             })->sortKeys()->values();
         $weekly = $weeklyReports->map(fn (array $report): array => collect($report)
             ->except(['content_types', 'top_views', 'top_engagement', 'excluded_content'])->all())->all();
-        $posts = $current->filter(fn (array $row): bool => $row['title'] !== '' || $row['permalink'] !== '')
+        $posts = $currentAll->filter(fn (array $row): bool => $row['title'] !== '' || $row['permalink'] !== '')
             ->sortByDesc('date')->values();
-        $availablePlatforms = collect($platforms)->pluck('platform')->filter()->values()->all();
+        $availablePlatforms = $all->pluck('platform')->filter()->intersect(['Instagram', 'Facebook', 'YouTube'])->unique()->values()->all();
         $expectedPlatforms = ['Instagram', 'Facebook', 'YouTube'];
         $engagements = $totals['likes'] + $totals['comments'] + $totals['shares'];
+        $excluded = $currentAll->filter(fn (array $row): bool => $row['excluded_from_aggregates']);
 
         return [
-            'schema' => 'natural-traffic-brand-media-v1',
+            'schema' => 'natural-traffic-brand-media-v2',
             'title' => '品牌官媒',
-            'description' => '跨平台内容表现、每日复盘与周度汇总；页面只读取当前项目数据库。',
+            'description' => 'Instagram / Facebook 手动导入、YouTube 官方 API 同步，以及统一口径的每日复盘与周度汇总。',
             'tabs' => [
                 ['key' => 'platforms', 'label' => '平台拆解'],
                 ['key' => 'daily', 'label' => '每日复盘'],
@@ -123,8 +140,20 @@ class NaturalTrafficDashboardService
                 'available' => $availablePlatforms,
                 'missing' => collect($expectedPlatforms)->diff($availablePlatforms)->values()->all(),
             ],
+            'platform_sources' => $this->brandPlatformSources($store, $all),
+            'exclusion_policy' => [
+                'platform' => 'Instagram',
+                'threshold' => self::INSTAGRAM_OUTLIER_THRESHOLD,
+                'rule' => 'Reels / 视频按播放或浏览量；图片 / 轮播按曝光量，源文件无曝光量时按覆盖人数。',
+                'behavior' => '原始明细保留并标记，但不计入 KPI、趋势、平台汇总、漏斗、日表和周报均值。',
+            ],
+            'exclusion_summary' => [
+                'posts' => round($excluded->sum('posts'), 2),
+                'views' => round($excluded->sum('views'), 2),
+                'content' => $excluded->sortByDesc('exclusion_value')->take(100)->values()->all(),
+            ],
             'funnel' => [
-                ['key' => 'views', 'label' => '浏览', 'value' => $totals['views']],
+                ['key' => 'views', 'label' => '播放 / 浏览', 'value' => $totals['views']],
                 ['key' => 'reach', 'label' => '触达', 'value' => round($current->sum('reach'), 2)],
                 ['key' => 'engagements', 'label' => '互动', 'value' => $engagements],
                 ['key' => 'clicks', 'label' => '点击', 'value' => round($current->sum('clicks'), 2)],
@@ -138,8 +167,8 @@ class NaturalTrafficDashboardService
                 'engagements' => $totals['likes'] + $totals['comments'] + $totals['shares'],
                 'reach' => round($current->sum('reach'), 2),
                 'clicks' => round($current->sum('clicks'), 2),
-                'top_post' => $posts->sortByDesc('views')->first(),
-                'top_engagement_post' => $posts->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'] + $row['shares'])->first(),
+                'top_post' => $current->sortByDesc('views')->first(),
+                'top_engagement_post' => $current->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'] + $row['shares'])->first(),
             ],
             'posts' => $posts->take(500)->all(),
             'columns' => $this->columns($source['records']),
@@ -472,26 +501,95 @@ class NaturalTrafficDashboardService
         $likes = $this->number($this->pick($fields, ['点赞', '点赞数', '赞', '心情', 'likes']));
         $comments = $this->number($this->pick($fields, ['评论', '评论数', '评', 'comments']));
         $shares = $this->number($this->pick($fields, ['分享', '分享数', '分享次数', 'shares']));
+        $platform = $this->socialPlatform($this->text($this->pick($fields, ['平台', 'platform', '渠道'])), $row['table_name']);
+        $postType = $this->text($this->pick($fields, ['帖子类型', 'post type', '类型']));
+        $title = $this->text($this->pick($fields, ['标题', 'Name', 'name']));
+        $title = $title !== '' ? $title : $this->text($this->pick($fields, ['描述', '内容', '文案', '文本']));
+        $reach = $this->number($this->pick($fields, ['触达', 'reach', '覆盖人数']));
+        $impressions = $this->number($this->pick($fields, ['曝光量', '展示次数', 'impressions']));
+        $isVideo = (bool) preg_match('/reel|视频|video|short/i', $postType);
+        if ($isVideo) {
+            $exclusionMetric = '播放量';
+            $exclusionValue = $views > 0 ? $views : $reach;
+        } elseif ($impressions > 0) {
+            $exclusionMetric = '曝光量';
+            $exclusionValue = $impressions;
+        } elseif ($reach > 0) {
+            $exclusionMetric = '覆盖人数';
+            $exclusionValue = $reach;
+        } else {
+            $exclusionMetric = '浏览量';
+            $exclusionValue = $views;
+        }
+        $excluded = ! $isAggregate
+            && $platform === 'Instagram'
+            && $exclusionValue > self::INSTAGRAM_OUTLIER_THRESHOLD;
 
         return [
             'record_id' => $row['record_id'], 'table_name' => $row['table_name'],
-            'platform' => $this->socialPlatform($this->text($this->pick($fields, ['平台', 'platform', '渠道'])), $row['table_name']),
+            'synced_at' => $row['synced_at'],
+            'source_section' => $row['source_section'],
+            'source_mode' => match ($row['source_section']) {
+                BrandSocialCsvImportService::SOURCE_SECTION => '手动 CSV',
+                YouTubeAnalyticsSyncService::SOURCE_SECTION => '官方 API',
+                default => '已同步数据源',
+            },
+            'platform' => $platform,
             'date' => $this->date($this->pick($fields, ['发布日期', '发布时间', '日期', '开始日期', '日期周期', 'date'])),
-            'title' => $this->text($this->pick($fields, ['描述', '内容', '标题', 'Name', 'name', '文案', '文本'])),
-            'post_type' => $this->text($this->pick($fields, ['帖子类型', 'post type', '类型'])),
+            'title' => $title,
+            'post_type' => $postType,
             'posts' => $isAggregate ? $this->number($postsValue) : 1,
             'views' => $views,
             'likes' => $likes,
             'comments' => $comments,
             'shares' => $shares,
-            'saves' => $this->number($this->pick($fields, ['收藏', '保存', 'saves'])),
-            'reach' => $this->number($this->pick($fields, ['触达', 'reach', '覆盖人数'])),
+            'saves' => $this->number($this->pick($fields, ['收藏次数', '收藏', '保存', 'saves'])),
+            'reach' => $reach,
+            'impressions' => $impressions,
             'clicks' => $this->number($this->pick($fields, ['点击', '点击数', '总点击量', '链接点击量', 'total clicks', 'link clicks'])),
             'followers' => $this->number($this->pick($fields, ['关注者数量', '关注者数', '粉丝数', 'followers'])),
             'permalink' => $this->link($this->pick($fields, ['固定链接', '链接', '帖子链接', 'permalink', 'URL'])),
             'engagement_rate' => $views > 0 ? round(($likes + $comments + $shares) / $views * 100, 2) : 0,
+            'excluded_from_aggregates' => $excluded,
+            'aggregation_status' => $excluded ? '异常爆款，已排除' : '已纳入',
+            'exclusion_metric' => $exclusionMetric,
+            'exclusion_value' => round($exclusionValue, 2),
+            'exclusion_reason' => $excluded
+                ? "Instagram {$exclusionMetric}超过 ".number_format(self::INSTAGRAM_OUTLIER_THRESHOLD)
+                : '',
             'source_fields' => $this->sanitizeFields($fields),
         ];
+    }
+
+    /** @param Collection<int, array<string, mixed>> $all @return list<array<string, mixed>> */
+    private function brandPlatformSources(Store $store, Collection $all): array
+    {
+        $youtubeConfigured = collect(['client_id', 'client_secret', 'refresh_token'])
+            ->every(fn (string $key): bool => filled($this->credentials->value($store, 'youtube_analytics', $key)));
+
+        return collect([
+            ['platform' => 'Instagram', 'mode' => 'manual_csv', 'mode_label' => '手动 CSV 导入'],
+            ['platform' => 'Facebook', 'mode' => 'manual_csv', 'mode_label' => '手动 CSV 导入'],
+            ['platform' => 'YouTube', 'mode' => 'official_api', 'mode_label' => '官方 API 同步'],
+        ])->map(function (array $source) use ($all, $youtubeConfigured): array {
+            $rows = $all->where('platform', $source['platform']);
+            $available = $rows->isNotEmpty();
+            $configured = $source['platform'] === 'YouTube' ? $youtubeConfigured : true;
+            $status = $available
+                ? '已有数据'
+                : ($source['platform'] === 'YouTube'
+                    ? ($configured ? '已授权，待同步' : '待 OAuth 授权')
+                    : '待导入 CSV');
+
+            return [
+                ...$source,
+                'available' => $available,
+                'configured' => $configured,
+                'status' => $status,
+                'record_count' => $rows->count(),
+                'last_synced_at' => $rows->pluck('synced_at')->filter()->sortDesc()->first(),
+            ];
+        })->all();
     }
 
     /** @param array<string, mixed> $row @return array<string, mixed> */
@@ -790,6 +888,9 @@ class NaturalTrafficDashboardService
             if ($number >= 20000 && $number <= 80000) {
                 return CarbonImmutable::create(1899, 12, 30)->addDays($number)->toDateString();
             }
+        }
+        if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s|$)/', $text, $matches)) {
+            return CarbonImmutable::create((int) $matches[3], (int) $matches[1], (int) $matches[2])->toDateString();
         }
         if (preg_match('/^(\d{1,2})[.\/-](\d{1,2})\s*[-~至]/u', $text, $matches)) {
             return CarbonImmutable::create((int) date('Y'), (int) $matches[1], (int) $matches[2])->toDateString();

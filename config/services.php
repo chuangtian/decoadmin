@@ -140,6 +140,7 @@ return [
     'youtube_analytics' => [
         'redirect_uri' => env('YOUTUBE_ANALYTICS_REDIRECT_URI'),
         'state_ttl_minutes' => (int) env('YOUTUBE_ANALYTICS_OAUTH_STATE_TTL_MINUTES', 10),
+        'max_videos' => (int) env('YOUTUBE_ANALYTICS_MAX_VIDEOS', 200),
     ],
 
 ];

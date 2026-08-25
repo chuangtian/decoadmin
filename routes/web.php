@@ -137,6 +137,9 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
             ->middleware(['permission:sync.run', 'throttle:6,1'])
             ->name("natural-traffic.{$naturalTrafficChannel}.refresh");
     }
+    Route::post('/natural-traffic/brand-media/import', [NaturalTrafficController::class, 'importBrandMedia'])
+        ->middleware(['permission:sync.run', 'throttle:12,1'])
+        ->name('natural-traffic.brand-media.import');
     Route::post('/natural-traffic/seo-geo/refresh', [NaturalTrafficController::class, 'refresh'])
         ->middleware(['permission:sync.run', 'throttle:6,1'])
         ->name('natural-traffic.seo-geo.refresh');
