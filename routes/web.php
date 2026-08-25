@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
+use App\Http\Controllers\ApplicationCenterController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
 use App\Http\Controllers\StoreMarketingHomeController;
+use App\Http\Controllers\StoreMarketingModuleController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\StoreStatusController;
 use App\Http\Controllers\SyncJobController;
@@ -339,6 +341,11 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/apps', [AppController::class, 'index'])->middleware('permission:apps.view')->name('apps.index');
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
 
+    Route::get('/app-center', [AppController::class, 'index'])->middleware('permission:apps.view')->name('app-center.index');
+    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.install')->name('app-installations.index');
+    Route::get('/app-configurations', [ApplicationCenterController::class, 'configurations'])->middleware('permission:apps.configure')->name('app-configurations.index');
+    Route::get('/app-logs', [ApplicationCenterController::class, 'logs'])->middleware('permission:audit.view')->name('app-logs.index');
+
     Route::get('/webhooks', [WebhookEventController::class, 'index'])->middleware('permission:webhooks.view')->name('webhooks.index');
     Route::get('/webhooks/{webhookEvent}', [WebhookEventController::class, 'show'])->middleware('permission:webhooks.view')->name('webhooks.show');
     Route::post('/webhooks/{webhookEvent}/retry', [WebhookEventController::class, 'retry'])->middleware('permission:webhooks.retry')->name('webhooks.retry');
@@ -399,6 +406,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/stores', [StoreController::class, 'store'])->middleware('permission:store.create')->name('stores.store');
     Route::get('/stores/{store}', [StoreController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.show');
     Route::get('/stores/{store}/marketing', StoreMarketingHomeController::class)->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.home');
+    Route::get('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.modules.show');
+    Route::put('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'update'])->middleware(['store.access', 'permission:apps.configure'])->name('stores.marketing.modules.update');
     Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:apps.install'])->name('stores.connect');
     Route::post('/stores/{store}/shopify/verify', ShopifyConnectionHealthController::class)->middleware(['store.access', 'permission:store.connect'])->name('stores.shopify.verify');
     Route::post('/stores/{store}/shopify/uninstall', ShopifyAppUninstallController::class)->middleware(['store.access', 'permission:apps.uninstall'])->name('stores.shopify.uninstall');

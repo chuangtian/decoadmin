@@ -4,7 +4,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 
 defineProps<{
     store: { id: number; name: string; shopify_domain: string };
-    modules: Array<{ handle: string; name: string; enabled: boolean }>;
+    modules: Array<{ handle: string; name: string; product_name: string; description: string; capabilities: string[]; enabled: boolean; configured: boolean }>;
 }>();
 </script>
 
@@ -25,12 +25,13 @@ defineProps<{
                 <article v-for="module in modules" :key="module.handle" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div class="flex items-start justify-between gap-4">
                         <div>
-                            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{{ module.handle }}</p>
+                            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{{ module.product_name }}</p>
                             <h2 class="mt-2 text-lg font-semibold text-slate-950">{{ module.name }}</h2>
                         </div>
                         <span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="module.enabled ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-slate-100 text-slate-500 ring-slate-200'">{{ module.enabled ? '已启用' : '已停用' }}</span>
                     </div>
-                    <p class="mt-5 text-sm leading-6 text-slate-500">模块基础入口已建立，后续功能将在这里逐步接入。</p>
+                    <p class="mt-5 min-h-12 text-sm leading-6 text-slate-500">{{ module.description }}</p>
+                    <div class="mt-4 flex items-center justify-between gap-3"><span class="text-xs font-semibold" :class="module.configured ? 'text-emerald-700' : 'text-amber-700'">{{ module.configured ? '配置完整' : '需要配置' }}</span><Link :href="`/stores/${store.id}/marketing/${module.handle}`" class="text-sm font-semibold text-emerald-700">进入模块 →</Link></div>
                 </article>
             </div>
         </div>

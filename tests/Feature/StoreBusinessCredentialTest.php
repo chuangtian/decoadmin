@@ -190,7 +190,7 @@ class StoreBusinessCredentialTest extends TestCase
             ->assertOk()
             ->assertDontSee('never-send-this-secret')
             ->assertInertia(fn (Assert $page) => $page
-                ->has('credentialProviders', 7)
+                ->has('credentialProviders', 9)
                 ->where('credentialProviders.1.key', 'tiktok_ads')
                 ->where('credentialProviders.1.fields.1.current_value', '7625908528032546832')
                 ->where('credentialProviders.1.fields.2.current_value', '')

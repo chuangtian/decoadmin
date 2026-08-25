@@ -107,6 +107,26 @@ class StoreBusinessCredentialService
                 'ga4_service_account_json' => ['label' => 'GA4 服务账号 JSON', 'env_key' => 'GA4_SERVICE_ACCOUNT_JSON', 'secret' => true, 'placeholder' => '粘贴 GA4 服务账号 JSON'],
             ],
         ],
+        'email_marketing' => [
+            'title' => '营销邮件服务',
+            'description' => '邮件服务商凭证按店铺加密保存，用于后续营销活动和自动化邮件发送。',
+            'setup_hint' => '在邮件服务商后台创建仅用于当前店铺的 API 凭证',
+            'fields' => [
+                'provider' => ['label' => '服务商', 'env_key' => 'MARKETING_EMAIL_PROVIDER', 'secret' => false, 'placeholder' => '例如 Amazon SES、SendGrid 或 Mailgun'],
+                'api_key' => ['label' => 'API Key', 'env_key' => 'MARKETING_EMAIL_API_KEY', 'secret' => true, 'placeholder' => '输入邮件服务商 API Key'],
+                'sending_domain' => ['label' => '发件域名', 'env_key' => 'MARKETING_EMAIL_DOMAIN', 'secret' => false, 'placeholder' => '例如 mail.example.com'],
+            ],
+        ],
+        'sms_marketing' => [
+            'title' => '营销短信服务',
+            'description' => '短信服务商凭证按店铺加密保存；系统始终要求有效营销授权。',
+            'setup_hint' => '在短信服务商后台创建仅用于当前店铺的 API 凭证',
+            'fields' => [
+                'provider' => ['label' => '服务商', 'env_key' => 'MARKETING_SMS_PROVIDER', 'secret' => false, 'placeholder' => '例如 Twilio'],
+                'account_id' => ['label' => 'Account ID', 'env_key' => 'MARKETING_SMS_ACCOUNT_ID', 'secret' => false, 'placeholder' => '输入短信服务商 Account ID'],
+                'auth_token' => ['label' => 'Auth Token', 'env_key' => 'MARKETING_SMS_AUTH_TOKEN', 'secret' => true, 'placeholder' => '输入短信服务商 Auth Token'],
+            ],
+        ],
     ];
 
     /** @return array<int, array<string, mixed>> */

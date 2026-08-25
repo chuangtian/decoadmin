@@ -35,10 +35,10 @@ export const menu: MenuItem[] = [
         name: '应用中心',
         icon: 'app-center',
         children: [
-            { name: '我的应用', route: '/app-center', icon: 'apps', permission: 'apps.view', comingSoon: true },
-            { name: '安装管理', route: '/app-installations', icon: 'installations', permission: 'apps.install', comingSoon: true },
-            { name: '应用配置', route: '/app-configurations', icon: 'settings', permission: 'apps.configure', comingSoon: true },
-            { name: '应用日志', route: '/app-logs', icon: 'audit', permission: 'audit.view', comingSoon: true },
+            { name: '我的应用', route: '/app-center', icon: 'apps', permission: 'apps.view' },
+            { name: '安装管理', route: '/app-installations', icon: 'installations', permission: 'apps.install' },
+            { name: '应用配置', route: '/app-configurations', icon: 'settings', permission: 'apps.configure' },
+            { name: '应用日志', route: '/app-logs', icon: 'audit', permission: 'audit.view' },
         ],
     },
     {
