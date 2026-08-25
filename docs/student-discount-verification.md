@@ -85,7 +85,7 @@ docker compose restart vite
 
 ## 完整回归
 
-- `docker compose exec -T app php artisan test --compact --colors=never`：`371 passed`，`6443 assertions`；
+- `docker compose exec -T app php artisan test --compact --colors=never`：`372 passed`，`6464 assertions`；
 - 未安装 Shopify App，未调用真实 Shopify、Gemini 或邮件外部服务；
 - 未输出、验证或记录任何 Secret 明文。
 

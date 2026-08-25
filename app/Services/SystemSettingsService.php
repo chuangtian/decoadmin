@@ -5,10 +5,13 @@ namespace App\Services;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Store;
-use App\Models\SystemSetting;
 use App\Models\User;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use JsonException;
 
 class SystemSettingsService
 {
@@ -96,12 +99,14 @@ class SystemSettingsService
 
         DB::transaction(function () use ($section, $clean, $actor): void {
             foreach ($clean as $key => $value) {
-                SystemSetting::query()->updateOrCreate(
+                DB::table('system_settings')->updateOrInsert(
                     ['section' => $section, 'key' => $key],
-                    [
-                        'value' => $this->encode($value),
+                    fn (bool $exists): array => [
+                        'value' => Crypt::encryptString($this->encode($value)),
                         'is_secret' => in_array($key, self::SECRET_KEYS, true),
                         'updated_by' => $actor->id,
+                        'updated_at' => now(),
+                        ...($exists ? [] : ['created_at' => now()]),
                     ],
                 );
             }
@@ -181,10 +186,19 @@ class SystemSettingsService
     /** @return array<string, mixed> */
     private function section(string $section): array
     {
-        $values = SystemSetting::query()
+        $values = DB::table('system_settings')
             ->where('section', $section)
-            ->pluck('value', 'key')
-            ->map(fn (?string $value): mixed => $this->decode($value))
+            ->get(['id', 'key', 'value'])
+            ->mapWithKeys(function (object $setting) use ($section): array {
+                $decoded = $this->decodePersistedValue(
+                    $setting->value,
+                    (int) $setting->id,
+                    $section,
+                    (string) $setting->key,
+                );
+
+                return $decoded['valid'] ? [(string) $setting->key => $decoded['value']] : [];
+            })
             ->all();
 
         return [...$this->defaults($section), ...$values];
@@ -192,9 +206,23 @@ class SystemSettingsService
 
     private function value(string $section, string $key): mixed
     {
-        $value = SystemSetting::query()->where('section', $section)->where('key', $key)->value('value');
+        $setting = DB::table('system_settings')
+            ->where('section', $section)
+            ->where('key', $key)
+            ->first(['id', 'value']);
 
-        return $this->decode($value);
+        if ($setting === null) {
+            return null;
+        }
+
+        $decoded = $this->decodePersistedValue(
+            $setting->value,
+            (int) $setting->id,
+            $section,
+            $key,
+        );
+
+        return $decoded['valid'] ? $decoded['value'] : null;
     }
 
     /** @return array<string, mixed> */
@@ -239,9 +267,28 @@ class SystemSettingsService
         return json_encode($this->normalize($value), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     }
 
-    private function decode(?string $value): mixed
+    /** @return array{valid: bool, value: mixed} */
+    private function decodePersistedValue(?string $value, int $id, string $section, string $key): array
     {
-        return $value === null ? null : json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+        if ($value === null || $value === '') {
+            return ['valid' => false, 'value' => null];
+        }
+
+        try {
+            return [
+                'valid' => true,
+                'value' => json_decode(Crypt::decryptString($value), true, 512, JSON_THROW_ON_ERROR),
+            ];
+        } catch (DecryptException|JsonException $exception) {
+            Log::warning('System setting could not be read with the current application key and was ignored.', [
+                'setting_id' => $id,
+                'section' => $section,
+                'key' => $key,
+                'reason' => $exception instanceof DecryptException ? 'decrypt_failed' : 'invalid_json',
+            ]);
+
+            return ['valid' => false, 'value' => null];
+        }
     }
 
     private function normalize(mixed $value): mixed
