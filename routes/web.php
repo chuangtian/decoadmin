@@ -30,7 +30,8 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
-use App\Http\Controllers\ShopifyConnectionDisconnectController;
+use App\Http\Controllers\ShopifyAppLaunchController;
+use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
@@ -40,6 +41,7 @@ use App\Http\Controllers\StoreBusinessCredentialController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
+use App\Http\Controllers\StoreMarketingHomeController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\StoreStatusController;
 use App\Http\Controllers\SyncJobController;
@@ -92,6 +94,7 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('throttle:6,1')
         ->name('verification.send');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+    Route::get('/shopify/launch', ShopifyAppLaunchController::class)->name('shopify.app.launch');
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
@@ -395,9 +398,10 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');
     Route::post('/stores', [StoreController::class, 'store'])->middleware('permission:store.create')->name('stores.store');
     Route::get('/stores/{store}', [StoreController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.show');
-    Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:store.connect'])->name('stores.connect');
+    Route::get('/stores/{store}/marketing', StoreMarketingHomeController::class)->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.home');
+    Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:apps.install'])->name('stores.connect');
     Route::post('/stores/{store}/shopify/verify', ShopifyConnectionHealthController::class)->middleware(['store.access', 'permission:store.connect'])->name('stores.shopify.verify');
-    Route::post('/stores/{store}/shopify/disconnect', ShopifyConnectionDisconnectController::class)->middleware(['store.access', 'permission:store.disconnect'])->name('stores.shopify.disconnect');
+    Route::post('/stores/{store}/shopify/uninstall', ShopifyAppUninstallController::class)->middleware(['store.access', 'permission:apps.uninstall'])->name('stores.shopify.uninstall');
     Route::get('/stores/{store}/notifications', [StoreNotificationSettingsController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.notifications.show');
     Route::put('/stores/{store}/notifications', [StoreNotificationSettingsController::class, 'update'])->middleware(['store.access', 'permission:store.update'])->name('stores.notifications.update');
     Route::get('/stores/{store}/access-check', fn (Store $store) => response()->json(['data' => ['id' => $store->id]]))

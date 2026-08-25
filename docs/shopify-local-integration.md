@@ -90,7 +90,7 @@ docker compose logs --tail=30 vite
 
 ```text
 App URL
-https://example.trycloudflare.com
+https://example.trycloudflare.com/shopify/launch
 
 Redirect URL
 https://example.trycloudflare.com/shopify/oauth/callback
@@ -99,21 +99,21 @@ Required scopes
 read_products
 ```
 
-decoadmin 当前不是 Shopify Admin Embedded App，因此关闭 Embedded App。Webhook API Version 与 `SHOPIFY_API_VERSION` 保持一致。
+decoadmin 当前不是 Shopify Admin Embedded App，因此关闭 Embedded App。用户从 Shopify 点击应用后，通过 `/shopify/launch` 使用现有 decoAdmin 账号登录，并自动进入已分配店铺的营销首页。Webhook API Version 与 `SHOPIFY_API_VERSION` 保持一致。
 
 Redirect URL 必须与 `SHOPIFY_REDIRECT_URI` 完全一致，包括 HTTPS、域名、路径以及末尾是否带 `/`。
 
 ## OAuth 实际安装流程
 
-1. 通过 Tunnel HTTPS 地址登录 decoadmin。
+1. 通过 Tunnel HTTPS 地址登录 decoAdmin。
 2. 进入 `Shopify → 店铺管理 → 添加店铺`。
-3. 输入店铺名称、准确的 `*.myshopify.com` Domain 和环境。
-4. 点击 `Connect Shopify`。
-5. 在 Shopify Dev Store 确认安装开发 App。
-6. Shopify 回调 `/shopify/oauth/callback`。
-7. Laravel 验证一次性 State、Cookie、Shop Domain 与 HMAC。
-8. Laravel 交换并加密保存 Store Access Token。
-9. 系统创建或更新 `stores`、`shopify_connections` 与 `app_installations`，并消费对应的 `oauth_states` 记录。
+3. 输入店铺名称、准确且唯一的 `*.myshopify.com` Domain 和环境，先创建店铺。
+4. 创建完成后进入店铺的“应用”页，确认状态为“未安装”。
+5. 由超级管理员或组织管理员点击“安装应用”。
+6. 在 Shopify Plus Organization 内的目标店铺确认 Custom distribution App 安装。
+7. Shopify 回调 `/shopify/oauth/callback`。
+8. Laravel 验证一次性 State、Cookie、Shop Domain 与 HMAC。
+9. Laravel 交换并加密保存 Store Access Token，更新预创建的店铺和安装记录；OAuth 回调绝不自动创建店铺。
 
 不要刷新旧的 Shopify OAuth 错误页或重复使用旧 State；回到店铺详情重新发起 OAuth。
 
@@ -142,8 +142,10 @@ docker compose exec -T app php artisan shopify:check-connections
 
 - 无效或撤销的 Token：Shopify 返回 `401/403`，Connection 标记为 `invalid`。
 - 限流、网络错误或临时 Shopify API 失败：Connection 标记为 `warning`。
-- App 卸载或明确断开：Connection 标记为 `disconnected`。
+- App 卸载：调用 Shopify `appUninstall` 真正卸载，撤销并清除 Token，Connection 标记为 `disconnected`。
 - `invalid` 或 `disconnected` 状态重新授权：复用现有 OAuth 流程，更新原 Connection 并恢复为 `connected`。
+
+卸载后立即停止同步任务；客户个人数据在 48 小时后清除或匿名化，店铺级应用配置在 30 天后清除。期间重新安装会取消待执行的清理。
 
 异常测试不得把真实 Token、Secret 或完整授权 URL写入日志或文档。对真实连接做破坏性测试时必须在可回滚事务中执行，确保原 Token 和 Connection 状态被恢复。
 

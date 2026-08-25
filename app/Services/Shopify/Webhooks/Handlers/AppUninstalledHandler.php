@@ -24,10 +24,6 @@ class AppUninstalledHandler implements WebhookHandlerInterface
             return;
         }
 
-        $this->lifecycle->markDisconnected($connection, 'Shopify 应用已从店铺卸载。');
-        $connection->appInstallations()->update([
-            'status' => 'uninstalled',
-            'uninstalled_at' => now(),
-        ]);
+        $this->lifecycle->markUninstalled($connection, 'Shopify 应用已从店铺卸载。');
     }
 }

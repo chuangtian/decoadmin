@@ -27,6 +27,12 @@ Schedule::command('shopify:prune-analytics-snapshots')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+Schedule::command('shopify:prune-uninstalled-data')
+    ->name('shopify:prune-uninstalled-data')
+    ->hourlyAt(20)
+    ->onOneServer()
+    ->withoutOverlapping(60);
+
 Schedule::command('shopify:check-connections')
     ->name('shopify:connection-and-store-metadata-refresh')
     ->everySixHours()

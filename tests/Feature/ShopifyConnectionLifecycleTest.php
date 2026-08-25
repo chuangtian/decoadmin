@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\App;
+use App\Models\AppInstallation;
 use App\Models\AuditLog;
+use App\Models\Customer;
+use App\Models\Order;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
@@ -83,7 +87,7 @@ class ShopifyConnectionLifecycleTest extends TestCase
 
     public function test_disconnected_connection_can_reconnect_through_existing_oauth_flow(): void
     {
-        [$user, $organization, $store] = $this->storeContext('store-admin');
+        [$user, $organization, $store] = $this->storeContext('organization-admin');
         $connection = $this->connection($store, 'disconnected');
 
         $response = $this->actingAs($user)
@@ -132,6 +136,31 @@ class ShopifyConnectionLifecycleTest extends TestCase
             ->assertForbidden();
 
         $this->assertSame('invalid', $connection->fresh()->status);
+        $this->assertDatabaseCount('oauth_states', 0);
+    }
+
+    public function test_store_admin_cannot_install_or_uninstall_shopify_app(): void
+    {
+        [$user, $organization, $store] = $this->storeContext('store-admin');
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->post(route('stores.connect', $store))
+            ->assertForbidden();
+
+        $connection = $this->connection($store, 'connected');
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->post(route('stores.shopify.uninstall', $store))
+            ->assertForbidden();
+
+        $this->assertSame('connected', $connection->fresh()->status);
         $this->assertDatabaseCount('oauth_states', 0);
     }
 
@@ -199,30 +228,41 @@ class ShopifyConnectionLifecycleTest extends TestCase
         $this->assertSame('Shopify App 已卸载。', data_get($audit->metadata, 'reason'));
     }
 
-    public function test_store_admin_can_disconnect_without_deleting_connection(): void
+    public function test_organization_admin_can_truly_uninstall_and_revoke_connection(): void
     {
-        [$user, $organization, $store] = $this->storeContext('store-admin');
+        [$user, $organization, $store] = $this->storeContext('organization-admin');
         $connection = $this->connection($store, 'connected');
+        $installation = $this->installation($connection, $user);
+        Http::fake([
+            "https://{$store->shopify_domain}/admin/api/2026-07/graphql.json" => Http::response([
+                'data' => ['appUninstall' => [
+                    'app' => ['id' => 'gid://shopify/App/1'],
+                    'userErrors' => [],
+                ]],
+            ]),
+        ]);
 
         $this->actingAs($user)
             ->withSession([
                 'current_organization_id' => $organization->id,
                 'current_store_id' => $store->id,
             ])
-            ->post(route('stores.shopify.disconnect', $store))
+            ->post(route('stores.shopify.uninstall', $store))
             ->assertRedirect()
             ->assertSessionHas('success');
 
         $connection->refresh();
         $this->assertSame('disconnected', $connection->status);
-        $this->assertSame('test-access-token', $connection->access_token_encrypted);
+        $this->assertNull($connection->access_token_encrypted);
+        $this->assertNotNull($connection->uninstalled_at);
+        $this->assertSame('uninstalled', $installation->fresh()->status);
         $this->assertDatabaseCount('shopify_connections', 1);
 
-        $audit = AuditLog::query()->where('action', 'shopify_connection_disconnected')->sole();
+        $audit = AuditLog::query()->where('action', 'shopify_app_uninstalled')->sole();
         $this->assertSame($organization->id, $audit->organization_id);
         $this->assertSame($store->id, $audit->store_id);
         $this->assertSame($user->id, $audit->user_id);
-        $this->assertSame('管理员主动断开 Shopify 连接。', data_get($audit->metadata, 'reason'));
+        $this->assertSame('管理员从 decoAdmin 真正卸载 Shopify 应用。', data_get($audit->metadata, 'reason'));
         $this->assertSame('connected', data_get($audit->metadata, 'previous_status'));
         $this->assertSame('disconnected', data_get($audit->metadata, 'new_status'));
         $this->assertStringNotContainsString('test-access-token', json_encode($audit->toArray(), JSON_THROW_ON_ERROR));
@@ -238,7 +278,7 @@ class ShopifyConnectionLifecycleTest extends TestCase
                 'current_organization_id' => $organization->id,
                 'current_store_id' => $store->id,
             ])
-            ->post(route('stores.shopify.disconnect', $store))
+            ->post(route('stores.shopify.uninstall', $store))
             ->assertForbidden();
 
         $this->assertSame('connected', $connection->fresh()->status);
@@ -254,7 +294,7 @@ class ShopifyConnectionLifecycleTest extends TestCase
 
         $this->actingAs($user)
             ->withSession(['current_organization_id' => $organization->id])
-            ->post(route('stores.shopify.disconnect', $store))
+            ->post(route('stores.shopify.uninstall', $store))
             ->assertForbidden();
 
         $this->assertSame('connected', $connection->fresh()->status);
@@ -286,6 +326,56 @@ class ShopifyConnectionLifecycleTest extends TestCase
                 ->where('connectionHistory.0.actor', $user->name)
                 ->where('connectionHistory.0.previous_status', 'connected')
                 ->where('connectionHistory.0.new_status', 'disconnected'));
+    }
+
+    public function test_uninstalled_store_data_is_erased_after_48_hours_and_settings_after_30_days(): void
+    {
+        [$user, , $store] = $this->storeContext('organization-admin');
+        $connection = $this->connection($store, 'connected');
+        $installation = $this->installation($connection, $user);
+        $installation->forceFill(['settings' => ['template' => 'retained temporarily']])->save();
+        Customer::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'shopify_customer_id' => 1001,
+            'email' => 'customer@example.com',
+            'phone' => '+15550000000',
+            'created_at_shopify' => now(),
+            'updated_at_shopify' => now(),
+            'synced_at' => now(),
+        ]);
+        $order = Order::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'shopify_order_id' => 2001,
+            'shopify_customer_id' => 1001,
+            'order_number' => '#2001',
+            'email' => 'customer@example.com',
+            'currency' => 'USD',
+            'total_price' => 100,
+            'subtotal_price' => 90,
+            'total_tax' => 10,
+            'created_at_shopify' => now(),
+            'synced_at' => now(),
+        ]);
+
+        app(ShopifyConnectionLifecycleService::class)
+            ->markUninstalled($connection, 'Test uninstall.', $user);
+
+        $this->travel(49)->hours();
+        $this->artisan('shopify:prune-uninstalled-data')->assertSuccessful();
+
+        $this->assertDatabaseCount('customers', 0);
+        $this->assertNull($order->fresh()->email);
+        $this->assertNull($order->fresh()->shopify_customer_id);
+        $this->assertSame(['template' => 'retained temporarily'], $installation->fresh()->settings);
+        $this->assertNotNull(data_get($connection->fresh()->metadata, 'personal_data_erased_at'));
+
+        $this->travel(29)->days();
+        $this->artisan('shopify:prune-uninstalled-data')->assertSuccessful();
+
+        $this->assertNull($installation->fresh()->settings);
+        $this->assertNotNull(data_get($connection->fresh()->metadata, 'configuration_purged_at'));
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */
@@ -339,6 +429,28 @@ class ShopifyConnectionLifecycleTest extends TestCase
             'status' => $status,
             'last_error' => $status === 'invalid' ? 'Invalid token' : null,
             'last_error_at' => $status === 'invalid' ? now() : null,
+            'installed_at' => now(),
+        ]);
+    }
+
+    private function installation(ShopifyConnection $connection, User $user): AppInstallation
+    {
+        $app = App::query()->create([
+            'name' => 'Deco Marketing',
+            'handle' => 'test-shopify-app',
+            'client_id' => 'test-client-id',
+            'client_secret_encrypted' => 'test-client-secret',
+            'distribution' => 'custom',
+            'status' => 'active',
+        ]);
+
+        return AppInstallation::query()->create([
+            'app_id' => $app->id,
+            'store_id' => $connection->store_id,
+            'shopify_connection_id' => $connection->id,
+            'installed_by' => $user->id,
+            'status' => 'active',
+            'granted_scopes' => ['read_products'],
             'installed_at' => now(),
         ]);
     }

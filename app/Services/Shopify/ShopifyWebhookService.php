@@ -58,12 +58,16 @@ class ShopifyWebhookService
             throw new ShopifyWebhookException('Webhook 事件载荷格式无效。', 422);
         }
 
-        $installation = AppInstallation::query()
+        $installationQuery = AppInstallation::query()
             ->whereBelongsTo($app)
-            ->where('status', 'active')
             ->whereHas('shopifyConnection', fn ($query) => $query->where('shop_domain', $shopDomain))
-            ->with(['store.organization', 'shopifyConnection'])
-            ->first();
+            ->with(['store.organization', 'shopifyConnection']);
+
+        if ($topic !== 'app/uninstalled') {
+            $installationQuery->where('status', 'active');
+        }
+
+        $installation = $installationQuery->first();
 
         if (! $installation || ! $installation->store || ! $installation->shopifyConnection) {
             throw new ShopifyWebhookException('Webhook 店铺尚未安装当前应用。', 404);

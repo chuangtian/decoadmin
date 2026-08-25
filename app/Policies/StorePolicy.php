@@ -38,12 +38,12 @@ class StorePolicy
 
     public function connect(User $user, Store $store): bool
     {
-        return $this->allows($user, 'store.connect', $store);
+        return $this->allows($user, 'apps.install', $store);
     }
 
     public function disconnect(User $user, Store $store): bool
     {
-        return $this->allows($user, 'store.disconnect', $store);
+        return $this->allows($user, 'apps.uninstall', $store);
     }
 
     private function allows(User $user, string $permission, ?Store $store = null): bool

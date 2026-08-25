@@ -5,18 +5,19 @@ import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import ShopifyConnectionStatus from '../../Components/Shopify/ShopifyConnectionStatus.vue';
 import StoreStatusOverview from '../../Components/Stores/StoreStatusOverview.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
-import type { AuditLogResult, SharedProps, ShopifyConnectionHistory, ShopifyStore, StoreOperations, SyncJobMode, SyncJobStatus, SyncJobType, WebhookEventStatus } from '../../types';
+import type { AuditLogResult, SharedProps, ShopifyConnectionHistory, ShopifyStore, StoreAppSummary, StoreOperations, SyncJobMode, SyncJobStatus, SyncJobType, WebhookEventStatus } from '../../types';
 import { formatDateTimeInTimezone } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{
     store: { data: ShopifyStore };
     connectionHistory: ShopifyConnectionHistory[];
+    storeApps: StoreAppSummary[];
     operations: StoreOperations;
 }>();
 const page = usePage<SharedProps>();
-const canConnect = computed(() => page.props.auth.permissions.includes('store.connect'));
-const canDisconnect = computed(() => page.props.auth.permissions.includes('store.disconnect') && props.store.data.connection_status !== 'disconnected');
-const canReconnect = computed(() => ['invalid', 'disconnected'].includes(props.store.data.connection_status));
+const canConnect = computed(() => page.props.auth.permissions.includes('apps.install'));
+const canDisconnect = computed(() => page.props.auth.permissions.includes('apps.uninstall') && props.store.data.connection_status === 'connected');
+const canReconnect = computed(() => ['pending', 'invalid', 'disconnected'].includes(props.store.data.connection_status));
 const tabs = [
     { id: 'overview', name: '概览', icon: 'stores', description: '', features: [] },
     { id: 'shopify', name: 'Shopify', icon: 'shopify', description: 'Shopify 连接详情与 API 状态将在后续阶段接入。', features: ['连接信息', '授权范围', 'API 状态'] },
@@ -35,7 +36,7 @@ const selectTab = (tab: string) => {
     else url.searchParams.set('tab', tab);
     window.history.replaceState({}, '', url);
 };
-const form = useForm({ name: props.store.data.name, shop_domain: props.store.data.shopify_domain, environment: props.store.data.environment });
+const form = useForm({});
 const healthForm = useForm({});
 const disconnectForm = useForm({});
 const syncForm = useForm({
@@ -50,8 +51,8 @@ const webhookRetryForm = useForm({});
 const reconnect = () => form.post(`/stores/${props.store.data.id}/connect`);
 const verifyConnection = () => healthForm.post(`/stores/${props.store.data.id}/shopify/verify`, { preserveScroll: true });
 const disconnect = () => {
-    if (window.confirm('确定要断开当前 Shopify 连接吗？连接记录和历史会保留，恢复时需要重新授权。')) {
-        disconnectForm.post(`/stores/${props.store.data.id}/shopify/disconnect`, { preserveScroll: true });
+    if (window.confirm('确定要真正卸载当前 Shopify 应用吗？Shopify 将立即撤销访问权限并停止所有任务。')) {
+        disconnectForm.post(`/stores/${props.store.data.id}/shopify/uninstall`, { preserveScroll: true });
     }
 };
 const createSyncJob = () => syncForm.post('/sync', { preserveScroll: true });
@@ -64,6 +65,7 @@ const eventLabels: Record<string, string> = {
     shopify_connection_invalid: '访问令牌失效',
     shopify_connection_disconnected: '连接已断开',
     shopify_connection_reconnected: '重新连接成功',
+    shopify_app_uninstalled: '应用已卸载',
 };
 const syncStatusLabel = (status: string) => ({ pending: '待处理', queued: '已入队', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' }[status] ?? status);
 const syncTypeLabel = (type: string) => ({ products: '商品', orders: '订单', customers: '客户', inventory: '库存' }[type] ?? type);
@@ -148,6 +150,33 @@ const logSourceLabel = (source: string) => ({ audit: '操作记录', sync: '数�
                     </div>
                     <p v-else class="px-6 py-10 text-center text-sm text-slate-500">暂无连接历史。</p>
                 </section>
+            </section>
+
+            <section v-else-if="activeTab === 'apps'" class="mt-6 space-y-4">
+                <article v-for="app in storeApps" :key="app.id" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div class="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <span class="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-lg font-bold text-emerald-700">D</span>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-slate-950">{{ app.name }}</h3>
+                                    <p class="font-mono text-xs text-slate-400">{{ app.handle }}</p>
+                                </div>
+                                <span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="app.status === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-slate-100 text-slate-600 ring-slate-200'">{{ app.status === 'active' ? '已安装' : '未安装' }}</span>
+                            </div>
+                            <p class="mt-4 text-sm leading-6 text-slate-500">{{ app.description || '一个 Shopify App 集成个性化、邮件、短信、弹窗与表单、评论和页面构建器。' }}</p>
+                            <div class="mt-4 flex flex-wrap gap-2">
+                                <span v-for="feature in ['个性化', '邮件', '短信', '弹窗与表单', '评论', '页面构建器']" :key="feature" class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-100">{{ feature }}</span>
+                            </div>
+                        </div>
+                        <div class="flex shrink-0 flex-col items-stretch gap-2 sm:min-w-36">
+                            <button v-if="app.installable && app.status !== 'active' && app.app_status === 'active' && canConnect" type="button" :disabled="form.processing" class="rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-50" @click="reconnect">{{ form.processing ? '正在跳转…' : '安装应用' }}</button>
+                            <button v-else-if="app.installable && app.status === 'active' && canDisconnect" type="button" :disabled="disconnectForm.processing" class="rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:opacity-50" @click="disconnect">{{ disconnectForm.processing ? '正在卸载…' : '卸载应用' }}</button>
+                            <p class="text-center text-xs text-slate-400">{{ !app.installable ? '暂未接入安装流程' : app.app_status !== 'active' ? '应用当前不可安装' : app.status === 'active' ? `安装于 ${dateLabel(app.installed_at)}` : '由组织管理员操作' }}</p>
+                        </div>
+                    </div>
+                </article>
+                <EmptyState v-if="!storeApps.length" title="暂无可安装应用" description="请先在应用中心创建并启用 Shopify 应用。" icon="apps" />
             </section>
 
             <section v-else-if="activeTab === 'sync'" class="mt-6 space-y-5">

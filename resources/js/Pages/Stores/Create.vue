@@ -9,14 +9,14 @@ const submit = () => form.post('/stores');
 </script>
 
 <template>
-    <Head title="连接 Shopify 店铺" />
-    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '店铺管理', href: '/stores' }, { label: '连接店铺' }]">
+    <Head title="创建 Shopify 店铺" />
+    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '店铺管理', href: '/stores' }, { label: '创建店铺' }]">
         <div class="mx-auto max-w-3xl">
             <Link href="/stores" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回店铺列表</Link>
             <div class="mt-5">
-                <p class="text-sm font-semibold text-emerald-700">Shopify OAuth</p>
-                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">连接 Shopify 店铺</h2>
-                <p class="mt-2 text-sm leading-6 text-slate-500">填写店铺信息后，将跳转到 Shopify 完成安全授权。当前阶段不会读取订单、商品或客户数据。</p>
+                <p class="text-sm font-semibold text-emerald-700">店铺资料</p>
+                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">创建 Shopify 店铺</h2>
+                <p class="mt-2 text-sm leading-6 text-slate-500">先在 decoAdmin 建立店铺，再从店铺的应用页发起 Shopify 安装。创建店铺不会自动跳转或授权。</p>
             </div>
 
             <div v-if="!configured" class="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">尚未配置 Shopify 应用的 Client ID 和 Client Secret，请先完成环境变量配置。</div>
@@ -54,7 +54,7 @@ const submit = () => form.post('/stores');
 
                 <div class="flex justify-end gap-3">
                     <Link href="/stores" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700">取消</Link>
-                    <button :disabled="form.processing || !configured" class="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">{{ form.processing ? '正在跳转…' : '连接 Shopify' }}</button>
+                    <button :disabled="form.processing" class="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">{{ form.processing ? '正在创建…' : '创建店铺' }}</button>
                 </div>
             </form>
         </div>

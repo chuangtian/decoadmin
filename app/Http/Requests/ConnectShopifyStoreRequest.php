@@ -22,6 +22,7 @@ class ConnectShopifyStoreRequest extends FormRequest
                 'string',
                 'max:255',
                 'regex:/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/',
+                Rule::unique('stores', 'shopify_domain'),
             ],
             'environment' => ['required', Rule::in(['production', 'development'])],
         ];
