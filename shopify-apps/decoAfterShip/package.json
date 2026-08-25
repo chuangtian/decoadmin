@@ -1,0 +1,33 @@
+{
+  "name": "deco-aftership-shopify-cli",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "shopify": "shopify",
+    "config:link:test": "shopify app config link --file-name shopify.app.test.toml",
+    "config:link:production": "shopify app config link --file-name shopify.app.production.toml",
+    "config:use:test": "shopify app config use test",
+    "config:use:production": "shopify app config use production",
+    "config:pull:test": "shopify app config pull --config test",
+    "config:pull:production": "shopify app config pull --config production",
+    "config:validate:test": "shopify app config validate --config test",
+    "config:validate:production": "shopify app config validate --config production",
+    "validate:structure": "node scripts/validate-project.mjs",
+    "build": "pnpm run build:test",
+    "build:test": "shopify app build --config test",
+    "build:production": "shopify app build --config production",
+    "verify": "pnpm run validate:structure && pnpm run config:validate:test && pnpm run build:test",
+    "generate:extension": "shopify app generate extension --config test",
+    "deploy:test": "shopify app deploy --config test",
+    "deploy:production": "shopify app deploy --config production"
+  },
+  "devDependencies": {
+    "@shopify/cli": "4.7.0"
+  }
+}

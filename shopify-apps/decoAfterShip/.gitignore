@@ -1,0 +1,10 @@
+.env
+.env.*
+.shopify/
+.shopify.lock
+node_modules/
+coverage/
+logs/
+*.log
+extensions/*/build/
+extensions/*/dist/
