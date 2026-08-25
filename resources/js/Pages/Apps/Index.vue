@@ -12,7 +12,7 @@ const props = defineProps<{
 }>();
 
 const form = useForm({ search: props.filters.search, status: props.filters.status });
-const search = () => form.get('/apps', { preserveState: true, replace: true });
+const search = () => form.get('/app-center', { preserveState: true, replace: true });
 const clearFilters = () => {
     form.search = '';
     form.status = '';
@@ -29,12 +29,12 @@ const statusClass = (status: string) => status === 'active'
 </script>
 
 <template>
-    <Head title="应用管理" />
-    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '应用管理' }]">
+    <Head title="我的应用" />
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '我的应用' }]">
         <div class="mx-auto max-w-7xl">
             <div class="mb-7">
-                <p class="text-sm font-semibold text-emerald-700">应用注册中心</p>
-                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">应用管理</h2>
+                <p class="text-sm font-semibold text-emerald-700">应用中心</p>
+                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">我的应用</h2>
                 <p class="mt-2 text-sm text-slate-500">管理当前组织的 Shopify 应用，并查看授权店铺中的安装状态。</p>
             </div>
 
