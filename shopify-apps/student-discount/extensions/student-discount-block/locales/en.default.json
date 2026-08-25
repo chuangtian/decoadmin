@@ -1,0 +1,60 @@
+{
+  "student_discount": {
+    "name": "Student discount",
+    "settings": {
+      "enabled": "Show this module",
+      "content_type": "Content type",
+      "text": "Text",
+      "image": "Image",
+      "image_alt": "Image alt text",
+      "alignment": "Alignment",
+      "max_width": "Maximum width",
+      "background_color": "Text background",
+      "text_color": "Text color",
+      "corner_radius": "Corner radius"
+    },
+    "options": {
+      "text": "Text",
+      "image": "Image",
+      "left": "Left",
+      "center": "Center",
+      "right": "Right"
+    },
+    "modal": {
+      "close": "Close student discount dialog",
+      "back": "Back",
+      "method_title": "Preferred verification method",
+      "method_lead": "Choose how you want to verify your student status.",
+      "email_method": "Get code by school email",
+      "email_method_help": "Use an eligible education email address to receive a code immediately.",
+      "id_method": "Verify with student ID",
+      "id_method_help": "Upload one student ID image for automatic or manual review.",
+      "email_title": "Get student discount",
+      "email_lead": "Enter the email address provided by your educational institution.",
+      "school_email": "School email address",
+      "submit": "Submit",
+      "email_unverified": "We couldn't verify this email",
+      "use_id_help": "Use your student ID to request a review.",
+      "fill_information": "Fill in information",
+      "id_title": "Verify with student ID",
+      "id_lead": "Most requests are checked automatically. If manual review is needed, we'll email you after it is complete.",
+      "full_name": "Full name",
+      "contact_email": "Email address",
+      "student_id_photo": "Student ID photo",
+      "upload_prompt": "Upload a clear photo of your student ID",
+      "preview_alt": "Student ID preview",
+      "remove_photo": "Remove selected student ID photo",
+      "upload_help": "JPG, PNG or WebP, up to 5MB. The image is deleted 30 days after review.",
+      "consent": "I agree to the Privacy Policy and Terms of Service. I understand my image may be analyzed automatically and used only to review my request and deliver the student discount.",
+      "submit_review": "Submit for review",
+      "submitted": "Submitted",
+      "done": "Done",
+      "approved": "Student discount approved",
+      "code_ready": "Your discount code is ready",
+      "your_code": "Your code",
+      "copy_code": "Copy code",
+      "checkout_note": "Enter this code at checkout to apply your student discount.",
+      "continue_shopping": "Continue shopping"
+    }
+  }
+}

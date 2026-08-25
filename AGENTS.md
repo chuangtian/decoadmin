@@ -21,3 +21,13 @@
 - Route all future `decoAdmin` backend code changes to the existing Codex task titled `开发 deco-afterShip`.
 - Other Codex tasks should clarify requirements, hand the implementation to that task, and review or verify its result instead of independently modifying the backend code.
 - Only change this ownership rule when the user explicitly instructs otherwise.
+
+## Shopify App architecture
+
+- Store every Shopify App under `shopify-apps/<app-name>/`; do not place Shopify App dependencies, extensions, or configuration files in the DecoAdmin repository root.
+- Keep different business domains as separate Shopify Apps by default. Do not merge apps unless the user explicitly approves the combined scopes, lifecycle, and release coupling.
+- Each Shopify App must independently own its package dependencies, extensions, Shopify client IDs and secrets, environment configuration, validation commands, and release commands.
+- Local, test, and production must remain separate Shopify App environments. Never reuse or interchange their app IDs, secrets, URLs, data, or release actions.
+- Shopify Apps may reuse DecoAdmin backend services, but backend authorization must enforce User, Organization, Store, and RBAC boundaries.
+- A request to develop or release one Shopify App never authorizes changes or releases for another app or environment.
+- Treat `shopify-apps/AGENTS.md` as the detailed operating rules for all current and future Shopify Apps in this repository.

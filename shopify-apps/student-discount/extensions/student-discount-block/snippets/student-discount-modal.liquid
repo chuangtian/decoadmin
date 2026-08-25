@@ -1,0 +1,122 @@
+{% doc %}
+Renders the student discount verification dialog for an app block.
+
+@param {string} shop_name - Store name displayed in the dialog.
+@param {string} block_id - Unique app block identifier.
+{% enddoc %}
+
+<div
+  id="student-discount-dialog-{{ block_id }}"
+  class="student-discount-dialog"
+  data-student-discount-dialog
+  hidden
+>
+  <button type="button" class="student-discount-dialog__backdrop" data-sd-close aria-label="{{ 'student_discount.modal.close' | t }}"></button>
+  <div class="student-discount-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="student-discount-title-{{ block_id }}">
+    <button type="button" class="student-discount-dialog__close" data-sd-close aria-label="{{ 'student_discount.modal.close' | t }}">×</button>
+
+    <div class="student-discount-dialog__brand">{{ shop_name | escape }}</div>
+
+    <div data-sd-view="method">
+      <button type="button" class="student-discount-dialog__back" data-sd-close>
+        <span aria-hidden="true">←</span>
+        <span>{{ 'student_discount.modal.back' | t }}</span>
+      </button>
+      <h2 id="student-discount-title-{{ block_id }}">{{ 'student_discount.modal.method_title' | t }}</h2>
+      <p class="student-discount-dialog__lead">{{ 'student_discount.modal.method_lead' | t }}</p>
+      <div class="student-discount-dialog__methods">
+        <div class="student-discount-dialog__method">
+          <button type="button" class="student-discount-dialog__primary" data-sd-select-email>{{ 'student_discount.modal.email_method' | t }}</button>
+          <p>{{ 'student_discount.modal.email_method_help' | t }}</p>
+        </div>
+        <div class="student-discount-dialog__method">
+          <button type="button" class="student-discount-dialog__primary" data-sd-select-id>{{ 'student_discount.modal.id_method' | t }}</button>
+          <p>{{ 'student_discount.modal.id_method_help' | t }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div data-sd-view="email" hidden>
+      <button type="button" class="student-discount-dialog__back" data-sd-back-method>
+        <span aria-hidden="true">←</span>
+        <span>{{ 'student_discount.modal.back' | t }}</span>
+      </button>
+      <h2>{{ 'student_discount.modal.email_title' | t }}</h2>
+      <p class="student-discount-dialog__lead">{{ 'student_discount.modal.email_lead' | t }}</p>
+      <form data-sd-email-form novalidate>
+        <div class="student-discount-dialog__email-row">
+          <input type="email" name="email" autocomplete="email" maxlength="254" placeholder="{{ 'student_discount.modal.school_email' | t }}" aria-label="{{ 'student_discount.modal.school_email' | t }}" required>
+          <button type="submit" disabled>{{ 'student_discount.modal.submit' | t }}</button>
+        </div>
+        <p class="student-discount-dialog__error" data-sd-email-error hidden></p>
+      </form>
+
+      <div class="student-discount-dialog__alternative" data-sd-alternative hidden>
+        <strong>{{ 'student_discount.modal.email_unverified' | t }}</strong>
+        <p>{{ 'student_discount.modal.use_id_help' | t }}</p>
+        <button type="button" class="student-discount-dialog__primary" data-sd-open-id>{{ 'student_discount.modal.fill_information' | t }}</button>
+      </div>
+    </div>
+
+    <div data-sd-view="student-id" hidden>
+      <button type="button" class="student-discount-dialog__back" data-sd-back-method>
+        <span aria-hidden="true">←</span>
+        <span>{{ 'student_discount.modal.back' | t }}</span>
+      </button>
+      <section class="student-discount-dialog__id-section" data-sd-id-section>
+        <h2>{{ 'student_discount.modal.id_title' | t }}</h2>
+        <p>{{ 'student_discount.modal.id_lead' | t }}</p>
+        <form class="student-discount-dialog__id-form" data-sd-id-form>
+          <label><span>{{ 'student_discount.modal.full_name' | t }}</span><input type="text" name="fullName" autocomplete="name" minlength="2" maxlength="120" required></label>
+          <label><span>{{ 'student_discount.modal.contact_email' | t }}</span><input type="email" name="email" autocomplete="email" maxlength="254" required></label>
+          <label class="student-discount-dialog__file">
+            <span>{{ 'student_discount.modal.student_id_photo' | t }}</span>
+            <span class="student-discount-dialog__upload">
+              <input type="file" name="studentId" accept="image/jpeg,image/png,image/webp" required>
+              <span class="student-discount-dialog__upload-placeholder" data-sd-upload-placeholder>
+                <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M16 36h-4a8 8 0 0 1-.7-16A13 13 0 0 1 36 18a9 9 0 0 1 0 18h-4M24 14v24m-8-16 8-8 8 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <strong>{{ 'student_discount.modal.upload_prompt' | t }}</strong>
+              </span>
+              <img data-sd-id-preview alt="{{ 'student_discount.modal.preview_alt' | t }}" width="620" height="240" hidden>
+              <span class="student-discount-dialog__file-name" data-sd-file-name hidden></span>
+              <button type="button" class="student-discount-dialog__clear-file" data-sd-clear-file aria-label="{{ 'student_discount.modal.remove_photo' | t }}" hidden>×</button>
+            </span>
+            <small>{{ 'student_discount.modal.upload_help' | t }}</small>
+          </label>
+          <label class="student-discount-dialog__consent">
+            <input type="checkbox" name="privacyConsent" value="agreed" required>
+            <span>{{ 'student_discount.modal.consent' | t }}</span>
+          </label>
+          <label class="student-discount-dialog__honeypot" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+          <p class="student-discount-dialog__error" data-sd-id-error hidden></p>
+          <button type="submit" class="student-discount-dialog__primary">{{ 'student_discount.modal.submit_review' | t }}</button>
+        </form>
+      </section>
+    </div>
+
+    <div data-sd-view="success" hidden>
+      <div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div>
+      <h2 data-sd-success-title>{{ 'student_discount.modal.submitted' | t }}</h2>
+      <p class="student-discount-dialog__lead" data-sd-success-message></p>
+      <button type="button" class="student-discount-dialog__primary" data-sd-done>{{ 'student_discount.modal.done' | t }}</button>
+    </div>
+
+    <div class="student-discount-dialog__code-result" data-sd-view="code" hidden>
+      <div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div>
+      <p class="student-discount-dialog__eyebrow">{{ 'student_discount.modal.approved' | t }}</p>
+      <h2>{{ 'student_discount.modal.code_ready' | t }}</h2>
+      <div class="student-discount-dialog__code-card">
+        <span>{{ 'student_discount.modal.your_code' | t }}</span>
+        <strong data-sd-code></strong>
+        <button type="button" class="student-discount-dialog__copy" data-sd-copy>{{ 'student_discount.modal.copy_code' | t }}</button>
+      </div>
+      <p class="student-discount-dialog__code-status" data-sd-code-status hidden></p>
+      <p class="student-discount-dialog__code-expiry" data-sd-code-expiry hidden></p>
+      <p class="student-discount-dialog__terms-note" data-sd-code-terms hidden></p>
+      <p class="student-discount-dialog__copy-feedback" data-sd-copy-feedback aria-live="polite"></p>
+      <p class="student-discount-dialog__delivery" data-sd-code-message role="status"></p>
+      <p class="student-discount-dialog__checkout-note">{{ 'student_discount.modal.checkout_note' | t }}</p>
+      <button type="button" class="student-discount-dialog__primary" data-sd-code-done>{{ 'student_discount.modal.continue_shopping' | t }}</button>
+    </div>
+  </div>
+</div>

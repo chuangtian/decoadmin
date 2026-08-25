@@ -1,0 +1,128 @@
+{% liquid
+  assign selected_image = block.settings.image
+  assign image_alt = block.settings.image_alt | default: block.settings.text
+  assign app_proxy_path = app.metafields.deco_student_discount.proxy_path.value | default: '/apps/deco-student-discount'
+%}
+
+{% if block.settings.enabled %}
+  <div
+    class="student-discount-app student-discount-app--{{ block.settings.alignment }}"
+    data-student-discount-app
+    data-proxy-path="{{ app_proxy_path | escape }}"
+    {{ block.shopify_attributes }}
+  >
+    <button
+      type="button"
+      class="student-discount-app__trigger student-discount-app__trigger--{{ block.settings.content_type }}"
+      data-student-discount-trigger
+      aria-haspopup="dialog"
+      style="--sd-background: {{ block.settings.background_color }}; --sd-text: {{ block.settings.text_color }}; --sd-radius: {{ block.settings.corner_radius }}px; --sd-max-width: {{ block.settings.max_width }}px;"
+    >
+      {% if block.settings.content_type == 'image' and selected_image != blank %}
+        {{
+          selected_image
+          | image_url: width: 1600
+          | image_tag:
+            class: 'student-discount-app__image',
+            loading: 'lazy',
+            widths: '320, 480, 640, 960, 1280, 1600',
+            sizes: '(max-width: 749px) calc(100vw - 32px), 720px',
+            alt: image_alt
+        }}
+      {% else %}
+        <span class="student-discount-app__text">{{ block.settings.text | escape }}</span>
+      {% endif %}
+    </button>
+
+    {% render 'student-discount-modal', shop_name: shop.name, block_id: block.id %}
+  </div>
+{% endif %}
+
+<script src="{{ 'student-discount-portal.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "t:student_discount.name",
+  "target": "section",
+  "stylesheet": "student-discount.css",
+  "javascript": "student-discount.js",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "t:student_discount.settings.enabled",
+      "default": true
+    },
+    {
+      "type": "select",
+      "id": "content_type",
+      "label": "t:student_discount.settings.content_type",
+      "options": [
+        { "value": "text", "label": "t:student_discount.options.text" },
+        { "value": "image", "label": "t:student_discount.options.image" }
+      ],
+      "default": "image"
+    },
+    {
+      "type": "text",
+      "id": "text",
+      "label": "t:student_discount.settings.text",
+      "default": "Verify your student status and get a student discount"
+    },
+    {
+      "type": "image_picker",
+      "id": "image",
+      "label": "t:student_discount.settings.image"
+    },
+    {
+      "type": "text",
+      "id": "image_alt",
+      "label": "t:student_discount.settings.image_alt",
+      "default": "Verify your student status"
+    },
+    {
+      "type": "select",
+      "id": "alignment",
+      "label": "t:student_discount.settings.alignment",
+      "options": [
+        { "value": "left", "label": "t:student_discount.options.left" },
+        { "value": "center", "label": "t:student_discount.options.center" },
+        { "value": "right", "label": "t:student_discount.options.right" }
+      ],
+      "default": "center"
+    },
+    {
+      "type": "range",
+      "id": "max_width",
+      "min": 240,
+      "max": 1200,
+      "step": 20,
+      "unit": "px",
+      "label": "t:student_discount.settings.max_width",
+      "default": 720
+    },
+    {
+      "type": "color",
+      "id": "background_color",
+      "label": "t:student_discount.settings.background_color",
+      "default": "#111111"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "t:student_discount.settings.text_color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "range",
+      "id": "corner_radius",
+      "min": 0,
+      "max": 32,
+      "step": 1,
+      "unit": "px",
+      "label": "t:student_discount.settings.corner_radius",
+      "default": 0
+    }
+  ]
+}
+{% endschema %}

@@ -1,0 +1,36 @@
+{
+  "name": "student-discount",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "extensions/*"
+  ],
+  "scripts": {
+    "shopify": "shopify",
+    "build": "npm run build:local",
+    "build:storefront": "terser scripts/student-discount-storefront.js --compress --mangle --output extensions/student-discount-block/assets/student-discount.js",
+    "build:local": "npm run build:storefront && shopify app build --config local",
+    "build:test": "npm run build:storefront && shopify app build --config test",
+    "build:production": "npm run build:storefront && shopify app build --config production",
+    "dev": "shopify app dev --config local",
+    "dev:test-store": "sh scripts/dev-test-store.sh",
+    "dev:test-store:clean": "shopify app dev clean --config local --store macfoxebike.myshopify.com",
+    "dev:local-preview": "node scripts/local-preview-server.mjs",
+    "check": "npm run check:config && npm run build:local",
+    "check:config": "shopify app config validate --config local --json && shopify app config validate --config test --json && shopify app config validate --config production --json",
+    "info": "shopify app info --config local",
+    "generate": "shopify app generate",
+    "deploy:local": "shopify app deploy --config local",
+    "deploy:test": "shopify app deploy --config test",
+    "deploy:production": "shopify app deploy --config production"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "terser": "^5.50.0"
+  },
+  "trustedDependencies": [
+    "@shopify/plugin-cloudflare"
+  ],
+  "author": "tianchuang",
+  "private": true
+}

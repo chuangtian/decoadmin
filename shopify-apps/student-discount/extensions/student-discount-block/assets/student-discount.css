@@ -1,0 +1,699 @@
+.student-discount-app,
+.student-discount-app * {
+  box-sizing: border-box;
+}
+
+.student-discount-app--left { text-align: left; }
+.student-discount-app--center { text-align: center; }
+.student-discount-app--right { text-align: right; }
+
+.student-discount-app__trigger {
+  display: inline-flex;
+  width: min(100%, var(--sd-max-width));
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: var(--sd-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.student-discount-app__trigger:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.student-discount-app__trigger:hover,
+.student-discount-app__trigger:focus,
+.student-discount-app__trigger:focus-visible,
+.student-discount-app__trigger:active {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+.student-discount-app__trigger--text {
+  padding: 14px 24px;
+  background: var(--sd-background);
+  color: var(--sd-text);
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.student-discount-app__trigger--text:hover,
+.student-discount-app__trigger--text:focus,
+.student-discount-app__trigger--text:focus-visible,
+.student-discount-app__trigger--text:active {
+  background: var(--sd-background) !important;
+  color: var(--sd-text) !important;
+}
+
+.student-discount-app__trigger::before,
+.student-discount-app__trigger::after,
+.student-discount-dialog button::before,
+.student-discount-dialog button::after {
+  display: none !important;
+  content: none !important;
+}
+
+.student-discount-app__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.student-discount-dialog[hidden],
+.student-discount-dialog [hidden] {
+  display: none !important;
+}
+
+.student-discount-dialog {
+  position: fixed !important;
+  z-index: 2147483500 !important;
+  inset: 0 !important;
+  display: flex;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 20px !important;
+  color: #111;
+  font-family: inherit;
+  text-align: left;
+  transform: none !important;
+  contain: none !important;
+  isolation: isolate;
+}
+
+.student-discount-dialog,
+.student-discount-dialog * {
+  box-sizing: border-box;
+}
+
+.student-discount-dialog__backdrop {
+  position: absolute !important;
+  z-index: 0;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: rgba(0, 0, 0, .64) !important;
+  box-shadow: none !important;
+  opacity: 1;
+  transform: none !important;
+  float: none !important;
+  cursor: default;
+}
+
+.student-discount-dialog__backdrop:hover,
+.student-discount-dialog__backdrop:focus,
+.student-discount-dialog__backdrop:focus-visible,
+.student-discount-dialog__backdrop:active {
+  background: rgba(0, 0, 0, .64) !important;
+  box-shadow: none !important;
+  opacity: 1;
+  transform: none;
+}
+
+.student-discount-dialog__panel {
+  position: relative !important;
+  z-index: 1;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  display: block;
+  width: min(640px, 100%) !important;
+  min-width: 0 !important;
+  max-width: 640px !important;
+  max-height: calc(100dvh - 40px) !important;
+  margin: auto !important;
+  overflow-y: auto !important;
+  padding: clamp(24px, 3.2vw, 36px);
+  transform: none !important;
+  float: none !important;
+  background: #fff;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, .34);
+  overscroll-behavior: contain;
+}
+
+.student-discount-dialog__close {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  margin: -18px -18px 4px auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font: 400 32px/1 Arial, sans-serif;
+  cursor: pointer;
+}
+
+.student-discount-dialog__close:hover,
+.student-discount-dialog__close:focus,
+.student-discount-dialog__close:focus-visible,
+.student-discount-dialog__close:active {
+  background: transparent !important;
+  color: #111 !important;
+}
+
+.student-discount-dialog__brand {
+  display: flex;
+  justify-content: center;
+  margin: -5px auto 20px;
+  color: #111;
+  font-size: clamp(20px, 3vw, 28px);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  text-align: center;
+}
+
+.student-discount-dialog__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  font-size: 15px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.student-discount-dialog__back:hover,
+.student-discount-dialog__back:focus,
+.student-discount-dialog__back:focus-visible,
+.student-discount-dialog__back:active {
+  background: transparent !important;
+  color: #111 !important;
+}
+
+.student-discount-dialog__back span[aria-hidden="true"] {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.student-discount-dialog h2,
+.student-discount-dialog h3 {
+  color: #111;
+  text-align: center;
+}
+
+.student-discount-dialog h2 {
+  margin: 0 auto 18px;
+  font-size: clamp(26px, 3.4vw, 34px);
+  line-height: 1.12;
+}
+
+.student-discount-dialog h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.student-discount-dialog__lead,
+.student-discount-dialog__id-section > p {
+  margin: 0 auto 24px;
+  color: #444;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.student-discount-dialog__email-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.student-discount-dialog input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 16px;
+  border: 1px solid #aaa;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 15px;
+}
+
+.student-discount-dialog input:focus {
+  border-color: #111;
+  outline: 2px solid #111;
+  outline-offset: 1px;
+}
+
+.student-discount-dialog input.is-invalid {
+  border-color: #d92d20;
+  background: #fff8f7;
+  outline-color: #d92d20;
+}
+
+.student-discount-dialog button[type="submit"],
+.student-discount-dialog__primary {
+  min-height: 50px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 0;
+  background: #222;
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.student-discount-dialog button[type="submit"]:hover,
+.student-discount-dialog button[type="submit"]:focus,
+.student-discount-dialog button[type="submit"]:focus-visible,
+.student-discount-dialog button[type="submit"]:active,
+.student-discount-dialog__primary:hover,
+.student-discount-dialog__primary:focus,
+.student-discount-dialog__primary:focus-visible,
+.student-discount-dialog__primary:active {
+  background: #222 !important;
+  color: #fff !important;
+}
+
+.student-discount-dialog button[disabled] {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.student-discount-dialog__error {
+  margin: 12px auto 0;
+  color: #c32b1c;
+  font-size: 14px;
+  text-align: center;
+}
+
+.student-discount-dialog__alternative {
+  margin: 18px auto 0;
+  text-align: center;
+}
+
+.student-discount-dialog__alternative strong {
+  display: block;
+  color: #c32b1c;
+  font-size: 18px;
+}
+
+.student-discount-dialog__alternative p {
+  margin: 8px 0 16px;
+}
+
+.student-discount-dialog__methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.student-discount-dialog__method {
+  text-align: center;
+}
+
+.student-discount-dialog__method .student-discount-dialog__primary {
+  width: 100%;
+}
+
+.student-discount-dialog__method p {
+  margin: 12px auto 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.student-discount-dialog__id-section {
+  margin: 0 auto;
+}
+
+.student-discount-dialog__id-section > p {
+  margin-top: 10px;
+  font-size: 15px;
+}
+
+.student-discount-dialog__id-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.student-discount-dialog__id-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.student-discount-dialog__file,
+.student-discount-dialog__consent,
+.student-discount-dialog__id-form .student-discount-dialog__error,
+.student-discount-dialog__id-form button {
+  grid-column: 1 / -1;
+}
+
+.student-discount-dialog__upload {
+  position: relative;
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed #999;
+  cursor: pointer;
+}
+
+.student-discount-dialog__upload input[type="file"] {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.student-discount-dialog__upload-placeholder {
+  display: grid;
+  max-width: 400px;
+  place-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.student-discount-dialog__upload-placeholder svg {
+  width: 38px;
+  height: 38px;
+}
+
+.student-discount-dialog__upload img {
+  display: block;
+  width: 100%;
+  max-height: 205px;
+  padding: 10px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.student-discount-dialog__file-name {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  overflow: hidden;
+  padding: 7px 10px;
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.student-discount-dialog__clear-file {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .76);
+  color: #fff;
+  font: 400 24px/1 Arial, sans-serif;
+  cursor: pointer;
+}
+
+.student-discount-dialog__clear-file:hover,
+.student-discount-dialog__clear-file:focus,
+.student-discount-dialog__clear-file:focus-visible,
+.student-discount-dialog__clear-file:active {
+  background: rgba(0, 0, 0, .76) !important;
+  color: #fff !important;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.student-discount-dialog__consent {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 10px !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.student-discount-dialog__consent input {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin: 0;
+  padding: 0;
+  accent-color: #222;
+}
+
+.student-discount-dialog small {
+  color: #666;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.student-discount-dialog__honeypot {
+  position: absolute !important;
+  left: -10000px !important;
+  width: 1px !important;
+  overflow: hidden !important;
+}
+
+.student-discount-dialog__success-icon {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: #1f8f55;
+  color: #fff;
+  font-size: 27px;
+}
+
+.student-discount-dialog__code-result {
+  text-align: center;
+}
+
+.student-discount-dialog__eyebrow {
+  margin: 0 0 10px;
+  color: #1f6f49;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.student-discount-dialog__delivery {
+  max-width: 560px;
+  margin: 12px auto 18px;
+  padding: 10px 14px;
+  border: 1px solid #b7dfc8;
+  background: #f0faf4;
+  color: #175c3d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.student-discount-dialog__delivery.is-warning {
+  border-color: #f2cf87;
+  background: #fff8e8;
+  color: #7a4b00;
+}
+
+.student-discount-dialog__code-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 18px;
+  border: 2px solid #222;
+  background: #f7f7f5;
+  text-align: left;
+}
+
+.student-discount-dialog__code-card > span {
+  grid-column: 1 / -1;
+  color: #666;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.student-discount-dialog__code-card strong {
+  overflow-wrap: anywhere;
+  color: #111;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(20px, 3.4vw, 26px);
+  letter-spacing: .04em;
+  line-height: 1.2;
+}
+
+.student-discount-dialog__copy {
+  min-height: 46px;
+  padding: 0 18px;
+  border: 1px solid #222;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.student-discount-dialog__copy:hover,
+.student-discount-dialog__copy:focus,
+.student-discount-dialog__copy:focus-visible,
+.student-discount-dialog__copy:active {
+  background: #fff !important;
+  color: #111 !important;
+}
+
+.student-discount-dialog__copy-feedback {
+  min-height: 21px;
+  margin: 6px 0 0;
+  color: #1f6f49;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.student-discount-dialog__code-status,
+.student-discount-dialog__code-expiry {
+  max-width: 560px;
+  margin: 10px auto 0;
+  color: #333;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.student-discount-dialog__code-expiry {
+  margin-top: 2px;
+  color: #555;
+  font-weight: 500;
+}
+
+.student-discount-dialog__terms-note {
+  max-width: 560px;
+  margin: 10px auto 0;
+  color: #555;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.student-discount-dialog__checkout-note {
+  margin: 6px auto 22px;
+  color: #555;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.student-discount-dialog__code-result > .student-discount-dialog__primary {
+  min-width: 220px;
+}
+
+@media (max-width: 640px) {
+  .student-discount-dialog {
+    padding: 8px !important;
+  }
+
+  .student-discount-app__trigger {
+    width: 100%;
+  }
+
+  .student-discount-dialog__panel {
+    top: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    max-width: 640px !important;
+    max-height: calc(100dvh - 16px) !important;
+    margin: auto !important;
+    padding: 18px 15px max(20px, env(safe-area-inset-bottom));
+    transform: none !important;
+  }
+
+  .student-discount-dialog__close {
+    margin: -8px -6px 2px auto;
+  }
+
+  .student-discount-dialog__brand {
+    margin: -4px auto 20px;
+  }
+
+  .student-discount-dialog h2 {
+    margin-bottom: 14px;
+    font-size: clamp(25px, 8vw, 30px);
+  }
+
+  .student-discount-dialog__lead {
+    margin-bottom: 20px;
+    font-size: 15px;
+  }
+
+  .student-discount-dialog__methods,
+  .student-discount-dialog__email-row,
+  .student-discount-dialog__id-form {
+    grid-template-columns: 1fr;
+  }
+
+  .student-discount-dialog button[type="submit"],
+  .student-discount-dialog__primary {
+    width: 100%;
+    min-height: 50px;
+  }
+
+  .student-discount-dialog__upload {
+    min-height: 150px;
+  }
+
+  .student-discount-dialog__code-card {
+    grid-template-columns: 1fr;
+    padding: 18px;
+    text-align: center;
+  }
+
+  .student-discount-dialog__copy {
+    width: 100%;
+  }
+}
