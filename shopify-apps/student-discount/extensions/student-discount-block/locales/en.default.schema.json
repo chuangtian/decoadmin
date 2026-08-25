@@ -1,0 +1,24 @@
+{
+  "student_discount": {
+    "name": "Student discount",
+    "settings": {
+      "enabled": "Show this module",
+      "content_type": "Content type",
+      "text": "Text",
+      "image": "Image",
+      "image_alt": "Image alt text",
+      "alignment": "Alignment",
+      "max_width": "Maximum width",
+      "background_color": "Text background",
+      "text_color": "Text color",
+      "corner_radius": "Corner radius"
+    },
+    "options": {
+      "text": "Text",
+      "image": "Image",
+      "left": "Left",
+      "center": "Center",
+      "right": "Right"
+    }
+  }
+}

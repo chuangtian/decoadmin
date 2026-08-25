@@ -273,6 +273,94 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.resources.0.link', 'https://example.test/post'));
     }
 
+    public function test_brand_media_content_details_filter_paginate_stably_and_remain_store_scoped(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $session = $this->contextSession($organization, $store);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Brand Store', 'shopify_domain' => 'other-brand.myshopify.com', 'status' => 'active',
+        ]);
+
+        foreach (range(1, 25) as $index) {
+            $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', sprintf('post-%02d', $index), [
+                '发布日期' => '2026-08-20',
+                '平台' => 'Instagram',
+                '描述' => sprintf('Needle content %02d', $index),
+                '帖子类型' => 'Reels',
+                '浏览量' => 1000 + $index,
+            ]);
+        }
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'excluded-post', [
+            '发布日期' => '2026-08-20', '平台' => 'Instagram', '描述' => 'Needle excluded', '帖子类型' => 'Reels', '浏览量' => 150000,
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'facebook-post', [
+            '发布日期' => '2026-08-20', '平台' => 'Facebook', '描述' => 'Needle facebook', '帖子类型' => '图片', '观看量' => 800,
+        ]);
+        $this->archiveRecord($organization, $otherStore, 'natural-traffic:social', '官媒内容', 'other-store-post', [
+            '发布日期' => '2026-08-20', '平台' => 'Instagram', '描述' => 'Needle tenant leak', '帖子类型' => 'Reels', '浏览量' => 999999,
+        ]);
+
+        $this->actingAs($user)->withSession($session)
+            ->get(route('natural-traffic.brand-media', [
+                'date_from' => '2026-08-20',
+                'date_to' => '2026-08-20',
+                'comparison' => 'none',
+                'content_keyword' => 'needle',
+                'content_platform' => 'instagram',
+                'content_type' => 'reels',
+                'content_status' => 'included',
+                'content_page' => 2,
+                'content_per_page' => 10,
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.post_filters.keyword', 'needle')
+                ->where('dashboard.post_filters.platform', 'Instagram')
+                ->where('dashboard.post_filters.post_type', 'Reels')
+                ->where('dashboard.post_filters.aggregation_status', 'included')
+                ->where('dashboard.post_filters.page', 2)
+                ->where('dashboard.post_filters.per_page', 10)
+                ->where('dashboard.posts_pagination.current_page', 2)
+                ->where('dashboard.posts_pagination.last_page', 3)
+                ->where('dashboard.posts_pagination.total', 25)
+                ->where('dashboard.posts_pagination.from', 11)
+                ->where('dashboard.posts_pagination.to', 20)
+                ->where('dashboard.posts.0.record_id', 'post-11')
+                ->where('dashboard.posts.9.record_id', 'post-20')
+                ->has('dashboard.posts', 10)
+                ->where('dashboard.kpis.0.value', 26)
+                ->where('dashboard.source.record_count', 27)
+                ->where('dashboard.post_filter_options.platforms', ['Instagram', 'Facebook', 'YouTube'])
+                ->where('dashboard.post_filter_options.aggregation_statuses.1.value', 'excluded'));
+
+        $this->actingAs($user)->withSession($session)
+            ->get(route('natural-traffic.brand-media', [
+                'date_from' => '2026-08-20', 'date_to' => '2026-08-20',
+                'content_platform' => 'TikTok', 'content_status' => 'unknown',
+                'content_page' => -50, 'content_per_page' => 999,
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.post_filters.platform', '')
+                ->where('dashboard.post_filters.aggregation_status', '')
+                ->where('dashboard.post_filters.page', 1)
+                ->where('dashboard.post_filters.per_page', 20)
+                ->where('dashboard.posts_pagination.total', 27)
+                ->has('dashboard.posts', 20));
+
+        $this->actingAs($user)->withSession($session)
+            ->get(route('natural-traffic.brand-media', [
+                'date_from' => '2026-08-20', 'date_to' => '2026-08-20',
+                'content_page' => 999999, 'content_per_page' => 20,
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.post_filters.page', 2)
+                ->where('dashboard.posts_pagination.current_page', 2)
+                ->where('dashboard.posts_pagination.last_page', 2)
+                ->has('dashboard.posts', 7));
+    }
+
     public function test_seo_overview_reads_only_local_database_and_calculates_anonymous_queries(): void
     {
         [$user, $organization, $store] = $this->context('operator');

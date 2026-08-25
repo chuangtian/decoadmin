@@ -1,0 +1,32 @@
+client_id = "89f4215fdf2d0ffa9be3c7586fe50234"
+name = "Deco-学生优惠-local"
+handle = "deco-student-discount-local"
+application_url = "https://consistent-menu-herself-telephony.trycloudflare.com/shopify-app/student-discounts"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://consistent-menu-herself-telephony.trycloudflare.com/api/shopify-app/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://consistent-menu-herself-telephony.trycloudflare.com/api/shopify-app/webhooks"
+
+[access_scopes]
+scopes = "read_discounts,write_discounts,read_products,write_app_proxy"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://consistent-menu-herself-telephony.trycloudflare.com/api/shopify-app/auth/callback" ]
+
+[app_proxy]
+url = "https://consistent-menu-herself-telephony.trycloudflare.com/api/shopify-app/student-discounts/proxy"
+prefix = "apps"
+subpath = "deco-student-local"

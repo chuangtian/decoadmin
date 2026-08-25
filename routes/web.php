@@ -38,6 +38,7 @@ use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyStudentDiscountAppController;
+use App\Http\Controllers\ShopifyStudentDiscountWebhookController;
 use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreAlertController;
 use App\Http\Controllers\StoreBusinessCredentialController;
@@ -71,6 +72,14 @@ Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'
 Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('shopify.webhooks.receive');
+
+Route::get('/shopify-app/student-discounts', [ShopifyStudentDiscountAppController::class, 'management'])
+    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->name('student-discounts.shopify-app.management');
+
+Route::post('/api/shopify-app/webhooks', ShopifyStudentDiscountWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('student-discounts.shopify-app.webhooks');
 
 Route::post('/shopify/pixels/{store:analytics_ingest_key}', StorefrontEventController::class)
     ->middleware('throttle:300,1')

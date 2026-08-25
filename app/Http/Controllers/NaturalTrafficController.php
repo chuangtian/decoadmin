@@ -87,6 +87,8 @@ class NaturalTrafficController extends Controller
             'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => $store->currency ?: 'USD'],
             'dashboard' => $trafficDashboard->forChannel($store, $channel, $request->only([
                 'date_from', 'date_to', 'comparison', 'affiliate',
+                'content_keyword', 'content_platform', 'content_type', 'content_status',
+                'content_page', 'content_per_page',
             ])),
             'configured' => $trafficSync->hasConfiguration($store, $channel),
             'canSync' => $request->user()?->hasPermission('sync.run', $organization, $store) ?? false,
@@ -165,16 +167,20 @@ class NaturalTrafficController extends Controller
                     'scope' => 'store',
                     'platform' => $summary['platform'],
                     'rows' => $summary['rows'],
+                    'unique_rows' => $summary['unique_rows'],
                     'created' => $summary['created'],
                     'updated' => $summary['updated'],
+                    'unchanged' => $summary['unchanged'],
+                    'skipped_stale' => $summary['skipped_stale'],
                     'outliers' => $summary['outliers'],
                     'checksum' => $summary['checksum'],
                 ],
             ]);
 
             return back()->with('success', sprintf(
-                '%s CSV 已导入：%d 条（新增 %d、更新 %d）；%d 条 IG 异常爆款保留在明细并从汇总中排除。',
-                $summary['platform'], $summary['rows'], $summary['created'], $summary['updated'], $summary['outliers'],
+                '%s CSV 已处理：%d 条（新增 %d、更新 %d、未变化 %d、跳过旧快照 %d）；%d 条 IG 异常爆款保留在明细并从汇总中排除。',
+                $summary['platform'], $summary['rows'], $summary['created'], $summary['updated'],
+                $summary['unchanged'], $summary['skipped_stale'], $summary['outliers'],
             ));
         } catch (Throwable $exception) {
             report($exception);
