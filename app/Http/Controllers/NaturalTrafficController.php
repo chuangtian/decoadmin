@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AuditLog;
 use App\Models\SeoAnalyticsSyncRun;
 use App\Models\Store;
+use App\Services\NaturalTraffic\BrandSocialCsvImportService;
 use App\Services\NaturalTraffic\NaturalTrafficDashboardService;
 use App\Services\NaturalTraffic\NaturalTrafficDataSyncService;
 use App\Services\SeoAnalytics\SeoAnalyticsConfigurationService;
@@ -131,6 +132,53 @@ class NaturalTrafficController extends Controller
         } catch (Throwable $exception) {
             report($exception);
             $message = preg_replace('/[A-Za-z0-9_-]{24,}/', '[已隐藏]', $exception->getMessage()) ?: '同步失败，请检查当前项目的数据源配置。';
+
+            return back()->with('error', mb_substr($message, 0, 500));
+        }
+    }
+
+    public function importBrandMedia(
+        Request $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialCsvImportService $importer,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('sync.run', $organization, $store), 403);
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
+        ]);
+
+        try {
+            $summary = $importer->import($store, $validated['file']);
+            AuditLog::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'user_id' => $request->user()?->id,
+                'action' => 'brand_social_csv_imported',
+                'subject_type' => Store::class,
+                'subject_id' => $store->id,
+                'metadata' => [
+                    'scope' => 'store',
+                    'platform' => $summary['platform'],
+                    'rows' => $summary['rows'],
+                    'created' => $summary['created'],
+                    'updated' => $summary['updated'],
+                    'outliers' => $summary['outliers'],
+                    'checksum' => $summary['checksum'],
+                ],
+            ]);
+
+            return back()->with('success', sprintf(
+                '%s CSV 已导入：%d 条（新增 %d、更新 %d）；%d 条 IG 异常爆款保留在明细并从汇总中排除。',
+                $summary['platform'], $summary['rows'], $summary['created'], $summary['updated'], $summary['outliers'],
+            ));
+        } catch (Throwable $exception) {
+            report($exception);
+            $message = preg_replace('/[A-Za-z0-9_-]{24,}/', '[已隐藏]', $exception->getMessage()) ?: 'CSV 导入失败，请使用平台原始导出文件。';
 
             return back()->with('error', mb_substr($message, 0, 500));
         }

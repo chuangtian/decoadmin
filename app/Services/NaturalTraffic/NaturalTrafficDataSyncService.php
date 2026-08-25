@@ -7,6 +7,7 @@ use App\Models\Store;
 use App\Services\Feishu\FeishuBitableArchiveSyncService;
 use App\Services\Feishu\FeishuSpreadsheetArchiveSyncService;
 use App\Services\StoreFeishuDataLinkService;
+use App\Services\YouTubeAnalytics\YouTubeAnalyticsSyncService;
 use RuntimeException;
 use Throwable;
 
@@ -23,6 +24,7 @@ class NaturalTrafficDataSyncService
         private StoreFeishuDataLinkService $dataLinks,
         private FeishuBitableArchiveSyncService $bitable,
         private FeishuSpreadsheetArchiveSyncService $spreadsheet,
+        private YouTubeAnalyticsSyncService $youtube,
     ) {}
 
     /** @return array{channel: string, tables: int, fields: int, records: int, synced_at: string} */
@@ -33,7 +35,7 @@ class NaturalTrafficDataSyncService
         }
 
         $parts = match ($channel) {
-            'brand-media' => [$this->syncWikiSection($store, 'social', 'social_wiki_node', 'natural-traffic:social')],
+            'brand-media' => $this->syncBrandMedia($store),
             'influencer-operations' => $this->syncKol($store),
             'edm-email' => [
                 $this->syncWikiSection($store, 'sequence', 'sequence_wiki_node', 'natural-traffic:sequence'),
@@ -113,7 +115,8 @@ class NaturalTrafficDataSyncService
     public function hasConfiguration(Store $store, string $channel): bool
     {
         return match ($channel) {
-            'brand-media' => filled($this->values($store, 'social')['social_wiki_node'] ?? null),
+            'brand-media' => filled($this->values($store, 'social')['social_wiki_node'] ?? null)
+                || $this->youtube->isConfigured($store),
             'influencer-operations' => filled($this->values($store, 'kol')['kol_app_token'] ?? null)
                 && filled($this->values($store, 'kol')['kol_table_id'] ?? null),
             'edm-email' => filled($this->values($store, 'sequence')['sequence_wiki_node'] ?? null)
@@ -122,6 +125,23 @@ class NaturalTrafficDataSyncService
                 && filled($this->values($store, 'affiliate')['affiliate_table_id'] ?? null),
             default => false,
         };
+    }
+
+    /** @return list<array{tables: int, fields: int, records: int}> */
+    private function syncBrandMedia(Store $store): array
+    {
+        $results = [];
+        if (filled($this->values($store, 'social')['social_wiki_node'] ?? null)) {
+            $results[] = $this->syncWikiSection($store, 'social', 'social_wiki_node', 'natural-traffic:social');
+        }
+        if ($this->youtube->isConfigured($store)) {
+            $results[] = $this->youtube->sync($store);
+        }
+        if ($results === []) {
+            throw new RuntimeException('当前店铺尚未配置品牌官媒同步来源；Instagram / Facebook 可手动导入 CSV，YouTube 需完成 OAuth 授权。');
+        }
+
+        return $results;
     }
 
     /** @return list<array{tables: int, fields: int, records: int}> */

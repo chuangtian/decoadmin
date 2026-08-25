@@ -106,6 +106,67 @@ class NaturalTrafficSyncTest extends TestCase
         $this->assertSame('Partner A', FeishuBitableRecord::query()->sole()->fields_encrypted['Name']);
     }
 
+    public function test_youtube_official_api_sync_archives_channel_videos(): void
+    {
+        [, $store] = $this->storeContext('youtube');
+        foreach (['client_id' => 'youtube-client', 'client_secret' => 'youtube-secret', 'refresh_token' => 'youtube-refresh'] as $key => $value) {
+            $this->youtubeCredential($store, $key, $value);
+        }
+
+        Http::fake(function (Request $request) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            if ($path === '/token') {
+                $this->assertSame('youtube-refresh', $request->data()['refresh_token'] ?? null);
+
+                return Http::response(['access_token' => 'youtube-access', 'expires_in' => 3600]);
+            }
+            if ($path === '/youtube/v3/channels') {
+                $this->assertSame('Bearer youtube-access', $request->header('Authorization')[0] ?? null);
+
+                return Http::response(['items' => [[
+                    'id' => 'channel-1',
+                    'snippet' => ['title' => 'Macfox YouTube'],
+                    'contentDetails' => ['relatedPlaylists' => ['uploads' => 'uploads-1']],
+                ]]]);
+            }
+            if ($path === '/youtube/v3/playlistItems') {
+                return Http::response(['items' => [
+                    ['contentDetails' => ['videoId' => 'video-1']],
+                    ['contentDetails' => ['videoId' => 'video-2']],
+                ]]);
+            }
+            if ($path === '/youtube/v3/videos') {
+                $this->assertSame('video-1,video-2', $request->data()['id'] ?? null);
+
+                return Http::response(['items' => [[
+                    'id' => 'video-1',
+                    'snippet' => ['title' => 'First ride', 'description' => 'Video one', 'publishedAt' => '2026-08-18T12:00:00Z'],
+                    'statistics' => ['viewCount' => '12345', 'likeCount' => '600', 'commentCount' => '20'],
+                    'contentDetails' => ['duration' => 'PT2M10S'],
+                ], [
+                    'id' => 'video-2',
+                    'snippet' => ['title' => 'Second ride', 'description' => 'Video two', 'publishedAt' => '2026-08-19T12:00:00Z'],
+                    'statistics' => ['viewCount' => '23456', 'likeCount' => '800', 'commentCount' => '32'],
+                    'contentDetails' => ['duration' => 'PT4M'],
+                ]]]);
+            }
+
+            return Http::response(['error' => 'unexpected'], 404);
+        });
+
+        $service = app(NaturalTrafficDataSyncService::class);
+        $this->assertTrue($service->hasConfiguration($store, 'brand-media'));
+        $result = $service->sync($store, 'brand-media');
+
+        $this->assertSame(1, $result['tables']);
+        $this->assertSame(2, $result['records']);
+        $records = FeishuBitableRecord::query()->orderBy('source_record_id')->get();
+        $this->assertCount(2, $records);
+        $this->assertSame('YouTube', $records[0]->fields_encrypted['平台']);
+        $this->assertSame(12345, $records[0]->fields_encrypted['浏览量']);
+        $this->assertStringNotContainsString('First ride', (string) DB::table('feishu_bitable_records')->pluck('fields_encrypted')->implode(' '));
+    }
+
     public function test_natural_traffic_database_sync_is_scheduled_daily(): void
     {
         $event = collect(app(Schedule::class)->events())
@@ -133,6 +194,17 @@ class NaturalTrafficSyncTest extends TestCase
             'organization_id' => $store->organization_id,
             'store_id' => $store->id,
             'provider' => 'feishu_data_links',
+            'credential_key' => $key,
+            'credential_value' => $value,
+        ]);
+    }
+
+    private function youtubeCredential(Store $store, string $key, string $value): void
+    {
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'provider' => 'youtube_analytics',
             'credential_key' => $key,
             'credential_value' => $value,
         ]);
