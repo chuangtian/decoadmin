@@ -251,9 +251,13 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('insights.acquisition.available', false)
             ->where('insights.devices.available', false)
             ->where('insights.locations.available', false)
+            ->where('insights.behavior.available', false)
             ->where('insights.customers.available', true)
             ->where('insights.pos.available', true)
             ->where('insights.pos.source', 'local_sync')
+            ->where('performance.schema', 'analytics-operating-metrics-v1')
+            ->where('performance.metrics.ad_spend.available', false)
+            ->where('performance.metrics.sessions.available', false)
             ->has('overview.sales_breakdown', 7)
             ->has('overview.order_statuses.financial'));
     }
@@ -277,6 +281,7 @@ class AnalyticsReportsCenterTest extends TestCase
             $this->assertStringContainsString('GROUP BY referrer_source', (string) ($variables['acquisition'] ?? ''));
             $this->assertStringContainsString('GROUP BY session_device_type', (string) ($variables['devices'] ?? ''));
             $this->assertStringContainsString('GROUP BY session_country', (string) ($variables['locations'] ?? ''));
+            $this->assertStringContainsString('sessions_with_cart_additions', (string) ($variables['behavior'] ?? ''));
 
             return Http::response(['data' => [
                 'acquisition' => ['tableData' => ['rows' => [[
@@ -302,6 +307,24 @@ class AnalyticsReportsCenterTest extends TestCase
                     'staff_id' => '601', 'staff_member_name' => 'Alex', 'orders' => '2',
                     'net_items_sold' => '5', 'net_sales' => '180', 'total_sales' => '200',
                 ]]], 'parseErrors' => []],
+                'behavior' => ['tableData' => [
+                    'columns' => [
+                        ['name' => 'opaque_comparison_sessions', 'dynamicColumnMetadata' => ['type' => 'COMPARISON_TOTALS', 'originalColumnName' => 'sessions', 'comparisonReference' => 'previous_period']],
+                        ['name' => 'opaque_percent_sessions', 'dynamicColumnMetadata' => ['type' => 'PERCENT_CHANGE_TOTALS', 'originalColumnName' => 'sessions', 'comparisonReference' => 'previous_period']],
+                        ['name' => 'opaque_comparison_cart', 'dynamicColumnMetadata' => ['type' => 'COMPARISON_TOTALS', 'originalColumnName' => 'sessions_with_cart_additions', 'comparisonReference' => 'previous_period']],
+                        ['name' => 'opaque_percent_cart', 'dynamicColumnMetadata' => ['type' => 'PERCENT_CHANGE_TOTALS', 'originalColumnName' => 'sessions_with_cart_additions', 'comparisonReference' => 'previous_period']],
+                        ['name' => 'opaque_comparison_checkout', 'dynamicColumnMetadata' => ['type' => 'COMPARISON_TOTALS', 'originalColumnName' => 'sessions_that_reached_checkout', 'comparisonReference' => 'previous_period']],
+                        ['name' => 'opaque_percent_checkout', 'dynamicColumnMetadata' => ['type' => 'PERCENT_CHANGE_TOTALS', 'originalColumnName' => 'sessions_that_reached_checkout', 'comparisonReference' => 'previous_period']],
+                    ],
+                    'rows' => [[
+                        'sessions__totals' => '20', 'sessions_with_cart_additions__totals' => '8',
+                        'sessions_that_reached_checkout__totals' => '5', 'sessions_that_completed_checkout__totals' => '4',
+                        'conversion_rate__totals' => '0.2', 'opaque_comparison_sessions' => '16',
+                        'opaque_percent_sessions' => '25', 'opaque_comparison_cart' => '6',
+                        'opaque_percent_cart' => '33.33', 'opaque_comparison_checkout' => '4',
+                        'opaque_percent_checkout' => '25',
+                    ]],
+                ], 'parseErrors' => []],
             ]]);
         });
 
@@ -317,6 +340,14 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('insights.devices.items.0.share', 80)
             ->where('insights.locations.items.0.label', 'Berlin')
             ->where('insights.locations.items.0.country', 'Germany')
+            ->where('insights.behavior.available', true)
+            ->where('insights.behavior.metrics.sessions.value', 20)
+            ->where('insights.behavior.metrics.add_to_cart.value', 8)
+            ->where('insights.behavior.metrics.checkout.value', 5)
+            ->where('performance.metrics.sessions.available', true)
+            ->where('performance.metrics.sessions.value', 20)
+            ->where('performance.metrics.add_to_cart.value', 8)
+            ->where('performance.metrics.checkout.value', 5)
             ->where('insights.customers.source', 'local_sync')
             ->where('insights.pos.source', 'shopifyql')
             ->where('insights.integration.storage.persisted', true)

@@ -26,6 +26,7 @@ class AnalyticsOverviewInsightsService
         $location = $native['locations'];
         $posLocations = $native['pos_locations'];
         $posStaff = $native['pos_staff'];
+        $behavior = $native['behavior'];
         $localPos = $this->businessInsights->localPosOverview($store, $filters);
 
         $nativePosAvailable = $posLocations['available'] || $posStaff['available'];
@@ -41,6 +42,7 @@ class AnalyticsOverviewInsightsService
             'acquisition' => $this->reportCard($source, $this->acquisitionRows($source['rows'])),
             'devices' => $this->reportCard($device, $this->deviceRows($device['rows'])),
             'locations' => $this->reportCard($location, $this->locationRows($location['rows'])),
+            'behavior' => $this->behaviorCard($behavior),
             'customers' => [
                 'available' => true,
                 'source' => (string) ($customers['source'] ?? 'local_sync'),
@@ -61,7 +63,7 @@ class AnalyticsOverviewInsightsService
             ],
             'integration' => [
                 'report_scope_granted' => $source['scope_granted'],
-                'shopifyql_available' => collect([$source, $device, $location, $posLocations, $posStaff])
+                'shopifyql_available' => collect([$source, $device, $location, $posLocations, $posStaff, $behavior])
                     ->contains(fn (array $report): bool => $report['available']),
                 'storage' => $native['storage'] ?? null,
             ],
@@ -125,6 +127,86 @@ class AnalyticsOverviewInsightsService
             'visitors' => $this->integer($row['online_store_visitors'] ?? 0),
             'conversion_rate' => $this->percent($row['conversion_rate'] ?? 0),
         ])->values()->all();
+    }
+
+    /** @param array<string, mixed> $report */
+    private function behaviorCard(array $report): array
+    {
+        $rows = collect($report['rows'] ?? [])->filter(fn (mixed $row): bool => is_array($row))->values();
+        $dailyRows = $rows->filter(fn (array $row): bool => filled($row['day'] ?? null))->values();
+        $totals = $rows->first(fn (array $row): bool => collect(array_keys($row))->contains(
+            fn (string $key): bool => str_ends_with($key, '__totals'),
+        ));
+        $totals = is_array($totals) ? $totals : [];
+
+        $metrics = [
+            'sessions' => $this->behaviorMetric($totals, $dailyRows->all(), 'sessions'),
+            'conversion_rate' => $this->behaviorMetric($totals, $dailyRows->all(), 'conversion_rate', true),
+            'add_to_cart' => $this->behaviorMetric($totals, $dailyRows->all(), 'sessions_with_cart_additions'),
+            'checkout' => $this->behaviorMetric($totals, $dailyRows->all(), 'sessions_that_reached_checkout'),
+            'completed_checkout' => $this->behaviorMetric($totals, $dailyRows->all(), 'sessions_that_completed_checkout'),
+        ];
+
+        if ($metrics['conversion_rate']['value'] === 0.0 && $metrics['sessions']['value'] > 0) {
+            $metrics['conversion_rate']['value'] = round(
+                $metrics['completed_checkout']['value'] / $metrics['sessions']['value'] * 100,
+                2,
+            );
+        }
+
+        return [
+            'available' => (bool) ($report['available'] ?? false),
+            'source' => 'shopifyql',
+            'metrics' => $metrics,
+            'trend' => $dailyRows->map(fn (array $row): array => [
+                'date' => (string) ($row['day'] ?? ''),
+                'sessions' => $this->integer($row['sessions'] ?? 0),
+                'conversion_rate' => $this->percent($row['conversion_rate'] ?? 0),
+                'add_to_cart' => $this->integer($row['sessions_with_cart_additions'] ?? 0),
+                'checkout' => $this->integer($row['sessions_that_reached_checkout'] ?? 0),
+                'completed_checkout' => $this->integer($row['sessions_that_completed_checkout'] ?? 0),
+            ])->all(),
+            'error' => $report['error'] ?? null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $totals
+     * @param  list<array<string, mixed>>  $dailyRows
+     * @return array{value: float, comparison: array<string, float|null>|null}
+     */
+    private function behaviorMetric(array $totals, array $dailyRows, string $key, bool $percent = false): array
+    {
+        $value = $totals["{$key}__totals"] ?? $totals[$key] ?? null;
+        if (! is_numeric($value)) {
+            $value = collect($dailyRows)->sum(fn (array $row): float => is_numeric($row[$key] ?? null) ? (float) $row[$key] : 0.0);
+        }
+        $current = $percent ? $this->percent($value) : (float) $this->integer($value);
+        $baseline = $totals["comparison_{$key}__previous_period__totals"]
+            ?? $totals["comparison_{$key}__previous_period"]
+            ?? null;
+        $changePercent = $totals["percent_change_{$key}__previous_period__totals"]
+            ?? $totals["percent_change_{$key}__previous_period"]
+            ?? null;
+
+        if (! is_numeric($baseline)) {
+            return ['value' => $current, 'comparison' => null];
+        }
+
+        $baselineValue = $percent ? $this->percent($baseline) : (float) $this->integer($baseline);
+        $change = round($current - $baselineValue, 2);
+
+        return [
+            'value' => $current,
+            'comparison' => [
+                'current' => $current,
+                'baseline' => $baselineValue,
+                'change' => $change,
+                'change_percent' => is_numeric($changePercent)
+                    ? round((float) $changePercent, 2)
+                    : (abs($baselineValue) > 0.000001 ? round($change / abs($baselineValue) * 100, 2) : null),
+            ],
+        ];
     }
 
     /** @param list<array<string, mixed>> $rows */
