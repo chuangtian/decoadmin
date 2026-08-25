@@ -14,6 +14,10 @@ class NaturalTrafficDashboardService
 {
     private const INSTAGRAM_OUTLIER_THRESHOLD = 100000;
 
+    private const BRAND_POST_PER_PAGE_OPTIONS = [10, 20, 50, 100];
+
+    private const BRAND_POST_PLATFORMS = ['Instagram', 'Facebook', 'YouTube'];
+
     public function __construct(private StoreBusinessCredentialService $credentials) {}
 
     /** @param array<string, mixed> $filters @return array<string, mixed> */
@@ -22,7 +26,7 @@ class NaturalTrafficDashboardService
         $period = $this->period($store, $filters);
 
         return match ($channel) {
-            'brand-media' => $this->brandMedia($store, $period),
+            'brand-media' => $this->brandMedia($store, $period, $this->brandPostFilters($filters)),
             'influencer-operations' => $this->influencerOperations($store, $period),
             'edm-email' => $this->edm($store, $period),
             'affiliate-marketing' => $this->affiliate($store, $period, trim((string) ($filters['affiliate'] ?? ''))),
@@ -30,8 +34,8 @@ class NaturalTrafficDashboardService
         };
     }
 
-    /** @param array<string, mixed> $period @return array<string, mixed> */
-    private function brandMedia(Store $store, array $period): array
+    /** @param array<string, mixed> $period @param array<string, mixed> $postFilters @return array<string, mixed> */
+    private function brandMedia(Store $store, array $period, array $postFilters): array
     {
         $source = $this->source($store, [
             'natural-traffic:social',
@@ -105,8 +109,23 @@ class NaturalTrafficDashboardService
             })->sortKeys()->values();
         $weekly = $weeklyReports->map(fn (array $report): array => collect($report)
             ->except(['content_types', 'top_views', 'top_engagement', 'excluded_content'])->all())->all();
-        $posts = $currentAll->filter(fn (array $row): bool => $row['title'] !== '' || $row['permalink'] !== '')
-            ->sortByDesc('date')->values();
+        $allPosts = $currentAll
+            ->filter(fn (array $row): bool => $row['title'] !== '' || $row['permalink'] !== '')
+            ->values();
+        $postTypes = $allPosts->pluck('post_type')->filter()->unique()->sort()->values()->all();
+        $postFilters['post_type'] = collect($postTypes)
+            ->first(fn (string $postType): bool => mb_strtolower($postType) === mb_strtolower($postFilters['post_type'])) ?? '';
+        $filteredPosts = $this->filterBrandPosts($allPosts, $postFilters)
+            ->sort(fn (array $left, array $right): int => $this->compareBrandPosts($left, $right))
+            ->values();
+        $postsTotal = $filteredPosts->count();
+        $postsLastPage = max(1, (int) ceil($postsTotal / $postFilters['per_page']));
+        $postsCurrentPage = min($postFilters['page'], $postsLastPage);
+        $posts = $filteredPosts
+            ->slice(($postsCurrentPage - 1) * $postFilters['per_page'], $postFilters['per_page'])
+            ->values()
+            ->all();
+        $postFilters['page'] = $postsCurrentPage;
         $availablePlatforms = $all->pluck('platform')->filter()->intersect(['Instagram', 'Facebook', 'YouTube'])->unique()->values()->all();
         $expectedPlatforms = ['Instagram', 'Facebook', 'YouTube'];
         $engagements = $totals['likes'] + $totals['comments'] + $totals['shares'];
@@ -170,9 +189,98 @@ class NaturalTrafficDashboardService
                 'top_post' => $current->sortByDesc('views')->first(),
                 'top_engagement_post' => $current->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'] + $row['shares'])->first(),
             ],
-            'posts' => $posts->take(500)->all(),
+            'post_filters' => $postFilters,
+            'post_filter_options' => [
+                'platforms' => self::BRAND_POST_PLATFORMS,
+                'post_types' => $postTypes,
+                'aggregation_statuses' => [
+                    ['value' => 'included', 'label' => '已纳入'],
+                    ['value' => 'excluded', 'label' => '异常爆款，已排除'],
+                ],
+            ],
+            'posts_pagination' => [
+                'current_page' => $postsCurrentPage,
+                'last_page' => $postsLastPage,
+                'per_page' => $postFilters['per_page'],
+                'total' => $postsTotal,
+                'from' => $postsTotal === 0 ? null : (($postsCurrentPage - 1) * $postFilters['per_page']) + 1,
+                'to' => $postsTotal === 0 ? null : min($postsCurrentPage * $postFilters['per_page'], $postsTotal),
+            ],
+            'posts' => $posts,
             'columns' => $this->columns($source['records']),
             'raw_rows' => $this->sanitizedRows($source['records'], 1000),
+        ];
+    }
+
+    /** @param array<string, mixed> $filters @return array{keyword: string, platform: string, post_type: string, aggregation_status: string, page: int, per_page: int} */
+    private function brandPostFilters(array $filters): array
+    {
+        $platformInput = mb_strtolower(trim((string) ($filters['content_platform'] ?? '')));
+        $platform = collect(self::BRAND_POST_PLATFORMS)
+            ->first(fn (string $candidate): bool => mb_strtolower($candidate) === $platformInput) ?? '';
+        $status = mb_strtolower(trim((string) ($filters['content_status'] ?? '')));
+        $page = (int) ($filters['content_page'] ?? 1);
+        $perPage = (int) ($filters['content_per_page'] ?? 20);
+
+        return [
+            'keyword' => mb_substr(trim((string) ($filters['content_keyword'] ?? '')), 0, 100),
+            'platform' => $platform,
+            'post_type' => mb_substr(trim((string) ($filters['content_type'] ?? '')), 0, 100),
+            'aggregation_status' => in_array($status, ['included', 'excluded'], true) ? $status : '',
+            'page' => min(max($page, 1), 10000),
+            'per_page' => in_array($perPage, self::BRAND_POST_PER_PAGE_OPTIONS, true) ? $perPage : 20,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $posts
+     * @param  array{keyword: string, platform: string, post_type: string, aggregation_status: string, page: int, per_page: int}  $filters
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function filterBrandPosts(Collection $posts, array $filters): Collection
+    {
+        return $posts
+            ->when($filters['platform'] !== '', fn (Collection $rows): Collection => $rows
+                ->filter(fn (array $row): bool => $row['platform'] === $filters['platform']))
+            ->when($filters['post_type'] !== '', fn (Collection $rows): Collection => $rows
+                ->filter(fn (array $row): bool => mb_strtolower((string) $row['post_type']) === mb_strtolower($filters['post_type'])))
+            ->when($filters['aggregation_status'] !== '', fn (Collection $rows): Collection => $rows
+                ->filter(fn (array $row): bool => $filters['aggregation_status'] === 'excluded'
+                    ? (bool) $row['excluded_from_aggregates']
+                    : ! (bool) $row['excluded_from_aggregates']))
+            ->when($filters['keyword'] !== '', function (Collection $rows) use ($filters): Collection {
+                $keyword = mb_strtolower($filters['keyword']);
+
+                return $rows->filter(function (array $row) use ($keyword): bool {
+                    $searchable = implode("\n", [
+                        (string) $row['title'],
+                        (string) $row['permalink'],
+                        (string) $row['record_id'],
+                        (string) $row['post_type'],
+                    ]);
+
+                    return str_contains(mb_strtolower($searchable), $keyword);
+                });
+            })
+            ->values();
+    }
+
+    /** @param array<string, mixed> $left @param array<string, mixed> $right */
+    private function compareBrandPosts(array $left, array $right): int
+    {
+        $date = strcmp((string) ($right['date'] ?? ''), (string) ($left['date'] ?? ''));
+        if ($date !== 0) {
+            return $date;
+        }
+
+        return [
+            (string) ($left['platform'] ?? ''),
+            (string) ($left['record_id'] ?? ''),
+            (string) ($left['table_name'] ?? ''),
+        ] <=> [
+            (string) ($right['platform'] ?? ''),
+            (string) ($right['record_id'] ?? ''),
+            (string) ($right['table_name'] ?? ''),
         ];
     }
 

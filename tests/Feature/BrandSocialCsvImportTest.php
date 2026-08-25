@@ -78,7 +78,9 @@ CSV;
         $this->assertSame(4, FeishuBitableRecord::query()->count());
         $latestAudit = AuditLog::query()->where('action', 'brand_social_csv_imported')->latest('id')->firstOrFail();
         $this->assertSame(0, $latestAudit->metadata['created']);
-        $this->assertSame(3, $latestAudit->metadata['updated']);
+        $this->assertSame(0, $latestAudit->metadata['updated']);
+        $this->assertSame(3, $latestAudit->metadata['unchanged']);
+        $this->assertSame(0, $latestAudit->metadata['skipped_stale']);
     }
 
     public function test_user_without_sync_permission_cannot_import_brand_social_csv(): void
@@ -91,6 +93,91 @@ CSV;
             ])->assertForbidden();
 
         $this->assertDatabaseCount('feishu_bitable_records', 0);
+    }
+
+    public function test_incremental_import_preserves_history_updates_newer_snapshot_and_skips_late_old_file(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $session = $this->contextSession($organization, $store);
+        $initial = <<<'CSV'
+帖子编号,账户编号,发布时间,帖子类型,浏览量,覆盖人数,赞,数据更新时间
+history,account-1,08/10/2026 10:00,Reels,50,40,5,08/18/2026 10:00
+current,account-1,08/11/2026 10:00,Reels,100,80,10,08/18/2026 10:00
+CSV;
+        $newer = <<<'CSV'
+帖子编号,账户编号,发布时间,帖子类型,浏览量,覆盖人数,赞,数据更新时间
+current,account-1,08/11/2026 10:00,Reels,200,160,20,08/20/2026 10:00
+CSV;
+        $stale = <<<'CSV'
+帖子编号,账户编号,发布时间,帖子类型,浏览量,覆盖人数,赞,数据更新时间
+current,account-1,08/11/2026 10:00,Reels,150,120,15,08/19/2026 10:00
+CSV;
+
+        foreach ([['initial.csv', $initial], ['newer.csv', $newer]] as [$name, $contents]) {
+            $this->actingAs($user)->withSession($session)
+                ->post(route('natural-traffic.brand-media.import'), [
+                    'file' => UploadedFile::fake()->createWithContent($name, $contents),
+                ])->assertRedirect()->assertSessionHasNoErrors();
+        }
+
+        $this->assertSame(2, FeishuBitableRecord::query()->count());
+        $record = FeishuBitableRecord::query()->where('source_record_id', 'post:current')->sole();
+        $this->assertSame('200', $record->fields_encrypted['浏览量']);
+        $this->assertSame('2026-08-20 10:00:00', $record->source_updated_at->toDateTimeString());
+        $updatedAudit = AuditLog::query()->where('action', 'brand_social_csv_imported')->latest('id')->firstOrFail();
+        $this->assertSame(0, $updatedAudit->metadata['created']);
+        $this->assertSame(1, $updatedAudit->metadata['updated']);
+        $this->assertSame(0, $updatedAudit->metadata['unchanged']);
+        $this->assertSame(0, $updatedAudit->metadata['skipped_stale']);
+
+        $this->actingAs($user)->withSession($session)
+            ->post(route('natural-traffic.brand-media.import'), [
+                'file' => UploadedFile::fake()->createWithContent('late-old.csv', $stale),
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertSame('200', $record->fresh()->fields_encrypted['浏览量']);
+        $staleAudit = AuditLog::query()->where('action', 'brand_social_csv_imported')->latest('id')->firstOrFail();
+        $this->assertSame(0, $staleAudit->metadata['updated']);
+        $this->assertSame(1, $staleAudit->metadata['skipped_stale']);
+        $this->assertDatabaseHas('feishu_bitable_records', ['source_record_id' => 'post:history']);
+    }
+
+    public function test_same_csv_duplicate_uses_newest_snapshot_and_same_post_id_is_scoped_by_platform(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $session = $this->contextSession($organization, $store);
+        $instagram = <<<'CSV'
+帖子编号,账户编号,发布时间,帖子类型,浏览量,覆盖人数,赞,数据更新时间
+shared-id,account-1,08/11/2026 10:00,Reels,100,80,10,08/18/2026 10:00
+shared-id,account-1,08/11/2026 10:00,Reels,250,200,25,08/20/2026 10:00
+CSV;
+        $facebook = <<<'CSV'
+帖子编号,公共主页编号,发布时间,帖子类型,观看量,覆盖人数,心情,数据更新时间
+shared-id,page-1,08/11/2026 10:00,视频,400,300,40,08/20/2026 11:00
+CSV;
+
+        $this->actingAs($user)->withSession($session)
+            ->post(route('natural-traffic.brand-media.import'), [
+                'file' => UploadedFile::fake()->createWithContent('instagram-duplicates.csv', $instagram),
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $duplicateAudit = AuditLog::query()->where('action', 'brand_social_csv_imported')->latest('id')->firstOrFail();
+        $this->assertSame(2, $duplicateAudit->metadata['rows']);
+        $this->assertSame(1, $duplicateAudit->metadata['unique_rows']);
+        $this->assertSame(1, $duplicateAudit->metadata['created']);
+        $this->assertSame(1, $duplicateAudit->metadata['skipped_stale']);
+        $instagramRecord = FeishuBitableRecord::query()->sole();
+        $this->assertSame('250', $instagramRecord->fields_encrypted['浏览量']);
+
+        $this->actingAs($user)->withSession($session)
+            ->post(route('natural-traffic.brand-media.import'), [
+                'file' => UploadedFile::fake()->createWithContent('facebook.csv', $facebook),
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $records = FeishuBitableRecord::query()->where('source_record_id', 'post:shared-id')->get();
+        $this->assertCount(2, $records);
+        $this->assertEqualsCanonicalizing(['Instagram', 'Facebook'], $records->pluck('fields_encrypted')->map(fn (array $fields): string => $fields['平台'])->all());
+        $this->assertSame(2, $records->pluck('feishu_bitable_table_id')->unique()->count());
     }
 
     /** @return array{User, Organization, Store} */
