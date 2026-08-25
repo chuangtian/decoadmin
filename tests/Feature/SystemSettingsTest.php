@@ -117,6 +117,75 @@ class SystemSettingsTest extends TestCase
         $this->assertStringNotContainsString('smtp-password-secret', $rawPassword);
     }
 
+    public function test_settings_with_an_unreadable_old_cipher_do_not_block_other_updates_and_can_be_replaced(): void
+    {
+        [$user, $organization, $store] = $this->context('super-admin');
+        $this->setting('student_ai', 'gemini_api_key', 'current-gemini-secret', true, $user);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, $user);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, $user);
+
+        DB::table('system_settings')->insert([
+            'section' => 'mail',
+            'key' => 'password',
+            'value' => 'ciphertext-from-a-different-app-key',
+            'is_secret' => true,
+            'updated_by' => $user->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->put(route('system.settings.student-ai.update'), [
+                'gemini_api_key' => '',
+                'gemini_model' => 'gemini-2.5-pro',
+                'auto_approval_threshold' => 82,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->put(route('system.settings.general.update'), [
+                'platform_name' => 'Recovered DecoAdmin',
+                'timezone' => 'Asia/Shanghai',
+                'locale' => 'zh_CN',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('system.settings.mail'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('settings.password', '')
+                ->where('settings.password_configured', false));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->put(route('system.settings.mail.update'), [
+                'enabled' => true,
+                'host' => 'smtp.recovered.example.com',
+                'port' => 587,
+                'encryption' => 'tls',
+                'username' => 'recovered@example.com',
+                'password' => 'replacement-mail-secret',
+                'from_address' => 'recovered@example.com',
+                'from_name' => 'Recovered Mail',
+                'timeout' => 10,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertSame('current-gemini-secret', $this->storedValue('student_ai', 'gemini_api_key'));
+        $this->assertSame(82, $this->storedValue('student_ai', 'auto_approval_threshold'));
+        $this->assertSame('Recovered DecoAdmin', $this->storedValue('general', 'platform_name'));
+        $this->assertSame('replacement-mail-secret', $this->storedValue('mail', 'password'));
+    }
+
     public function test_feishu_settings_are_saved_and_audited_without_secret_values(): void
     {
         [$user, $organization, $store] = $this->context('super-admin');
