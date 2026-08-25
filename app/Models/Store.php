@@ -95,6 +95,21 @@ class Store extends Model
         return $this->hasMany(StoreBusinessCredential::class);
     }
 
+    public function studentDiscountCampaign(): HasOne
+    {
+        return $this->hasOne(StudentDiscountCampaign::class);
+    }
+
+    public function studentDiscountClaims(): HasMany
+    {
+        return $this->hasMany(StudentDiscountClaim::class);
+    }
+
+    public function studentDiscountCodes(): HasMany
+    {
+        return $this->hasMany(StudentDiscountCode::class);
+    }
+
     public function metaAdAccounts(): HasMany
     {
         return $this->hasMany(MetaAdAccount::class);

@@ -13,6 +13,7 @@ class PermissionSeeder extends Seeder
         'products' => '商品', 'customers' => '客户', 'inventory' => '库存', 'apps' => '应用',
         'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
         'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'reports' => '报表', 'system' => '系统',
+        'student_discount' => '学生优惠',
     ];
 
     /** @var array<string, string> */
@@ -23,6 +24,8 @@ class PermissionSeeder extends Seeder
         'configure' => '配置', 'uninstall' => '卸载', 'retry' => '重试', 'run' => '执行',
         'assign_role' => '分配角色', 'assign' => '分配', 'settings.view' => '查看设置',
         'settings.update' => '更新设置', 'health.view' => '查看运行状态', 'manage' => '管理',
+        'claim.read' => '查看申请', 'view_evidence' => '查看证件', 'approve' => '审核通过',
+        'reject' => '拒绝申请', 'campaign.manage' => '管理活动', 'analytics.read' => '查看分析', 'audit.read' => '查看审计',
     ];
 
     /** @var list<string> */
@@ -88,6 +91,13 @@ class PermissionSeeder extends Seeder
         'system.settings.view',
         'system.settings.update',
         'system.health.view',
+        'student_discount.claim.read',
+        'student_discount.view_evidence',
+        'student_discount.approve',
+        'student_discount.reject',
+        'student_discount.campaign.manage',
+        'student_discount.analytics.read',
+        'student_discount.audit.read',
     ];
 
     public function run(): void

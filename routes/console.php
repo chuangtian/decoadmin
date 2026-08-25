@@ -33,6 +33,12 @@ Schedule::command('shopify:prune-uninstalled-data')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+Schedule::command('student-discounts:prune-evidence --days=30')
+    ->name('student-discounts:prune-reviewed-evidence')
+    ->dailyAt('04:35')
+    ->onOneServer()
+    ->withoutOverlapping(60);
+
 Schedule::command('shopify:check-connections')
     ->name('shopify:connection-and-store-metadata-refresh')
     ->everySixHours()

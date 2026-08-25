@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, useForm } from '@inertiajs/vue3';
+import SecretSettingInput from '../../Components/Settings/SecretSettingInput.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 interface GeneralSettings {
@@ -8,9 +9,25 @@ interface GeneralSettings {
     locale: string;
 }
 
-const props = defineProps<{ settings: GeneralSettings; canUpdate: boolean; timezones: string[] }>();
+interface StudentAiSettings {
+    gemini_api_key: string;
+    gemini_api_key_configured: boolean;
+    gemini_model: string;
+    auto_approval_threshold: number;
+}
+
+const props = defineProps<{ settings: GeneralSettings; canUpdate: boolean; timezones: string[]; aiSettings: StudentAiSettings | null; canUpdateAi: boolean }>();
 const form = useForm({ ...props.settings });
 const save = () => form.put('/settings/general', { preserveScroll: true });
+const aiForm = useForm({
+    gemini_api_key: '',
+    gemini_model: props.aiSettings?.gemini_model ?? 'gemini-2.5-pro',
+    auto_approval_threshold: props.aiSettings?.auto_approval_threshold ?? 80,
+});
+const saveAi = () => aiForm.put('/settings/student-ai', {
+    preserveScroll: true,
+    onSuccess: () => aiForm.gemini_api_key = '',
+});
 </script>
 
 <template>
@@ -56,6 +73,44 @@ const save = () => form.put('/settings/general', { preserveScroll: true });
                     </div>
                     <div v-if="canUpdate" class="mt-7 flex justify-end">
                         <button :disabled="form.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50">{{ form.processing ? '保存中…' : '保存系统设置' }}</button>
+                    </div>
+                </form>
+            </section>
+
+            <section v-if="aiSettings && canUpdateAi" class="mt-7 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <header class="border-b border-slate-100 px-5 py-5 sm:px-7">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-violet-700">AI 学生证识别</p>
+                    <h2 class="mt-1 text-xl font-semibold text-slate-950">Gemini 审核设置</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-500">仅服务端使用。密钥不会回显；留空保存会保留已配置的 Key。</p>
+                </header>
+                <form class="p-5 sm:p-7" @submit.prevent="saveAi">
+                    <div class="grid gap-5 sm:grid-cols-2">
+                        <SecretSettingInput
+                            v-model="aiForm.gemini_api_key"
+                            class="sm:col-span-2"
+                            label="Gemini API Key"
+                            :configured="aiSettings.gemini_api_key_configured"
+                            :disabled="!canUpdateAi"
+                            :error="aiForm.errors.gemini_api_key"
+                            placeholder="留空则保留原 Key"
+                            help="页面只显示配置状态，完整明文永不从服务端返回。"
+                        />
+                        <label>
+                            <span class="text-sm font-semibold text-slate-800">Gemini 模型</span>
+                            <input v-model="aiForm.gemini_model" :disabled="!canUpdateAi" maxlength="120" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50" />
+                            <span v-if="aiForm.errors.gemini_model" class="mt-1 block text-xs text-rose-600">{{ aiForm.errors.gemini_model }}</span>
+                        </label>
+                        <label>
+                            <span class="text-sm font-semibold text-slate-800">自动通过置信度阈值</span>
+                            <div class="mt-2 flex items-center gap-2">
+                                <input v-model="aiForm.auto_approval_threshold" :disabled="!canUpdateAi" type="number" min="0" max="100" step="0.01" class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50" />
+                                <span class="text-sm text-slate-500">/ 100</span>
+                            </div>
+                            <span v-if="aiForm.errors.auto_approval_threshold" class="mt-1 block text-xs text-rose-600">{{ aiForm.errors.auto_approval_threshold }}</span>
+                        </label>
+                    </div>
+                    <div class="mt-7 flex justify-end">
+                        <button :disabled="aiForm.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50">{{ aiForm.processing ? '保存中…' : '保存 AI 识别设置' }}</button>
                     </div>
                 </form>
             </section>

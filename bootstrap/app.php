@@ -6,6 +6,8 @@ use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\ResolveCurrentStore;
 use App\Http\Middleware\StoreAccessMiddleware;
 use App\Http\Middleware\UseBuiltAssetsForExternalRequests;
+use App\Http\Middleware\VerifyShopifyAppProxy;
+use App\Http\Middleware\VerifyShopifyIdToken;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -21,6 +23,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'shopify/webhooks/*',
             'shopify/pixels/*',
+            'api/student-discounts/*',
+            'api/shopify-app/student-discounts/*',
         ]);
 
         $middleware->trustProxies(
@@ -35,6 +39,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => PermissionMiddleware::class,
             'store.context' => ResolveCurrentStore::class,
             'store.access' => StoreAccessMiddleware::class,
+            'shopify.app-proxy' => VerifyShopifyAppProxy::class,
+            'shopify.id-token' => VerifyShopifyIdToken::class,
         ]);
 
         $middleware->web(append: [

@@ -13,12 +13,23 @@ const navigation = ref<HTMLElement | null>(null);
 const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
+const contextualRoute = (route?: string) => {
+    if (route !== '/student-discounts') return route;
+    const organization = page.props.currentOrganization;
+    const store = page.props.currentStore;
+    return organization && store
+        ? `/organizations/${organization.id}/stores/${store.id}/student-discounts`
+        : route;
+};
 
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
     .map((item) => ({
         ...item,
-        children: item.children?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission))),
+        route: contextualRoute(item.route),
+        children: item.children
+            ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
+            .map((child) => ({ ...child, route: contextualRoute(child.route) })),
     }))
     .filter((item) => item.route
         ? Boolean(item.permission && page.props.auth.permissions.includes(item.permission))

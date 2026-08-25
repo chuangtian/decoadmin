@@ -17,10 +17,11 @@ class SystemSettingsService
         'general' => ['platform_name', 'timezone', 'locale'],
         'mail' => ['enabled', 'host', 'port', 'encryption', 'username', 'password', 'from_address', 'from_name', 'timeout'],
         'feishu' => ['enabled', 'app_id', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url'],
+        'student_ai' => ['gemini_api_key', 'gemini_model', 'auto_approval_threshold'],
     ];
 
     /** @var list<string> */
-    private const SECRET_KEYS = ['password', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url'];
+    private const SECRET_KEYS = ['password', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url', 'gemini_api_key'];
 
     /** @return array<string, mixed> */
     public function sectionForFrontend(string $section, bool $includeSecrets): array
@@ -48,7 +49,24 @@ class SystemSettingsService
             $settings['bot_webhook_configured'] = filled($this->value('feishu', 'bot_webhook_url'));
         }
 
+        if ($section === 'student_ai') {
+            $settings['gemini_api_key'] = '';
+            $settings['gemini_api_key_configured'] = filled($this->value('student_ai', 'gemini_api_key'));
+        }
+
         return $settings;
+    }
+
+    /** @return array{gemini_api_key: string, gemini_model: string, auto_approval_threshold: float} */
+    public function studentAiForServer(): array
+    {
+        $settings = $this->section('student_ai');
+
+        return [
+            'gemini_api_key' => (string) $settings['gemini_api_key'],
+            'gemini_model' => (string) $settings['gemini_model'],
+            'auto_approval_threshold' => (float) $settings['auto_approval_threshold'],
+        ];
     }
 
     /**
@@ -66,6 +84,9 @@ class SystemSettingsService
 
         $allowed = collect(self::KEYS[$section]);
         $clean = collect($values)->only($allowed)->all();
+        if ($section === 'student_ai' && blank($clean['gemini_api_key'] ?? null)) {
+            unset($clean['gemini_api_key']);
+        }
         $before = collect($this->section($section))->only(array_keys($clean))->all();
         $changedKeys = collect($clean)
             ->filter(fn (mixed $value, string $key): bool => $this->normalize($value) !== $this->normalize($before[$key] ?? null))
@@ -153,6 +174,7 @@ class SystemSettingsService
             'general' => $this->section('general'),
             'mail' => $this->section('mail'),
             'feishu' => $this->section('feishu'),
+            'student_ai' => $this->section('student_ai'),
         ];
     }
 
@@ -202,6 +224,11 @@ class SystemSettingsService
                 'verification_token' => '',
                 'encrypt_key' => '',
                 'bot_webhook_url' => '',
+            ],
+            'student_ai' => [
+                'gemini_api_key' => '',
+                'gemini_model' => 'gemini-2.5-pro',
+                'auto_approval_threshold' => 80,
             ],
             default => [],
         };

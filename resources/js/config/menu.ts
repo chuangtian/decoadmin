@@ -89,6 +89,7 @@ export const menu: MenuItem[] = [
         icon: 'settings',
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
+            { name: '学生优惠', route: '/student-discounts', icon: 'campaign', permission: 'student_discount.claim.read' },
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
             { name: '业务凭证', route: '/store-settings/credentials', icon: 'settings', permission: 'store.view' },

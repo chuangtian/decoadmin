@@ -28,7 +28,10 @@ use App\Services\Shopify\Webhooks\WebhookHandlerRegistry;
 use App\Services\SystemSettingsService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
@@ -71,6 +74,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('student-discount-public', function (Request $request): array {
+            $shop = strtolower((string) $request->query('shop', 'unknown'));
+
+            return [
+                Limit::perMinute(20)->by('student-discount-shop:'.$shop),
+                Limit::perMinute(8)->by('student-discount-ip:'.$request->ip()),
+            ];
+        });
+
         try {
             if (Schema::hasTable('system_settings')) {
                 app(SystemSettingsService::class)->applyRuntimeConfiguration();

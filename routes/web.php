@@ -28,6 +28,7 @@ use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
@@ -36,6 +37,7 @@ use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyOAuthController;
+use App\Http\Controllers\ShopifyStudentDiscountAppController;
 use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\StoreAlertController;
 use App\Http\Controllers\StoreBusinessCredentialController;
@@ -46,6 +48,7 @@ use App\Http\Controllers\StoreMarketingHomeController;
 use App\Http\Controllers\StoreMarketingModuleController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\StoreStatusController;
+use App\Http\Controllers\StudentDiscountController;
 use App\Http\Controllers\SyncJobController;
 use App\Http\Controllers\SystemSettingsController;
 use App\Http\Controllers\SystemStatusController;
@@ -77,6 +80,27 @@ Route::options('/shopify/pixels/{store:analytics_ingest_key}', fn () => response
     'Access-Control-Allow-Methods' => 'POST, OPTIONS',
     'Access-Control-Allow-Headers' => 'Content-Type',
 ]))->name('shopify.pixels.options');
+
+Route::prefix('/api/shopify-app/student-discounts')->group(function (): void {
+    Route::get('/connection', [ShopifyStudentDiscountAppController::class, 'connection'])
+        ->middleware(['shopify.id-token', 'throttle:60,1'])
+        ->name('student-discounts.shopify-app.connection');
+    Route::post('/bootstrap', [ShopifyStudentDiscountAppController::class, 'bootstrap'])
+        ->middleware(['shopify.id-token', 'throttle:20,1'])
+        ->name('student-discounts.shopify-app.bootstrap');
+});
+
+Route::prefix('/api/shopify-app/student-discounts/proxy')
+    ->middleware(['shopify.app-proxy', 'throttle:student-discount-public'])
+    ->group(function (): void {
+        Route::get('/', [PublicStudentDiscountController::class, 'info'])
+            ->name('student-discounts.public.info');
+        Route::post('/', [PublicStudentDiscountController::class, 'store']);
+        Route::post('/claims', [PublicStudentDiscountController::class, 'store'])
+            ->name('student-discounts.public.claims.store');
+        Route::get('/claims/{claim}', [PublicStudentDiscountController::class, 'show'])
+            ->name('student-discounts.public.claims.show');
+    });
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -303,6 +327,9 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/general', [SystemSettingsController::class, 'updateGeneral'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.general.update');
+    Route::put('/settings/student-ai', [SystemSettingsController::class, 'updateStudentAi'])
+        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
+        ->name('system.settings.student-ai.update');
     Route::put('/settings/mail', [SystemSettingsController::class, 'updateMail'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.mail.update');
@@ -417,3 +444,22 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->middleware(['store.access', 'permission:store.view'])
         ->name('stores.access-check');
 });
+
+Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [StudentDiscountController::class, 'index'])
+            ->name('student-discounts.index');
+        Route::put('/campaign', [StudentDiscountController::class, 'updateCampaign'])
+            ->middleware(['permission:student_discount.campaign.manage', 'throttle:30,1'])
+            ->name('student-discounts.campaign.update');
+        Route::post('/claims/{claim}/approve', [StudentDiscountController::class, 'approve'])
+            ->middleware(['permission:student_discount.approve', 'throttle:30,1'])
+            ->name('student-discounts.claims.approve');
+        Route::post('/claims/{claim}/reject', [StudentDiscountController::class, 'reject'])
+            ->middleware(['permission:student_discount.reject', 'throttle:30,1'])
+            ->name('student-discounts.claims.reject');
+        Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
+            ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
+            ->name('student-discounts.claims.evidence');
+    });
