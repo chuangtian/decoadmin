@@ -26,40 +26,25 @@ class ShopifyOAuthService
     /**
      * @return array{authorization_url: string, state: string, state_record: OAuthState, store: Store}
      */
-    public function begin(Organization $organization, User $user, string $name, string $shopDomain, ?Store $store = null): array
+    public function begin(Organization $organization, User $user, Store $store): array
     {
         $this->ensureConfigured();
-        $domain = $this->normalizeShopDomain($shopDomain);
+        if ($store->organization_id !== $organization->getKey()) {
+            throw ValidationException::withMessages(['shop_domain' => '该店铺不属于当前组织。']);
+        }
+
+        $domain = $this->normalizeShopDomain($store->shopify_domain);
         $app = $this->configuredApp();
         $redirectUri = $this->redirectUri();
         $scopes = config('shopify.requested_scopes', []);
         $plainState = Str::random(64);
 
-        [$store, $stateRecord] = DB::transaction(function () use ($organization, $user, $name, $domain, $store, $app, $redirectUri, $scopes, $plainState): array {
-            if ($store) {
-                if ($store->organization_id !== $organization->getKey()) {
-                    throw ValidationException::withMessages(['shop_domain' => '该店铺不属于当前组织。']);
-                }
+        $stateRecord = DB::transaction(function () use ($organization, $user, $domain, $store, $app, $redirectUri, $scopes, $plainState): OAuthState {
+            $lockedStore = Store::query()->lockForUpdate()->findOrFail($store->getKey());
 
-                $store->forceFill(['name' => $name, 'shopify_domain' => $domain, 'status' => 'pending'])->save();
-            } else {
-                $existing = Store::withTrashed()->where('shopify_domain', $domain)->first();
-
-                if ($existing) {
-                    throw ValidationException::withMessages(['shop_domain' => '该 Shopify 店铺已存在，请从店铺详情页重新连接。']);
-                }
-
-                $store = $organization->stores()->create([
-                    'name' => $name,
-                    'shopify_domain' => $domain,
-                    'status' => 'pending',
-                    'created_by' => $user->getKey(),
-                ]);
-                $store->members()->attach($user, [
-                    'status' => 'active',
-                    'invited_by' => $user->getKey(),
-                    'joined_at' => now(),
-                ]);
+            if ($lockedStore->organization_id !== $organization->getKey()
+                || ! hash_equals($domain, $this->normalizeShopDomain($lockedStore->shopify_domain))) {
+                throw ValidationException::withMessages(['shop_domain' => '店铺身份校验失败，请刷新后重试。']);
             }
 
             $stateRecord = OAuthState::query()->create([
@@ -75,7 +60,7 @@ class ShopifyOAuthService
                 'expires_at' => now()->addMinutes((int) config('shopify.state_ttl_minutes', 10)),
             ]);
 
-            return [$store, $stateRecord];
+            return $stateRecord;
         });
 
         $query = http_build_query([
@@ -91,6 +76,15 @@ class ShopifyOAuthService
             'state_record' => $stateRecord,
             'store' => $store,
         ];
+    }
+
+    public function syncConfiguredApp(): ?App
+    {
+        if (! filled(config('shopify.client_id')) || ! filled(config('shopify.client_secret'))) {
+            return null;
+        }
+
+        return $this->configuredApp();
     }
 
     /** @param array<string, mixed> $query */

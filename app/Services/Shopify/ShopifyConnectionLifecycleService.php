@@ -5,6 +5,7 @@ namespace App\Services\Shopify;
 use App\Models\AuditLog;
 use App\Models\ShopifyConnection;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class ShopifyConnectionLifecycleService
 {
@@ -101,6 +102,66 @@ class ShopifyConnectionLifecycleService
         bool $apiChecked = false,
     ): ShopifyConnection {
         return $this->markFailed($connection, 'disconnected', $reason, $actor, $apiChecked);
+    }
+
+    public function markUninstalled(
+        ShopifyConnection $connection,
+        string $reason,
+        ?User $actor = null,
+    ): ShopifyConnection {
+        if ($connection->uninstalled_at !== null && ! filled($connection->access_token_encrypted)) {
+            $connection->appInstallations()->where('status', '!=', 'uninstalled')->update([
+                'status' => 'uninstalled',
+                'uninstalled_at' => $connection->uninstalled_at,
+            ]);
+
+            return $connection->refresh();
+        }
+
+        $previousStatus = $connection->status;
+        $safeReason = $this->safeReason($connection, $reason);
+        $metadata = $connection->metadata ?? [];
+        $metadata['personal_data_erase_at'] = now()->addHours(48)->toIso8601String();
+        $metadata['configuration_purge_at'] = now()->addDays(30)->toIso8601String();
+        unset($metadata['personal_data_erased_at'], $metadata['configuration_purged_at']);
+
+        DB::transaction(function () use ($connection, $previousStatus, $safeReason, $metadata, $actor): void {
+            $connection->forceFill([
+                'access_token_encrypted' => null,
+                'refresh_token_encrypted' => null,
+                'access_token_expires_at' => null,
+                'status' => 'disconnected',
+                'uninstalled_at' => now(),
+                'last_error' => $safeReason,
+                'last_error_at' => now(),
+                'metadata' => $metadata,
+            ])->save();
+
+            $connection->appInstallations()->update([
+                'status' => 'uninstalled',
+                'uninstalled_at' => now(),
+            ]);
+
+            $connection->store?->syncJobs()
+                ->whereIn('status', ['pending', 'queued', 'running'])
+                ->update([
+                    'status' => 'cancelled',
+                    'finished_at' => now(),
+                    'last_error' => 'Shopify 应用已卸载，任务自动取消。',
+                    'error_code' => 'shopify_app_uninstalled',
+                ]);
+
+            $this->audit(
+                $connection,
+                'shopify_app_uninstalled',
+                $previousStatus,
+                'disconnected',
+                $actor,
+                $safeReason,
+            );
+        });
+
+        return $connection->refresh();
     }
 
     private function markFailed(

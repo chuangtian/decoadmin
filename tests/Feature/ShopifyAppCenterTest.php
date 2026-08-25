@@ -118,6 +118,34 @@ class ShopifyAppCenterTest extends TestCase
             ->assertOk();
     }
 
+    public function test_precreated_store_shows_configured_app_as_not_installed(): void
+    {
+        config()->set('shopify.app_handle', 'shopify-commerce-hub');
+        [$user, $organization] = $this->userWithRole('organization-admin');
+        $store = $this->store($organization, 'Macfox US', 'macfox-us.myshopify.com');
+        $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        App::query()->create([
+            'organization_id' => null,
+            'name' => 'Deco Marketing',
+            'handle' => 'shopify-commerce-hub',
+            'distribution' => 'custom',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_store_id' => $store->id,
+            ])
+            ->get(route('stores.show', ['store' => $store, 'tab' => 'apps']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Stores/Show')
+                ->has('storeApps', 1)
+                ->where('storeApps.0.name', 'Deco Marketing')
+                ->where('storeApps.0.status', 'uninstalled'));
+    }
+
     public function test_app_from_another_organization_is_forbidden(): void
     {
         [$user, $organization] = $this->userWithRole('organization-admin');

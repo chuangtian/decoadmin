@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use App\Exceptions\ShopifyOAuthException;
 use App\Http\Requests\ConnectShopifyStoreRequest;
 use App\Http\Resources\StoreResource;
+use App\Models\App as ShopifyApp;
 use App\Models\AuditLog;
 use App\Models\Store;
 use App\Services\Shopify\ShopifyOAuthService;
 use App\Services\StoreOperationsQueryService;
 use App\Support\CurrentOrganization;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -55,20 +57,29 @@ class StoreController extends Controller
     public function store(ConnectShopifyStoreRequest $request, ShopifyOAuthService $oauth): Response
     {
         $this->authorize('create', Store::class);
-        try {
-            $authorization = $oauth->begin(
-                $this->currentOrganization->require(),
-                $request->user(),
-                $request->validated('name'),
-                $request->validated('shop_domain'),
-            );
-        } catch (ShopifyOAuthException $exception) {
-            return back()->with('error', $exception->getMessage());
-        }
+        $organization = $this->currentOrganization->require();
 
-        $this->saveEnvironment($authorization['store'], $request->validated('environment'));
+        $store = DB::transaction(function () use ($request, $organization): Store {
+            $store = $organization->stores()->create([
+                'name' => $request->validated('name'),
+                'shopify_domain' => $request->validated('shop_domain'),
+                'status' => 'pending',
+                'settings' => ['environment' => $request->validated('environment')],
+                'created_by' => $request->user()->getKey(),
+            ]);
+            $store->members()->attach($request->user(), [
+                'status' => 'active',
+                'invited_by' => $request->user()->getKey(),
+                'joined_at' => now(),
+            ]);
 
-        return $this->redirectToShopify($authorization);
+            return $store;
+        });
+
+        $oauth->syncConfiguredApp();
+
+        return redirect()->route('stores.show', ['store' => $store, 'tab' => 'apps'])
+            ->with('success', '店铺已创建，请在应用页发起安装。');
     }
 
     public function show(Store $store, StoreOperationsQueryService $operations): InertiaResponse
@@ -102,11 +113,36 @@ class StoreController extends Controller
             ->values();
 
         $store->load(['shopifyConnection', 'appInstallations.app', 'latestSyncJob']);
+        $installations = $store->appInstallations->keyBy('app_id');
+        $apps = ShopifyApp::query()
+            ->where(function ($query) use ($store): void {
+                $query->where('organization_id', $store->organization_id)
+                    ->orWhere('handle', (string) config('shopify.app_handle'));
+            })
+            ->orderBy('name')
+            ->get()
+            ->map(function (ShopifyApp $app) use ($installations): array {
+                $installation = $installations->get($app->getKey());
+
+                return [
+                    'id' => $app->getKey(),
+                    'name' => $app->name,
+                    'handle' => $app->handle,
+                    'description' => $app->description,
+                    'app_status' => $app->status,
+                    'installable' => hash_equals((string) config('shopify.app_handle'), (string) $app->handle),
+                    'status' => $installation?->status ?? 'uninstalled',
+                    'installed_at' => $installation?->installed_at?->toIso8601String(),
+                    'uninstalled_at' => $installation?->uninstalled_at?->toIso8601String(),
+                ];
+            })
+            ->values();
 
         return Inertia::render('Stores/Show', [
             'store' => new StoreResource($store
                 ->loadCount(['appInstallations as installed_apps_count' => fn ($query) => $query->where('status', 'active')])),
             'connectionHistory' => $connectionHistory,
+            'storeApps' => $apps,
             'operations' => $operations->forStore(
                 request()->user(),
                 $this->currentOrganization->require(),
@@ -115,22 +151,18 @@ class StoreController extends Controller
         ]);
     }
 
-    public function connect(ConnectShopifyStoreRequest $request, Store $store, ShopifyOAuthService $oauth): Response
+    public function connect(Request $request, Store $store, ShopifyOAuthService $oauth): Response
     {
         $this->authorize('connect', $store);
         try {
             $authorization = $oauth->begin(
                 $this->currentOrganization->require(),
                 $request->user(),
-                $request->validated('name'),
-                $request->validated('shop_domain'),
                 $store,
             );
         } catch (ShopifyOAuthException $exception) {
             return back()->with('error', $exception->getMessage());
         }
-
-        $this->saveEnvironment($authorization['store'], $request->validated('environment'));
 
         return $this->redirectToShopify($authorization);
     }

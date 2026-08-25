@@ -6,7 +6,6 @@ use App\Exceptions\ShopifyOAuthException;
 use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
-use App\Models\OAuthState;
 use App\Models\Organization;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
@@ -38,7 +37,7 @@ class ShopifyOAuthTest extends TestCase
         ]);
     }
 
-    public function test_store_creation_generates_authorization_url_and_persists_hashed_state(): void
+    public function test_store_creation_does_not_start_oauth_and_redirects_to_apps_tab(): void
     {
         [$user, $organization] = $this->superAdminContext();
 
@@ -51,32 +50,23 @@ class ShopifyOAuthTest extends TestCase
             ]);
 
         $response->assertRedirect();
-        $location = $response->headers->get('Location');
-        $this->assertIsString($location);
-        $this->assertStringStartsWith('https://macfox-us.myshopify.com/admin/oauth/authorize?', $location);
-
-        parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
-        $this->assertSame('test-client-id', $query['client_id']);
-        $this->assertSame('read_products,read_orders', $query['scope']);
-        $this->assertSame('http://localhost:8000/shopify/oauth/callback', $query['redirect_uri']);
-        $this->assertNotEmpty($query['state']);
-
-        $state = OAuthState::query()->sole();
-        $this->assertSame(hash('sha256', $query['state']), $state->state_hash);
-        $this->assertNotSame($query['state'], $state->state_hash);
         $store = Store::query()->sole();
+        $response->assertRedirect(route('stores.show', ['store' => $store, 'tab' => 'apps']));
         $this->assertSame('pending', $store->status);
         $this->assertSame('development', data_get($store->settings, 'environment'));
+        $this->assertTrue($store->hasMember($user));
+        $this->assertDatabaseCount('oauth_states', 0);
+        $this->assertDatabaseHas('apps', ['handle' => 'test-shopify-app', 'distribution' => 'custom']);
     }
 
     public function test_expired_oauth_state_is_rejected(): void
     {
         [$user, $organization] = $this->superAdminContext();
+        $store = $this->store($organization);
         $authorization = app(ShopifyOAuthService::class)->begin(
             $organization,
             $user,
-            'Macfox US',
-            'macfox-us.myshopify.com',
+            $store,
         );
         $authorization['state_record']->forceFill(['expires_at' => now()->subMinute()])->save();
         $query = $this->signedCallbackQuery($authorization['state'], 'macfox-us.myshopify.com');
@@ -88,11 +78,11 @@ class ShopifyOAuthTest extends TestCase
     public function test_callback_with_invalid_hmac_is_rejected(): void
     {
         [$user, $organization] = $this->superAdminContext();
+        $store = $this->store($organization);
         $authorization = app(ShopifyOAuthService::class)->begin(
             $organization,
             $user,
-            'Macfox US',
-            'macfox-us.myshopify.com',
+            $store,
         );
         $query = $this->signedCallbackQuery($authorization['state'], 'macfox-us.myshopify.com');
         $query['hmac'] = str_repeat('0', 64);
@@ -114,11 +104,11 @@ class ShopifyOAuthTest extends TestCase
             ]),
         ]);
         [$user, $organization] = $this->superAdminContext();
+        $precreatedStore = $this->store($organization);
         $authorization = app(ShopifyOAuthService::class)->begin(
             $organization,
             $user,
-            'Macfox US',
-            'macfox-us.myshopify.com',
+            $precreatedStore,
         );
         $query = $this->signedCallbackQuery($authorization['state'], 'macfox-us.myshopify.com');
 
@@ -132,6 +122,8 @@ class ShopifyOAuthTest extends TestCase
         $this->assertNotSame('shpat_sensitive_access_token', DB::table('shopify_connections')->value('access_token_encrypted'));
         $this->assertSame($connection->id, $installation->shopify_connection_id);
         $this->assertSame($app->id, $installation->app_id);
+        $this->assertCount(6, data_get($installation->settings, 'modules'));
+        $this->assertNotContains(false, data_get($installation->settings, 'modules'));
         $this->assertSame('test-client-secret', $app->client_secret_encrypted);
         $this->assertNotSame('test-client-secret', DB::table('apps')->value('client_secret_encrypted'));
         $this->assertArrayNotHasKey('access_token_encrypted', $connection->toArray());
@@ -158,11 +150,11 @@ class ShopifyOAuthTest extends TestCase
             ]),
         ]);
         [$user, $organization] = $this->superAdminContext();
+        $store = $this->store($organization);
         $authorization = app(ShopifyOAuthService::class)->begin(
             $organization,
             $user,
-            'Macfox US',
-            'macfox-us.myshopify.com',
+            $store,
         );
         $query = $this->signedCallbackQuery($authorization['state'], 'macfox-us.myshopify.com');
         app(ShopifyOAuthService::class)->complete($query, $authorization['state']);
@@ -182,6 +174,15 @@ class ShopifyOAuthTest extends TestCase
         $organization->users()->attach($user, ['status' => 'active', 'joined_at' => now()]);
 
         return [$user, $organization];
+    }
+
+    private function store(Organization $organization): Store
+    {
+        return $organization->stores()->create([
+            'name' => 'Macfox US',
+            'shopify_domain' => 'macfox-us.myshopify.com',
+            'status' => 'pending',
+        ]);
     }
 
     /** @return array<string, string|int> */
