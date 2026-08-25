@@ -28,6 +28,14 @@ interface CustomerInsight { key: string; label: string; value: number }
 interface PosLocationInsight { id: string; name: string; orders: number; net_sales: number; total_sales: number }
 interface PosStaffInsight { id: string; name: string; orders: number; units: number; attributed_sales: number }
 interface ReportInsight<T> { available: boolean; source: 'shopifyql'; items: T[]; error: string | null }
+interface OperatingMetric { available: boolean; value: number | null; comparison: ComparisonMetric | null; trend: number[]; note: string }
+interface BehaviorInsight {
+    available: boolean;
+    source: 'shopifyql';
+    metrics: Record<string, { value: number; comparison: ComparisonMetric | null }>;
+    trend: { date: string; sessions: number; conversion_rate: number; add_to_cart: number; checkout: number; completed_checkout: number }[];
+    error: string | null;
+}
 
 const props = defineProps<{
     store: { id: number; name: string; currency: string; timezone: string };
@@ -50,9 +58,19 @@ const props = defineProps<{
         acquisition: ReportInsight<AcquisitionInsight>;
         devices: ReportInsight<DeviceInsight>;
         locations: ReportInsight<LocationInsight>;
+        behavior: BehaviorInsight;
         customers: { available: boolean; source: 'local_sync'; items: CustomerInsight[]; repeat_rate: number; error: null };
         pos: { available: boolean; source: 'shopifyql' | 'local_sync'; locations: PosLocationInsight[]; staff: PosStaffInsight[]; error: string | null };
         integration: { report_scope_granted: boolean; shopifyql_available: boolean };
+        generated_at: string;
+    };
+    performance: {
+        schema: 'analytics-operating-metrics-v1';
+        comparison: { mode: 'previous' | 'none'; label: string; period: { from: string; to: string } | null };
+        advertising: { available: boolean; complete: boolean; available_channels: number; expected_channels: number; channels: { key: string; name: string; available: boolean; spend: number }[]; message: string };
+        behavior: { available: boolean; source: 'shopifyql'; message: string };
+        metrics: Record<string, OperatingMetric>;
+        catalog: { sku_count: number; customer_count: number };
         generated_at: string;
     };
 }>();
@@ -64,6 +82,7 @@ const filters = reactive({
     date_to: props.overview.period.to,
     include_test: props.overview.period.include_test,
     include_cancelled: props.overview.period.include_cancelled,
+    comparison: props.performance.comparison.mode,
 });
 const showFilters = ref(false);
 const loading = ref(false);
@@ -80,12 +99,12 @@ const money = (value: number) => new Intl.NumberFormat('zh-CN', {
     style: 'currency', currency: props.store.currency || 'USD', maximumFractionDigits: 2,
 }).format(Number(value || 0));
 const number = (value: number) => Number(value || 0).toLocaleString('zh-CN');
-const changeText = (metric: string) => {
-    const value = props.overview.comparisons.previous[metric]?.change_percent;
+const changeText = (comparison: ComparisonMetric | null | undefined) => {
+    const value = comparison?.change_percent;
     return value === null || value === undefined ? '暂无对比' : `${value >= 0 ? '↑' : '↓'} ${Math.abs(value)}%`;
 };
-const changeClass = (metric: string) => {
-    const value = props.overview.comparisons.previous[metric]?.change_percent;
+const changeClass = (comparison: ComparisonMetric | null | undefined) => {
+    const value = comparison?.change_percent;
     return value === null || value === undefined ? 'text-slate-400' : value >= 0 ? 'text-emerald-600' : 'text-rose-600';
 };
 const filterParams = () => ({
@@ -95,6 +114,7 @@ const filterParams = () => ({
         : {}),
     include_test: filters.include_test ? 1 : 0,
     include_cancelled: filters.include_cancelled ? 1 : 0,
+    comparison: filters.comparison,
 });
 const applyFilters = () => router.get('/analytics/overview', filterParams(), {
     preserveState: false,
@@ -109,6 +129,11 @@ const preset = (days: number) => {
     filters.date_to = '';
     applyFilters();
 };
+const refresh = () => router.reload({
+    only: ['overview', 'insights', 'performance'],
+    onStart: () => { loading.value = true; },
+    onFinish: () => { loading.value = false; },
+});
 
 const metricOptions: { key: keyof TrendPoint; label: string; money: boolean }[] = [
     { key: 'net_sales', label: '净销售额', money: true },
@@ -135,12 +160,57 @@ const newCustomerDegrees = computed(() => `${(props.overview.customers.new / cus
 const acquisitionMax = computed(() => Math.max(...props.insights.acquisition.items.map((item) => item.sessions), 1));
 const locationMax = computed(() => Math.max(...props.insights.locations.items.map((item) => item.sessions), 1));
 
-const cards = computed(() => [
-    { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), note: '扣除退款后的商品销售额' },
-    { key: 'orders', label: '订单数', value: number(props.overview.summary.orders), note: '有效 Shopify 订单' },
-    { key: 'average_order_value', label: '平均订单金额', value: money(props.overview.summary.average_order_value), note: '净销售额 ÷ 订单数' },
-    { key: 'refunds', label: '退款金额', value: money(props.overview.summary.refunds), note: '统计周期内退款' },
-]);
+const comparisonEnabled = computed(() => filters.comparison !== 'none');
+const salesComparison = (key: string) => comparisonEnabled.value ? props.overview.comparisons.previous[key] ?? null : null;
+const performanceMetric = (key: string): OperatingMetric => props.performance.metrics[key] ?? {
+    available: false, value: null, comparison: null, trend: [], note: '暂不可用',
+};
+const formatOperating = (metric: OperatingMetric, format: 'money' | 'number' | 'percent' | 'ratio') => {
+    if (!metric.available || metric.value === null) return '暂不可用';
+    if (format === 'money') return money(metric.value);
+    if (format === 'percent') return `${Number(metric.value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}%`;
+    if (format === 'ratio') return `${Number(metric.value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
+    return number(metric.value);
+};
+const salesTrend = (key: keyof TrendPoint) => props.overview.trend.map((point) => Number(point[key]) || 0);
+const cards = computed(() => {
+    const adSpend = performanceMetric('ad_spend');
+    const roi = performanceMetric('roi');
+    const sessions = performanceMetric('sessions');
+    const conversionRate = performanceMetric('conversion_rate');
+    const addToCart = performanceMetric('add_to_cart');
+    const checkout = performanceMetric('checkout');
+    const addToCartCost = performanceMetric('add_to_cart_cost');
+    const checkoutCost = performanceMetric('checkout_cost');
+
+    return [
+        { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), available: true, comparison: salesComparison('net_sales'), note: '扣除退款后的商品销售额', trend: salesTrend('net_sales'), color: '#0ea5e9' },
+        { key: 'ad_spend', label: '广告花费', value: formatOperating(adSpend, 'money'), available: adSpend.available, comparison: comparisonEnabled.value ? adSpend.comparison : null, note: adSpend.note, trend: adSpend.trend, color: '#8b5cf6' },
+        { key: 'roi', label: 'ROI', value: formatOperating(roi, 'ratio'), available: roi.available, comparison: comparisonEnabled.value ? roi.comparison : null, note: roi.note, trend: roi.trend, color: '#f59e0b' },
+        { key: 'orders', label: '订单数', value: number(props.overview.summary.orders), available: true, comparison: salesComparison('orders'), note: '有效 Shopify 订单', trend: salesTrend('orders'), color: '#10b981' },
+        { key: 'average_order_value', label: '平均订单金额', value: money(props.overview.summary.average_order_value), available: true, comparison: salesComparison('average_order_value'), note: 'Shopify 原生平均订单金额', trend: salesTrend('average_order_value'), color: '#14b8a6' },
+        { key: 'sessions', label: '访问量', value: formatOperating(sessions, 'number'), available: sessions.available, comparison: comparisonEnabled.value ? sessions.comparison : null, note: sessions.note, trend: sessions.trend, color: '#6366f1' },
+        { key: 'conversion_rate', label: '转化率', value: formatOperating(conversionRate, 'percent'), available: conversionRate.available, comparison: comparisonEnabled.value ? conversionRate.comparison : null, note: conversionRate.note, trend: conversionRate.trend, color: '#06b6d4' },
+        { key: 'refunds', label: '退款金额', value: money(props.overview.summary.refunds), available: true, comparison: salesComparison('refunds'), note: '统计周期内退款', trend: salesTrend('refunds'), color: '#f43f5e' },
+        { key: 'add_to_cart', label: '加购数', value: formatOperating(addToCart, 'number'), available: addToCart.available, comparison: comparisonEnabled.value ? addToCart.comparison : null, note: addToCart.note, trend: addToCart.trend, color: '#8b5cf6' },
+        { key: 'checkout', label: '结账数', value: formatOperating(checkout, 'number'), available: checkout.available, comparison: comparisonEnabled.value ? checkout.comparison : null, note: checkout.note, trend: checkout.trend, color: '#ec4899' },
+        { key: 'add_to_cart_cost', label: '单次加购成本', value: formatOperating(addToCartCost, 'money'), available: addToCartCost.available, comparison: comparisonEnabled.value ? addToCartCost.comparison : null, note: addToCartCost.note, trend: addToCartCost.trend, color: '#f97316' },
+        { key: 'checkout_cost', label: '单次结账成本', value: formatOperating(checkoutCost, 'money'), available: checkoutCost.available, comparison: comparisonEnabled.value ? checkoutCost.comparison : null, note: checkoutCost.note, trend: checkoutCost.trend, color: '#eab308' },
+    ];
+});
+const sparklinePoints = (values: number[]) => {
+    if (!values.length) return '';
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = Math.max(max - min, 0.000001);
+
+    return values.map((value, index) => {
+        const x = values.length === 1 ? 50 : index * (100 / (values.length - 1));
+        const y = max === min ? 50 : 88 - ((value - min) / range) * 76;
+        return `${x},${y}`;
+    }).join(' ');
+};
+const advertisingChannels = computed(() => props.performance.advertising.channels.filter((channel) => channel.available).map((channel) => channel.name));
 
 const statusLabel: Record<string, string> = {
     paid: '已付款', pending: '待付款', refunded: '已退款', partially_refunded: '部分退款',
@@ -164,6 +234,11 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                 <div class="flex flex-wrap items-center gap-2">
                     <button v-for="days in [1, 7, 30, 90]" :key="days" type="button" :disabled="loading" class="rounded-xl border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60" :class="overview.period.days === days && !isCustomPeriod ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="preset(days)">{{ days === 1 ? '今天' : `${days} 天` }}</button>
                     <button type="button" :disabled="loading" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @click="showFilters = !showFilters">{{ overview.period.from }} — {{ overview.period.to }}</button>
+                    <select v-model="filters.comparison" :disabled="loading" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @change="applyFilters">
+                        <option value="previous">对比上一等长周期</option>
+                        <option value="none">不对比</option>
+                    </select>
+                    <button type="button" :disabled="loading" class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60" @click="refresh">刷新</button>
                 </div>
             </header>
 
@@ -175,15 +250,24 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                 <button class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white">应用</button>
             </form>
 
-            <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <div class="grid sm:grid-cols-2 xl:grid-cols-4">
-                    <article v-for="(card,index) in cards" :key="card.key" class="relative min-h-44 p-6" :class="index ? 'border-t border-slate-100 sm:border-l sm:border-t-0' : ''">
+            <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <article v-for="card in cards" :key="card.key" class="relative min-h-44 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p class="text-sm font-semibold text-slate-500">{{ card.label }}</p>
-                        <p class="mt-8 text-3xl font-semibold tracking-tight text-slate-950">{{ card.value }}</p>
-                        <div class="mt-3 flex items-center justify-between gap-2 text-xs"><span :class="changeClass(card.key)">环比 {{ changeText(card.key) }}</span><span class="text-slate-400">{{ card.note }}</span></div>
+                        <div class="mt-6 flex items-end justify-between gap-4">
+                            <p class="min-w-0 text-2xl font-semibold tracking-tight" :class="card.available ? 'text-slate-950' : 'text-slate-400'">{{ card.value }}</p>
+                            <svg v-if="card.trend.length" viewBox="0 0 100 100" preserveAspectRatio="none" class="h-12 w-24 shrink-0 overflow-visible opacity-80"><polyline :points="sparklinePoints(card.trend)" fill="none" :stroke="card.color" stroke-width="3" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        </div>
+                        <div class="mt-4 flex items-start justify-between gap-3 text-xs"><span class="shrink-0 font-semibold" :class="changeClass(card.comparison)">{{ comparisonEnabled ? `环比 ${changeText(card.comparison)}` : '未启用对比' }}</span><span class="line-clamp-2 text-right leading-5 text-slate-400">{{ card.note }}</span></div>
                     </article>
-                </div>
             </section>
+
+            <div class="flex flex-wrap gap-x-5 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-500">
+                <span>商品 SKU {{ number(performance.catalog.sku_count) }}</span>
+                <span>客户总数 {{ number(performance.catalog.customer_count) }}</span>
+                <span>广告花费渠道：{{ advertisingChannels.length ? advertisingChannels.join(' + ') : '暂无已同步渠道' }}</span>
+                <span :class="performance.advertising.complete ? 'text-emerald-700' : 'text-amber-700'">{{ performance.advertising.message }}</span>
+                <span>访问、加购与结账：{{ performance.behavior.available ? 'ShopifyQL' : '暂不可用' }}</span>
+            </div>
 
             <section class="grid gap-5 xl:grid-cols-[1.35fr_.85fr]">
                 <article class="relative min-h-[430px] overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

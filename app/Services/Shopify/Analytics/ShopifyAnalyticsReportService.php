@@ -21,7 +21,7 @@ class ShopifyAnalyticsReportService
 
     private const ANALYTICS_OVERVIEW_REPORT = 'analytics-overview';
 
-    private const ANALYTICS_OVERVIEW_SCHEMA_VERSION = 2;
+    private const ANALYTICS_OVERVIEW_SCHEMA_VERSION = 3;
 
     private const CATALOG_REPORT_SCHEMA_VERSION = 2;
 
@@ -106,12 +106,14 @@ class ShopifyAnalyticsReportService
           $locations: String!
           $posLocations: String!
           $posStaff: String!
+          $behavior: String!
         ) {
           acquisition: shopifyqlQuery(query: $acquisition) { tableData { rows } parseErrors }
           devices: shopifyqlQuery(query: $devices) { tableData { rows } parseErrors }
           locations: shopifyqlQuery(query: $locations) { tableData { rows } parseErrors }
           posLocations: shopifyqlQuery(query: $posLocations) { tableData { rows } parseErrors }
           posStaff: shopifyqlQuery(query: $posStaff) { tableData { rows } parseErrors }
+          behavior: shopifyqlQuery(query: $behavior) { tableData { columns { name dynamicColumnMetadata { type originalColumnName comparisonReference } } rows } parseErrors }
         }
         GRAPHQL;
 
@@ -367,7 +369,7 @@ class ShopifyAnalyticsReportService
 
         $connection = $store->shopifyConnection;
         $scopes = $connection?->scopes ?? [];
-        $keys = ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff'];
+        $keys = ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff', 'behavior'];
 
         if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
             return $snapshot
@@ -415,6 +417,7 @@ class ShopifyAnalyticsReportService
             'locations' => str_replace('{range}', $range, self::REPORT_QUERIES['acquisition-by-location']),
             'posLocations' => str_replace('{range}', $range, self::REPORT_QUERIES['pos-sales-by-location']),
             'posStaff' => str_replace('{range}', $range, self::REPORT_QUERIES['pos-sales-by-staff']),
+            'behavior' => str_replace('{range}', $range, self::REPORT_QUERIES['conversion-funnel-timeseries']),
         ];
 
         try {
@@ -426,6 +429,7 @@ class ShopifyAnalyticsReportService
                 'locations' => $this->tableReport($payload, 'locations'),
                 'pos_locations' => $this->tableReport($payload, 'posLocations'),
                 'pos_staff' => $this->tableReport($payload, 'posStaff'),
+                'behavior' => $this->tableReport($payload, 'behavior'),
             ];
         } catch (ShopifyApiException $exception) {
             return $snapshot
@@ -698,7 +702,7 @@ class ShopifyAnalyticsReportService
         $payload = $snapshot->payload;
         if (! is_array($payload)) {
             return $this->unavailableReports(
-                ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff'],
+                ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff', 'behavior'],
                 false,
                 '本地分析快照不可用。',
             );

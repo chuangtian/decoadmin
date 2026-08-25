@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AnalyticsFilterRequest;
+use App\Services\AnalyticsOperatingMetricsService;
 use App\Services\AnalyticsOverviewInsightsService;
 use App\Services\AnalyticsQueryService;
 use App\Services\ModelSalesSummaryService;
@@ -18,11 +19,14 @@ class AnalyticsController extends Controller
         CurrentStore $currentStore,
         AnalyticsQueryService $analytics,
         AnalyticsOverviewInsightsService $insights,
+        AnalyticsOperatingMetricsService $operatingMetrics,
     ): Response {
         $store = $currentStore->require();
         $this->authorize('view', $store);
         $filters = $request->filters();
         $overview = $analytics->operationsOverview($store, $filters);
+        $overviewInsights = $insights->forStore($store, $overview['period'], $overview['customers'], $filters);
+        $comparisonMode = (string) ($filters['comparison'] ?? 'previous');
 
         return Inertia::render('Analytics/Overview', [
             'store' => [
@@ -32,7 +36,13 @@ class AnalyticsController extends Controller
                 'timezone' => $store->timezone ?: 'UTC',
             ],
             'overview' => $overview,
-            'insights' => $insights->forStore($store, $overview['period'], $overview['customers'], $filters),
+            'insights' => $overviewInsights,
+            'performance' => $operatingMetrics->forStore(
+                $store,
+                $overview,
+                $overviewInsights['behavior'],
+                $comparisonMode,
+            ),
         ]);
     }
 
