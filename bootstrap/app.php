@@ -24,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'shopify/webhooks/*',
             'shopify/pixels/*',
             'api/student-discounts/*',
+            'api/shopify-app/webhooks',
             'api/shopify-app/student-discounts/*',
         ]);
 

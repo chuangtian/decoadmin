@@ -5,6 +5,7 @@ namespace App\Services\StudentDiscount;
 use App\Exceptions\StudentDiscountException;
 use App\Models\AuditLog;
 use App\Models\Store;
+use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 
@@ -29,6 +30,30 @@ class ShopifyStudentDiscountAppService
         GRAPHQL;
 
     public function __construct(private HttpFactory $http) {}
+
+    public function managementStore(User $user, string $shop): Store
+    {
+        $shop = strtolower(trim($shop));
+        if (! preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $shop)) {
+            throw new StudentDiscountException('STORE_NOT_CONNECTED', '未找到对应的 DecoAdmin 店铺。', 404);
+        }
+
+        $store = Store::query()
+            ->where('shopify_domain', $shop)
+            ->where('status', 'active')
+            ->whereHas('organization', fn ($query) => $query->where('status', 'active'))
+            ->with('organization')
+            ->first();
+        if (! $store || ! $store->organization) {
+            throw new StudentDiscountException('STORE_NOT_CONNECTED', '未找到对应的 DecoAdmin 店铺。', 404);
+        }
+        if (! $user->canAccessStore($store)
+            || ! $user->hasPermission('student_discount.claim.read', $store->organization, $store)) {
+            throw new StudentDiscountException('STORE_ACCESS_DENIED', '无权访问该店铺的学生优惠后台。', 403);
+        }
+
+        return $store;
+    }
 
     /** @return array{app_installation_id: string, proxy_path: string} */
     public function bootstrap(Store $store, string $idToken): array

@@ -6,10 +6,22 @@ use App\Exceptions\StudentDiscountException;
 use App\Models\Store;
 use App\Services\StudentDiscount\ShopifyStudentDiscountAppService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 class ShopifyStudentDiscountAppController extends Controller
 {
+    public function management(Request $request, ShopifyStudentDiscountAppService $app): RedirectResponse
+    {
+        try {
+            $store = $app->managementStore($request->user(), (string) $request->query('shop'));
+        } catch (StudentDiscountException $exception) {
+            abort($exception->statusCode, $exception->getMessage());
+        }
+
+        return redirect()->route('student-discounts.index', [$store->organization_id, $store->id]);
+    }
+
     public function connection(Request $request): JsonResponse
     {
         $shop = (string) $request->attributes->get('shopify_shop');
