@@ -15,3 +15,9 @@
 
 - Keep local, test, and production environments distinct; never treat their URLs, credentials, data, or deployment actions as interchangeable.
 - The Cloudflare URL is a temporary local-development tunnel and may change. Treat the URL above as the currently known local URL, not a permanent production endpoint.
+
+## Backend development ownership
+
+- Route all future `decoAdmin` backend code changes to the existing Codex task titled `开发 deco-afterShip`.
+- Other Codex tasks should clarify requirements, hand the implementation to that task, and review or verify its result instead of independently modifying the backend code.
+- Only change this ownership rule when the user explicitly instructs otherwise.

@@ -21,11 +21,17 @@ class SystemSettingsController extends Controller
 
     public function index(Request $request): Response
     {
+        $isSuperAdmin = $request->user()->isSuperAdmin();
+
         return $this->render($request, 'System/Settings', 'general', [
             'timezones' => collect(timezone_identifiers_list())
                 ->filter(fn (string $timezone): bool => str_contains($timezone, '/'))
                 ->values()
                 ->all(),
+            'aiSettings' => $isSuperAdmin
+                ? $this->settings->sectionForFrontend('student_ai', false)
+                : null,
+            'canUpdateAi' => $isSuperAdmin,
         ]);
     }
 
@@ -96,6 +102,19 @@ class SystemSettingsController extends Controller
         ]);
 
         return $this->save('feishu', $values, $request, '飞书设置已保存。');
+    }
+
+    public function updateStudentAi(Request $request): RedirectResponse
+    {
+        abort_unless($request->user()->isSuperAdmin(), 403);
+
+        $values = $request->validate([
+            'gemini_api_key' => ['nullable', 'string', 'max:2000'],
+            'gemini_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._-]+$/'],
+            'auto_approval_threshold' => ['required', 'numeric', 'between:0,100'],
+        ]);
+
+        return $this->save('student_ai', $values, $request, 'AI 学生证识别设置已保存。');
     }
 
     /** @param array<string, mixed> $values */
