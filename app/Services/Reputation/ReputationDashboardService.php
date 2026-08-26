@@ -521,7 +521,7 @@ class ReputationDashboardService
                 }
             });
 
-        $query->when($tab === 'reviews' || $tab === 'targets', fn (Builder $builder) => $builder->whereIn('source', ['trustpilot', 'website', 'facebook']))
+        $query->when($tab === 'targets', fn (Builder $builder) => $builder->whereIn('source', ['trustpilot', 'website', 'facebook']))
             ->when($tab === 'reddit', fn (Builder $builder) => $builder->where('source', 'reddit'))
             ->when($tab === 'threads', fn (Builder $builder) => $builder->where('source', 'threads'))
             ->when(filled($filters['source'] ?? null), fn (Builder $builder) => $builder->where('source', $filters['source']))
