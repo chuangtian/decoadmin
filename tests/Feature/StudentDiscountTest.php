@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Exceptions\StudentDiscountException;
 use App\Mail\StudentDiscountDecisionMail;
+use App\Models\App;
+use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Role;
@@ -322,6 +324,7 @@ class StudentDiscountTest extends TestCase
     public function test_shopify_app_connection_validates_oidc_claims_and_bootstrap_sets_installation_proxy_path(): void
     {
         [, , $store] = $this->context('store-admin');
+        $connection = $this->connection($store);
         config([
             'student_discount.environment' => 'local',
             'student_discount.active.client_id' => 'student-app-client-id',
@@ -359,6 +362,25 @@ class StudentDiscountTest extends TestCase
                     'value' => '/apps/deco-student-local',
                 ]],
                 'userErrors' => [],
+            ]]])
+            ->push(['access_token' => 'ephemeral-online-access-token', 'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy'])
+            ->push(['data' => ['currentAppInstallation' => [
+                'id' => 'gid://shopify/AppInstallation/789',
+                'accessScopes' => [
+                    ['handle' => 'read_discounts'],
+                    ['handle' => 'write_discounts'],
+                    ['handle' => 'read_products'],
+                    ['handle' => 'write_app_proxy'],
+                ],
+            ]]])
+            ->push(['data' => ['metafieldsSet' => [
+                'metafields' => [[
+                    'id' => 'gid://shopify/Metafield/999',
+                    'namespace' => 'deco_student_discount',
+                    'key' => 'proxy_path',
+                    'value' => '/apps/deco-student-local',
+                ]],
+                'userErrors' => [],
             ]]]);
 
         $this->withToken($token)
@@ -367,6 +389,10 @@ class StudentDiscountTest extends TestCase
             ->assertJsonPath('data.environment', 'local')
             ->assertJsonPath('data.app_installation_id', 'gid://shopify/AppInstallation/789')
             ->assertJsonPath('data.proxy_path', '/apps/deco-student-local');
+
+        $this->withToken($token)
+            ->postJson(route('student-discounts.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
+            ->assertOk();
 
         Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
             && $request['subject_token'] === $token
@@ -383,6 +409,19 @@ class StudentDiscountTest extends TestCase
             'action' => 'student_discount_shopify_app_bootstrapped',
             'store_id' => $store->id,
         ]);
+        $app = App::query()->sole();
+        $this->assertSame(config('student_discount.active.handle'), $app->handle);
+        $installation = AppInstallation::query()->whereBelongsTo($app)->whereBelongsTo($store)->sole();
+        $this->assertSame('active', $installation->status);
+        $this->assertSame($connection->id, $installation->shopify_connection_id);
+        $this->assertSame('gid://shopify/AppInstallation/789', $installation->external_installation_id);
+        $this->assertSame(
+            ['read_discounts', 'read_products', 'write_app_proxy', 'write_discounts'],
+            $installation->granted_scopes,
+        );
+        $this->assertSame('student_discount_bootstrap', data_get($installation->settings, 'source'));
+        $this->assertDatabaseCount('apps', 1);
+        $this->assertDatabaseCount('app_installations', 1);
     }
 
     public function test_shopify_app_bootstrap_rejects_token_without_required_scopes(): void

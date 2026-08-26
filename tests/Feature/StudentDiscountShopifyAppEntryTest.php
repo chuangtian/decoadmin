@@ -152,6 +152,44 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'student_discount_shopify_app_scopes_updated')->count());
     }
 
+    public function test_reconcile_command_registers_only_the_exact_previously_bootstrapped_store(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $connection = $this->connection($store);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Do Not Touch',
+            'shopify_domain' => 'do-not-touch.myshopify.com',
+            'status' => 'active',
+        ]);
+        $this->connection($otherStore);
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'action' => 'student_discount_shopify_app_bootstrapped',
+            'subject_type' => Store::class,
+            'subject_id' => $store->id,
+            'metadata' => [
+                'app_installation_id' => 'gid://shopify/AppInstallation/789',
+                'granted_scopes' => ['write_discounts', 'read_products', 'read_discounts', 'write_app_proxy'],
+            ],
+        ]);
+
+        $this->artisan('student-discounts:reconcile-installation', ['shop' => $store->shopify_domain])
+            ->expectsOutput('学生优惠 App 安装记录已同步。')
+            ->assertSuccessful();
+
+        $app = App::query()->where('handle', 'deco-student-discount-test')->sole();
+        $installation = AppInstallation::query()->whereBelongsTo($app)->whereBelongsTo($store)->sole();
+        $this->assertSame($connection->id, $installation->shopify_connection_id);
+        $this->assertSame('gid://shopify/AppInstallation/789', $installation->external_installation_id);
+        $this->assertSame('active', $installation->status);
+        $this->assertFalse(AppInstallation::query()->whereBelongsTo($otherStore)->exists());
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'student_discount_shopify_app_reconciled',
+            'store_id' => $store->id,
+        ]);
+    }
+
     public function test_webhook_rejects_wrong_environment_secret_unsupported_topic_and_body_only_shop(): void
     {
         [, , $store] = $this->context('store-admin');
