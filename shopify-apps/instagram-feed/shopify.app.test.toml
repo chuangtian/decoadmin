@@ -1,0 +1,30 @@
+# 测试环境是 Dev Dashboard 里独立的 Shopify App。
+# 该 App 尚未创建，所以 client_id 留空；创建后用 `npm run config:link:test` 写入。
+# 留空而不是预填，是为了避免克隆仓库后误把测试配置指向本地开发 App。
+client_id = ""
+name = "Deco-Instagram-内容-test"
+handle = "deco-instagram-feed-test"
+application_url = "https://testadmin.decomkt.com/shopify-app/instagram-feed"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://testadmin.decomkt.com/api/shopify-app/auth/callback" ]

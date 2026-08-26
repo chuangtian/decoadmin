@@ -1,0 +1,35 @@
+# Logs
+logs
+*.log
+node_modules
+npm-debug.log*
+
+yarn-debug.log*
+yarn-error.log*
+
+pnpm-debug.log*
+
+lerna-debug.log*
+
+# Ignore shopify files created during app dev
+.shopify/*
+.shopify.lock
+
+# Environment variables. 业务凭证一律放在 DecoAdmin 根项目的未跟踪环境文件里。
+.env
+.env.*
+
+# Build
+dist
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
