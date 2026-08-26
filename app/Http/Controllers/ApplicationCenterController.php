@@ -2,80 +2,36 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\AppCenter\AppConfigurationCatalog;
+use App\Services\AppCenter\ApplicationCenterQueryService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ApplicationCenterController extends Controller
 {
-    public function __construct(
-        private CurrentOrganization $currentOrganization,
-        private CurrentStore $currentStore,
-    ) {}
+    public function __construct(private ApplicationCenterQueryService $applicationCenter) {}
 
-    public function installations(Request $request): Response
+    public function installations(): RedirectResponse
     {
-        $organization = $this->currentOrganization->require();
-        $storeIds = $this->accessibleStoreIds($request->user(), $organization);
-        $filters = $request->validate([
-            'search' => ['nullable', 'string', 'max:120'],
-            'status' => ['nullable', 'in:active,pending,uninstalled,disabled'],
-        ]);
-        $search = trim((string) ($filters['search'] ?? ''));
-        $status = (string) ($filters['status'] ?? '');
-
-        $installations = AppInstallation::query()
-            ->whereIn('store_id', $storeIds)
-            ->whereHas('store', fn (Builder $query) => $query->whereBelongsTo($organization))
-            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
-                $query->whereHas('app', fn (Builder $query) => $query
-                    ->where('name', 'like', "%{$search}%")
-                    ->orWhere('handle', 'like', "%{$search}%"))
-                    ->orWhereHas('store', fn (Builder $query) => $query
-                        ->where('name', 'like', "%{$search}%")
-                        ->orWhere('shopify_domain', 'like', "%{$search}%"));
-            }))
-            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
-            ->with(['app:id,name,handle,status', 'store:id,organization_id,name,shopify_domain,status,timezone', 'installedBy:id,name'])
-            ->latest('installed_at')
-            ->paginate(20)
-            ->withQueryString()
-            ->through(fn (AppInstallation $installation): array => [
-                'id' => $installation->id,
-                'status' => $installation->status,
-                'app' => $installation->app ? [
-                    'id' => $installation->app->id,
-                    'name' => $installation->app->name,
-                    'handle' => $installation->app->handle,
-                ] : null,
-                'store' => [
-                    'id' => $installation->store->id,
-                    'name' => $installation->store->name,
-                    'shopify_domain' => $installation->store->shopify_domain,
-                ],
-                'installed_by' => $installation->installedBy?->name,
-                'installed_at' => $installation->installed_at?->toIso8601String(),
-                'uninstalled_at' => $installation->uninstalled_at?->toIso8601String(),
-            ]);
-
-        return Inertia::render('Apps/Installations', [
-            'installations' => $installations,
-            'filters' => ['search' => $search, 'status' => $status],
-        ]);
+        return redirect()->route('app-center.index');
     }
 
-    public function configurations(Request $request, AppConfigurationCatalog $catalog): Response
-    {
-        $organization = $this->currentOrganization->require();
-        $store = $this->currentStore->get();
+    public function configurations(
+        Request $request,
+        AppConfigurationCatalog $catalog,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+    ): Response {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->get();
         if (! $store) {
             return Inertia::render('Apps/Configurations', [
                 'store' => null,
@@ -86,21 +42,7 @@ class ApplicationCenterController extends Controller
         $this->authorize('view', $store);
         abort_unless($store->organization_id === $organization->id, 403);
         $store->loadMissing('organization:id,name');
-        $installations = AppInstallation::query()
-            ->where('store_id', $store->id)
-            ->whereIn('status', ['active', 'pending', 'disabled'])
-            ->whereHas('app', fn (Builder $query) => $query->where('status', 'active'))
-            ->with([
-                'app:id,organization_id,name,handle,status,description,settings',
-                'store:id,organization_id,name,shopify_domain,status',
-                'store.organization:id,name',
-                'shopifyConnection:id,store_id,status',
-            ])
-            ->orderByRaw("case when status = 'active' then 0 else 1 end")
-            ->latest('installed_at')
-            ->get()
-            ->sortBy(fn (AppInstallation $installation): string => mb_strtolower((string) $installation->app?->name))
-            ->values();
+        $installations = $this->applicationCenter->configurationInstallations($store);
 
         return Inertia::render('Apps/Configurations', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'shopify_domain' => $store->shopify_domain],
@@ -108,9 +50,9 @@ class ApplicationCenterController extends Controller
         ]);
     }
 
-    public function logs(Request $request): Response
+    public function logs(Request $request, CurrentOrganization $currentOrganization): Response
     {
-        $organization = $this->currentOrganization->require();
+        $organization = $currentOrganization->require();
         $storeIds = $this->accessibleStoreIds($request->user(), $organization);
         $filters = $request->validate(['search' => ['nullable', 'string', 'max:120']]);
         $search = trim((string) ($filters['search'] ?? ''));

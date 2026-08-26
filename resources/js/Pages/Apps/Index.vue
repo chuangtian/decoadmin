@@ -26,6 +26,21 @@ const statusClass = (status: string) => status === 'active'
     : status === 'disabled'
         ? 'bg-rose-50 text-rose-700 ring-rose-100'
         : 'bg-amber-50 text-amber-700 ring-amber-100';
+const installationStatusLabel = (status: string) => ({
+    active: '已安装',
+    pending: '待完成',
+    disabled: '已禁用',
+    uninstalled: '已卸载',
+    not_installed: '未安装',
+}[status] ?? status);
+const installationStatusClass = (status: string) => ({
+    active: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+    pending: 'bg-amber-50 text-amber-700 ring-amber-100',
+    disabled: 'bg-slate-100 text-slate-600 ring-slate-200',
+    uninstalled: 'bg-rose-50 text-rose-700 ring-rose-100',
+    not_installed: 'bg-slate-100 text-slate-500 ring-slate-200',
+}[status] ?? 'bg-slate-100 text-slate-600 ring-slate-200');
+const currentInstallationStatus = (app: ShopifyApp) => app.current_store_installation?.status ?? 'not_installed';
 </script>
 
 <template>
@@ -35,7 +50,7 @@ const statusClass = (status: string) => status === 'active'
             <div class="mb-7">
                 <p class="text-sm font-semibold text-emerald-700">应用中心</p>
                 <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">应用列表</h2>
-                <p class="mt-2 text-sm text-slate-500">查看当前组织可用的 Shopify 应用，以及有权访问店铺中的安装状态。</p>
+                <p class="mt-2 text-sm text-slate-500">查看当前组织可用的 Shopify 应用，以及右上角当前店铺的安装状态。</p>
             </div>
 
             <form class="mb-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_220px_auto]" @submit.prevent="search">
@@ -61,14 +76,14 @@ const statusClass = (status: string) => status === 'active'
                     <div class="hidden overflow-x-auto md:block">
                         <table class="w-full min-w-[880px] text-left text-sm">
                             <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                                <tr><th class="px-5 py-3.5">应用名称</th><th class="px-5 py-3.5">类型</th><th class="px-5 py-3.5">状态</th><th class="px-5 py-3.5 text-center">安装数量</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
+                                <tr><th class="px-5 py-3.5">应用名称</th><th class="px-5 py-3.5">类型</th><th class="px-5 py-3.5">应用状态</th><th class="px-5 py-3.5">当前店铺</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 <tr v-for="app in apps.data" :key="app.id" class="transition hover:bg-slate-50/70">
                                     <td class="px-5 py-4"><div class="flex items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-sm font-bold text-emerald-700">{{ app.name.charAt(0).toUpperCase() }}</span><div class="min-w-0"><Link :href="`/apps/${app.id}`" class="font-semibold text-slate-900 hover:text-emerald-700">{{ app.name }}</Link><p class="mt-0.5 font-mono text-xs text-slate-400">{{ app.slug }}</p></div></div></td>
                                     <td class="px-5 py-4 font-medium text-slate-600">{{ typeLabel(app.type) }}</td>
                                     <td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(app.status)">{{ statusLabel(app.status) }}</span></td>
-                                    <td class="px-5 py-4 text-center text-lg font-semibold text-slate-800">{{ app.installations_count }}</td>
+                                    <td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="installationStatusClass(currentInstallationStatus(app))">{{ installationStatusLabel(currentInstallationStatus(app)) }}</span></td>
                                     <td class="px-5 py-4 text-xs text-slate-500">{{ dateLabel(app.created_at) }}</td>
                                     <td class="px-5 py-4 text-right"><Link :href="`/apps/${app.id}`" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50">查看详情</Link></td>
                                 </tr>
@@ -79,7 +94,7 @@ const statusClass = (status: string) => status === 'active'
                     <div class="divide-y divide-slate-100 md:hidden">
                         <article v-for="app in apps.data" :key="app.id" class="p-5">
                             <div class="flex items-start justify-between gap-3"><div class="flex min-w-0 items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-sm font-bold text-emerald-700">{{ app.name.charAt(0).toUpperCase() }}</span><div class="min-w-0"><Link :href="`/apps/${app.id}`" class="block truncate font-semibold text-slate-900">{{ app.name }}</Link><p class="mt-0.5 truncate font-mono text-xs text-slate-400">{{ app.slug }}</p></div></div><span class="inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(app.status)">{{ statusLabel(app.status) }}</span></div>
-                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">类型</dt><dd class="mt-1 font-medium text-slate-700">{{ typeLabel(app.type) }}</dd></div><div><dt class="text-xs text-slate-400">安装数量</dt><dd class="mt-1 font-semibold text-slate-900">{{ app.installations_count }}</dd></div></dl>
+                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">类型</dt><dd class="mt-1 font-medium text-slate-700">{{ typeLabel(app.type) }}</dd></div><div><dt class="text-xs text-slate-400">当前店铺安装</dt><dd class="mt-1"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="installationStatusClass(currentInstallationStatus(app))">{{ installationStatusLabel(currentInstallationStatus(app)) }}</span></dd></div></dl>
                             <Link :href="`/apps/${app.id}`" class="mt-4 inline-flex text-sm font-semibold text-emerald-700">查看详情 →</Link>
                         </article>
                     </div>

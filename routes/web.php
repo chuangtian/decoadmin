@@ -378,7 +378,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
 
     Route::get('/app-center', [AppController::class, 'index'])->middleware('permission:apps.view')->name('app-center.index');
-    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.install')->name('app-installations.index');
+    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.view')->name('app-installations.index');
     Route::get('/app-configurations', [ApplicationCenterController::class, 'configurations'])->middleware('permission:apps.configure')->name('app-configurations.index');
     Route::get('/app-logs', [ApplicationCenterController::class, 'logs'])->middleware('permission:audit.view')->name('app-logs.index');
 
