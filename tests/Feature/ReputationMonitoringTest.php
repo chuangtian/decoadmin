@@ -90,6 +90,64 @@ class ReputationMonitoringTest extends TestCase
                 ->missing('dashboard.ai'));
     }
 
+    public function test_reviews_records_support_all_sources_and_platform_filters_without_cross_store_or_sensitive_data(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'record-sources');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Reputation Source Store',
+            'shopify_domain' => 'other-reputation-source.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'trustpilot', 'current-review', ['content' => 'Current review']);
+        $this->mention($organization, $store, 'reddit', 'current-reddit', [
+            'content' => 'Current Reddit record',
+            'metrics' => ['views' => 100, 'comments' => 4, 'upvotes' => 10],
+            'source_payloads_encrypted' => ['source' => ['private_note' => 'must-not-leak']],
+        ]);
+        $this->mention($organization, $store, 'threads', 'current-threads', [
+            'content' => 'Current Threads record',
+            'metrics' => ['likes' => 10, 'replies' => 2, 'reposts' => 1, 'shares' => 1],
+        ]);
+        $this->mention($organization, $otherStore, 'reddit', 'other-store-reddit', ['content' => 'Must not leak']);
+
+        $filters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews'];
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', $filters))
+            ->assertOk()
+            ->assertDontSee('must-not-leak')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.schema', 'reputation-overview-v1')
+                ->where('dashboard.records.total', 3)
+                ->has('dashboard.records.data', 3)
+                ->missing('dashboard.analysis'));
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', [...$filters, 'source' => 'reddit']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.filters.tab', 'reviews')
+                ->where('dashboard.filters.source', 'reddit')
+                ->where('dashboard.records.total', 1)
+                ->has('dashboard.records.data', 1)
+                ->where('dashboard.records.data.0.source', 'reddit')
+                ->missing('dashboard.records.data.0.source_payloads')
+                ->missing('dashboard.records.data.0.source_payloads_encrypted'));
+
+        foreach (['reddit', 'threads'] as $tab) {
+            $this->actingAs($user)
+                ->withSession($this->contextSession($organization, $store))
+                ->get(route('reputation.overview', [...$filters, 'tab' => $tab, 'source' => null]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('dashboard.records.total', 1)
+                    ->where('dashboard.records.data.0.source', $tab));
+        }
+    }
+
     public function test_permissions_workflows_audit_and_cross_store_binding_are_enforced(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
