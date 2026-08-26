@@ -20,6 +20,7 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
+use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
 use App\Http\Controllers\NaturalTrafficController;
@@ -476,8 +477,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
     Route::get('/customers', [ShopifyDataController::class, 'customers'])->middleware('permission:customers.view')->name('customers.index');
     Route::get('/customers/{customer}', [ShopifyDataController::class, 'customer'])->whereNumber('customer')->middleware('permission:customers.view')->name('customers.show');
-    Route::get('/inventory', [ShopifyDataController::class, 'inventory'])->middleware('permission:inventory.view')->name('inventory.index');
-    Route::get('/inventory/{inventoryItem}', [ShopifyDataController::class, 'inventoryItem'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
+    Route::get('/inventory', [InventoryController::class, 'index'])->middleware('permission:inventory.view')->name('inventory.index');
+    Route::get('/inventory/{inventoryItem}', [InventoryController::class, 'show'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
     Route::get('/locations', [ShopifyDataController::class, 'locations'])->middleware('permission:inventory.view')->name('locations.index');
     Route::get('/locations/{location}', [ShopifyDataController::class, 'location'])->whereNumber('location')->middleware('permission:inventory.view')->name('locations.show');
 

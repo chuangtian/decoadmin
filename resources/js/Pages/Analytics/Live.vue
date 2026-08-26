@@ -257,8 +257,8 @@ watch([layer, search], updateLocationLayer);
 
                 <div class="metric-grid">
                     <article v-for="item in metricCards" :key="item.key" class="metric-card">
-                        <div class="metric-label"><span>{{ item.label }}</span><em v-if="!item.metric.available">待接入</em></div>
-                        <strong>{{ item.currency ? formatCurrency(item.metric.value) : item.metric.value }}</strong>
+                        <div class="metric-label"><span>{{ item.label }}</span><em v-if="!item.metric.available">未接入</em></div>
+                        <strong>{{ item.metric.available ? (item.currency ? formatCurrency(item.metric.value) : item.metric.value) : '—' }}</strong>
                         <svg v-if="item.metric.trend.length" viewBox="0 0 100 28" preserveAspectRatio="none"><path :d="sparkline(item.metric.trend)" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
                         <small v-else>{{ item.metric.message ?? '最近 30 分钟' }}</small>
                     </article>
@@ -267,10 +267,10 @@ watch([layer, search], updateLocationLayer);
                 <section class="overlay-section">
                     <div class="section-heading">
                         <div><span>客户行为</span><small>实时漏斗</small></div>
-                        <span class="connection-pill" :class="{ connected: live.traffic.available }">{{ live.traffic.available ? '已接入' : 'Web Pixel 待接入' }}</span>
+                        <span class="connection-pill" :class="{ connected: live.traffic.available }">{{ live.traffic.available ? 'Web Pixel 已接入' : 'Web Pixel 未接入' }}</span>
                     </div>
                     <div class="behavior-row">
-                        <div v-for="item in behaviorCards" :key="item.label"><strong>{{ item.metric.value }}</strong><span>{{ item.label }}</span></div>
+                        <div v-for="item in behaviorCards" :key="item.label"><strong>{{ item.metric.available ? item.metric.value : '—' }}</strong><span>{{ item.label }}</span></div>
                     </div>
                 </section>
 

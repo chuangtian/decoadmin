@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -91,6 +92,75 @@ class SystemStatusTest extends TestCase
             ->assertDontSee('hidden-error')
             ->assertInertia(fn (Assert $page) => $page
                 ->where('systemStatus.incidents.1.count', 1));
+    }
+
+    public function test_queue_health_uses_recent_failures_while_retaining_a_sanitized_total(): void
+    {
+        Carbon::setTestNow('2026-08-26 12:00:00');
+        [$user, $organization, $store] = $this->context('organization-admin');
+
+        DB::table('failed_jobs')->insert([
+            [
+                'uuid' => (string) Str::uuid(),
+                'connection' => 'redis',
+                'queue' => 'shopify-webhook',
+                'payload' => '{}',
+                'exception' => 'old failure',
+                'failed_at' => now()->subDays(2),
+            ],
+            [
+                'uuid' => (string) Str::uuid(),
+                'connection' => 'redis',
+                'queue' => 'shopify-webhook',
+                'payload' => '{}',
+                'exception' => 'recent failure',
+                'failed_at' => now()->subHour(),
+            ],
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('system.status'))
+            ->assertOk()
+            ->assertDontSee('old failure')
+            ->assertDontSee('recent failure')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('systemStatus.queues.0.name', 'shopify-webhook')
+                ->where('systemStatus.queues.0.failed', 1)
+                ->where('systemStatus.queues.0.failed_total', 2)
+                ->where('systemStatus.queues.0.failed_window_hours', 24)
+                ->where('systemStatus.queues.0.status', 'warning')
+                ->where('systemStatus.incidents.0.count', 1));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_old_failed_jobs_do_not_keep_a_queue_in_warning_state_forever(): void
+    {
+        Carbon::setTestNow('2026-08-26 12:00:00');
+        [$user, $organization, $store] = $this->context('organization-admin');
+
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) Str::uuid(),
+            'connection' => 'redis',
+            'queue' => 'shopify-webhook',
+            'payload' => '{}',
+            'exception' => 'old failure',
+            'failed_at' => now()->subDays(2),
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('system.status'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('systemStatus.queues.0.name', 'shopify-webhook')
+                ->where('systemStatus.queues.0.failed', 0)
+                ->where('systemStatus.queues.0.failed_total', 1)
+                ->where('systemStatus.queues.0.status', 'healthy')
+                ->where('systemStatus.incidents.0.count', 0));
+
+        Carbon::setTestNow();
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */
