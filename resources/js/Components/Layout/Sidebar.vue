@@ -13,12 +13,14 @@ const navigation = ref<HTMLElement | null>(null);
 const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
+// 这些菜单项的真实路径带组织与店铺作用域，菜单里只登记后缀，进入时按当前上下文补全。
+const storeScopedRoutes = ['/student-discounts', '/instagram-feed'];
 const contextualRoute = (route?: string) => {
-    if (route !== '/student-discounts') return route;
+    if (!route || !storeScopedRoutes.includes(route)) return route;
     const organization = page.props.currentOrganization;
     const store = page.props.currentStore;
     return organization && store
-        ? `/organizations/${organization.id}/stores/${store.id}/student-discounts`
+        ? `/organizations/${organization.id}/stores/${store.id}${route}`
         : route;
 };
 
