@@ -28,6 +28,12 @@ class AnalyticsOverviewInsightsService
         $posStaff = $native['pos_staff'];
         $behavior = $native['behavior'];
         $localPos = $this->businessInsights->localPosOverview($store, $filters);
+        $integrationError = collect([$behavior, $source, $device, $location, $posLocations, $posStaff])
+            ->map(fn (array $report): ?string => filled($report['error'] ?? null)
+                ? trim((string) $report['error'])
+                : null)
+            ->filter()
+            ->first();
 
         $nativePosAvailable = $posLocations['available'] || $posStaff['available'];
         $locations = $posLocations['available']
@@ -65,6 +71,7 @@ class AnalyticsOverviewInsightsService
                 'report_scope_granted' => $source['scope_granted'],
                 'shopifyql_available' => collect([$source, $device, $location, $posLocations, $posStaff, $behavior])
                     ->contains(fn (array $report): bool => $report['available']),
+                'error' => $integrationError,
                 'storage' => $native['storage'] ?? null,
             ],
             'generated_at' => now()->toIso8601String(),

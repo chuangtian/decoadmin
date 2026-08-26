@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\RefreshShopifyAnalyticsSnapshot;
 use App\Models\AnalyticsSnapshot;
 use App\Models\Order;
 use App\Models\Organization;
@@ -18,6 +19,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -252,14 +254,79 @@ class AnalyticsReportsCenterTest extends TestCase
             ->where('insights.devices.available', false)
             ->where('insights.locations.available', false)
             ->where('insights.behavior.available', false)
+            ->where('insights.integration.error', 'Shopify 连接不可用。')
             ->where('insights.customers.available', true)
             ->where('insights.pos.available', true)
             ->where('insights.pos.source', 'local_sync')
             ->where('performance.schema', 'analytics-operating-metrics-v1')
             ->where('performance.metrics.ad_spend.available', false)
             ->where('performance.metrics.sessions.available', false)
+            ->where('performance.metrics.sessions.note', 'Shopify 连接不可用。')
+            ->where('performance.behavior.message', 'Shopify 连接不可用。')
             ->has('overview.sales_breakdown', 7)
             ->has('overview.order_statuses.financial'));
+    }
+
+    public function test_operations_overview_exposes_pending_shopifyql_refresh_for_frontend_polling(): void
+    {
+        Queue::fake();
+        [$user, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders', 'read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview', ['date_from' => '2026-08-01', 'date_to' => '2026-08-20']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('insights.behavior.available', false)
+                ->where('insights.behavior.error', 'Shopify 报表正在刷新，请稍后重试。')
+                ->where('insights.integration.storage.pending', true)
+                ->where('insights.integration.storage.refreshing', true)
+                ->where('performance.behavior.available', false)
+                ->where('performance.behavior.message', 'Shopify 报表正在刷新，请稍后重试。')
+                ->where('performance.metrics.sessions.note', 'Shopify 报表正在刷新，请稍后重试。')
+                ->where('performance.metrics.add_to_cart_cost.note', 'Shopify 报表正在刷新，请稍后重试。'));
+
+        $snapshot = AnalyticsSnapshot::query()
+            ->where('organization_id', $organization->id)
+            ->where('store_id', $store->id)
+            ->where('report_key', 'analytics-overview')
+            ->sole();
+        Queue::assertPushed(
+            RefreshShopifyAnalyticsSnapshot::class,
+            fn (RefreshShopifyAnalyticsSnapshot $job): bool => $job->snapshotId === $snapshot->id,
+        );
+    }
+
+    public function test_operations_overview_exposes_missing_read_reports_as_permanent_error(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.overview'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('insights.integration.report_scope_granted', false)
+                ->where('insights.integration.error', '缺少 read_reports，请重新授权店铺。')
+                ->where('insights.behavior.error', '缺少 read_reports，请重新授权店铺。')
+                ->where('performance.behavior.message', '缺少 read_reports，请重新授权店铺。')
+                ->where('performance.metrics.checkout.note', '缺少 read_reports，请重新授权店铺。'));
     }
 
     public function test_operations_overview_connects_shopifyql_acquisition_device_location_and_pos_data(): void
