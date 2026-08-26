@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 interface Campaign {
@@ -54,6 +55,42 @@ const props = defineProps<{
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/student-discounts`;
+type StudentDiscountTab = 'campaign' | 'claims';
+const tabOptions: Array<{ value: StudentDiscountTab; name: string; description: string }> = [
+    { value: 'campaign', name: '活动配置', description: '设置优惠规则与适用范围' },
+    { value: 'claims', name: '申请记录', description: '审核申请并管理优惠码' },
+];
+const requestedTab = typeof window === 'undefined'
+    ? null
+    : new URLSearchParams(window.location.search).get('tab');
+const activeTab = ref<StudentDiscountTab>(
+    requestedTab === 'claims' || (requestedTab !== 'campaign' && props.filters.status !== '')
+        ? 'claims'
+        : 'campaign',
+);
+const selectTab = (tab: StudentDiscountTab) => {
+    activeTab.value = tab;
+
+    if (typeof window === 'undefined') return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+};
+const claimFilterUrl = (status: string) => {
+    const query = new URLSearchParams({ tab: 'claims' });
+    if (status) query.set('status', status);
+
+    return `${baseUrl}?${query.toString()}`;
+};
+const claimPageUrl = (url: string | null) => {
+    if (!url) return '';
+
+    const parsedUrl = new URL(url, 'http://localhost');
+    parsedUrl.searchParams.set('tab', 'claims');
+
+    return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+};
 const campaignForm = useForm({
     enabled: props.campaign.enabled,
     code_prefix: props.campaign.code_prefix,
@@ -129,7 +166,49 @@ const label = (status: string) => ({
                 <div class="rounded-2xl border border-rose-200 bg-rose-50 p-5"><p class="text-sm font-semibold text-rose-700">已拒绝</p><p class="mt-2 text-3xl font-semibold text-rose-950">{{ counts.rejected }}</p></div>
             </section>
 
-            <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <nav class="overflow-x-auto pb-1" aria-label="学生优惠管理" role="tablist">
+                <div class="flex min-w-max gap-3">
+                    <button
+                        v-for="tab in tabOptions"
+                        :id="`${tab.value}-tab`"
+                        :key="tab.value"
+                        type="button"
+                        role="tab"
+                        :aria-controls="`${tab.value}-panel`"
+                        :aria-selected="activeTab === tab.value"
+                        class="flex min-w-[240px] items-center gap-3 rounded-2xl border px-4 py-3.5 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:min-w-[280px]"
+                        :class="activeTab === tab.value
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 ring-1 ring-blue-100'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                        @click="selectTab(tab.value)"
+                    >
+                        <span
+                            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition"
+                            :class="activeTab === tab.value ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'"
+                        >
+                            <svg v-if="tab.value === 'campaign'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h10m4 0h2M4 17h2m4 0h10M14 5v4M6 15v4" />
+                            </svg>
+                            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M7 3.75h7.5L19 8.25v12H7v-16.5Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M14 3.75v4.5h5M10 12h6m-6 4h6" />
+                            </svg>
+                        </span>
+                        <span>
+                            <span class="block text-sm font-semibold">{{ tab.name }}</span>
+                            <span class="mt-1 block text-xs" :class="activeTab === tab.value ? 'text-blue-600' : 'text-slate-500'">{{ tab.description }}</span>
+                        </span>
+                    </button>
+                </div>
+            </nav>
+
+            <section
+                v-if="activeTab === 'campaign'"
+                id="campaign-panel"
+                role="tabpanel"
+                aria-labelledby="campaign-tab"
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
                 <header class="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
                     <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">每店铺独立</p><h2 class="mt-1 text-xl font-semibold text-slate-950">活动配置</h2></div>
                     <span class="text-xs font-semibold text-slate-500">{{ permissions.manageCampaign ? '可编辑' : '只读' }}</span>
@@ -158,10 +237,16 @@ const label = (status: string) => ({
                 </form>
             </section>
 
-            <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <section
+                v-else
+                id="claims-panel"
+                role="tabpanel"
+                aria-labelledby="claims-tab"
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
                 <header class="border-b border-slate-100 px-5 py-5 sm:px-7"><p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">审核与发码</p><h2 class="mt-1 text-xl font-semibold text-slate-950">申请记录</h2></header>
                 <div class="flex flex-wrap gap-2 border-b border-slate-100 px-5 py-4 sm:px-7">
-                    <Link v-for="option in [{ value: '', name: '全部' }, { value: 'pending', name: '待审核' }, { value: 'approved', name: '已通过' }, { value: 'rejected', name: '已拒绝' }]" :key="option.value" :href="option.value ? `${baseUrl}?status=${option.value}` : baseUrl" class="rounded-full px-3 py-1.5 text-xs font-semibold ring-1" :class="filters.status === option.value ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200'">{{ option.name }}</Link>
+                    <Link v-for="option in [{ value: '', name: '全部' }, { value: 'pending', name: '待审核' }, { value: 'approved', name: '已通过' }, { value: 'rejected', name: '已拒绝' }]" :key="option.value" :href="claimFilterUrl(option.value)" class="rounded-full px-3 py-1.5 text-xs font-semibold ring-1" :class="filters.status === option.value ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200'">{{ option.name }}</Link>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-slate-100 text-sm">
@@ -178,7 +263,7 @@ const label = (status: string) => ({
                         </tbody>
                     </table>
                 </div>
-                <footer v-if="claims.links.length > 3" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-xs text-slate-500"><span>第 {{ claims.from ?? 0 }}–{{ claims.to ?? 0 }} 条，共 {{ claims.total }} 条</span><div class="flex gap-1"><Link v-for="item in claims.links" :key="item.label" :href="item.url ?? ''" preserve-scroll class="rounded-lg px-2.5 py-1.5 ring-1" :class="[item.active ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200', !item.url ? 'pointer-events-none opacity-40' : '']"><span v-html="item.label" /></Link></div></footer>
+                <footer v-if="claims.links.length > 3" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-xs text-slate-500"><span>第 {{ claims.from ?? 0 }}–{{ claims.to ?? 0 }} 条，共 {{ claims.total }} 条</span><div class="flex gap-1"><Link v-for="item in claims.links" :key="item.label" :href="claimPageUrl(item.url)" preserve-scroll class="rounded-lg px-2.5 py-1.5 ring-1" :class="[item.active ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200', !item.url ? 'pointer-events-none opacity-40' : '']"><span v-html="item.label" /></Link></div></footer>
             </section>
         </div>
     </AppLayout>
