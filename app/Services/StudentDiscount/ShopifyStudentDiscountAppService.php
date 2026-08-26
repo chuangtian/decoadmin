@@ -92,7 +92,7 @@ class ShopifyStudentDiscountAppService
             throw new StudentDiscountException('SHOPIFY_PROXY_PATH_WRITE_FAILED', 'Shopify 未能保存 App Proxy 路径。', 502);
         }
 
-        $connection = $store->shopifyConnection()->where('status', 'active')->first();
+        $connection = $store->shopifyConnection()->whereIn('status', ['connected', 'warning'])->first();
         if (! $connection) {
             throw new StudentDiscountException('STORE_NOT_CONNECTED', '该 Shopify 店铺尚未连接 DecoAdmin。', 409);
         }

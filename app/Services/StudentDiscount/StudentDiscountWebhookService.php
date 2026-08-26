@@ -185,10 +185,10 @@ class StudentDiscountWebhookService
             ->where('shopify_domain', $shopDomain)
             ->where('status', 'active')
             ->whereHas('organization', fn ($query) => $query->where('status', 'active'))
-            ->whereHas('shopifyConnection', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('shopifyConnection', fn ($query) => $query->whereIn('status', ['connected', 'warning']))
             ->with([
                 'organization',
-                'shopifyConnection' => fn ($query) => $query->where('status', 'active'),
+                'shopifyConnection' => fn ($query) => $query->whereIn('status', ['connected', 'warning']),
             ])
             ->first();
         if (! $store || ! $store->organization || ! $store->shopifyConnection) {

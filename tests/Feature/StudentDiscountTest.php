@@ -550,7 +550,7 @@ class StudentDiscountTest extends TestCase
             'access_token_encrypted' => 'shopify-test-token',
             'scopes' => ['read_discounts', 'write_discounts'],
             'api_version' => '2026-07',
-            'status' => 'active',
+            'status' => 'connected',
         ]);
     }
 

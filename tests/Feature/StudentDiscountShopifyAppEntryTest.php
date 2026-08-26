@@ -103,7 +103,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertSame($rawPayload, $event->payload_encrypted);
         $this->assertArrayNotHasKey('hmac', $event->headers);
         $this->assertSame($store->id, $audit->store_id);
-        $this->assertSame('active', $connection->fresh()->status);
+        $this->assertSame('connected', $connection->fresh()->status);
         $this->assertSame('core-shopify-token', $connection->fresh()->access_token_encrypted);
         $this->assertStringNotContainsString('student-test-webhook-secret', (string) DB::table('apps')->value('client_secret_encrypted'));
         $this->assertStringNotContainsString('attacker.myshopify.com', (string) DB::table('webhook_events')->value('payload_encrypted'));
@@ -147,7 +147,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertNull($installation->uninstalled_at);
         $this->assertSame(['read_products', 'write_discounts'], $installation->granted_scopes);
         $this->assertSame($store->id, $installation->store_id);
-        $this->assertSame('active', $connection->fresh()->status);
+        $this->assertSame('connected', $connection->fresh()->status);
         $this->assertDatabaseCount('webhook_events', 2);
         $this->assertSame(1, AuditLog::query()->where('action', 'student_discount_shopify_app_scopes_updated')->count());
     }
@@ -218,7 +218,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertDatabaseCount('app_installations', 0);
         $this->assertDatabaseCount('webhook_events', 0);
         $this->assertDatabaseCount('audit_logs', 0);
-        $this->assertSame('active', $store->shopifyConnection->fresh()->status);
+        $this->assertSame('connected', $store->shopifyConnection->fresh()->status);
     }
 
     /** @return array{User, Organization, Store} */
@@ -257,7 +257,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
             'access_token_encrypted' => 'core-shopify-token',
             'scopes' => ['read_products'],
             'api_version' => '2026-07',
-            'status' => 'active',
+            'status' => 'connected',
             'installed_at' => now(),
         ]);
     }

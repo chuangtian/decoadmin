@@ -20,8 +20,8 @@ class ReconcileStudentDiscountInstallation extends Command
         $store = Store::query()
             ->where('shopify_domain', $shop)
             ->where('status', 'active')
-            ->whereHas('shopifyConnection', fn ($query) => $query->where('status', 'active'))
-            ->with(['shopifyConnection' => fn ($query) => $query->where('status', 'active')])
+            ->whereHas('shopifyConnection', fn ($query) => $query->whereIn('status', ['connected', 'warning']))
+            ->with(['shopifyConnection' => fn ($query) => $query->whereIn('status', ['connected', 'warning'])])
             ->sole();
         $bootstrapAudit = AuditLog::query()
             ->where('store_id', $store->id)
