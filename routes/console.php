@@ -39,6 +39,12 @@ Schedule::command('student-discounts:prune-evidence --days=30')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+Schedule::command('instagram-feed:advance-mirrors')
+    ->name('instagram-feed:advance-pending-media-mirrors')
+    ->everyTenMinutes()
+    ->onOneServer()
+    ->withoutOverlapping(30);
+
 Schedule::command('shopify:check-connections')
     ->name('shopify:connection-and-store-metadata-refresh')
     ->everySixHours()

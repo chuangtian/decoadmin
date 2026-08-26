@@ -110,6 +110,21 @@ class Store extends Model
         return $this->hasMany(StudentDiscountCode::class);
     }
 
+    public function instagramAccount(): HasOne
+    {
+        return $this->hasOne(InstagramAccount::class);
+    }
+
+    public function instagramMedia(): HasMany
+    {
+        return $this->hasMany(InstagramMedia::class);
+    }
+
+    public function instagramGalleries(): HasMany
+    {
+        return $this->hasMany(InstagramGallery::class);
+    }
+
     public function metaAdAccounts(): HasMany
     {
         return $this->hasMany(MetaAdAccount::class);
