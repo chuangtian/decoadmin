@@ -186,7 +186,9 @@ class ShopifyStudentDiscountAppService
                 ->timeout(20)
                 ->post("https://{$shop}/admin/api/".(string) config('shopify.api_version').'/graphql.json', [
                     'query' => $query,
-                    'variables' => $variables,
+                    // GraphQL requires variables to be a JSON object. PHP's empty array
+                    // would otherwise be encoded as `[]` and rejected by Shopify.
+                    'variables' => (object) $variables,
                 ]);
         } catch (ConnectionException) {
             throw new StudentDiscountException('SHOPIFY_ADMIN_API_TIMEOUT', 'Shopify Admin API 请求超时。', 502);

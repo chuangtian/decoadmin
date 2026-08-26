@@ -372,6 +372,9 @@ class StudentDiscountTest extends TestCase
             && $request['subject_token'] === $token
             && $request['requested_token_type'] === 'urn:shopify:params:oauth:token-type:online-access-token');
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
+            && str_contains($request->body(), '"variables":{}')
+            && str_contains((string) $request['query'], 'currentAppInstallation'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
             && data_get($request->data(), 'variables.metafields.0.ownerId') === 'gid://shopify/AppInstallation/789'
             && data_get($request->data(), 'variables.metafields.0.namespace') === 'deco_student_discount'
             && data_get($request->data(), 'variables.metafields.0.key') === 'proxy_path'
