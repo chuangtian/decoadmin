@@ -1,0 +1,11 @@
+api_version = "2026-07"
+
+[[extensions]]
+# 商家可见名称在 locales/en.default.json 里维护
+name = "t:name"
+handle = "app-home"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/AppHome.jsx"
+target = "admin.app.home.render"

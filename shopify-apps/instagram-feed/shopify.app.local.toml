@@ -1,0 +1,28 @@
+client_id = "d3446448682d2950aa75cea4a399d50f"
+name = "Deco-Instagram-内容-local"
+handle = "deco-instagram-feed-local"
+application_url = "https://wendy-interim-classic-segment.trycloudflare.com/shopify-app/instagram-feed"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://wendy-interim-classic-segment.trycloudflare.com/api/shopify-app/instagram-feed/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://wendy-interim-classic-segment.trycloudflare.com/api/shopify-app/instagram-feed/webhooks"
+
+# 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://wendy-interim-classic-segment.trycloudflare.com/api/shopify-app/auth/callback" ]
