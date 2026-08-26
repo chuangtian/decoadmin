@@ -29,13 +29,13 @@ const statusClass = (status: string) => status === 'active'
 </script>
 
 <template>
-    <Head title="我的应用" />
-    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '我的应用' }]">
+    <Head title="应用列表" />
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '应用列表' }]">
         <div class="mx-auto max-w-7xl">
             <div class="mb-7">
                 <p class="text-sm font-semibold text-emerald-700">应用中心</p>
-                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">我的应用</h2>
-                <p class="mt-2 text-sm text-slate-500">管理当前组织的 Shopify 应用，并查看授权店铺中的安装状态。</p>
+                <h2 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">应用列表</h2>
+                <p class="mt-2 text-sm text-slate-500">查看当前组织可用的 Shopify 应用，以及有权访问店铺中的安装状态。</p>
             </div>
 
             <form class="mb-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_220px_auto]" @submit.prevent="search">

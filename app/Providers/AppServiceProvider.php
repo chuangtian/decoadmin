@@ -14,6 +14,10 @@ use App\Policies\StorePolicy;
 use App\Policies\SyncJobPolicy;
 use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
+use App\Services\AppCenter\AppConfigurationCatalog;
+use App\Services\AppCenter\GenericAppConfigurationProvider;
+use App\Services\AppCenter\MarketingAppConfigurationProvider;
+use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
 use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
 use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
@@ -45,6 +49,14 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
+        $this->app->tag([
+            MarketingAppConfigurationProvider::class,
+            StudentDiscountAppConfigurationProvider::class,
+            GenericAppConfigurationProvider::class,
+        ], 'app-center.configuration-providers');
+        $this->app->singleton(AppConfigurationCatalog::class, fn ($app) => new AppConfigurationCatalog(
+            $app->tagged('app-center.configuration-providers'),
+        ));
         $this->app->singleton(WebhookHandlerRegistry::class, function ($app): WebhookHandlerRegistry {
             $data = $app->make(ShopifyIncrementalDataService::class);
             $topics = [

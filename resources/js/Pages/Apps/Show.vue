@@ -33,9 +33,9 @@ const statusClass = (status: string) => status === 'active'
 
 <template>
     <Head :title="currentApp.name" />
-    <AppLayout :breadcrumbs="[{ label: 'Shopify' }, { label: '应用管理', href: '/apps' }, { label: currentApp.name }]">
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '应用列表', href: '/app-center' }, { label: currentApp.name }]">
         <div class="mx-auto max-w-6xl">
-            <Link href="/apps" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回应用列表</Link>
+            <Link href="/app-center" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回应用列表</Link>
             <div class="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div class="flex min-w-0 items-center gap-4"><span class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-xl font-bold text-emerald-700">{{ currentApp.name.charAt(0).toUpperCase() }}</span><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h2 class="truncate text-3xl font-semibold tracking-tight text-slate-950">{{ currentApp.name }}</h2><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClass(currentApp.status)">{{ statusLabel(currentApp.status) }}</span></div><p class="mt-1 truncate font-mono text-xs text-slate-500">{{ currentApp.slug }}</p></div></div>
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-500 shadow-sm"><span class="font-semibold text-slate-900">{{ currentApp.installations_count }}</span> 个授权安装</div>
@@ -62,8 +62,8 @@ const statusClass = (status: string) => status === 'active'
                 <EmptyState v-else class="border-0 shadow-none" title="暂无可见安装记录" description="应用尚未安装到你有权访问的店铺，或当前安装记录已被隔离。" icon="installations" />
             </section>
 
-            <EmptyState v-else-if="activeTab === 'configuration'" class="mt-6" title="应用配置" description="应用配置将在后续应用中心阶段完善，本阶段不会保存应用密钥或 Shopify 访问令牌。" icon="settings" />
-            <EmptyState v-else class="mt-6" title="应用日志" description="应用日志将在后续阶段接入统一审计和运行记录。" icon="audit" />
+            <EmptyState v-else-if="activeTab === 'configuration'" class="mt-6" title="按店铺管理应用配置" description="应用配置与店铺安装绑定；先选择目标店铺，再进入该应用提供的独立工作台。" icon="settings"><Link href="/app-configurations" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">前往应用配置</Link></EmptyState>
+            <EmptyState v-else class="mt-6" title="查看应用日志" description="统一日志中心会按当前账号的组织和店铺权限隔离应用安装、配置与业务操作记录。" icon="audit"><Link href="/app-logs" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">前往应用日志</Link></EmptyState>
         </div>
     </AppLayout>
 </template>

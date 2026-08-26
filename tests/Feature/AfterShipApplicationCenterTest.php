@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
+use App\Models\StudentDiscountCampaign;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -56,10 +57,11 @@ class AfterShipApplicationCenterTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Apps/Configurations')
-                ->has('installation.modules', 6)
-                ->where('installation.modules.0.handle', 'personalization')
-                ->where('installation.modules.5.handle', 'page_builder')
-                ->has('credentialProviders', 2));
+                ->has('applications', 1)
+                ->where('applications.0.app.handle', 'deco-marketing')
+                ->where('applications.0.category', '营销与店铺运营')
+                ->where('applications.0.action_label', '管理营销模块')
+                ->has('applications.0.metrics', 3));
 
         $this->actingAs($user)->withSession($session)
             ->get(route('app-logs.index'))
@@ -85,6 +87,132 @@ class AfterShipApplicationCenterTest extends TestCase
                     ->where('module.handle', $module)
                     ->where('module.enabled', true));
         }
+    }
+
+    public function test_configuration_center_supports_multiple_apps_and_a_safe_generic_fallback(): void
+    {
+        [$user, $organization] = $this->userWithRole('organization-admin');
+        $store = $this->store($organization, 'Macfox US', 'macfox-us.myshopify.com');
+        $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $marketingInstallation = $this->installation($store, $user);
+        $studentApp = App::query()->create([
+            'name' => 'Deco Student Discount Test',
+            'handle' => 'deco-student-discount-test',
+            'distribution' => 'custom',
+            'status' => 'active',
+            'settings' => ['managed_by' => 'student_discount_config', 'environment' => 'test'],
+        ]);
+        $genericApp = App::query()->create([
+            'name' => 'Future App',
+            'handle' => 'future-app',
+            'distribution' => 'custom',
+            'status' => 'active',
+        ]);
+
+        foreach ([$studentApp, $genericApp] as $app) {
+            AppInstallation::query()->create([
+                'app_id' => $app->id,
+                'store_id' => $store->id,
+                'shopify_connection_id' => $marketingInstallation->shopify_connection_id,
+                'installed_by' => $user->id,
+                'status' => 'active',
+                'granted_scopes' => ['read_products'],
+                'installed_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('app-configurations.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('applications', 3)
+                ->where('applications.0.app.handle', 'deco-marketing')
+                ->where('applications.0.category', '营销与店铺运营')
+                ->where('applications.1.app.handle', 'deco-student-discount-test')
+                ->where('applications.1.category', '优惠与身份审核')
+                ->where('applications.1.action_label', '管理学生优惠')
+                ->where('applications.2.app.handle', 'future-app')
+                ->where('applications.2.configuration_status', 'unsupported'));
+    }
+
+    public function test_application_logs_include_student_discount_events_for_the_authorized_store(): void
+    {
+        [$user, $organization] = $this->userWithRole('organization-admin');
+        $allowed = $this->store($organization, 'Macfox US', 'macfox-us.myshopify.com');
+        $blocked = $this->store($organization, 'Macfox EU', 'macfox-eu.myshopify.com');
+        $allowed->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $allowed->id,
+            'action' => 'student_discount_campaign_updated',
+        ]);
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $blocked->id,
+            'action' => 'student_discount_claim_approved',
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $allowed))
+            ->get(route('app-logs.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('logs.data', 1)
+                ->where('logs.data.0.action', 'student_discount_campaign_updated')
+                ->where('logs.data.0.action_label', '学生优惠活动配置已更新')
+                ->where('logs.data.0.store.id', $allowed->id));
+    }
+
+    public function test_configuration_summary_does_not_expose_student_discount_state_without_permission(): void
+    {
+        [$user, $organization] = $this->userWithRole('developer');
+        $store = $this->store($organization, 'Macfox US', 'macfox-us.myshopify.com');
+        $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $connection = ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'test-token',
+            'token_type' => 'offline',
+            'scopes' => ['read_products'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+            'installed_at' => now(),
+        ]);
+        $studentApp = App::query()->create([
+            'name' => 'Deco Student Discount Test',
+            'handle' => 'deco-student-discount-test',
+            'distribution' => 'custom',
+            'status' => 'active',
+            'settings' => ['managed_by' => 'student_discount_config'],
+        ]);
+        AppInstallation::query()->create([
+            'app_id' => $studentApp->id,
+            'store_id' => $store->id,
+            'shopify_connection_id' => $connection->id,
+            'installed_by' => $user->id,
+            'status' => 'active',
+            'granted_scopes' => ['read_products'],
+            'installed_at' => now(),
+        ]);
+        StudentDiscountCampaign::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'enabled' => true,
+        ]);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('app-configurations.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('applications', 1)
+                ->where('applications.0.configuration_status', 'restricted')
+                ->where('applications.0.configuration_status_label', '权限不足')
+                ->where('applications.0.management_url', null)
+                ->where('applications.0.metrics', [
+                    ['label' => '配置范围', 'value' => '当前店铺'],
+                ]));
     }
 
     public function test_admin_can_save_store_scoped_module_configuration_with_an_audit_record(): void

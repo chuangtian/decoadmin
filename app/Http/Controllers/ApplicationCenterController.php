@@ -6,8 +6,7 @@ use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\User;
-use App\Services\Marketing\MarketingModuleCatalog;
-use App\Services\StoreBusinessCredentialService;
+use App\Services\AppCenter\AppConfigurationCatalog;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
@@ -73,37 +72,39 @@ class ApplicationCenterController extends Controller
         ]);
     }
 
-    public function configurations(
-        Request $request,
-        MarketingModuleCatalog $modules,
-        StoreBusinessCredentialService $credentials,
-    ): Response {
+    public function configurations(Request $request, AppConfigurationCatalog $catalog): Response
+    {
+        $organization = $this->currentOrganization->require();
         $store = $this->currentStore->get();
         if (! $store) {
             return Inertia::render('Apps/Configurations', [
                 'store' => null,
-                'installation' => null,
-                'credentialProviders' => [],
-                'canConfigure' => false,
+                'applications' => [],
             ]);
         }
 
         $this->authorize('view', $store);
-        $installation = $this->marketingInstallation($store->id);
+        abort_unless($store->organization_id === $organization->id, 403);
+        $store->loadMissing('organization:id,name');
+        $installations = AppInstallation::query()
+            ->where('store_id', $store->id)
+            ->whereIn('status', ['active', 'pending', 'disabled'])
+            ->whereHas('app', fn (Builder $query) => $query->where('status', 'active'))
+            ->with([
+                'app:id,organization_id,name,handle,status,description,settings',
+                'store:id,organization_id,name,shopify_domain,status',
+                'store.organization:id,name',
+                'shopifyConnection:id,store_id,status',
+            ])
+            ->orderByRaw("case when status = 'active' then 0 else 1 end")
+            ->latest('installed_at')
+            ->get()
+            ->sortBy(fn (AppInstallation $installation): string => mb_strtolower((string) $installation->app?->name))
+            ->values();
 
         return Inertia::render('Apps/Configurations', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'shopify_domain' => $store->shopify_domain],
-            'installation' => $installation ? [
-                'id' => $installation->id,
-                'status' => $installation->status,
-                'app_name' => $installation->app?->name,
-                'modules' => $modules->forInstallation($installation),
-            ] : null,
-            'credentialProviders' => collect($credentials->catalogForFrontend($store))
-                ->whereIn('key', ['email_marketing', 'sms_marketing'])
-                ->values()
-                ->all(),
-            'canConfigure' => $request->user()->hasPermission('apps.configure', $store->organization, $store),
+            'applications' => $catalog->forInstallations($installations, $request->user()),
         ]);
     }
 
@@ -121,7 +122,8 @@ class ApplicationCenterController extends Controller
                 $query->where('action', 'like', 'shopify_app_%')
                     ->orWhere('action', 'like', 'shopify_connection_%')
                     ->orWhere('action', 'like', 'marketing_module_%')
-                    ->orWhere('action', 'like', 'store_business_credential_%');
+                    ->orWhere('action', 'like', 'store_business_credential_%')
+                    ->orWhere('action', 'like', 'student_discount_%');
             })
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                 $query->where('action', 'like', "%{$search}%")
@@ -151,16 +153,6 @@ class ApplicationCenterController extends Controller
         ]);
     }
 
-    private function marketingInstallation(int $storeId): ?AppInstallation
-    {
-        return AppInstallation::query()
-            ->where('store_id', $storeId)
-            ->where('status', 'active')
-            ->whereHas('app', fn (Builder $query) => $query->where('handle', config('shopify.app_handle')))
-            ->with('app:id,name,handle')
-            ->first();
-    }
-
     /** @return list<int> */
     private function accessibleStoreIds(User $user, Organization $organization): array
     {
@@ -180,6 +172,15 @@ class ApplicationCenterController extends Controller
             'marketing_module_configured' => '营销模块配置已更新',
             'store_business_credential_updated' => '应用凭证已更新',
             'store_business_credential_cleared' => '应用凭证已清除',
+            'student_discount_shopify_app_bootstrapped' => '学生优惠应用连接成功',
+            'student_discount_shopify_app_reconciled' => '学生优惠应用安装记录已同步',
+            'student_discount_shopify_app_uninstalled' => '学生优惠应用已卸载',
+            'student_discount_shopify_app_scopes_updated' => '学生优惠应用权限已更新',
+            'student_discount_campaign_updated' => '学生优惠活动配置已更新',
+            'student_discount_claim_submitted' => '学生优惠申请已提交',
+            'student_discount_claim_resubmitted' => '学生优惠申请已重新提交',
+            'student_discount_claim_approved' => '学生优惠申请已通过',
+            'student_discount_claim_rejected' => '学生优惠申请已拒绝',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }
