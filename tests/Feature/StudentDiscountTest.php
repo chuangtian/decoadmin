@@ -98,9 +98,10 @@ class StudentDiscountTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_public_claim_requires_name_privacy_consent_and_safe_evidence_fields(): void
+    public function test_student_id_claim_requires_name_privacy_consent_and_safe_evidence_fields(): void
     {
-        [, , $store] = $this->context('store-admin');
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
         config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
         $url = fn (): string => $this->signedProxyUrl(
             route('student-discounts.public.claims.store'),
@@ -108,27 +109,36 @@ class StudentDiscountTest extends TestCase
         );
 
         $this->postJson($url(), [
-            'email' => 'legacy@school.edu',
-            'idempotency_key' => 'legacy-contract-001',
+            'email' => 'student@example.com',
+            'idempotency_key' => 'email-only-contract-001',
         ])->assertUnprocessable()
+            ->assertJsonPath('error.code', 'EVIDENCE_REQUIRED');
+
+        $this->post($url(), [
+            'email' => 'student@example.com',
+            'idempotency_key' => 'missing-identity-001',
+            'evidence' => UploadedFile::fake()->create('student-id.jpg', 32, 'image/jpeg'),
+        ], ['Accept' => 'application/json'])->assertUnprocessable()
             ->assertJsonPath('error.code', 'VALIDATION_FAILED')
             ->assertJsonStructure(['error' => ['fields' => ['name', 'privacy_consent']]]);
 
-        $this->postJson($url(), [
+        $this->post($url(), [
             'name' => '<script>',
-            'email' => 'student@school.edu',
+            'email' => 'student@example.com',
             'privacy_consent' => true,
             'idempotency_key' => 'invalid-name-001',
-        ])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['name']]]);
-
-        $this->postJson($url(), [
-            'name' => 'Student Example',
-            'email' => 'student@school.edu',
-            'privacy_consent' => false,
-            'idempotency_key' => 'missing-consent-001',
-        ])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['privacy_consent']]]);
+            'evidence' => UploadedFile::fake()->create('student-id.jpg', 32, 'image/jpeg'),
+        ], ['Accept' => 'application/json'])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['name']]]);
 
         $this->post($url(), [
+            'name' => 'Student Example',
+            'email' => 'student@example.com',
+            'privacy_consent' => false,
+            'idempotency_key' => 'missing-consent-001',
+            'evidence' => UploadedFile::fake()->create('student-id.jpg', 32, 'image/jpeg'),
+        ], ['Accept' => 'application/json'])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['privacy_consent']]]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.55'])->post($url(), [
             'name' => 'Student Example',
             'email' => 'student@example.com',
             'privacy_consent' => true,
@@ -221,9 +231,7 @@ class StudentDiscountTest extends TestCase
 
         $url = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
         $first = $this->postJson($url, [
-            'name' => 'Student Example',
             'email' => 'student@school.edu',
-            'privacy_consent' => true,
             'idempotency_key' => 'claim-fast-pass-001',
         ])
             ->assertOk()
@@ -233,17 +241,15 @@ class StudentDiscountTest extends TestCase
 
         $code = StudentDiscountCode::query()->sole();
         $createdClaim = $code->claim;
-        $this->assertSame('Student Example', $createdClaim->name);
-        $this->assertNotNull($createdClaim->privacy_consented_at);
+        $this->assertNull($createdClaim->name);
+        $this->assertNull($createdClaim->privacy_consented_at);
         $this->assertSame('gid://shopify/DiscountCodeNode/123', $code->shopify_discount_id);
         $this->assertEquals(7, $code->generated_at->diffInDays($code->expires_at));
         Mail::assertNothingSent();
 
         $secondUrl = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
         $this->postJson($secondUrl, [
-            'name' => 'Student Example',
             'email' => 'student@school.edu',
-            'privacy_consent' => true,
             'idempotency_key' => 'claim-fast-pass-001',
         ])
             ->assertOk()
@@ -749,6 +755,7 @@ class StudentDiscountTest extends TestCase
                 'rollback@example.com',
                 UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
                 'rollback-new-claim-001',
+                true,
             );
             $this->fail('The synthetic audit failure must roll back the submission transaction.');
         } catch (\RuntimeException $exception) {
@@ -804,6 +811,7 @@ class StudentDiscountTest extends TestCase
             'post-commit@example.com',
             UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
             'post-commit-new-001',
+            true,
         );
 
         $this->assertSame('pending', $result['claim']->status);
@@ -912,6 +920,7 @@ class StudentDiscountTest extends TestCase
             'student@example.com',
             UploadedFile::fake()->createWithContent('first.webp', str_repeat('A', 128)),
             'claim-content-hash-001',
+            true,
         );
 
         try {
@@ -921,6 +930,7 @@ class StudentDiscountTest extends TestCase
                 'student@example.com',
                 UploadedFile::fake()->createWithContent('second.webp', str_repeat('B', 128)),
                 'claim-content-hash-001',
+                true,
             );
             $this->fail('Different evidence content must not reuse the same idempotency result.');
         } catch (StudentDiscountException $exception) {

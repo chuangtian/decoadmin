@@ -108,13 +108,15 @@ Content-Type: multipart/form-data
 
 字段：
 
-- `name`：必填，2–120 个字符；支持常见中英文姓名字符、空格及常用分隔符；
+- `name`：上传学生证时必填，2–120 个字符；支持常见中英文姓名字符、空格及常用分隔符；教育邮箱快速验证不提交该字段；
 - `email`：必填，RFC 邮箱，最长 320；
-- `privacy_consent`：必填，必须为 HTML/Laravel accepted 语义的同意值（建议 JSON `true` 或表单 `1`）；后台只记录同意时间；
+- `privacy_consent`：上传学生证时必填，必须为 HTML/Laravel accepted 语义的同意值（建议表单 `1`）；后台只记录同意时间；教育邮箱快速验证不提交该字段；
 - `idempotency_key`：必填，8–120 位，只允许字母、数字、`.`、`_`、`:`、`-`；
 - `evidence`：非教育邮箱必填；单张 JPG/JPEG/PNG/WebP，最大 5MB。
 
-`name` 与 `privacy_consent` 是强制契约。旧客户端缺少任一字段时返回 `422 VALIDATION_FAILED`，服务端不会自动填充默认值。
+教育邮箱快速验证使用 JSON，仅提交 `email` 与 `idempotency_key`。邮箱匹配当前店铺教育域名规则时直接发码；不匹配且未上传证件时返回 `422 EVIDENCE_REQUIRED`，店面据此显示学生证入口。
+
+学生证申请使用 `multipart/form-data`，必须同时提交 `name`、`email`、`privacy_consent`、`evidence` 与 `idempotency_key`。缺少姓名或隐私同意时返回 `422 VALIDATION_FAILED`，服务端不会自动填充默认值。
 
 同一已验证 Store 与请求 IP 每小时最多提交 5 次。限流发生在 App Proxy 签名和 Store 解析之后，服务端使用 Store ID 与 IP 的不可逆 HMAC 作为限流键，不信任请求体中的 `shop`、`store_id` 或 `organization_id`。
 
