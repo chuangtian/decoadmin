@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\ResolveCurrentStore;
@@ -45,6 +46,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'store.context' => ResolveCurrentStore::class,
             'store.access' => StoreAccessMiddleware::class,
             'shopify.app-proxy' => VerifyShopifyAppProxy::class,
+            'shopify.app-proxy-response' => NormalizeShopifyAppProxyResponse::class,
             'shopify.id-token' => VerifyShopifyIdToken::class,
         ]);
         $middleware->prependToPriorityList(

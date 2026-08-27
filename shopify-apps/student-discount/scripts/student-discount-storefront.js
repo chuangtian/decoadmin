@@ -394,10 +394,18 @@
       throw error;
     }
 
-    if (!response.ok) {
-      const error = new Error(payload.error?.message || 'Request failed.');
+    if (payload.error && typeof payload.error === 'object' && !Array.isArray(payload.error)) {
+      const error = new Error(payload.error.message || 'Request failed.');
       error.code = String(payload.error?.code || 'REQUEST_FAILED');
       error.fields = payload.error?.fields || {};
+      error.status = Number(payload.error?.status || response.status);
+      throw error;
+    }
+
+    if (!response.ok) {
+      const error = new Error('Request failed.');
+      error.code = 'REQUEST_FAILED';
+      error.fields = {};
       error.status = response.status;
       throw error;
     }
