@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 interface Campaign {
@@ -141,17 +141,32 @@ const saveCampaign = () => campaignForm
     }))
     .put(`${baseUrl}/campaign`, { preserveScroll: true });
 
-const filterForm = useForm({ tab: 'claims', ...props.filters });
-const submitFilters = () => filterForm.get(baseUrl, {
-    preserveScroll: true,
-    preserveState: true,
-    replace: true,
-    onSuccess: () => { activeTab.value = 'claims'; },
+const filterForm = useForm({
+    tab: 'claims',
+    status: props.filters.status,
+    source: props.filters.source,
+    review_method: props.filters.review_method,
+    usage_status: props.filters.usage_status,
+    per_page: props.filters.per_page,
+    email: '',
+    submitted_from: '',
+    submitted_to: '',
 });
-const applyStatus = (status: string) => {
-    filterForm.status = status;
-    submitFilters();
-};
+const submitFilters = () => filterForm
+    .transform(data => ({
+        tab: data.tab,
+        status: data.status,
+        source: data.source,
+        review_method: data.review_method,
+        usage_status: data.usage_status,
+        per_page: data.per_page,
+    }))
+    .get(baseUrl, {
+        preserveScroll: true,
+        preserveState: true,
+        replace: true,
+        onSuccess: () => { activeTab.value = 'claims'; },
+    });
 const resetFilters = () => router.get(baseUrl, { tab: 'claims', per_page: props.filters.per_page }, {
     preserveScroll: true,
     preserveState: true,
@@ -161,20 +176,33 @@ const hasActiveFilters = computed(() => [
     filterForm.status,
     filterForm.source,
     filterForm.review_method,
-    filterForm.email,
-    filterForm.submitted_from,
-    filterForm.submitted_to,
     filterForm.usage_status,
 ].some(Boolean));
 
 const selectedClaimIds = ref<string[]>([]);
 const bulkSelectionLimit = 30;
+const bulkActionsOpen = ref(false);
+const bulkActionsElement = ref<HTMLElement | null>(null);
 const currentPendingIds = computed(() => props.claims.data.filter(claim => claim.status === 'pending').slice(0, bulkSelectionLimit).map(claim => claim.id));
 const allPendingSelected = computed({
     get: () => currentPendingIds.value.length > 0 && currentPendingIds.value.every(id => selectedClaimIds.value.includes(id)),
     set: (selected: boolean) => { selectedClaimIds.value = selected ? [...currentPendingIds.value] : []; },
 });
-watch(() => props.claims.data.map(claim => claim.id).join(','), () => { selectedClaimIds.value = []; });
+watch(() => props.claims.data.map(claim => claim.id).join(','), () => {
+    selectedClaimIds.value = [];
+    bulkActionsOpen.value = false;
+});
+watch(() => selectedClaimIds.value.length, count => {
+    if (count === 0) bulkActionsOpen.value = false;
+});
+const closeBulkActions = () => { bulkActionsOpen.value = false; };
+const handleBulkActionsPointerDown = (event: PointerEvent) => {
+    if (!(event.target instanceof Node) || bulkActionsElement.value?.contains(event.target)) return;
+    closeBulkActions();
+};
+const handleBulkActionsKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') closeBulkActions();
+};
 type ReviewAction = 'approve' | 'reject' | 'bulk_approve' | 'bulk_reject';
 const reviewDialog = ref<{ action: ReviewAction; claim: Claim | null } | null>(null);
 const reviewDialogElement = ref<HTMLElement | null>(null);
@@ -196,6 +224,7 @@ const reviewDialogDescription = computed(() => {
 });
 const openReviewDialog = (action: ReviewAction, claim: Claim | null = null) => {
     if (action.startsWith('bulk_') && selectedClaimIds.value.length === 0) return;
+    closeBulkActions();
     reviewReason.value = '';
     reviewError.value = '';
     reviewDialog.value = { action, claim };
@@ -260,6 +289,20 @@ const confirmDelete = () => {
     });
 };
 
+const evidencePreview = ref<Claim | null>(null);
+const evidencePreviewElement = ref<HTMLElement | null>(null);
+const evidenceUrl = (claim: Claim) => `${baseUrl}/claims/${claim.id}/evidence`;
+const canPreviewEvidence = (claim: Claim) => props.permissions.viewEvidence
+    && claim.has_evidence
+    && claim.source === 'student_id'
+    && (claim.status === 'pending' || claim.review_method === 'manual');
+const openEvidencePreview = (claim: Claim) => {
+    if (!canPreviewEvidence(claim)) return;
+    evidencePreview.value = claim;
+    nextTick(() => evidencePreviewElement.value?.focus());
+};
+const closeEvidencePreview = () => { evidencePreview.value = null; };
+
 const syncableCodeIds = computed(() => [...new Set(props.claims.data.flatMap(claim => claim.discount ? [claim.discount.id] : []))]);
 const usageRefreshing = ref(false);
 let usageReloadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -278,8 +321,14 @@ const syncUsage = () => {
         },
     });
 };
+onMounted(() => {
+    document.addEventListener('pointerdown', handleBulkActionsPointerDown);
+    document.addEventListener('keydown', handleBulkActionsKeydown);
+});
 onBeforeUnmount(() => {
     if (usageReloadTimer) clearTimeout(usageReloadTimer);
+    document.removeEventListener('pointerdown', handleBulkActionsPointerDown);
+    document.removeEventListener('keydown', handleBulkActionsKeydown);
 });
 const badge = (status: string) => ({
     pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -415,24 +464,38 @@ const recognitionFailureLabel = (code: string | null) => ({
                     </button>
                 </header>
                 <form class="space-y-4 border-b border-slate-100 bg-slate-50/60 px-5 py-5 sm:px-7" @submit.prevent="submitFilters">
-                    <div class="flex flex-wrap gap-2">
-                        <button v-for="option in [{ value: '', label: '全部' }, ...filterOptions.statuses]" :key="option.value" type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold ring-1" :class="filterForm.status === option.value ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200'" @click="applyStatus(option.value)">{{ option.label }}</button>
-                    </div>
-                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <label class="text-xs font-semibold text-slate-600"><span>申请状态</span><select v-model="filterForm.status" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部状态</option><option v-for="option in filterOptions.statuses" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                         <label class="text-xs font-semibold text-slate-600"><span>证明</span><select v-model="filterForm.source" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部证明</option><option v-for="option in filterOptions.sources" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                         <label class="text-xs font-semibold text-slate-600"><span>验证方式</span><select v-model="filterForm.review_method" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部方式</option><option v-for="option in filterOptions.review_methods" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                         <label class="text-xs font-semibold text-slate-600"><span>使用情况</span><select v-model="filterForm.usage_status" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部使用情况</option><option v-for="option in filterOptions.usage_statuses" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                        <label class="text-xs font-semibold text-slate-600"><span>申请人邮箱</span><input v-model="filterForm.email" type="search" maxlength="120" placeholder="模糊搜索邮箱" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
-                        <label class="text-xs font-semibold text-slate-600"><span>提交开始日期</span><input v-model="filterForm.submitted_from" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
-                        <label class="text-xs font-semibold text-slate-600"><span>提交结束日期</span><input v-model="filterForm.submitted_to" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
-                        <label class="text-xs font-semibold text-slate-600"><span>每页条数</span><select v-model="filterForm.per_page" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option :value="20">20 条</option><option :value="30">30 条</option><option :value="50">50 条</option></select></label>
-                        <div class="flex items-end gap-2"><button :disabled="filterForm.processing" class="flex-1 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">筛选</button><button v-if="hasActiveFilters" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600" @click="resetFilters">重置</button></div>
+                    </div>
+                    <div class="flex flex-col gap-3 border-t border-slate-200/70 pt-4 sm:flex-row sm:items-end sm:justify-between">
+                        <label class="w-full text-xs font-semibold text-slate-600 sm:w-40"><span>每页条数</span><select v-model="filterForm.per_page" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option :value="20">20 条</option><option :value="30">30 条</option><option :value="50">50 条</option></select></label>
+                        <div class="flex justify-end gap-2"><button :disabled="filterForm.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">筛选</button><button v-if="hasActiveFilters" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600" @click="resetFilters">重置</button></div>
                     </div>
                 </form>
                 <div v-if="batchResult" class="border-b border-slate-100 bg-blue-50 px-5 py-3 text-sm text-blue-800 sm:px-7">上次批量处理：成功 {{ batchResult.succeeded }} 条，已处理 {{ batchResult.unchanged }} 条，失败 {{ batchResult.failed }} 条。</div>
-                <div v-if="selectedClaimIds.length > 0" class="flex flex-col gap-3 border-b border-slate-100 bg-amber-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-                    <p class="text-sm font-semibold text-amber-900">已选择当前页 {{ selectedClaimIds.length }} 条待审核申请（每次最多 {{ bulkSelectionLimit }} 条）</p>
-                    <div class="flex flex-wrap gap-2"><button v-if="permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" @click="openReviewDialog('bulk_approve')">批量批准</button><button v-if="permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white" @click="openReviewDialog('bulk_reject')">批量拒绝</button><button type="button" class="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800" @click="selectedClaimIds = []">取消选择</button></div>
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-3 sm:px-7">
+                    <div class="flex items-center gap-3"><p class="text-sm font-semibold text-slate-800">已选择 <span class="text-blue-700">{{ selectedClaimIds.length }}</span> 条</p><button v-if="selectedClaimIds.length > 0" type="button" class="text-xs font-semibold text-slate-500 hover:text-slate-800" @click="selectedClaimIds = []">清除选择</button><span class="hidden text-xs text-slate-400 sm:inline">仅可选择当前页待审核申请，每次最多 {{ bulkSelectionLimit }} 条</span></div>
+                    <div ref="bulkActionsElement" class="relative">
+                        <button
+                            type="button"
+                            :disabled="selectedClaimIds.length === 0"
+                            class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+                            aria-haspopup="menu"
+                            :aria-expanded="bulkActionsOpen"
+                            aria-controls="student-discount-bulk-actions"
+                            @click="bulkActionsOpen = !bulkActionsOpen"
+                        >
+                            更多操作
+                            <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 7.72a.75.75 0 0 1 1.06 0L10 11.44l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.78a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+                        </button>
+                        <div v-if="bulkActionsOpen" id="student-discount-bulk-actions" role="menu" aria-label="批量审核操作" class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl" @keydown.esc.stop="closeBulkActions">
+                            <button v-if="permissions.approve" type="button" role="menuitem" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-emerald-700 hover:bg-emerald-50 focus:bg-emerald-50 focus:outline-none" @click="openReviewDialog('bulk_approve')">一键批准</button>
+                            <button v-if="permissions.reject" type="button" role="menuitem" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50 focus:bg-rose-50 focus:outline-none" @click="openReviewDialog('bulk_reject')">一键拒绝</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-[1180px] divide-y divide-slate-100 text-sm">
@@ -440,12 +503,12 @@ const recognitionFailureLabel = (code: string | null) => ({
                         <tbody class="divide-y divide-slate-100">
                             <tr v-for="claim in claims.data" :key="claim.id" class="align-top">
                                 <td class="px-4 py-4"><input v-if="claim.status === 'pending' && (permissions.approve || permissions.reject)" v-model="selectedClaimIds" :value="claim.id" type="checkbox" :disabled="!selectedClaimIds.includes(claim.id) && selectedClaimIds.length >= bulkSelectionLimit" :aria-label="`选择 ${claim.email} 的申请`" /></td>
-                                <td class="px-4 py-4"><p class="font-semibold text-slate-900">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-500">第 {{ claim.submission_count }} 次提交</p></td>
+                                <td class="px-4 py-4"><div class="flex items-start gap-3"><div class="min-w-0"><p class="font-semibold text-slate-900">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-500">第 {{ claim.submission_count }} 次提交</p></div><button v-if="canPreviewEvidence(claim)" type="button" class="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" :aria-label="`预览 ${claim.email} 的学生证`" @click="openEvidencePreview(claim)"><img :src="evidenceUrl(claim)" alt="学生证缩略图" class="h-10 w-10 object-cover" loading="lazy" /></button></div></td>
                                 <td class="px-4 py-4"><p class="font-semibold text-slate-800">{{ sourceLabel(claim.source) }}</p><p class="mt-1 text-xs text-slate-500">{{ verificationLabel(claim) }}<span v-if="claim.confidence !== null"> · {{ claim.confidence }}/100</span></p><p v-if="claim.recognition_failure_code" class="mt-1 text-xs font-semibold text-amber-700">{{ recognitionFailureLabel(claim.recognition_failure_code) }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
                                 <td class="px-4 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">有效期至 {{ new Date(claim.discount.expires_at).toLocaleDateString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
                                 <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-[11px] text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>
                                 <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
-                                <td class="px-4 py-4"><div class="flex flex-wrap justify-end gap-2"><a v-if="permissions.viewEvidence && claim.has_evidence" :href="`${baseUrl}/claims/${claim.id}/evidence`" target="_blank" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">证件</a><button v-if="claim.status === 'pending' && permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('approve', claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('reject', claim)">拒绝</button><button v-if="permissions.deleteClaim" type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="openDelete(claim)">删除</button></div></td>
+                                <td class="px-4 py-4"><div class="flex flex-wrap justify-end gap-2"><button v-if="canPreviewEvidence(claim)" type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700" @click="openEvidencePreview(claim)">证件</button><button v-if="claim.status === 'pending' && permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('approve', claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('reject', claim)">拒绝</button><button v-if="permissions.deleteClaim" type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="openDelete(claim)">删除</button></div></td>
                             </tr>
                             <tr v-if="claims.data.length === 0"><td colspan="7" class="px-5 py-14 text-center"><p class="text-sm font-semibold text-slate-700">没有符合条件的申请记录</p><p class="mt-1 text-xs text-slate-400">调整筛选条件或等待新的学生优惠申请。</p><button v-if="hasActiveFilters" type="button" class="mt-4 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" @click="resetFilters">清除筛选</button></td></tr>
                         </tbody>
@@ -455,6 +518,9 @@ const recognitionFailureLabel = (code: string | null) => ({
             </section>
 
             <Teleport to="body">
+                <div v-if="evidencePreview" ref="evidencePreviewElement" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 outline-none" role="dialog" aria-modal="true" aria-labelledby="evidence-preview-title" @keydown.esc="closeEvidencePreview" @click.self="closeEvidencePreview">
+                    <div class="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"><header class="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 id="evidence-preview-title" class="text-base font-semibold text-slate-950">学生证预览</h3><p class="mt-0.5 text-xs text-slate-500">仅用于当前店铺人工审核</p></div><button type="button" class="flex h-9 w-9 items-center justify-center rounded-full text-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="关闭学生证预览" @click="closeEvidencePreview">×</button></header><div class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-slate-100 p-4"><img :src="evidenceUrl(evidencePreview)" alt="学生证预览" class="max-h-[76vh] max-w-full rounded-xl object-contain shadow-sm" /></div></div>
+                </div>
                 <div v-if="reviewDialog" ref="reviewDialogElement" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 outline-none" role="dialog" aria-modal="true" aria-labelledby="review-dialog-title" aria-describedby="review-dialog-description" @keydown.esc="closeReviewDialog" @click.self="closeReviewDialog">
                     <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div class="flex h-11 w-11 items-center justify-center rounded-full" :class="reviewNeedsReason ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5"><path v-if="reviewNeedsReason" stroke-linecap="round" stroke-linejoin="round" d="m7 7 10 10M17 7 7 17" /><path v-else stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" /></svg></div><h3 id="review-dialog-title" class="mt-4 text-lg font-semibold text-slate-950">{{ reviewDialogTitle }}</h3><p id="review-dialog-description" class="mt-2 text-sm leading-6 text-slate-600">{{ reviewDialogDescription }}</p><label v-if="reviewNeedsReason" class="mt-4 block text-sm font-semibold text-slate-700"><span>拒绝原因</span><textarea v-model="reviewReason" autofocus rows="4" maxlength="1000" :disabled="reviewProcessing" class="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal" placeholder="请输入拒绝原因" @input="reviewError = ''" /></label><p v-if="reviewError" class="mt-2 text-xs text-rose-600" role="alert">{{ reviewError }}</p><div class="mt-5 flex justify-end gap-2"><button type="button" :disabled="reviewProcessing" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50" @click="closeReviewDialog">取消</button><button type="button" :disabled="reviewProcessing" class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :class="reviewNeedsReason ? 'bg-rose-600' : 'bg-emerald-600'" @click="submitReview">{{ reviewProcessing ? '处理中…' : (reviewNeedsReason ? '确认拒绝' : '确认批准') }}</button></div></div>
                 </div>
