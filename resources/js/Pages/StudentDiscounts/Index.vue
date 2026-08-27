@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -81,17 +81,11 @@ const props = defineProps<{
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/student-discounts`;
 type StudentDiscountTab = 'campaign' | 'claims';
 const tabOptions: Array<{ value: StudentDiscountTab; name: string; description: string }> = [
-    { value: 'campaign', name: '活动配置', description: '设置优惠规则与适用范围' },
     { value: 'claims', name: '申请记录', description: '审核申请并管理优惠码' },
+    { value: 'campaign', name: '活动配置', description: '设置优惠规则与适用范围' },
 ];
-const requestedTab = typeof window === 'undefined'
-    ? null
-    : new URLSearchParams(window.location.search).get('tab');
-const activeTab = ref<StudentDiscountTab>(
-    requestedTab === 'claims' || (requestedTab !== 'campaign' && Object.entries(props.filters).some(([key, value]) => key !== 'per_page' && value !== ''))
-        ? 'claims'
-        : 'campaign',
-);
+const requestedTab = new URL(usePage().url, 'http://localhost').searchParams.get('tab');
+const activeTab = ref<StudentDiscountTab>(requestedTab === 'campaign' ? 'campaign' : 'claims');
 const selectTab = (tab: StudentDiscountTab) => {
     activeTab.value = tab;
 
@@ -100,6 +94,23 @@ const selectTab = (tab: StudentDiscountTab) => {
     const url = new URL(window.location.href);
     url.searchParams.set('tab', tab);
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+};
+const handleTabKeydown = (event: KeyboardEvent, index: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+
+    event.preventDefault();
+    const lastIndex = tabOptions.length - 1;
+    const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+            ? lastIndex
+            : event.key === 'ArrowRight'
+                ? (index + 1) % tabOptions.length
+                : (index - 1 + tabOptions.length) % tabOptions.length;
+    const nextTab = tabOptions[nextIndex];
+
+    selectTab(nextTab.value);
+    nextTick(() => document.getElementById(`${nextTab.value}-tab`)?.focus());
 };
 const claimPageUrl = (url: string | null) => {
     if (!url) return '';
@@ -144,7 +155,7 @@ const saveCampaign = () => campaignForm
 const filterForm = useForm({
     tab: 'claims',
     status: props.filters.status,
-    source: props.filters.source,
+    source: '',
     review_method: props.filters.review_method,
     usage_status: props.filters.usage_status,
     per_page: props.filters.per_page,
@@ -156,7 +167,6 @@ const submitFilters = () => filterForm
     .transform(data => ({
         tab: data.tab,
         status: data.status,
-        source: data.source,
         review_method: data.review_method,
         usage_status: data.usage_status,
         per_page: data.per_page,
@@ -174,7 +184,6 @@ const resetFilters = () => router.get(baseUrl, { tab: 'claims', per_page: props.
 });
 const hasActiveFilters = computed(() => [
     filterForm.status,
-    filterForm.source,
     filterForm.review_method,
     filterForm.usage_status,
 ].some(Boolean));
@@ -379,25 +388,27 @@ const recognitionFailureLabel = (code: string | null) => ({
                 <div class="rounded-2xl border border-rose-200 bg-rose-50 p-5"><p class="text-sm font-semibold text-rose-700">已拒绝</p><p class="mt-2 text-3xl font-semibold text-rose-950">{{ counts.rejected }}</p></div>
             </section>
 
-            <nav class="overflow-x-auto pb-1" aria-label="学生优惠管理" role="tablist">
-                <div class="flex min-w-max gap-3">
+            <nav class="overflow-x-auto" aria-label="学生优惠管理" role="tablist">
+                <div class="grid min-w-[520px] grid-cols-2 gap-1.5 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5">
                     <button
-                        v-for="tab in tabOptions"
+                        v-for="(tab, index) in tabOptions"
                         :id="`${tab.value}-tab`"
                         :key="tab.value"
                         type="button"
                         role="tab"
                         :aria-controls="`${tab.value}-panel`"
                         :aria-selected="activeTab === tab.value"
-                        class="flex min-w-[240px] items-center gap-3 rounded-2xl border px-4 py-3.5 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:min-w-[280px]"
+                        :tabindex="activeTab === tab.value ? 0 : -1"
+                        class="flex items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                         :class="activeTab === tab.value
-                            ? 'border-blue-200 bg-blue-50 text-blue-700 ring-1 ring-blue-100'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                            ? 'border-blue-200 bg-white text-slate-950 shadow-sm'
+                            : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white/70'"
                         @click="selectTab(tab.value)"
+                        @keydown="handleTabKeydown($event, index)"
                     >
                         <span
-                            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition"
-                            :class="activeTab === tab.value ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'"
+                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition"
+                            :class="activeTab === tab.value ? 'bg-blue-50 text-blue-700' : 'bg-white text-slate-500 ring-1 ring-slate-200'"
                         >
                             <svg v-if="tab.value === 'campaign'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h10m4 0h2M4 17h2m4 0h10M14 5v4M6 15v4" />
@@ -407,9 +418,12 @@ const recognitionFailureLabel = (code: string | null) => ({
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M14 3.75v4.5h5M10 12h6m-6 4h6" />
                             </svg>
                         </span>
-                        <span>
-                            <span class="block text-sm font-semibold">{{ tab.name }}</span>
-                            <span class="mt-1 block text-xs" :class="activeTab === tab.value ? 'text-blue-600' : 'text-slate-500'">{{ tab.description }}</span>
+                        <span class="min-w-0 flex-1">
+                            <span class="flex items-center gap-2">
+                                <span class="block text-sm font-semibold">{{ tab.name }}</span>
+                                <span v-if="tab.value === 'claims'" class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold leading-none text-amber-700" :aria-label="`待审核 ${counts.pending} 条`">{{ counts.pending }}</span>
+                            </span>
+                            <span class="mt-0.5 block truncate text-xs text-slate-500">{{ tab.description }}</span>
                         </span>
                     </button>
                 </div>
@@ -464,9 +478,8 @@ const recognitionFailureLabel = (code: string | null) => ({
                     </button>
                 </header>
                 <form class="space-y-4 border-b border-slate-100 bg-slate-50/60 px-5 py-5 sm:px-7" @submit.prevent="submitFilters">
-                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="grid gap-4 md:grid-cols-3">
                         <label class="text-xs font-semibold text-slate-600"><span>申请状态</span><select v-model="filterForm.status" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部状态</option><option v-for="option in filterOptions.statuses" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                        <label class="text-xs font-semibold text-slate-600"><span>证明</span><select v-model="filterForm.source" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部证明</option><option v-for="option in filterOptions.sources" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                         <label class="text-xs font-semibold text-slate-600"><span>验证方式</span><select v-model="filterForm.review_method" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部方式</option><option v-for="option in filterOptions.review_methods" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                         <label class="text-xs font-semibold text-slate-600"><span>使用情况</span><select v-model="filterForm.usage_status" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部使用情况</option><option v-for="option in filterOptions.usage_statuses" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                     </div>
