@@ -1548,6 +1548,7 @@ class StudentDiscountTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('permissions.manageEmailTemplates', true)
                 ->where('emailTemplates.templates.approval.subject', 'Your {{ store_name }} student discount code')
+                ->where('emailTemplates.branding.shop_url', 'https://'.$store->shopify_domain)
                 ->where('emailTemplates.variables.0.sample', $store->name)
                 ->has('emailTemplates.variables', 6));
 
@@ -1555,12 +1556,16 @@ class StudentDiscountTest extends TestCase
             ->put(route('student-discounts.email-templates.update', [$organization, $store]), $templates)
             ->assertRedirect();
 
-        $this->assertSame($templates, $campaign->fresh()->email_templates);
+        $stored = $campaign->fresh()->email_templates;
+        $this->assertSame($templates['approval']['subject'], data_get($stored, 'templates.approval.subject'));
+        $this->assertSame($templates['approval']['body'], data_get($stored, 'templates.approval.body'));
+        $this->assertSame('https://'.$store->shopify_domain, data_get($stored, 'branding.shop_url'));
         $this->assertNull($otherCampaign->fresh()->email_templates);
         $audit = AuditLog::query()->where('action', 'student_discount_email_templates_updated')->sole();
         $this->assertSame($store->id, $audit->store_id);
         $this->assertStringNotContainsString($templates['approval']['body'], $audit->toJson());
-        $this->assertSame(hash('sha256', $templates['approval']['body']), data_get($audit->new_values, 'approval.body_sha256'));
+        $this->assertNotNull(data_get($audit->new_values, 'templates.approval.content_sha256'));
+        $this->assertTrue(data_get($audit->new_values, 'branding.shop_link_configured'));
     }
 
     public function test_email_template_variables_are_whitelisted_and_critical_variables_are_required(): void
@@ -1578,11 +1583,16 @@ class StudentDiscountTest extends TestCase
             ->put(route('student-discounts.email-templates.update', [$organization, $store]), $invalidVariable)
             ->assertSessionHasErrors('approval.subject');
 
-        $missingCode = $base;
-        $missingCode['approval']['body'] = 'Approved without a code.';
+        $missingReason = $base;
+        $missingReason['rejection']['body'] = 'Rejected without a reason.';
         $this->actingAs($admin)
-            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $missingCode)
-            ->assertSessionHasErrors('approval.body');
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $missingReason)
+            ->assertSessionHasErrors('rejection.body');
+
+        $unsafeUrl = $base + ['branding' => ['shop_url' => 'javascript:alert(1)']];
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $unsafeUrl)
+            ->assertSessionHasErrors('branding.shop_url');
     }
 
     public function test_operator_cannot_manage_or_test_student_discount_email_templates(): void
@@ -1656,15 +1666,18 @@ class StudentDiscountTest extends TestCase
         Mail::assertSent(StudentDiscountDecisionMail::class, function (StudentDiscountDecisionMail $mail) use ($store, $claim): bool {
             return $mail->renderedSubject === "{$store->name} approved {$claim->email}"
                 && str_contains((string) $mail->renderedBody, 'STUDENT-TEMPLATE')
-                && str_contains((string) $mail->renderedBody, 'Limit 2.');
+                && str_contains((string) $mail->renderedBody, 'Limit 2.')
+                && str_contains($mail->render(), 'STUDENT-TEMPLATE')
+                && str_contains($mail->render(), 'SHOP NOW');
         });
 
         $this->actingAs($admin)
             ->post(route('student-discounts.email-templates.test', [$organization, $store]), [
                 'type' => 'rejection',
                 'email' => 'preview-recipient@example.com',
-                'subject' => '{{ store_name }} preview',
-                'body' => 'Preview reason: {{ rejection_reason }}',
+                'branding' => ['primary_color' => '#111111', 'shop_url' => 'https://'.$store->shopify_domain],
+                'approval' => ['subject' => 'Approved', 'body' => 'Approved'],
+                'rejection' => ['subject' => '{{ store_name }} preview', 'body' => 'Preview reason: {{ rejection_reason }}'],
             ])
             ->assertRedirect();
         Mail::assertSent(StudentDiscountTemplatePreviewMail::class, function (StudentDiscountTemplatePreviewMail $mail) use ($store): bool {

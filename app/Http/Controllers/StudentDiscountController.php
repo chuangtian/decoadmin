@@ -108,14 +108,7 @@ class StudentDiscountController extends Controller
     public function updateEmailTemplates(Request $request, Organization $organization, Store $store): RedirectResponse
     {
         $this->assertUserScope($request, $organization, $store, 'student_discount.email_template.manage');
-        $values = $request->validate([
-            'approval' => ['required', 'array'],
-            'approval.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
-            'approval.body' => ['required', 'string', 'max:5000'],
-            'rejection' => ['required', 'array'],
-            'rejection.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
-            'rejection.body' => ['required', 'string', 'max:5000'],
-        ]);
+        $values = $request->validate($this->emailTemplateRules());
         $campaign = $this->campaigns->getOrCreate($organization, $store, $request->user());
         $this->emailTemplates->update($organization, $store, $campaign, $values, $request->user());
 
@@ -126,10 +119,9 @@ class StudentDiscountController extends Controller
     {
         $this->assertUserScope($request, $organization, $store, 'student_discount.email_template.manage');
         $values = $request->validate([
+            ...$this->emailTemplateRules(),
             'type' => ['required', Rule::in(['approval', 'rejection'])],
             'email' => ['required', 'email:rfc', 'max:254'],
-            'subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
-            'body' => ['required', 'string', 'max:5000'],
         ]);
         try {
             $this->mailDelivery->sendTest(
@@ -138,7 +130,11 @@ class StudentDiscountController extends Controller
                 $request->user(),
                 $values['type'],
                 $values['email'],
-                ['subject' => $values['subject'], 'body' => $values['body']],
+                [
+                    'branding' => $values['branding'] ?? [],
+                    'approval' => $values['approval'],
+                    'rejection' => $values['rejection'],
+                ],
             );
         } catch (\RuntimeException) {
             return back()->with('error', '测试邮件发送失败，请检查系统邮件配置后重试。');
@@ -247,6 +243,39 @@ class StudentDiscountController extends Controller
         abort_unless($store->organization_id === $organization->id, 403);
         abort_unless($request->user()->canAccessStore($store), 403);
         abort_unless($request->user()->hasPermission($permission, $organization, $store), 403);
+    }
+
+    /** @return array<string, array<int, mixed>> */
+    private function emailTemplateRules(): array
+    {
+        $urlRules = ['nullable', 'string', 'max:2048', 'url:http,https'];
+
+        return [
+            'branding' => ['nullable', 'array'],
+            'branding.logo_url' => $urlRules,
+            'branding.primary_color' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'branding.shop_url' => $urlRules,
+            'branding.support_email' => ['nullable', 'email:rfc', 'max:254'],
+            'branding.support_url' => $urlRules,
+            'branding.instagram_url' => $urlRules,
+            'branding.facebook_url' => $urlRules,
+            'branding.tiktok_url' => $urlRules,
+            'branding.youtube_url' => $urlRules,
+            'approval' => ['required', 'array'],
+            'approval.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
+            'approval.preheader' => ['nullable', 'string', 'max:240'],
+            'approval.heading' => ['nullable', 'string', 'max:180'],
+            'approval.body' => ['required', 'string', 'max:5000'],
+            'approval.cta_label' => ['nullable', 'string', 'max:60'],
+            'approval.footer_note' => ['nullable', 'string', 'max:500'],
+            'rejection' => ['required', 'array'],
+            'rejection.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
+            'rejection.preheader' => ['nullable', 'string', 'max:240'],
+            'rejection.heading' => ['nullable', 'string', 'max:180'],
+            'rejection.body' => ['required', 'string', 'max:5000'],
+            'rejection.cta_label' => ['nullable', 'string', 'max:60'],
+            'rejection.footer_note' => ['nullable', 'string', 'max:500'],
+        ];
     }
 
     /** @param array<string, mixed> $result */

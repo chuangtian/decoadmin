@@ -12,10 +12,17 @@ class StudentDiscountTemplatePreviewMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(
-        public string $renderedSubject,
-        public string $renderedBody,
-    ) {}
+    public string $renderedSubject;
+
+    public string $renderedBody;
+
+    public bool $isTest = true;
+
+    public function __construct(public array $renderedTemplate)
+    {
+        $this->renderedSubject = (string) ($renderedTemplate['subject'] ?? 'Student discount email preview');
+        $this->renderedBody = (string) ($renderedTemplate['body'] ?? '');
+    }
 
     public function envelope(): Envelope
     {
@@ -24,6 +31,9 @@ class StudentDiscountTemplatePreviewMail extends Mailable
 
     public function content(): Content
     {
-        return new Content(view: 'mail.student-discount-template-preview');
+        return new Content(
+            view: 'mail.student-discount-template-preview',
+            text: 'mail.student-discount-decision-text',
+        );
     }
 }

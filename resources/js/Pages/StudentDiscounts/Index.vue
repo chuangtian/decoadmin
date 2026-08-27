@@ -52,11 +52,30 @@ interface ClaimFilters {
 interface FilterOption { value: string; label: string }
 
 type EmailTemplateType = 'approval' | 'rejection';
-interface EmailTemplate { subject: string; body: string }
+interface EmailBranding {
+    logo_url: string;
+    primary_color: string;
+    shop_url: string;
+    support_email: string;
+    support_url: string;
+    instagram_url: string;
+    facebook_url: string;
+    tiktok_url: string;
+    youtube_url: string;
+}
+interface EmailTemplate {
+    subject: string;
+    preheader: string;
+    heading: string;
+    body: string;
+    cta_label: string;
+    footer_note: string;
+}
 interface EmailTemplateVariable { key: string; label: string; sample: string; types: EmailTemplateType[] }
 interface EmailTemplateConfiguration {
+    branding: EmailBranding;
     templates: Record<EmailTemplateType, EmailTemplate>;
-    defaults: Record<EmailTemplateType, EmailTemplate>;
+    defaults: { branding: EmailBranding; templates: Record<EmailTemplateType, EmailTemplate> };
     variables: EmailTemplateVariable[];
 }
 
@@ -165,17 +184,20 @@ const saveCampaign = () => campaignForm
     .put(`${baseUrl}/campaign`, { preserveScroll: true });
 
 const selectedEmailTemplate = ref<EmailTemplateType>('approval');
+const emailPreviewMode = ref<'desktop' | 'mobile'>('desktop');
 const emailTemplateForm = useForm({
+    branding: { ...props.emailTemplates.branding },
     approval: { ...props.emailTemplates.templates.approval },
     rejection: { ...props.emailTemplates.templates.rejection },
 });
+const currentEmailTemplate = computed(() => emailTemplateForm[selectedEmailTemplate.value]);
 const currentEmailSubject = computed({
-    get: () => emailTemplateForm[selectedEmailTemplate.value].subject,
-    set: (value: string) => { emailTemplateForm[selectedEmailTemplate.value].subject = value; },
+    get: () => currentEmailTemplate.value.subject,
+    set: (value: string) => { currentEmailTemplate.value.subject = value; },
 });
 const currentEmailBody = computed({
-    get: () => emailTemplateForm[selectedEmailTemplate.value].body,
-    set: (value: string) => { emailTemplateForm[selectedEmailTemplate.value].body = value; },
+    get: () => currentEmailTemplate.value.body,
+    set: (value: string) => { currentEmailTemplate.value.body = value; },
 });
 const availableEmailVariables = computed(() => props.emailTemplates.variables.filter(variable => variable.types.includes(selectedEmailTemplate.value)));
 const emailVariableToken = (key: string) => `{{ ${key} }}`;
@@ -185,25 +207,40 @@ const renderEmailPreview = (content: string) => props.emailTemplates.variables.r
 );
 const emailPreviewSubject = computed(() => renderEmailPreview(currentEmailSubject.value));
 const emailPreviewBody = computed(() => renderEmailPreview(currentEmailBody.value));
+const emailPreviewHeading = computed(() => renderEmailPreview(currentEmailTemplate.value.heading));
+const emailPreviewPreheader = computed(() => renderEmailPreview(currentEmailTemplate.value.preheader));
+const emailPreviewCode = computed(() => props.emailTemplates.variables.find(variable => variable.key === 'discount_code')?.sample ?? 'STUDENT-AB12CD34');
+const emailTemplateError = computed(() => Object.values(emailTemplateForm.errors)[0] ?? '');
+const configuredSocials = computed(() => [
+    ['Instagram', emailTemplateForm.branding.instagram_url],
+    ['Facebook', emailTemplateForm.branding.facebook_url],
+    ['TikTok', emailTemplateForm.branding.tiktok_url],
+    ['YouTube', emailTemplateForm.branding.youtube_url],
+].filter((item): item is [string, string] => Boolean(item[1])));
 const insertEmailVariable = (key: string) => {
     const token = emailVariableToken(key);
     currentEmailBody.value = `${currentEmailBody.value}${currentEmailBody.value.endsWith(' ') || currentEmailBody.value.endsWith('\n') ? '' : ' '}${token}`;
 };
 const restoreEmailDefault = () => {
-    emailTemplateForm[selectedEmailTemplate.value] = { ...props.emailTemplates.defaults[selectedEmailTemplate.value] };
+    emailTemplateForm[selectedEmailTemplate.value] = { ...props.emailTemplates.defaults.templates[selectedEmailTemplate.value] };
+    emailTemplateForm.clearErrors();
+};
+const restoreEmailBrandingDefault = () => {
+    emailTemplateForm.branding = { ...props.emailTemplates.defaults.branding };
     emailTemplateForm.clearErrors();
 };
 const saveEmailTemplates = () => emailTemplateForm.put(`${baseUrl}/email-templates`, {
     preserveScroll: true,
     onSuccess: () => emailTemplateForm.defaults(),
 });
-const testEmailForm = useForm({ email: '', subject: '', body: '' });
+const testEmailForm = useForm({ email: '' });
 const sendTestEmail = () => testEmailForm
     .transform(data => ({
         type: selectedEmailTemplate.value,
         email: data.email,
-        subject: currentEmailSubject.value,
-        body: currentEmailBody.value,
+        branding: emailTemplateForm.branding,
+        approval: emailTemplateForm.approval,
+        rejection: emailTemplateForm.rejection,
     }))
     .post(`${baseUrl}/email-templates/test`, { preserveScroll: true });
 
@@ -621,37 +658,54 @@ const recognitionFailureLabel = (code: string | null) => ({
                     </div>
                 </div>
 
-                <div class="p-5 sm:p-7">
-                    <div class="grid gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-                        <div class="space-y-5">
+                <div class="space-y-7 p-5 sm:p-7">
+                    <section class="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                        <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="text-base font-semibold text-slate-950">店铺品牌与链接</h3><p class="mt-1 text-xs leading-5 text-slate-500">当前店铺独立保存；留空的 Logo、客服或社交链接不会显示在邮件中。</p></div><button v-if="permissions.manageEmailTemplates" type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50" @click="restoreEmailBrandingDefault">恢复品牌默认值</button></div>
+                        <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            <label class="block"><span class="text-xs font-semibold text-slate-700">Logo 图片 URL</span><input v-model="emailTemplateForm.branding.logo_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="https://…/logo.png" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-100" /></label>
+                            <label class="block"><span class="text-xs font-semibold text-slate-700">品牌主色</span><span class="mt-1.5 flex rounded-xl border border-slate-200 bg-white p-1"><input v-model="emailTemplateForm.branding.primary_color" :disabled="!permissions.manageEmailTemplates" type="color" class="h-9 w-12 cursor-pointer rounded-lg border-0 bg-transparent p-0" /><input v-model="emailTemplateForm.branding.primary_color" :disabled="!permissions.manageEmailTemplates" maxlength="7" class="min-w-0 flex-1 border-0 px-2 font-mono text-sm uppercase outline-none" /></span></label>
+                            <label class="block"><span class="text-xs font-semibold text-slate-700">SHOP NOW 跳转链接</span><input v-model="emailTemplateForm.branding.shop_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="https://your-store.com" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-100" /></label>
+                            <label class="block"><span class="text-xs font-semibold text-slate-700">客服邮箱</span><input v-model="emailTemplateForm.branding.support_email" :disabled="!permissions.manageEmailTemplates" type="email" maxlength="254" placeholder="support@example.com" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-100" /></label>
+                            <label class="block"><span class="text-xs font-semibold text-slate-700">客服页面 URL</span><input v-model="emailTemplateForm.branding.support_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="https://…/support" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-100" /></label>
+                        </div>
+                        <details class="mt-4 rounded-xl border border-slate-200 bg-white p-4"><summary class="cursor-pointer text-sm font-semibold text-slate-700">社交媒体链接（可选）</summary><div class="mt-4 grid gap-3 md:grid-cols-2"><input v-model="emailTemplateForm.branding.instagram_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="Instagram URL" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><input v-model="emailTemplateForm.branding.facebook_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="Facebook URL" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><input v-model="emailTemplateForm.branding.tiktok_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="TikTok URL" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><input v-model="emailTemplateForm.branding.youtube_url" :disabled="!permissions.manageEmailTemplates" type="url" maxlength="2048" placeholder="YouTube URL" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /></div></details>
+                    </section>
+
+                    <div class="grid gap-7 xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
+                        <div class="space-y-4">
                             <label class="block"><span class="text-sm font-semibold text-slate-800">邮件主题</span><input v-model="currentEmailSubject" :disabled="!permissions.manageEmailTemplates" maxlength="180" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
-                            <label class="block"><span class="text-sm font-semibold text-slate-800">邮件正文</span><textarea v-model="currentEmailBody" :disabled="!permissions.manageEmailTemplates" rows="12" maxlength="5000" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <label class="block"><span class="text-sm font-semibold text-slate-800">收件箱预览摘要</span><input v-model="currentEmailTemplate.preheader" :disabled="!permissions.manageEmailTemplates" maxlength="240" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <label class="block"><span class="text-sm font-semibold text-slate-800">邮件标题</span><input v-model="currentEmailTemplate.heading" :disabled="!permissions.manageEmailTemplates" maxlength="240" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <label class="block"><span class="text-sm font-semibold text-slate-800">邮件正文</span><textarea v-model="currentEmailBody" :disabled="!permissions.manageEmailTemplates" rows="7" maxlength="5000" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <div class="grid gap-4 md:grid-cols-2"><label class="block"><span class="text-sm font-semibold text-slate-800">按钮文字</span><input v-model="currentEmailTemplate.cta_label" :disabled="!permissions.manageEmailTemplates" maxlength="80" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" /></label><label class="block"><span class="text-sm font-semibold text-slate-800">优惠说明</span><input v-model="currentEmailTemplate.footer_note" :disabled="!permissions.manageEmailTemplates" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" /></label></div>
                             <div>
                                 <p class="text-xs font-semibold text-slate-600">插入变量</p>
                                 <div class="mt-2 flex flex-wrap gap-2">
                                     <button v-for="variable in availableEmailVariables" :key="variable.key" type="button" :disabled="!permissions.manageEmailTemplates" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50" :title="variable.label" @click="insertEmailVariable(variable.key)">{{ emailVariableToken(variable.key) }}</button>
                                 </div>
-                                <p class="mt-2 text-xs leading-5 text-slate-400">仅支持上方安全变量，不执行 HTML、脚本或其他模板代码。批准正文必须保留优惠码变量，拒绝正文必须保留拒绝原因变量。</p>
+                                <p class="mt-2 text-xs leading-5 text-slate-400">仅支持上方安全变量，不执行 HTML、脚本或其他模板代码。优惠码由系统固定区域显示；拒绝正文必须保留拒绝原因变量。</p>
                             </div>
-                            <div v-if="emailTemplateForm.errors['approval.body'] || emailTemplateForm.errors['rejection.body'] || emailTemplateForm.errors['approval.subject'] || emailTemplateForm.errors['rejection.subject']" class="rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700">
-                                {{ emailTemplateForm.errors['approval.body'] || emailTemplateForm.errors['rejection.body'] || emailTemplateForm.errors['approval.subject'] || emailTemplateForm.errors['rejection.subject'] }}
-                            </div>
+                            <div v-if="emailTemplateError" class="rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700">{{ emailTemplateError }}</div>
                             <div v-if="permissions.manageEmailTemplates" class="flex flex-wrap gap-2">
                                 <button type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50" @click="restoreEmailDefault">恢复当前默认内容</button>
-                                <button type="button" :disabled="emailTemplateForm.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" @click="saveEmailTemplates">{{ emailTemplateForm.processing ? '保存中…' : '保存两套邮件内容' }}</button>
+                                <button type="button" :disabled="emailTemplateForm.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" @click="saveEmailTemplates">{{ emailTemplateForm.processing ? '保存中…' : '保存邮件设置' }}</button>
                             </div>
                         </div>
 
                         <aside class="space-y-4">
                             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
-                                <div class="border-b border-slate-200 bg-white px-4 py-3"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">实时预览</p><p class="mt-1 break-words text-sm font-semibold text-slate-900">{{ emailPreviewSubject }}</p></div>
-                                <div class="min-h-72 whitespace-pre-line px-5 py-5 text-sm leading-7 text-slate-700">{{ emailPreviewBody }}</div>
+                                <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">实时预览</p><p class="mt-1 max-w-xs truncate text-sm font-semibold text-slate-900" :title="emailPreviewSubject">{{ emailPreviewSubject }}</p><p class="mt-0.5 max-w-xs truncate text-[11px] text-slate-400">{{ emailPreviewPreheader }}</p></div><div class="flex rounded-lg bg-slate-100 p-1 text-[11px] font-semibold"><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'desktop' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'mobile' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'mobile'">手机</button></div></div>
+                                <div class="overflow-auto bg-slate-200 p-4"><div class="mx-auto bg-white shadow-sm transition-all" :class="emailPreviewMode === 'mobile' ? 'max-w-[320px]' : 'max-w-[560px]'">
+                                    <div class="border-b border-slate-100 px-6 py-6 text-center"><img v-if="emailTemplateForm.branding.logo_url" :src="emailTemplateForm.branding.logo_url" :alt="store.name" class="mx-auto max-h-14 max-w-[180px] object-contain" /><p v-else class="text-xl font-extrabold" :style="{ color: emailTemplateForm.branding.primary_color }">{{ store.name }}</p></div>
+                                    <div class="px-6 py-7"><h3 class="text-2xl font-extrabold leading-tight text-slate-950">{{ emailPreviewHeading }}</h3><p class="mt-4 whitespace-pre-line text-sm leading-6 text-slate-600">{{ emailPreviewBody }}</p><div v-if="selectedEmailTemplate === 'approval'" class="mt-5 break-all border-[3px] px-4 py-5 text-center font-mono text-xl font-extrabold tracking-wider" :style="{ borderColor: emailTemplateForm.branding.primary_color }">{{ emailPreviewCode }}</div><div v-if="emailTemplateForm.branding.shop_url && currentEmailTemplate.cta_label" class="mt-3 px-4 py-4 text-center text-sm font-extrabold text-white" :style="{ backgroundColor: emailTemplateForm.branding.primary_color }">{{ currentEmailTemplate.cta_label }}</div><p v-if="currentEmailTemplate.footer_note" class="mt-4 text-xs italic leading-5 text-slate-500">{{ currentEmailTemplate.footer_note }}</p></div>
+                                    <div v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email || configuredSocials.length" class="border-t border-slate-100 px-6 py-5 text-xs leading-5 text-slate-500"><template v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email"><strong class="text-slate-800">HELP</strong><br>Having trouble? <span class="font-semibold underline" :style="{ color: emailTemplateForm.branding.primary_color }">Contact our support team</span>.</template><div v-if="configuredSocials.length" class="mt-4 flex flex-wrap justify-center gap-3"><span v-for="social in configuredSocials" :key="social[0]" class="font-semibold" :style="{ color: emailTemplateForm.branding.primary_color }">{{ social[0] }}</span></div></div>
+                                </div></div>
                             </div>
                             <form v-if="permissions.manageEmailTemplates" class="rounded-2xl border border-blue-100 bg-blue-50 p-4" @submit.prevent="sendTestEmail">
                                 <p class="text-sm font-semibold text-blue-950">发送测试邮件</p>
                                 <p class="mt-1 text-xs leading-5 text-blue-700">使用当前编辑内容和示例变量发送，不会创建申请或优惠码。</p>
                                 <div class="mt-3 flex flex-col gap-2 sm:flex-row xl:flex-col 2xl:flex-row"><input v-model="testEmailForm.email" type="email" maxlength="254" required placeholder="测试收件邮箱" class="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500" /><button :disabled="testEmailForm.processing" class="shrink-0 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{{ testEmailForm.processing ? '发送中…' : '发送测试' }}</button></div>
-                                <p v-if="testEmailForm.errors.email || testEmailForm.errors.subject || testEmailForm.errors.body" class="mt-2 text-xs text-rose-600">{{ testEmailForm.errors.email || testEmailForm.errors.subject || testEmailForm.errors.body }}</p>
+                                <p v-if="Object.values(testEmailForm.errors)[0]" class="mt-2 text-xs text-rose-600">{{ Object.values(testEmailForm.errors)[0] }}</p>
                             </form>
                         </aside>
                     </div>
