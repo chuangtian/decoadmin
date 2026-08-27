@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 class StudentDiscountClaimQueryService
 {
-    private const STATUSES = ['pending', 'approved', 'rejected'];
+    private const STATUSES = ['pending', 'approved', 'rejected', 'voided'];
 
     private const SOURCES = ['education_email', 'student_id'];
 
@@ -129,6 +129,7 @@ class StudentDiscountClaimQueryService
 
         return [
             'id' => $claim->uuid,
+            'name' => $claim->name,
             'email' => $claim->email,
             'source' => $claim->source,
             'status' => $claim->status,
@@ -163,6 +164,7 @@ class StudentDiscountClaimQueryService
                 ['value' => 'pending', 'label' => '待审核'],
                 ['value' => 'approved', 'label' => '已通过'],
                 ['value' => 'rejected', 'label' => '已拒绝'],
+                ['value' => 'voided', 'label' => '已作废'],
             ],
             'sources' => [
                 ['value' => 'education_email', 'label' => '教育邮箱'],

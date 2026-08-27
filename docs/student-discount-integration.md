@@ -108,9 +108,17 @@ Content-Type: multipart/form-data
 
 字段：
 
+- `name`：必填，2–120 个字符；支持常见中英文姓名字符、空格及常用分隔符；
 - `email`：必填，RFC 邮箱，最长 320；
+- `privacy_consent`：必填，必须为 HTML/Laravel accepted 语义的同意值（建议 JSON `true` 或表单 `1`）；后台只记录同意时间；
 - `idempotency_key`：必填，8–120 位，只允许字母、数字、`.`、`_`、`:`、`-`；
-- `evidence`：非教育邮箱必填；单张 JPG/PNG/WebP，最大 5MB。
+- `evidence`：非教育邮箱必填；单张 JPG/JPEG/PNG/WebP，最大 5MB。
+
+`name` 与 `privacy_consent` 是强制契约。旧客户端缺少任一字段时返回 `422 VALIDATION_FAILED`，服务端不会自动填充默认值。
+
+同一已验证 Store 与请求 IP 每小时最多提交 5 次。限流发生在 App Proxy 签名和 Store 解析之后，服务端使用 Store ID 与 IP 的不可逆 HMAC 作为限流键，不信任请求体中的 `shop`、`store_id` 或 `organization_id`。
+
+同一 Store、同一规范化邮箱使用新的 `idempotency_key` 重新提交时，会创建独立申请。旧的 `pending` 申请转为 `voided`，旧证件文件立即删除；旧申请、关联关系及不含隐私正文的审计历史继续保留。重复使用相同 `idempotency_key` 且内容一致仍返回原申请，内容不一致仍返回 `IDEMPOTENCY_CONFLICT`。
 
 也可直接 POST 到 App Proxy 根目标 `/api/shopify-app/student-discounts/proxy`，请求字段相同。
 
@@ -147,9 +155,11 @@ Content-Type: multipart/form-data
 
 状态枚举：
 
-- 申请：`pending`、`approved`、`rejected`；
+- 申请：`pending`、`approved`、`rejected`、`voided`（已被新申请取代）；
 - 优惠码：`unused`、`partially_used`、`used_up`、`expired`；
 - 审核方式：`education_email`、`ai`、`manual`。
+
+Gemini 仅判断图片整体是否呈现学生证或校园学生身份卡形态。学校名称/Logo、姓名、照片、学号等均可作为文档类型特征；它不会鉴别真伪、有效期、证件归属、填写姓名是否匹配或当前是否仍在校，也不会因 `TEST SAMPLE`、`NOT VALID`、样本或仿制水印否决。只有 `is_student_id=true` 且 `confidence` 达到后台阈值才自动通过，有效阈值最低为 80；其余识别结果或 API、超时、JSON、置信度异常均进入人工审核，永不自动拒绝。
 
 ### 查询申请/优惠码状态
 
@@ -173,7 +183,19 @@ GET /api/shopify-app/student-discounts/proxy/claims/{claim_uuid}?claim_token={cl
 }
 ```
 
-常见错误码包括：`INVALID_APP_PROXY_SIGNATURE`、`INVALID_SHOPIFY_ID_TOKEN`、`SHOPIFY_REQUIRED_SCOPES_MISSING`、`STORE_NOT_AVAILABLE`、`STORE_NOT_CONNECTED`、`CAMPAIGN_DISABLED`、`EVIDENCE_REQUIRED`、`IDEMPOTENCY_CONFLICT`、`SHOPIFY_DISCOUNT_CREATE_FAILED`、`STUDENT_DISCOUNT_UNAVAILABLE`。
+常见错误码包括：`INVALID_APP_PROXY_SIGNATURE`、`INVALID_SHOPIFY_ID_TOKEN`、`SHOPIFY_REQUIRED_SCOPES_MISSING`、`STORE_NOT_AVAILABLE`、`STORE_NOT_CONNECTED`、`CAMPAIGN_DISABLED`、`EVIDENCE_REQUIRED`、`IDEMPOTENCY_CONFLICT`、`STUDENT_DISCOUNT_RATE_LIMITED`、`SHOPIFY_DISCOUNT_CREATE_FAILED`、`STUDENT_DISCOUNT_UNAVAILABLE`。
+
+超过提交频率时返回 `429`，并携带秒数形式的 `Retry-After` 响应头：
+
+```json
+{
+  "error": {
+    "code": "STUDENT_DISCOUNT_RATE_LIMITED",
+    "message": "提交过于频繁，请稍后重试。",
+    "retry_after": 3598
+  }
+}
+```
 
 ## DecoAdmin 后台
 
@@ -207,5 +229,10 @@ GET /api/shopify-app/student-discounts/proxy/claims/{claim_uuid}?claim_token={cl
 `database/migrations/2026_08_25_021000_create_student_discount_claim_idempotencies_table.php` 创建：
 
 - `student_discount_claim_idempotencies`
+
+`database/migrations/2026_08_27_000500_add_submission_identity_and_supersession_to_student_discount_claims.php` 增加：
+
+- 申请人姓名与隐私同意时间；
+- 旧申请的作废时间及指向新申请的关联。
 
 Gemini 设置继续存放在既有 `system_settings` 表的 `student_ai` section，API Key 通过 Eloquent encrypted cast 加密，前端只收到配置状态。
