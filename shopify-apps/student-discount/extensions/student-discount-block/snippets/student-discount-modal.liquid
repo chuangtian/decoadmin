@@ -43,11 +43,19 @@ Renders the student discount verification dialog for an app block.
       </button>
       <h2>{{ 'student_discount.modal.email_title' | t }}</h2>
       <p class="student-discount-dialog__lead">{{ 'student_discount.modal.email_lead' | t }}</p>
-      <form data-sd-email-form novalidate>
+      <form class="student-discount-dialog__email-form" data-sd-email-form novalidate>
+        <label>
+          <span>{{ 'student_discount.modal.full_name' | t }}</span>
+          <input type="text" name="fullName" autocomplete="name" minlength="2" maxlength="120" required>
+        </label>
         <div class="student-discount-dialog__email-row">
           <input type="email" name="email" autocomplete="email" maxlength="254" placeholder="{{ 'student_discount.modal.school_email' | t }}" aria-label="{{ 'student_discount.modal.school_email' | t }}" required>
           <button type="submit" disabled>{{ 'student_discount.modal.submit' | t }}</button>
         </div>
+        <label class="student-discount-dialog__consent">
+          <input type="checkbox" name="privacyConsent" value="agreed" required>
+          <span>{{ 'student_discount.modal.email_consent' | t }}</span>
+        </label>
         <p class="student-discount-dialog__error" data-sd-email-error hidden></p>
       </form>
 

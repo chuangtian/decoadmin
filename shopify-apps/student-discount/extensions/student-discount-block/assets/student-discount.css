@@ -246,6 +246,18 @@
   gap: 12px;
 }
 
+.student-discount-dialog__email-form {
+  display: grid;
+  gap: 16px;
+}
+
+.student-discount-dialog__email-form > label:not(.student-discount-dialog__consent) {
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .student-discount-dialog input {
   width: 100%;
   min-height: 50px;

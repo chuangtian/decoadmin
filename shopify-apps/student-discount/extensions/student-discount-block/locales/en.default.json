@@ -32,6 +32,7 @@
       "email_title": "Get student discount",
       "email_lead": "Enter the email address provided by your educational institution.",
       "school_email": "School email address",
+      "email_consent": "I agree to the Privacy Policy and Terms of Service and consent to the use of my information to verify eligibility and deliver the student discount.",
       "submit": "Submit",
       "email_unverified": "Don't have an eligible school email?",
       "use_id_help": "Upload your student ID instead to request a review.",
