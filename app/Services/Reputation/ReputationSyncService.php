@@ -250,7 +250,9 @@ class ReputationSyncService
         $rating = in_array($kind, ['trustpilot', 'website'], true) ? $number('星级') : null;
         $weekNumber = $this->weekNumber($payload['周数'] ?? null);
         $model = $kind === 'website' ? $text('车型') : '';
-        $orderReference = $kind === 'website' ? $text('订单号') : '';
+        $orderReference = $kind === 'website'
+            ? $firstText(['订单号', '订单编号', '订单', 'Order Number', 'Order ID', 'order_number'])
+            : '';
         $processingStatus = $kind === 'website' ? $text('处理结果') : '';
         $metrics = match ($kind) {
             'reddit_extended' => array_filter([

@@ -520,7 +520,7 @@ class ReputationMonitoringTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'reputation_sync_requested', 'store_id' => $store->id]);
     }
 
-    public function test_manual_review_is_scoped_audited_and_full_order_reference_requires_manage_permission(): void
+    public function test_manual_review_is_scoped_audited_and_full_order_reference_is_visible_to_authorized_viewers(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
         $session = $this->contextSession($organization, $store);
@@ -562,8 +562,8 @@ class ReputationMonitoringTest extends TestCase
             ->get(route('reputation.overview', ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews']))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.records.data.0.order_reference', 'ORDER-123456')
                 ->where('dashboard.records.data.0.order_reference_masked', '••••3456')
-                ->missing('dashboard.records.data.0.order_reference')
                 ->missing('dashboard.records.data.0.order_reference_encrypted'));
 
         $this->actingAs($admin)->withSession($session)->patch(route('reputation.mentions.update', $mention), [

@@ -58,7 +58,7 @@ class ReputationDashboardService
     public function __construct(private StoreFeishuDataLinkService $dataLinks) {}
 
     /** @param array<string, mixed> $filters @return array<string, mixed> */
-    public function overview(Store $store, array $filters, bool $includeFullOrderReference = false): array
+    public function overview(Store $store, array $filters): array
     {
         [$dateFrom, $dateTo] = $this->dateRange($store, $filters);
         $periodQuery = $this->periodQuery($store, $dateFrom, $dateTo);
@@ -98,7 +98,7 @@ class ReputationDashboardService
                 $this->modelComparisonQuery($store, $comparison),
             ),
             'goals' => $this->goalCards($goals, $summary, $social),
-            'records' => $this->records($store, $filters, $dateFrom, $dateTo, $includeFullOrderReference),
+            'records' => $this->records($store, $filters, $dateFrom, $dateTo),
             'freshness' => $this->freshness($store),
             'source_status' => $this->dataLinks->sectionStatusForFrontend($store, 'reputation'),
         ];
@@ -740,7 +740,7 @@ class ReputationDashboardService
         return $cards;
     }
 
-    private function records(Store $store, array $filters, CarbonImmutable $from, CarbonImmutable $to, bool $includeFullOrderReference = false): LengthAwarePaginator
+    private function records(Store $store, array $filters, CarbonImmutable $from, CarbonImmutable $to): LengthAwarePaginator
     {
         $tab = in_array($filters['tab'] ?? null, ['targets', 'reviews', 'reddit', 'threads'], true) ? $filters['tab'] : 'targets';
         $query = ReputationMention::query()->forOrganization((int) $store->organization_id)->forStore((int) $store->id)
@@ -791,7 +791,7 @@ class ReputationDashboardService
                 ->values()
                 ->all(),
             'order_reference_masked' => $this->maskOrderReference($mention->order_reference_encrypted),
-            ...($includeFullOrderReference ? ['order_reference' => $mention->order_reference_encrypted] : []),
+            'order_reference' => $mention->order_reference_encrypted,
         ]);
     }
 
