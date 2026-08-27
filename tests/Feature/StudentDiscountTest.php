@@ -263,6 +263,81 @@ class StudentDiscountTest extends TestCase
         $this->assertDatabaseMissing('student_discount_codes', ['store_id' => $store->id]);
     }
 
+    public function test_sample_watermark_does_not_prevent_student_card_document_from_auto_approval(): void
+    {
+        Storage::fake('local');
+        Mail::fake();
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+
+        $evidence = UploadedFile::fake()->create('test-sample-student-id.jpg', 64, 'image/jpeg');
+        file_put_contents((string) $evidence->getRealPath(), "\nTEST SAMPLE — NOT VALID", FILE_APPEND);
+
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => true,
+                    'institution_name' => 'Example University',
+                    'student_name' => null,
+                    'student_identifier_masked' => '***1234',
+                    'expiry_date' => null,
+                    'confidence' => 94,
+                    'review_notes' => 'Student identity card layout with a readable institution field.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+            "https://{$store->shopify_domain}/*" => Http::sequence()
+                ->push(['data' => ['codeDiscountNodeByCode' => null]])
+                ->push(['data' => ['discountCodeBasicCreate' => [
+                    'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/sample-watermark'],
+                    'userErrors' => [],
+                ]]]),
+        ]);
+
+        $response = $this->post($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'email' => 'student@example.com',
+            'idempotency_key' => 'claim-sample-watermark-001',
+            'evidence' => $evidence,
+        ], ['Accept' => 'application/json']);
+
+        $response->assertOk()->assertJsonPath('data.status', 'approved');
+        $claim = StudentDiscountClaim::query()->sole();
+        $this->assertSame('approved', $claim->status);
+        $this->assertSame('ai', $claim->review_method);
+        $this->assertSame('94.00', $claim->confidence);
+        $this->assertTrue(data_get($claim->recognition_result, 'is_student_id'));
+        $this->assertDatabaseHas('student_discount_codes', [
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/sample-watermark',
+        ]);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 1);
+
+        Http::assertSent(function ($request): bool {
+            if (! str_contains($request->url(), 'generativelanguage.googleapis.com')) {
+                return false;
+            }
+
+            $prompt = mb_strtolower((string) data_get($request->data(), 'contents.0.parts.0.text'));
+            $encodedEvidence = data_get($request->data(), 'contents.0.parts.1.inlineData.data');
+            $sentEvidence = is_string($encodedEvidence) ? base64_decode($encodedEvidence, true) : false;
+
+            return str_contains($prompt, 'only document-type recognition')
+                && str_contains($prompt, 'test sample')
+                && str_contains($prompt, 'not valid')
+                && str_contains($prompt, 'must not cause is_student_id to be false')
+                && str_contains($prompt, 'confidence must not measure authenticity or validity')
+                && is_string($sentEvidence)
+                && str_contains($sentEvidence, 'TEST SAMPLE — NOT VALID');
+        });
+    }
+
     public function test_gemini_provider_failures_map_to_safe_stable_codes_without_retaining_provider_text(): void
     {
         Storage::fake('local');
@@ -350,7 +425,7 @@ class StudentDiscountTest extends TestCase
                 ->where('claims.data.0.recognition_result', null));
     }
 
-    public function test_high_confidence_non_student_id_is_never_auto_approved(): void
+    public function test_unrelated_image_is_queued_for_manual_review_without_auto_rejection(): void
     {
         Storage::fake('local');
         Mail::fake();
@@ -365,8 +440,8 @@ class StudentDiscountTest extends TestCase
                 'candidates' => [['content' => ['parts' => [['text' => json_encode([
                     'is_student_id' => false,
                     'institution_name' => null,
-                    'confidence' => 99,
-                    'review_notes' => 'Not a student ID',
+                    'confidence' => 5,
+                    'review_notes' => 'Unrelated image without a student card layout.',
                 ], JSON_THROW_ON_ERROR)]]]]],
             ]),
         ]);
