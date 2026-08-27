@@ -3,6 +3,7 @@
 namespace App\Services\StudentDiscount;
 
 use App\Exceptions\StudentDiscountException;
+use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Store;
 use App\Models\User;
@@ -63,7 +64,7 @@ class ShopifyStudentDiscountAppService
     public function bootstrap(Store $store, string $idToken): array
     {
         $shop = $store->shopify_domain;
-        $token = $this->exchangeOnlineToken($shop, $idToken);
+        $token = $this->exchangeOfflineToken($shop, $idToken);
         $installationPayload = $this->graphql($shop, $token['access_token'], self::INSTALLATION_QUERY);
         $installationId = data_get($installationPayload, 'data.currentAppInstallation.id');
         if (! is_string($installationId) || $installationId === '') {
@@ -97,8 +98,8 @@ class ShopifyStudentDiscountAppService
             throw new StudentDiscountException('STORE_NOT_CONNECTED', '该 Shopify 店铺尚未连接 DecoAdmin。', 409);
         }
 
-        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath): void {
-            $this->registry->synchronizeInstallation(
+        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $token): void {
+            $installation = $this->registry->synchronizeInstallation(
                 $store,
                 $connection,
                 'active',
@@ -106,6 +107,7 @@ class ShopifyStudentDiscountAppService
                 'student_discount_bootstrap',
                 $installationId,
             );
+            $this->storeOfflineToken($installation, $token);
 
             AuditLog::query()->create([
                 'organization_id' => $store->organization_id,
@@ -126,8 +128,16 @@ class ShopifyStudentDiscountAppService
         return ['app_installation_id' => $installationId, 'proxy_path' => $proxyPath];
     }
 
-    /** @return array{access_token: string, granted_scopes: list<string>} */
-    private function exchangeOnlineToken(string $shop, string $idToken): array
+    /**
+     * @return array{
+     *     access_token: string,
+     *     refresh_token: string,
+     *     expires_in: int,
+     *     refresh_token_expires_in: int,
+     *     granted_scopes: list<string>
+     * }
+     */
+    private function exchangeOfflineToken(string $shop, string $idToken): array
     {
         try {
             $response = $this->http
@@ -141,17 +151,25 @@ class ShopifyStudentDiscountAppService
                     'grant_type' => 'urn:ietf:params:oauth:grant-type:token-exchange',
                     'subject_token' => $idToken,
                     'subject_token_type' => 'urn:ietf:params:oauth:token-type:id_token',
-                    'requested_token_type' => 'urn:shopify:params:oauth:token-type:online-access-token',
+                    'requested_token_type' => 'urn:shopify:params:oauth:token-type:offline-access-token',
+                    'expiring' => 1,
                 ]);
         } catch (ConnectionException) {
             throw new StudentDiscountException('SHOPIFY_TOKEN_EXCHANGE_TIMEOUT', 'Shopify 身份交换超时，请稍后重试。', 502);
         }
 
         $accessToken = $response->json('access_token');
+        $refreshToken = $response->json('refresh_token');
+        $expiresIn = $response->json('expires_in');
+        $refreshTokenExpiresIn = $response->json('refresh_token_expires_in');
         if ($response->status() === 400) {
             throw new StudentDiscountException('INVALID_SHOPIFY_ID_TOKEN', 'Shopify 身份令牌已失效，请刷新后重试。', 401);
         }
-        if ($response->failed() || ! is_string($accessToken) || $accessToken === '') {
+        if ($response->failed()
+            || ! is_string($accessToken) || $accessToken === ''
+            || ! is_string($refreshToken) || $refreshToken === ''
+            || ! is_numeric($expiresIn) || (int) $expiresIn <= 0
+            || ! is_numeric($refreshTokenExpiresIn) || (int) $refreshTokenExpiresIn <= 0) {
             throw new StudentDiscountException('SHOPIFY_TOKEN_EXCHANGE_FAILED', '无法建立 Shopify Admin API 会话。', 502);
         }
 
@@ -161,7 +179,34 @@ class ShopifyStudentDiscountAppService
         )));
         $this->assertRequiredScopes($grantedScopes);
 
-        return ['access_token' => $accessToken, 'granted_scopes' => $grantedScopes];
+        return [
+            'access_token' => $accessToken,
+            'refresh_token' => $refreshToken,
+            'expires_in' => (int) $expiresIn,
+            'refresh_token_expires_in' => (int) $refreshTokenExpiresIn,
+            'granted_scopes' => $grantedScopes,
+        ];
+    }
+
+    /**
+     * @param  array{
+     *     access_token: string,
+     *     refresh_token: string,
+     *     expires_in: int,
+     *     refresh_token_expires_in: int,
+     *     granted_scopes: list<string>
+     * }  $token
+     */
+    private function storeOfflineToken(AppInstallation $installation, array $token): void
+    {
+        $issuedAt = now();
+        $installation->forceFill([
+            'access_token_encrypted' => $token['access_token'],
+            'refresh_token_encrypted' => $token['refresh_token'],
+            'token_type' => 'offline',
+            'access_token_expires_at' => $issuedAt->copy()->addSeconds($token['expires_in']),
+            'refresh_token_expires_at' => $issuedAt->copy()->addSeconds($token['refresh_token_expires_in']),
+        ])->save();
     }
 
     /** @param list<string> $grantedScopes */
