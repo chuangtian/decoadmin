@@ -3,14 +3,13 @@
 namespace App\Services\StudentDiscount;
 
 use App\Exceptions\StudentDiscountException;
-use App\Mail\StudentDiscountDecisionMail;
+use App\Jobs\SendStudentDiscountDecisionMail;
 use App\Models\Store;
 use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 class StudentDiscountCodeService
@@ -39,7 +38,10 @@ class StudentDiscountCodeService
         }
         GRAPHQL;
 
-    public function __construct(private ShopifyGraphQLClient $shopify) {}
+    public function __construct(
+        private ShopifyGraphQLClient $shopify,
+        private StudentDiscountAppTokenService $tokens,
+    ) {}
 
     public function reusableForEmail(Store $store, string $normalizedEmail): ?StudentDiscountCode
     {
@@ -82,23 +84,20 @@ class StudentDiscountCodeService
                 }
 
                 $store = $claim->store;
-                $connection = $store->shopifyConnection;
-                if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-                    throw new StudentDiscountException('SHOPIFY_NOT_CONNECTED', '店铺尚未连接可用的 Shopify Admin API。', 409);
-                }
+                $accessToken = $this->tokens->accessTokenFor($store);
 
                 $code = $this->codeFor($claim, $campaign);
                 $startsAt = now()->utc();
                 $expiresAt = $startsAt->copy()->addDays($campaign->validity_days);
-                $shopifyId = $this->findShopifyId($connection, $code);
+                $shopifyId = $this->findShopifyId($store->shopify_domain, $accessToken, $code);
                 if (! $shopifyId) {
-                    $payload = $this->shopify->query($connection, self::CREATE_MUTATION, [
+                    $payload = $this->shopify->queryWithAccessToken($store->shopify_domain, $accessToken, self::CREATE_MUTATION, [
                         'basicCodeDiscount' => $this->shopifyInput($store, $campaign, $code, $startsAt->toIso8601String(), $expiresAt->toIso8601String()),
                     ]);
                     $errors = data_get($payload, 'data.discountCodeBasicCreate.userErrors', []);
                     $shopifyId = data_get($payload, 'data.discountCodeBasicCreate.codeDiscountNode.id');
                     if (! is_string($shopifyId) || $shopifyId === '') {
-                        $shopifyId = $this->findShopifyId($connection, $code);
+                        $shopifyId = $this->findShopifyId($store->shopify_domain, $accessToken, $code);
                     }
                     if (! $shopifyId) {
                         throw new StudentDiscountException(
@@ -128,13 +127,15 @@ class StudentDiscountCodeService
 
     public function syncUsage(StudentDiscountCode $code): StudentDiscountCode
     {
-        $connection = $code->store->shopifyConnection;
-        if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return $code->refreshStatus();
-        }
-
         try {
-            $payload = $this->shopify->query($connection, self::FIND_QUERY, ['code' => $code->code]);
+            $store = $code->store;
+            $accessToken = $this->tokens->accessTokenFor($store);
+            $payload = $this->shopify->queryWithAccessToken(
+                $store->shopify_domain,
+                $accessToken,
+                self::FIND_QUERY,
+                ['code' => $code->code],
+            );
             $usage = data_get($payload, 'data.codeDiscountNodeByCode.codeDiscount.codes.nodes.0.asyncUsageCount');
             if (is_numeric($usage)) {
                 $code->usage_count = max(0, (int) $usage);
@@ -148,23 +149,19 @@ class StudentDiscountCodeService
         return $code;
     }
 
-    public function sendDecisionEmail(StudentDiscountClaim $claim, ?StudentDiscountCode $code): void
+    public function dispatchDecisionEmail(StudentDiscountClaim $claim, ?StudentDiscountCode $code): void
     {
-        try {
-            Mail::to($claim->email)->send(new StudentDiscountDecisionMail($claim, $code));
-            if ($code) {
-                $code->forceFill(['email_sent_at' => now(), 'email_failed_at' => null])->save();
-            }
-        } catch (Throwable) {
-            if ($code) {
-                $code->forceFill(['email_failed_at' => now()])->save();
-            }
-        }
+        SendStudentDiscountDecisionMail::dispatch(
+            (int) $claim->organization_id,
+            (int) $claim->store_id,
+            (int) $claim->id,
+            $code?->id,
+        )->afterCommit();
     }
 
-    private function findShopifyId($connection, string $code): ?string
+    private function findShopifyId(string $shopDomain, string $accessToken, string $code): ?string
     {
-        $payload = $this->shopify->query($connection, self::FIND_QUERY, ['code' => $code]);
+        $payload = $this->shopify->queryWithAccessToken($shopDomain, $accessToken, self::FIND_QUERY, ['code' => $code]);
         $id = data_get($payload, 'data.codeDiscountNodeByCode.id');
 
         return is_string($id) && $id !== '' ? $id : null;

@@ -351,14 +351,44 @@
       ...options,
       headers: {Accept: 'application/json', ...(options.headers || {})},
     });
-    const payload = await response.json().catch(() => ({}));
+    const responseText = await response.text();
+    let payload = null;
+    if (responseText.trim() !== '') {
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        payload = null;
+      }
+    }
+
+    const validEnvelope = payload !== null
+      && typeof payload === 'object'
+      && !Array.isArray(payload)
+      && (Object.hasOwn(payload, 'data') || Object.hasOwn(payload, 'error'));
+
+    if (!validEnvelope) {
+      const error = new Error('The student discount service returned an invalid response. Please try again later.');
+      error.code = 'INVALID_API_RESPONSE';
+      error.status = response.status;
+      throw error;
+    }
+
     if (!response.ok) {
       const error = new Error(payload.error?.message || 'Request failed.');
       error.code = String(payload.error?.code || 'REQUEST_FAILED');
       error.fields = payload.error?.fields || {};
+      error.status = response.status;
       throw error;
     }
-    return payload.data || {};
+
+    if (payload.data === null || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+      const error = new Error('The student discount service returned an invalid response. Please try again later.');
+      error.code = 'INVALID_API_RESPONSE';
+      error.status = response.status;
+      throw error;
+    }
+
+    return payload.data;
   }
 
   function normalizeProxyPath(value) {

@@ -127,7 +127,7 @@ class StudentDiscountController extends Controller
             return back()->with('error', $exception->getMessage());
         }
 
-        return back()->with('success', '申请已通过，优惠码已生成并发送。');
+        return back()->with('success', '申请已通过，优惠码已生成，通知邮件正在发送。');
     }
 
     public function reject(Request $request, Organization $organization, Store $store, StudentDiscountClaim $claim): RedirectResponse
@@ -140,7 +140,7 @@ class StudentDiscountController extends Controller
             return back()->with('error', $exception->getMessage());
         }
 
-        return back()->with('success', '申请已拒绝并发送通知邮件。');
+        return back()->with('success', '申请已拒绝，通知邮件正在发送。');
     }
 
     public function evidence(Request $request, Organization $organization, Store $store, StudentDiscountClaim $claim): StreamedResponse

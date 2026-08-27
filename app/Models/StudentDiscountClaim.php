@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
     'review_method', 'evidence_disk', 'evidence_path', 'evidence_mime', 'evidence_size',
     'evidence_deleted_at', 'recognition_result', 'confidence', 'model_name', 'recognized_at',
     'reviewed_at', 'reviewed_by', 'rejection_reason', 'idempotency_key', 'request_fingerprint',
-    'claim_token_hash', 'claim_token_encrypted', 'submission_count',
+    'claim_token_hash', 'claim_token_encrypted', 'submission_count', 'email_sent_at', 'email_failed_at',
 ])]
 #[Hidden(['evidence_disk', 'evidence_path', 'recognition_result', 'claim_token_hash', 'claim_token_encrypted', 'request_fingerprint'])]
 class StudentDiscountClaim extends Model
@@ -62,6 +62,8 @@ class StudentDiscountClaim extends Model
             'reviewed_at' => 'datetime',
             'evidence_deleted_at' => 'datetime',
             'submission_count' => 'integer',
+            'email_sent_at' => 'datetime',
+            'email_failed_at' => 'datetime',
         ];
     }
 }

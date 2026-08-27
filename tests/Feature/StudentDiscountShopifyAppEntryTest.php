@@ -75,6 +75,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
     {
         [, $organization, $store] = $this->context('store-admin');
         $connection = $this->connection($store);
+        $this->activeInstallation($store, $connection);
         $webhookId = (string) Str::uuid();
         $payload = ['id' => 99, 'shop' => 'attacker.myshopify.com', 'domain' => 'attacker.myshopify.com'];
 
@@ -96,6 +97,11 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertSame($connection->id, $installation->shopify_connection_id);
         $this->assertSame('uninstalled', $installation->status);
         $this->assertNotNull($installation->uninstalled_at);
+        $this->assertNull($installation->access_token_encrypted);
+        $this->assertNull($installation->refresh_token_encrypted);
+        $this->assertNull($installation->token_type);
+        $this->assertNull($installation->access_token_expires_at);
+        $this->assertNull($installation->refresh_token_expires_at);
         $this->assertSame($organization->id, $event->organization_id);
         $this->assertSame($store->id, $event->store_id);
         $this->assertSame('processed', $event->status);
@@ -146,6 +152,8 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertSame('active', $installation->status);
         $this->assertNull($installation->uninstalled_at);
         $this->assertSame(['read_products', 'write_discounts'], $installation->granted_scopes);
+        $this->assertNull($installation->access_token_encrypted);
+        $this->assertNull($installation->refresh_token_encrypted);
         $this->assertSame($store->id, $installation->store_id);
         $this->assertSame('connected', $connection->fresh()->status);
         $this->assertDatabaseCount('webhook_events', 2);
@@ -258,6 +266,35 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
             'scopes' => ['read_products'],
             'api_version' => '2026-07',
             'status' => 'connected',
+            'installed_at' => now(),
+        ]);
+    }
+
+    private function activeInstallation(Store $store, ShopifyConnection $connection): AppInstallation
+    {
+        $app = App::query()->create([
+            'organization_id' => null,
+            'name' => (string) config('student_discount.active.name'),
+            'handle' => (string) config('student_discount.active.handle'),
+            'client_id' => (string) config('student_discount.active.client_id'),
+            'client_secret_encrypted' => (string) config('student_discount.active.client_secret'),
+            'distribution' => 'custom',
+            'status' => 'active',
+            'scopes' => (array) config('student_discount.required_scopes'),
+            'webhook_api_version' => (string) config('shopify.api_version'),
+        ]);
+
+        return AppInstallation::query()->create([
+            'app_id' => $app->id,
+            'store_id' => $store->id,
+            'shopify_connection_id' => $connection->id,
+            'status' => 'active',
+            'granted_scopes' => (array) config('student_discount.required_scopes'),
+            'access_token_encrypted' => 'student-app-offline-token',
+            'refresh_token_encrypted' => 'student-app-refresh-token',
+            'token_type' => 'offline',
+            'access_token_expires_at' => now()->addHour(),
+            'refresh_token_expires_at' => now()->addDays(90),
             'installed_at' => now(),
         ]);
     }

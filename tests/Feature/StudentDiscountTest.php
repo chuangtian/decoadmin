@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Exceptions\StudentDiscountException;
+use App\Jobs\SendStudentDiscountDecisionMail;
 use App\Mail\StudentDiscountDecisionMail;
 use App\Models\App;
 use App\Models\AppInstallation;
@@ -24,6 +25,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -93,10 +95,12 @@ class StudentDiscountTest extends TestCase
     public function test_signed_education_email_claim_creates_and_reuses_shopify_discount_idempotently(): void
     {
         Mail::fake();
+        Queue::fake();
         [$user, $organization, $store] = $this->context('store-admin');
         $this->campaign($organization, $store, ['enabled' => true]);
-        $this->connection($store);
+        $connection = $this->connection($store);
         config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        $this->studentInstallation($store, $connection);
         Http::fakeSequence('https://student-test.myshopify.com/*')
             ->push(['data' => ['codeDiscountNodeByCode' => null]])
             ->push(['data' => ['discountCodeBasicCreate' => [
@@ -114,7 +118,7 @@ class StudentDiscountTest extends TestCase
         $code = StudentDiscountCode::query()->sole();
         $this->assertSame('gid://shopify/DiscountCodeNode/123', $code->shopify_discount_id);
         $this->assertEquals(7, $code->generated_at->diffInDays($code->expires_at));
-        Mail::assertSent(StudentDiscountDecisionMail::class, 1);
+        Mail::assertNothingSent();
 
         $secondUrl = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
         $this->postJson($secondUrl, ['email' => 'student@school.edu', 'idempotency_key' => 'claim-fast-pass-001'])
@@ -124,7 +128,86 @@ class StudentDiscountTest extends TestCase
 
         $this->assertDatabaseCount('student_discount_claims', 1);
         $this->assertDatabaseCount('student_discount_codes', 1);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, function (SendStudentDiscountDecisionMail $job) use ($code): bool {
+            return $job->organizationId === $code->organization_id
+                && $job->storeId === $code->store_id
+                && $job->claimId === $code->claim_id
+                && $job->codeId === $code->id;
+        });
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 1);
         Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'student-app-offline-token');
+        Http::assertNotSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'shopify-test-token');
+    }
+
+    public function test_education_email_claim_requires_current_store_student_app_token(): void
+    {
+        Mail::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $this->connection($store);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Student Store',
+            'shopify_domain' => 'other-student.myshopify.com',
+            'status' => 'active',
+        ]);
+        $this->studentInstallation($otherStore, $this->connection($otherStore));
+        Http::fake();
+
+        $payload = ['email' => 'student@school.edu', 'idempotency_key' => 'claim-current-store-token-001'];
+        $this->postJson($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), $payload)
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'STUDENT_DISCOUNT_APP_REAUTH_REQUIRED');
+
+        $this->assertDatabaseHas('student_discount_claims', ['store_id' => $store->id, 'status' => 'pending']);
+        $this->assertDatabaseCount('student_discount_claim_idempotencies', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_expired_student_app_token_is_refreshed_and_rotated_before_issuing_code(): void
+    {
+        Mail::fake();
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $connection = $this->connection($store);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        $installation = $this->studentInstallation($store, $connection, [
+            'access_token_encrypted' => 'expired-student-app-token',
+            'refresh_token_encrypted' => 'student-app-refresh-token-old',
+            'access_token_expires_at' => now()->subMinute(),
+        ]);
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push([
+                'access_token' => 'student-app-offline-token-new',
+                'refresh_token' => 'student-app-refresh-token-new',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy',
+            ])
+            ->push(['data' => ['codeDiscountNodeByCode' => null]])
+            ->push(['data' => ['discountCodeBasicCreate' => [
+                'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/refreshed'],
+                'userErrors' => [],
+            ]]]);
+
+        $this->postJson($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'email' => 'student@school.edu',
+            'idempotency_key' => 'claim-token-refresh-001',
+        ])->assertOk()->assertJsonPath('data.status', 'approved');
+
+        Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
+            && $request['grant_type'] === 'refresh_token'
+            && $request['refresh_token'] === 'student-app-refresh-token-old');
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/graphql.json')
+            && $request->header('X-Shopify-Access-Token')[0] === 'student-app-offline-token-new');
+        $this->assertSame('student-app-offline-token-new', $installation->fresh()->access_token_encrypted);
+        $this->assertSame('student-app-refresh-token-new', $installation->fresh()->refresh_token_encrypted);
+        $this->assertStringNotContainsString(
+            'student-app-offline-token-new',
+            (string) DB::table('app_installations')->where('id', $installation->id)->value('access_token_encrypted'),
+        );
     }
 
     public function test_low_confidence_student_id_is_queued_for_manual_review_without_auto_rejection(): void
@@ -274,9 +357,11 @@ class StudentDiscountTest extends TestCase
     public function test_store_operator_can_review_only_an_explicitly_authorized_organization_and_store(): void
     {
         Mail::fake();
+        Queue::fake();
         [$operator, $organization, $store] = $this->context('operator');
         $campaign = $this->campaign($organization, $store, ['enabled' => true]);
-        $this->connection($store);
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
         $claim = StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -309,7 +394,28 @@ class StudentDiscountTest extends TestCase
         $this->assertSame('approved', $claim->fresh()->status);
         $this->assertSame($operator->id, $claim->fresh()->reviewed_by);
         $this->assertSame($campaign->usage_limit, $claim->fresh()->discountCode->usage_limit);
-        Mail::assertSent(StudentDiscountDecisionMail::class, 1);
+        $approvedCode = $claim->fresh()->discountCode;
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, fn (SendStudentDiscountDecisionMail $job): bool => $job->claimId === $claim->id
+            && $job->codeId === $approvedCode->id);
+
+        $rejectedClaim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'rejected-review@example.com',
+            'normalized_email' => 'rejected-review@example.com',
+            'source' => 'student_id',
+            'status' => 'pending',
+            'claim_token_hash' => hash('sha256', 'rejected-review-token'),
+            'claim_token_encrypted' => 'rejected-review-token',
+        ]);
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.reject', [$organization, $store, $rejectedClaim]), ['reason' => '证据无法验证'])
+            ->assertRedirect();
+        $this->assertSame('rejected', $rejectedClaim->fresh()->status);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, fn (SendStudentDiscountDecisionMail $job): bool => $job->claimId === $rejectedClaim->id
+            && $job->codeId === null);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 2);
+        Mail::assertNothingSent();
 
         $otherStore = $organization->stores()->create([
             'name' => 'Other Store',
@@ -319,6 +425,160 @@ class StudentDiscountTest extends TestCase
         $this->actingAs($operator)
             ->get(route('student-discounts.index', [$organization, $otherStore]))
             ->assertForbidden();
+    }
+
+    public function test_decision_mail_job_marks_claim_and_code_sent_once_without_serializing_pii(): void
+    {
+        Mail::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'queued-student@example.edu',
+            'normalized_email' => 'queued-student@example.edu',
+            'source' => 'education_email',
+            'status' => 'approved',
+            'claim_token_hash' => hash('sha256', 'queued-claim-token'),
+            'claim_token_encrypted' => 'queued-claim-token',
+            'email_failed_at' => now()->subMinute(),
+        ]);
+        $code = StudentDiscountCode::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/mail-success',
+            'code' => 'STUDENT-MAIL-SUCCESS',
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 1,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
+            'email_failed_at' => now()->subMinute(),
+        ]);
+        $job = new SendStudentDiscountDecisionMail($organization->id, $store->id, $claim->id, $code->id);
+
+        $this->assertStringNotContainsString($claim->email, serialize($job));
+        $this->assertStringNotContainsString($claim->claim_token_encrypted, serialize($job));
+        $job->handle();
+        $job->handle();
+
+        Mail::assertSent(StudentDiscountDecisionMail::class, function (StudentDiscountDecisionMail $mail) use ($claim, $code): bool {
+            return $mail->hasTo($claim->email) && $mail->discountCode->is($code);
+        });
+        Mail::assertSent(StudentDiscountDecisionMail::class, 1);
+        $this->assertNotNull($claim->fresh()->email_sent_at);
+        $this->assertNull($claim->fresh()->email_failed_at);
+        $this->assertNotNull($code->fresh()->email_sent_at);
+        $this->assertNull($code->fresh()->email_failed_at);
+    }
+
+    public function test_decision_mail_job_sends_outside_a_transaction_and_preserves_concurrent_success_markers(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'concurrent-student@example.edu',
+            'normalized_email' => 'concurrent-student@example.edu',
+            'source' => 'education_email',
+            'status' => 'approved',
+            'claim_token_hash' => hash('sha256', 'concurrent-claim-token'),
+            'claim_token_encrypted' => 'concurrent-claim-token',
+            'email_failed_at' => now()->subMinute(),
+        ]);
+        $code = StudentDiscountCode::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/mail-concurrent',
+            'code' => 'STUDENT-MAIL-CONCURRENT',
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 1,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
+            'email_failed_at' => now()->subMinute(),
+        ]);
+        $concurrentSentAt = now()->subSeconds(5)->startOfSecond();
+        $transactionLevel = DB::transactionLevel();
+        $pendingMail = \Mockery::mock();
+        $pendingMail->shouldReceive('send')
+            ->once()
+            ->with(\Mockery::type(StudentDiscountDecisionMail::class))
+            ->andReturnUsing(function (StudentDiscountDecisionMail $mail) use ($claim, $code, $concurrentSentAt, $transactionLevel): void {
+                $this->assertSame($transactionLevel, DB::transactionLevel());
+                $this->assertTrue($mail->discountCode->is($code));
+                StudentDiscountClaim::query()->whereKey($claim->id)->update([
+                    'email_sent_at' => $concurrentSentAt,
+                    'email_failed_at' => null,
+                ]);
+                StudentDiscountCode::query()->whereKey($code->id)->update([
+                    'email_sent_at' => $concurrentSentAt,
+                    'email_failed_at' => null,
+                ]);
+            });
+        Mail::shouldReceive('to')
+            ->once()
+            ->with($claim->email)
+            ->andReturn($pendingMail);
+
+        $job = new SendStudentDiscountDecisionMail($organization->id, $store->id, $claim->id, $code->id);
+        $job->handle();
+
+        $this->assertSame($concurrentSentAt->toISOString(), $claim->fresh()->email_sent_at?->toISOString());
+        $this->assertSame($concurrentSentAt->toISOString(), $code->fresh()->email_sent_at?->toISOString());
+        $this->assertNull($claim->fresh()->email_failed_at);
+        $this->assertNull($code->fresh()->email_failed_at);
+    }
+
+    public function test_decision_mail_job_marks_claim_and_code_failed_with_sanitized_exception(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'failed-student@example.edu',
+            'normalized_email' => 'failed-student@example.edu',
+            'source' => 'education_email',
+            'status' => 'approved',
+            'claim_token_hash' => hash('sha256', 'failed-claim-token'),
+            'claim_token_encrypted' => 'failed-claim-token',
+        ]);
+        $code = StudentDiscountCode::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/mail-failure',
+            'code' => 'STUDENT-MAIL-FAILURE',
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 1,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
+        ]);
+        $job = new SendStudentDiscountDecisionMail($organization->id, $store->id, $claim->id, $code->id);
+        Mail::shouldReceive('to')->once()->andThrow(new \RuntimeException('sensitive transport detail'));
+
+        try {
+            $job->handle();
+            $this->fail('The mail job should throw a sanitized exception.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Student discount decision email delivery failed.', $exception->getMessage());
+            $this->assertStringNotContainsString('sensitive transport detail', $exception->getMessage());
+            $this->assertStringNotContainsString($claim->email, $exception->getMessage());
+            $job->failed($exception);
+        }
+
+        $this->assertNull($claim->fresh()->email_sent_at);
+        $this->assertNotNull($claim->fresh()->email_failed_at);
+        $this->assertNull($code->fresh()->email_sent_at);
+        $this->assertNotNull($code->fresh()->email_failed_at);
     }
 
     public function test_shopify_app_connection_validates_oidc_claims_and_bootstrap_sets_installation_proxy_path(): void
@@ -344,7 +604,13 @@ class StudentDiscountTest extends TestCase
             ->assertJsonPath('data.store.shopify_domain', $store->shopify_domain);
 
         Http::fakeSequence("https://{$store->shopify_domain}/*")
-            ->push(['access_token' => 'ephemeral-online-access-token', 'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy'])
+            ->push([
+                'access_token' => 'student-offline-access-token',
+                'refresh_token' => 'student-offline-refresh-token',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy',
+            ])
             ->push(['data' => ['currentAppInstallation' => [
                 'id' => 'gid://shopify/AppInstallation/789',
                 'accessScopes' => [
@@ -363,7 +629,13 @@ class StudentDiscountTest extends TestCase
                 ]],
                 'userErrors' => [],
             ]]])
-            ->push(['access_token' => 'ephemeral-online-access-token', 'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy'])
+            ->push([
+                'access_token' => 'student-offline-access-token-rotated',
+                'refresh_token' => 'student-offline-refresh-token-rotated',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy',
+            ])
             ->push(['data' => ['currentAppInstallation' => [
                 'id' => 'gid://shopify/AppInstallation/789',
                 'accessScopes' => [
@@ -396,7 +668,8 @@ class StudentDiscountTest extends TestCase
 
         Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
             && $request['subject_token'] === $token
-            && $request['requested_token_type'] === 'urn:shopify:params:oauth:token-type:online-access-token');
+            && $request['requested_token_type'] === 'urn:shopify:params:oauth:token-type:offline-access-token'
+            && (int) $request['expiring'] === 1);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
             && str_contains($request->body(), '"variables":{}')
             && str_contains((string) $request['query'], 'currentAppInstallation'));
@@ -420,6 +693,17 @@ class StudentDiscountTest extends TestCase
             $installation->granted_scopes,
         );
         $this->assertSame('student_discount_bootstrap', data_get($installation->settings, 'source'));
+        $this->assertSame('offline', $installation->token_type);
+        $this->assertSame('student-offline-access-token-rotated', $installation->access_token_encrypted);
+        $this->assertSame('student-offline-refresh-token-rotated', $installation->refresh_token_encrypted);
+        $this->assertNotNull($installation->access_token_expires_at);
+        $this->assertNotNull($installation->refresh_token_expires_at);
+        $this->assertArrayNotHasKey('access_token_encrypted', $installation->toArray());
+        $this->assertArrayNotHasKey('refresh_token_encrypted', $installation->toArray());
+        $this->assertStringNotContainsString(
+            'student-offline-access-token-rotated',
+            (string) DB::table('app_installations')->where('id', $installation->id)->value('access_token_encrypted'),
+        );
         $this->assertDatabaseCount('apps', 1);
         $this->assertDatabaseCount('app_installations', 1);
     }
@@ -434,7 +718,13 @@ class StudentDiscountTest extends TestCase
         ]);
         $token = $this->shopifyIdToken($store->shopify_domain, 'student-app-client-id', 'student-app-client-secret');
         Http::fakeSequence("https://{$store->shopify_domain}/*")
-            ->push(['access_token' => 'limited-online-access-token', 'scope' => 'read_products,write_app_proxy']);
+            ->push([
+                'access_token' => 'limited-offline-access-token',
+                'refresh_token' => 'limited-offline-refresh-token',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_products,write_app_proxy',
+            ]);
 
         $this->withToken($token)
             ->postJson(route('student-discounts.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
@@ -458,7 +748,13 @@ class StudentDiscountTest extends TestCase
         ]);
         $token = $this->shopifyIdToken($store->shopify_domain, 'student-app-client-id', 'student-app-client-secret');
         Http::fakeSequence("https://{$store->shopify_domain}/*")
-            ->push(['access_token' => 'ephemeral-online-access-token', 'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy'])
+            ->push([
+                'access_token' => 'student-offline-access-token',
+                'refresh_token' => 'student-offline-refresh-token',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_discounts,write_discounts,read_products,write_app_proxy',
+            ])
             ->push(['data' => ['currentAppInstallation' => [
                 'id' => 'gid://shopify/AppInstallation/789',
                 'accessScopes' => [
@@ -551,6 +847,46 @@ class StudentDiscountTest extends TestCase
             'scopes' => ['read_discounts', 'write_discounts'],
             'api_version' => '2026-07',
             'status' => 'connected',
+        ]);
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function studentInstallation(
+        Store $store,
+        ShopifyConnection $connection,
+        array $overrides = [],
+    ): AppInstallation {
+        if (! filled(config('student_discount.active.client_secret'))) {
+            config(['student_discount.active.client_secret' => 'student-app-test-secret']);
+        }
+
+        $app = App::query()->firstOrCreate(
+            ['handle' => (string) config('student_discount.active.handle')],
+            [
+                'organization_id' => null,
+                'name' => (string) config('student_discount.active.name'),
+                'client_id' => (string) config('student_discount.active.client_id'),
+                'client_secret_encrypted' => (string) config('student_discount.active.client_secret'),
+                'distribution' => 'custom',
+                'status' => 'active',
+                'scopes' => (array) config('student_discount.required_scopes'),
+                'webhook_api_version' => (string) config('shopify.api_version'),
+            ],
+        );
+
+        return AppInstallation::query()->create([
+            'app_id' => $app->id,
+            'store_id' => $store->id,
+            'shopify_connection_id' => $connection->id,
+            'status' => 'active',
+            'granted_scopes' => (array) config('student_discount.required_scopes'),
+            'access_token_encrypted' => 'student-app-offline-token',
+            'refresh_token_encrypted' => 'student-app-refresh-token',
+            'token_type' => 'offline',
+            'access_token_expires_at' => now()->addHour(),
+            'refresh_token_expires_at' => now()->addDays(90),
+            'installed_at' => now(),
+            ...$overrides,
         ]);
     }
 

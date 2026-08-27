@@ -230,7 +230,7 @@ class StudentDiscountClaimService
             'rejection_reason' => null,
         ])->save();
         $this->audit($claim, $actor, 'student_discount_claim_approved', ['review_method' => $method, 'discount_code_uuid' => $code->uuid]);
-        $this->codes->sendDecisionEmail($claim, $code);
+        $this->codes->dispatchDecisionEmail($claim, $code);
 
         return $code;
     }
@@ -253,7 +253,7 @@ class StudentDiscountClaimService
             'rejection_reason' => trim($reason),
         ])->save();
         $this->audit($claim, $actor, 'student_discount_claim_rejected', ['reason_present' => true]);
-        $this->codes->sendDecisionEmail($claim, null);
+        $this->codes->dispatchDecisionEmail($claim, null);
 
         return $claim;
     }
