@@ -22,6 +22,9 @@ type WeeklyTrend = {
     week: string; label: string; posts: number; views: number; comments: number; upvotes: number;
     likes?: number; replies?: number; reposts?: number; shares?: number; interactions: number;
 };
+type RedditTopicAverage = { topic: string; views: number; comments: number; upvotes: number; posts: number };
+type RedditTopicDistribution = { topic: string; count: number; percent: number };
+type RedditTopicWeek = { week: string; label: string; posts: number; topic_distribution: RedditTopicDistribution[] };
 
 const props = defineProps<{
     store: { id: number; name: string; timezone: string };
@@ -37,6 +40,12 @@ const props = defineProps<{
         };
         comparison: null | { mode: string; date_from: string; date_to: string; metrics: Record<string, ComparisonMetric> };
         source_breakdown: Array<{ source: string; total: number; average_rating: number | null; negative_count: number }>;
+        reddit_topics: {
+            method: string;
+            source_fields: string[];
+            topic_averages: RedditTopicAverage[];
+            weekly_trends: RedditTopicWeek[];
+        };
         star_distribution: Array<{ rating: number; count: number; percent: number }>;
         trends: TrendRow[];
         models: Array<{ model: string; count: number; average_rating: number }>;
@@ -48,6 +57,19 @@ const props = defineProps<{
 }>();
 
 const sourceLabels: Record<string, string> = { trustpilot: 'Trustpilot', website: '官网评论', facebook: 'Facebook', reddit: 'Reddit', threads: 'Threads', multiple: '综合风险' };
+const reviewSourceOptions = [
+    { key: 'trustpilot', label: 'Trustpilot' },
+    { key: 'website', label: '官网评论' },
+    { key: 'multiple', label: '综合风险' },
+];
+const redditTopicColors: Record<string, string> = {
+    '购买建议 / 对比': '#10b981',
+    '产品技术 / 故障': '#3b82f6',
+    '品牌声音 / 抱怨': '#f43f5e',
+    '社区互动 / 问答': '#f97316',
+    '骑行生活 / 展示': '#8b5cf6',
+    '其他': '#94a3b8',
+};
 const tabLabels = [{ key: 'targets', label: '目标看板' }, { key: 'reviews', label: '评论管理' }, { key: 'reddit', label: 'Reddit' }, { key: 'threads', label: 'Threads' }];
 const filters = ref({ ...props.dashboard.filters });
 const goalOpen = ref(false);
@@ -99,6 +121,12 @@ const socialMetricMax = computed(() => Math.max(1, ...socialWeeklyTrends.value.f
         ? [row.views, row.comments, row.upvotes]
         : [row.likes ?? 0, row.replies ?? 0, row.interactions]
 ))));
+const redditTopicAverages = computed(() => props.dashboard.reddit_topics?.topic_averages.filter((row) => row.posts > 0) ?? []);
+const redditTopicWeeks = computed(() => props.dashboard.reddit_topics?.weekly_trends.slice(-12) ?? []);
+const redditTopicNames = computed(() => Object.keys(redditTopicColors).filter((topic) => (
+    redditTopicWeeks.value.some((week) => week.topic_distribution.some((item) => item.topic === topic && item.count > 0))
+)));
+const redditTopicViewMax = computed(() => Math.max(1, ...redditTopicAverages.value.map((row) => row.views)));
 
 const formatNumber = (value: number) => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value ?? 0);
 const formatDate = (value: string | null, withTime = false) => value
@@ -134,6 +162,11 @@ const trendPoints = (key: 'views' | 'comments' | 'upvotes' | 'likes' | 'replies'
         return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
 };
+const topicWeekX = (index: number) => redditTopicWeeks.value.length === 1 ? 344 : 48 + (index / Math.max(1, redditTopicWeeks.value.length - 1)) * 592;
+const topicPercent = (week: RedditTopicWeek, topic: string) => week.topic_distribution.find((item) => item.topic === topic)?.percent ?? 0;
+const topicStackBefore = (week: RedditTopicWeek, topicIndex: number) => redditTopicNames.value
+    .slice(0, topicIndex)
+    .reduce((sum, topic) => sum + topicPercent(week, topic), 0);
 
 function applyFilters(extra: Record<string, string> = {}) {
     filters.value = { ...filters.value, ...extra };
@@ -275,8 +308,27 @@ onBeforeUnmount(stopPolling);
 
             <template v-if="filters.tab === 'reviews'">
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h2 class="text-lg font-black text-slate-950">评论列表</h2><p class="mt-1 text-sm text-slate-500">评论记录已移至页面底部；来源、日期、订单和周数分别展示。</p></div><div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><select v-model="filters.source" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部平台</option><option v-for="(label, key) in sourceLabels" :key="key" :value="key">{{ label }}</option></select><select v-model="filters.rating" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部星级</option><option v-for="star in [5,4,3,2,1]" :key="star" :value="star">{{ star }} 星</option></select><select v-model="filters.status" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部处理状态</option><option value="pending">待处理低分</option><option value="done">已处理</option></select><form class="flex" @submit.prevent="applyFilters()"><input v-model="filters.search" class="min-w-0 flex-1 rounded-l-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="搜索内容或车型"><button class="rounded-r-xl bg-slate-950 px-4 text-sm font-semibold text-white">搜索</button></form></div></div>
-                    <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200"><table class="min-w-full divide-y divide-slate-200 text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3">来源</th><th class="px-4 py-3">日期</th><th class="min-w-[300px] px-4 py-3">内容</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">周数</th><th class="px-4 py-3">评分 / 指标</th><th class="px-4 py-3">跟进状态</th><th class="px-4 py-3">数据来源</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70"><td class="whitespace-nowrap px-4 py-4"><span class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{{ sourceLabels[record.source] ?? record.source }}</span><div v-if="record.model_name" class="mt-2 text-xs text-slate-500">{{ record.model_name }}</div></td><td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td><td class="px-4 py-4"><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td><td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-slate-600">{{ record.order_reference_masked ?? '—' }}</td><td class="whitespace-nowrap px-4 py-4 text-xs text-slate-600">{{ record.week_number ? `W${record.week_number}` : '—' }}</td><td class="px-4 py-4"><div v-if="record.rating !== null" class="whitespace-nowrap font-bold text-amber-500">★ {{ record.rating.toFixed(1) }}</div><div v-if="metricSummary(record)" class="mt-1 max-w-xs text-xs leading-5 text-slate-500">{{ metricSummary(record) }}</div></td><td class="px-4 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-bold" :class="record.is_negative ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'">{{ record.processing_status || (record.is_negative ? '待跟进' : '正常') }}</span><p v-if="record.response_note" class="mt-2 max-w-48 text-xs leading-5 text-slate-500">{{ record.response_note }}</p><button v-if="canManage && record.rating !== null" type="button" class="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800" @click="openFollowUp(record)">更新跟进</button></td><td class="px-4 py-4 text-xs text-slate-500"><span class="rounded-full px-2.5 py-1 font-bold" :class="record.origin === 'manual' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'">{{ record.origin === 'manual' ? '人工导入' : '系统同步' }}</span><p class="mt-2 max-w-40 leading-5">{{ sourceSheetText(record) }}</p></td></tr><tr v-if="dashboard.records.data.length === 0"><td colspan="8" class="px-6 py-14 text-center text-slate-500">当前筛选条件下暂无数据库记录。</td></tr></tbody></table></div>
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h2 class="text-lg font-black text-slate-950">评论列表</h2><p class="mt-1 text-sm text-slate-500">评论记录已移至页面底部；来源、日期、订单和周数分别展示。</p></div><div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><select v-model="filters.source" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部平台</option><option v-for="option in reviewSourceOptions" :key="option.key" :value="option.key">{{ option.label }}</option></select><select v-model="filters.rating" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部星级</option><option v-for="star in [5,4,3,2,1]" :key="star" :value="star">{{ star }} 星</option></select><select v-model="filters.status" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部处理状态</option><option value="pending">待处理低分</option><option value="done">已处理</option></select><form class="flex" @submit.prevent="applyFilters()"><input v-model="filters.search" class="min-w-0 flex-1 rounded-l-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="搜索内容或车型"><button class="rounded-r-xl bg-slate-950 px-4 text-sm font-semibold text-white">搜索</button></form></div></div>
+                    <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                        <table class="w-full min-w-[1180px] divide-y divide-slate-200 text-left text-sm">
+                            <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                <tr><th class="w-28 whitespace-nowrap px-4 py-3">来源</th><th class="w-32 whitespace-nowrap px-4 py-3">日期</th><th class="min-w-[340px] px-4 py-3">内容</th><th class="w-28 whitespace-nowrap px-4 py-3">订单</th><th class="w-20 whitespace-nowrap px-4 py-3">周数</th><th class="min-w-[140px] whitespace-nowrap px-4 py-3">评分 / 指标</th><th class="min-w-[150px] whitespace-nowrap px-4 py-3">跟进状态</th><th class="min-w-[170px] whitespace-nowrap px-4 py-3">数据来源</th></tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70">
+                                    <td class="whitespace-nowrap px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{{ sourceLabels[record.source] ?? record.source }}</span><div v-if="record.model_name" class="mt-2 text-xs text-slate-500">{{ record.model_name }}</div></td>
+                                    <td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td>
+                                    <td class="px-4 py-4"><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td>
+                                    <td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-slate-600">{{ record.order_reference_masked ?? '—' }}</td>
+                                    <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-600">{{ record.week_number ? `W${record.week_number}` : '—' }}</td>
+                                    <td class="min-w-[140px] px-4 py-4"><div v-if="record.rating !== null" class="whitespace-nowrap font-bold text-amber-500">★ {{ record.rating.toFixed(1) }}</div><div v-if="metricSummary(record)" class="mt-1 max-w-xs text-xs leading-5 text-slate-500">{{ metricSummary(record) }}</div></td>
+                                    <td class="min-w-[150px] px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold" :class="record.is_negative ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'">{{ record.processing_status || (record.is_negative ? '待跟进' : '正常') }}</span><p v-if="record.response_note" class="mt-2 max-w-48 text-xs leading-5 text-slate-500">{{ record.response_note }}</p><button v-if="canManage && record.rating !== null" type="button" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800" @click="openFollowUp(record)">更新跟进</button></td>
+                                    <td class="min-w-[170px] px-4 py-4 text-xs text-slate-500"><span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 font-bold" :class="record.origin === 'manual' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'">{{ record.origin === 'manual' ? '人工导入' : '系统同步' }}</span><p class="mt-2 max-w-[180px] break-words leading-5">{{ sourceSheetText(record) }}</p></td>
+                                </tr>
+                                <tr v-if="dashboard.records.data.length === 0"><td colspan="8" class="px-6 py-14 text-center text-slate-500">当前筛选条件下暂无数据库记录。</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><p class="mt-5 text-sm text-slate-500">共 {{ formatNumber(dashboard.records.total) }} 条；未标日期数据 {{ formatNumber(dashboard.summary.undated_records) }} 条</p><Pagination :links="dashboard.records.links" /></div>
                 </section>
             </template>
@@ -288,12 +340,55 @@ onBeforeUnmount(stopPolling);
 
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div><h2 class="text-lg font-black text-slate-950">{{ filters.tab === 'reddit' ? 'Reddit' : 'Threads' }} 趋势分析</h2><p class="mt-1 text-sm text-slate-500">按周汇总平台原始互动指标。</p></div>
-                    <article class="mt-6 rounded-2xl border border-slate-200 p-4"><h3 class="font-bold text-slate-900">发帖及互动趋势（周度）</h3><div class="mt-2 flex flex-wrap gap-4 text-xs text-slate-500"><template v-if="filters.tab === 'reddit'"><span class="text-indigo-600">● 曝光</span><span class="text-emerald-600">● 评论</span><span class="text-amber-600">● Upvotes</span></template><template v-else><span class="text-violet-600">● 点赞</span><span class="text-emerald-600">● 回复</span><span class="text-amber-600">● 总互动</span></template></div><svg v-if="socialWeeklyTrends.length" class="mt-3 h-64 w-full" viewBox="0 0 720 210" role="img" aria-label="周度互动趋势"><line v-for="y in [42,86,130,174]" :key="y" x1="44" x2="696" :y1="y" :y2="y" stroke="#e2e8f0" stroke-width="1" /><template v-if="filters.tab === 'reddit'"><polyline :points="trendPoints('views')" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('comments')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('upvotes')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><template v-else><polyline :points="trendPoints('likes')" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('replies')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('interactions')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><text v-for="(row, index) in socialWeeklyTrends" :key="`x-${row.week}`" :x="socialWeeklyTrends.length === 1 ? 360 : 44 + (index / (socialWeeklyTrends.length - 1)) * 632" y="202" text-anchor="middle" fill="#64748b" font-size="11">{{ row.label || row.week }}</text></svg><div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">暂无周度趋势数据。</div></article>
+                    <div class="mt-6 grid gap-4" :class="filters.tab === 'reddit' ? 'lg:grid-cols-2' : 'grid-cols-1'">
+                        <article class="min-w-0 rounded-2xl border border-slate-200 p-4"><h3 class="font-bold text-slate-900">发帖及互动趋势（周度）</h3><div class="mt-2 flex flex-wrap gap-4 text-xs text-slate-500"><template v-if="filters.tab === 'reddit'"><span class="text-indigo-600">● 曝光</span><span class="text-emerald-600">● 评论</span><span class="text-amber-600">● Upvotes</span></template><template v-else><span class="text-violet-600">● 点赞</span><span class="text-emerald-600">● 回复</span><span class="text-amber-600">● 总互动</span></template></div><svg v-if="socialWeeklyTrends.length" class="mt-3 h-64 w-full" viewBox="0 0 720 210" role="img" aria-label="周度互动趋势"><line v-for="y in [42,86,130,174]" :key="y" x1="44" x2="696" :y1="y" :y2="y" stroke="#e2e8f0" stroke-width="1" /><template v-if="filters.tab === 'reddit'"><polyline :points="trendPoints('views')" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('comments')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('upvotes')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><template v-else><polyline :points="trendPoints('likes')" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('replies')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('interactions')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><text v-for="(row, index) in socialWeeklyTrends" :key="`x-${row.week}`" :x="socialWeeklyTrends.length === 1 ? 360 : 44 + (index / (socialWeeklyTrends.length - 1)) * 632" y="202" text-anchor="middle" fill="#64748b" font-size="11">{{ row.label || row.week }}</text></svg><div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">暂无周度趋势数据。</div></article>
+
+                        <article v-if="filters.tab === 'reddit'" class="min-w-0 rounded-2xl border border-slate-200 p-4">
+                            <h3 class="font-bold text-slate-900">主题分布趋势（周度）</h3>
+                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500"><span v-for="topic in redditTopicNames" :key="topic" class="inline-flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-sm" :style="{ backgroundColor: redditTopicColors[topic] }" />{{ topic }}</span></div>
+                            <svg v-if="redditTopicWeeks.some((week) => week.posts > 0)" class="mt-3 h-64 w-full" viewBox="0 0 688 210" role="img" aria-label="Reddit 主题分布趋势">
+                                <line v-for="percent in [0,25,50,75,100]" :key="percent" x1="38" x2="650" :y1="174 - percent * 1.32" :y2="174 - percent * 1.32" stroke="#e2e8f0" stroke-width="1" />
+                                <text v-for="percent in [0,25,50,75,100]" :key="`label-${percent}`" x="32" :y="178 - percent * 1.32" text-anchor="end" fill="#94a3b8" font-size="10">{{ percent }}%</text>
+                                <template v-for="(week, weekIndex) in redditTopicWeeks" :key="week.week">
+                                    <rect v-for="(topic, topicIndex) in redditTopicNames" :key="`${week.week}-${topic}`" :x="topicWeekX(weekIndex) - 14" :y="174 - (topicStackBefore(week, topicIndex) + topicPercent(week, topic)) * 1.32" width="28" :height="topicPercent(week, topic) * 1.32" :fill="redditTopicColors[topic]" rx="2"><title>{{ week.label }} · {{ topic }}：{{ topicPercent(week, topic).toFixed(1) }}%</title></rect>
+                                    <text :x="topicWeekX(weekIndex)" y="202" text-anchor="middle" fill="#64748b" font-size="10">{{ week.label.split(' - ')[0] }}</text>
+                                </template>
+                            </svg>
+                            <div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">当前期间暂无可分类的 Reddit 帖子。</div>
+                        </article>
+                    </div>
+                </section>
+
+                <section v-if="filters.tab === 'reddit'" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <div><h2 class="text-lg font-black text-slate-950">主题分类效果对比（平均数据）</h2><p class="mt-1 text-sm text-slate-500">仅根据帖子标题与正文的固定关键词规则分类，不读取 AI 分类字段。</p></div>
+                    <div v-if="redditTopicAverages.length" class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                        <table class="w-full min-w-[760px] divide-y divide-slate-200 text-left text-sm">
+                            <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="min-w-[300px] px-4 py-3">主题分类</th><th class="whitespace-nowrap px-4 py-3 text-right">帖子数</th><th class="whitespace-nowrap px-4 py-3 text-right">平均曝光</th><th class="whitespace-nowrap px-4 py-3 text-right">平均评论</th><th class="whitespace-nowrap px-4 py-3 text-right">平均 Upvotes</th></tr></thead>
+                            <tbody class="divide-y divide-slate-100"><tr v-for="topic in redditTopicAverages" :key="topic.topic"><td class="px-4 py-4"><div class="flex items-center gap-3"><i class="h-3 w-3 shrink-0 rounded-full" :style="{ backgroundColor: redditTopicColors[topic.topic] ?? '#94a3b8' }" /><span class="min-w-[130px] whitespace-nowrap font-semibold text-slate-800">{{ topic.topic }}</span><div class="h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full" :style="{ width: `${Math.max(2, topic.views / redditTopicViewMax * 100)}%`, backgroundColor: redditTopicColors[topic.topic] ?? '#94a3b8' }" /></div></div></td><td class="whitespace-nowrap px-4 py-4 text-right font-mono text-slate-600">{{ formatNumber(topic.posts) }}</td><td class="whitespace-nowrap px-4 py-4 text-right font-mono font-semibold text-slate-900">{{ formatNumber(topic.views) }}</td><td class="whitespace-nowrap px-4 py-4 text-right font-mono text-slate-700">{{ formatNumber(topic.comments) }}</td><td class="whitespace-nowrap px-4 py-4 text-right font-mono text-slate-700">{{ formatNumber(topic.upvotes) }}</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div v-else class="mt-5 rounded-2xl bg-slate-50 py-14 text-center text-sm text-slate-500">当前期间暂无可分类的 Reddit 帖子。</div>
                 </section>
 
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div><h2 class="text-lg font-black text-slate-950">{{ filters.tab === 'reddit' ? 'Reddit' : 'Threads' }} 评论列表</h2><p class="mt-1 text-sm text-slate-500">列表已移至页面底部，仅保留平台相关字段。</p></div>
-                    <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200"><table class="min-w-full divide-y divide-slate-200 text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3">来源</th><th class="px-4 py-3">日期</th><th class="min-w-[360px] px-4 py-3">内容</th><th class="px-4 py-3">互动指标</th><th class="px-4 py-3">数据来源</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70"><td class="whitespace-nowrap px-4 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-bold" :class="filters.tab === 'reddit' ? 'bg-orange-100 text-orange-700' : 'bg-violet-100 text-violet-700'">{{ sourceLabels[record.source] ?? record.source }}</span></td><td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td><td class="px-4 py-4"><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td><td class="max-w-sm px-4 py-4 text-xs leading-5 text-slate-500">{{ metricSummary(record) || '—' }}</td><td class="px-4 py-4 text-xs text-slate-500"><span class="rounded-full bg-sky-100 px-2.5 py-1 font-bold text-sky-700">{{ record.origin === 'manual' ? '人工导入' : '系统同步' }}</span><p class="mt-2 max-w-48 leading-5">{{ sourceSheetText(record) }}</p></td></tr><tr v-if="dashboard.records.data.length === 0"><td colspan="5" class="px-6 py-14 text-center text-slate-500">当前期间暂无 {{ filters.tab === 'reddit' ? 'Reddit' : 'Threads' }} 记录。</td></tr></tbody></table></div>
+                    <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                        <table class="w-full min-w-[980px] divide-y divide-slate-200 text-left text-sm">
+                            <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                <tr><th class="w-28 whitespace-nowrap px-4 py-3">来源</th><th class="w-32 whitespace-nowrap px-4 py-3">日期</th><th class="min-w-[420px] px-4 py-3">内容</th><th class="min-w-[180px] whitespace-nowrap px-4 py-3">互动指标</th><th class="min-w-[180px] whitespace-nowrap px-4 py-3">数据来源</th></tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70">
+                                    <td class="whitespace-nowrap px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold" :class="filters.tab === 'reddit' ? 'bg-orange-100 text-orange-700' : 'bg-violet-100 text-violet-700'">{{ sourceLabels[record.source] ?? record.source }}</span></td>
+                                    <td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td>
+                                    <td class="px-4 py-4"><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td>
+                                    <td class="min-w-[180px] px-4 py-4 text-xs leading-5 text-slate-500">{{ metricSummary(record) || '—' }}</td>
+                                    <td class="min-w-[180px] px-4 py-4 text-xs text-slate-500"><span class="inline-flex whitespace-nowrap rounded-full bg-sky-100 px-2.5 py-1 font-bold text-sky-700">{{ record.origin === 'manual' ? '人工导入' : '系统同步' }}</span><p class="mt-2 max-w-[180px] break-words leading-5">{{ sourceSheetText(record) }}</p></td>
+                                </tr>
+                                <tr v-if="dashboard.records.data.length === 0"><td colspan="5" class="px-6 py-14 text-center text-slate-500">当前期间暂无 {{ filters.tab === 'reddit' ? 'Reddit' : 'Threads' }} 记录。</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><p class="mt-5 text-sm text-slate-500">共 {{ formatNumber(dashboard.records.total) }} 条</p><Pagination :links="dashboard.records.links" /></div>
                 </section>
             </template>

@@ -148,6 +148,142 @@ class ReputationMonitoringTest extends TestCase
         }
     }
 
+    public function test_reddit_topics_use_only_current_store_period_content_and_return_stable_weekly_aggregation(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'reddit-topics');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Reddit Topic Store',
+            'shopify_domain' => 'other-reddit-topic.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+        $otherOrganization = Organization::query()->create([
+            'name' => 'Other Reddit Topic Organization',
+            'code' => 'other-reddit-topic-organization',
+        ]);
+        $otherOrganizationStore = $otherOrganization->stores()->create([
+            'name' => 'Other Organization Reddit Store',
+            'shopify_domain' => 'other-organization-reddit.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'reddit', 'purchase-one', [
+            'title' => 'Should I buy X1 or X2?',
+            'content' => 'Looking for a comparison before purchase.',
+            'metrics' => ['views' => 100, 'comments' => 4, 'upvotes' => 10],
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'purchase-two', [
+            'title' => 'Which bike is worth buying?',
+            'metrics' => ['views' => 300, 'comments' => 6, 'upvotes' => 30],
+            'published_at' => '2026-08-05 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'technical', [
+            'title' => 'Battery motor fault, please help',
+            'metrics' => ['views' => 90, 'comments' => 5, 'upvotes' => 5],
+            'source_payloads_encrypted' => [[
+                '帖子类型' => '购买建议 / 对比',
+                '目标关键词' => 'must-never-drive-topic',
+            ]],
+            'published_at' => '2026-08-06 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'complaint', [
+            'content' => 'Terrible customer service complaint and refund experience.',
+            'metrics' => ['views' => 50, 'comments' => 8, 'upvotes' => 2],
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'community', [
+            'content' => 'Community question: anyone have tips?',
+            'metrics' => ['views' => 40, 'comments' => 3, 'upvotes' => 6],
+            'published_at' => '2026-08-13 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'lifestyle', [
+            'content' => 'Weekend trail ride photo showcase.',
+            'metrics' => ['views' => 70, 'comments' => 1, 'upvotes' => 12],
+            'published_at' => '2026-08-19 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'other', [
+            'content' => 'Quarterly update.',
+            'metrics' => ['views' => 10, 'comments' => 0, 'upvotes' => 0],
+            'published_at' => '2026-08-20 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'threads', 'threads-excluded', [
+            'content' => 'Should I buy this bike?',
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'previous-period', [
+            'content' => 'Should I buy this older bike?',
+            'published_at' => '2026-07-31 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'inactive', [
+            'content' => 'Should I buy this inactive bike?',
+            'is_active' => false,
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $otherStore, 'reddit', 'other-store', [
+            'content' => 'Should I buy the other store bike?',
+            'metrics' => ['views' => 99999, 'comments' => 999, 'upvotes' => 999],
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($otherOrganization, $otherOrganizationStore, 'reddit', 'other-organization', [
+            'content' => 'Terrible complaint from another organization.',
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
+
+        $filters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reddit'];
+        $dashboard = app(ReputationDashboardService::class)->overview($store, $filters);
+        $averages = collect($dashboard['reddit_topics']['topic_averages'])->keyBy('topic');
+
+        $this->assertSame('keyword-rules-v1', $dashboard['reddit_topics']['method']);
+        $this->assertSame(['title', 'content'], $dashboard['reddit_topics']['source_fields']);
+        $this->assertSame([
+            '购买建议 / 对比',
+            '产品技术 / 故障',
+            '品牌声音 / 抱怨',
+            '社区互动 / 问答',
+            '骑行生活 / 展示',
+            '其他',
+        ], $averages->keys()->all());
+        $this->assertSame([
+            'topic' => '购买建议 / 对比',
+            'views' => 200.0,
+            'comments' => 5.0,
+            'upvotes' => 20.0,
+            'posts' => 2,
+        ], $averages->get('购买建议 / 对比'));
+        $this->assertSame(1, $averages->get('产品技术 / 故障')['posts']);
+        $this->assertSame(90.0, $averages->get('产品技术 / 故障')['views']);
+        $this->assertSame(1, $averages->get('品牌声音 / 抱怨')['posts']);
+        $this->assertSame(1, $averages->get('社区互动 / 问答')['posts']);
+        $this->assertSame(1, $averages->get('骑行生活 / 展示')['posts']);
+        $this->assertSame(1, $averages->get('其他')['posts']);
+
+        $week = collect($dashboard['reddit_topics']['weekly_trends'])->firstWhere('week', '2026-08-03');
+        $distribution = collect($week['topic_distribution'])->keyBy('topic');
+        $this->assertSame(3, $week['posts']);
+        $this->assertSame(2, $distribution->get('购买建议 / 对比')['count']);
+        $this->assertSame(66.67, $distribution->get('购买建议 / 对比')['percent']);
+        $this->assertSame(1, $distribution->get('产品技术 / 故障')['count']);
+        $this->assertSame(33.33, $distribution->get('产品技术 / 故障')['percent']);
+
+        $serialized = json_encode($dashboard['reddit_topics'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('帖子类型', $serialized);
+        $this->assertStringNotContainsString('目标关键词', $serialized);
+        $this->assertStringNotContainsString('must-never-drive-topic', $serialized);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', $filters))
+            ->assertOk()
+            ->assertDontSee('must-never-drive-topic')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.reddit_topics.method', 'keyword-rules-v1')
+                ->has('dashboard.reddit_topics.topic_averages', 6)
+                ->where('dashboard.reddit_topics.topic_averages.0.posts', 2)
+                ->where('dashboard.summary.reddit.posts', 7));
+    }
+
     public function test_permissions_workflows_audit_and_cross_store_binding_are_enforced(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
