@@ -10,11 +10,17 @@ use Symfony\Component\HttpFoundation\Response;
 
 class VerifyShopifyIdToken
 {
-    public function handle(Request $request, Closure $next): Response
+    /**
+     * 校验 Shopify App Bridge 的 session token。
+     *
+     * 每个 Shopify App 有自己的 client id / secret，所以凭证来源由 $configKey 指定
+     * （对应 config/<configKey>.php）。默认值保持学生优惠 App 的既有行为。
+     */
+    public function handle(Request $request, Closure $next, string $configKey = 'student_discount'): Response
     {
         $token = $request->bearerToken();
-        $clientId = (string) config('student_discount.active.client_id', '');
-        $clientSecret = (string) config('student_discount.active.client_secret', '');
+        $clientId = (string) config($configKey.'.active.client_id', '');
+        $clientSecret = (string) config($configKey.'.active.client_secret', '');
         if (! is_string($token) || $token === '' || $clientId === '' || $clientSecret === '') {
             return $this->unauthorized();
         }
@@ -44,7 +50,7 @@ class VerifyShopifyIdToken
         $issuer = rtrim((string) ($claims['iss'] ?? ''), '/');
         $audiences = is_array($claims['aud'] ?? null) ? $claims['aud'] : [$claims['aud'] ?? null];
         $now = now()->timestamp;
-        $leeway = (int) config('student_discount.id_token_leeway_seconds', 5);
+        $leeway = (int) config($configKey.'.id_token_leeway_seconds', 5);
 
         if (preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $shop) !== 1
             || $destination !== 'https://'.$shop

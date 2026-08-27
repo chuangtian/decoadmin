@@ -13,7 +13,7 @@ class PermissionSeeder extends Seeder
         'products' => '商品', 'customers' => '客户', 'inventory' => '库存', 'apps' => '应用',
         'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
         'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'reports' => '报表', 'system' => '系统',
-        'student_discount' => '学生优惠',
+        'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram 内容',
     ];
 
     /** @var array<string, string> */
@@ -28,6 +28,7 @@ class PermissionSeeder extends Seeder
         'claim.delete' => '删除申请',
         'reject' => '拒绝申请', 'campaign.manage' => '管理活动', 'email_template.manage' => '管理邮件内容',
         'analytics.read' => '查看分析', 'audit.read' => '查看审计',
+        'gallery.manage' => '管理展示组', 'publish' => '发布前台',
     ];
 
     /** @var list<string> */
@@ -102,6 +103,11 @@ class PermissionSeeder extends Seeder
         'student_discount.email_template.manage',
         'student_discount.analytics.read',
         'student_discount.audit.read',
+        'instagram_feed.view',
+        'instagram_feed.connect',
+        'instagram_feed.sync',
+        'instagram_feed.gallery.manage',
+        'instagram_feed.publish',
     ];
 
     public function run(): void

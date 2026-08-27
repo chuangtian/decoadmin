@@ -18,6 +18,8 @@ use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
 use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
+use App\Http\Controllers\InstagramFeedController;
+use App\Http\Controllers\InstagramFeedMetaCallbackController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
@@ -37,6 +39,8 @@ use App\Http\Controllers\ShopifyAppLaunchController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
+use App\Http\Controllers\ShopifyInstagramFeedAppController;
+use App\Http\Controllers\ShopifyInstagramFeedWebhookController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyStudentDiscountAppController;
 use App\Http\Controllers\ShopifyStudentDiscountWebhookController;
@@ -113,6 +117,46 @@ Route::prefix('/api/shopify-app/student-discounts/proxy')
         Route::get('/claims/{claim}', [PublicStudentDiscountController::class, 'show'])
             ->name('student-discounts.public.claims.show');
     });
+
+// instagram-feed Shopify App。前台数据走 app-data metafield，不需要 App Proxy。
+Route::get('/shopify-app/instagram-feed', [ShopifyInstagramFeedAppController::class, 'management'])
+    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->name('instagram-feed.shopify-app.management');
+
+Route::post('/api/shopify-app/instagram-feed/webhooks', ShopifyInstagramFeedWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('instagram-feed.shopify-app.webhooks');
+
+Route::prefix('/api/shopify-app/instagram-feed')->group(function (): void {
+    Route::get('/connection', [ShopifyInstagramFeedAppController::class, 'connection'])
+        ->middleware(['shopify.id-token:instagram_feed', 'throttle:60,1'])
+        ->name('instagram-feed.shopify-app.connection');
+    Route::post('/bootstrap', [ShopifyInstagramFeedAppController::class, 'bootstrap'])
+        ->middleware(['shopify.id-token:instagram_feed', 'throttle:20,1'])
+        ->name('instagram-feed.shopify-app.bootstrap');
+});
+
+// Meta 侧的公开回调：OAuth 靠一次性 state，合规回调靠 signed_request 验签。
+Route::prefix('/instagram-feed')->group(function (): void {
+    Route::get('/oauth/{provider}/callback', [InstagramFeedMetaCallbackController::class, 'oauthCallback'])
+        ->whereIn('provider', ['instagram', 'facebook'])
+        ->middleware('throttle:30,1')
+        ->name('instagram-feed.meta.oauth.callback');
+
+    Route::post('/meta/deauthorize', [InstagramFeedMetaCallbackController::class, 'deauthorize'])
+        ->middleware('throttle:60,1')
+        ->name('instagram-feed.meta.deauthorize');
+    Route::get('/meta/deauthorize', [InstagramFeedMetaCallbackController::class, 'probe'])
+        ->middleware('throttle:60,1')
+        ->name('instagram-feed.meta.deauthorize.probe');
+
+    Route::post('/meta/data-deletion', [InstagramFeedMetaCallbackController::class, 'dataDeletion'])
+        ->middleware('throttle:60,1')
+        ->name('instagram-feed.meta.data-deletion');
+    Route::get('/meta/data-deletion', [InstagramFeedMetaCallbackController::class, 'dataDeletionStatus'])
+        ->middleware('throttle:60,1')
+        ->name('instagram-feed.meta.data-deletion.status');
+});
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
@@ -492,4 +536,63 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');
+    });
+
+Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [InstagramFeedController::class, 'index'])
+            ->middleware('permission:instagram_feed.view')
+            ->name('instagram-feed.index');
+
+        Route::post('/connect', [InstagramFeedController::class, 'connect'])
+            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
+            ->name('instagram-feed.connect');
+        Route::post('/select-page', [InstagramFeedController::class, 'selectPage'])
+            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
+            ->name('instagram-feed.select-page');
+        Route::delete('/account', [InstagramFeedController::class, 'disconnect'])
+            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
+            ->name('instagram-feed.disconnect');
+
+        // 同步与转存会打 Instagram 与 R2，限流比一般写操作更严。
+        Route::post('/sync', [InstagramFeedController::class, 'sync'])
+            ->middleware(['permission:instagram_feed.sync', 'throttle:6,1'])
+            ->name('instagram-feed.sync');
+        Route::post('/mirror', [InstagramFeedController::class, 'mirror'])
+            ->middleware(['permission:instagram_feed.sync', 'throttle:12,1'])
+            ->name('instagram-feed.mirror');
+        Route::post('/media/{media}/retry-mirror', [InstagramFeedController::class, 'retryMirror'])
+            ->middleware(['permission:instagram_feed.sync', 'throttle:30,1'])
+            ->name('instagram-feed.media.retry-mirror');
+
+        Route::post('/publish', [InstagramFeedController::class, 'publish'])
+            ->middleware(['permission:instagram_feed.publish', 'throttle:12,1'])
+            ->name('instagram-feed.publish');
+
+        Route::post('/galleries', [InstagramFeedController::class, 'storeGallery'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
+            ->name('instagram-feed.galleries.store');
+        Route::get('/galleries/{gallery}', [InstagramFeedController::class, 'showGallery'])
+            ->middleware('permission:instagram_feed.gallery.manage')
+            ->name('instagram-feed.galleries.show');
+        Route::put('/galleries/{gallery}', [InstagramFeedController::class, 'updateGallery'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
+            ->name('instagram-feed.galleries.update');
+        Route::delete('/galleries/{gallery}', [InstagramFeedController::class, 'destroyGallery'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
+            ->name('instagram-feed.galleries.destroy');
+        Route::post('/galleries/{gallery}/items', [InstagramFeedController::class, 'addGalleryItems'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
+            ->name('instagram-feed.galleries.items.store');
+        Route::delete('/galleries/{gallery}/items', [InstagramFeedController::class, 'removeGalleryItems'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
+            ->name('instagram-feed.galleries.items.destroy');
+        Route::put('/galleries/{gallery}/order', [InstagramFeedController::class, 'reorderGallery'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
+            ->name('instagram-feed.galleries.order');
+
+        Route::put('/media/{media}/products', [InstagramFeedController::class, 'updateMediaProducts'])
+            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
+            ->name('instagram-feed.media.products');
     });
