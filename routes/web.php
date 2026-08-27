@@ -469,6 +469,9 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::post('/claims/{claim}/reject', [StudentDiscountController::class, 'reject'])
             ->middleware(['permission:student_discount.reject', 'throttle:30,1'])
             ->name('student-discounts.claims.reject');
+        Route::delete('/claims/{claim}', [StudentDiscountController::class, 'destroy'])
+            ->middleware(['permission:student_discount.claim.delete', 'throttle:30,1'])
+            ->name('student-discounts.claims.destroy');
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');

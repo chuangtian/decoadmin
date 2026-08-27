@@ -84,6 +84,7 @@ class StudentDiscountController extends Controller
                 'viewEvidence' => $canViewEvidence,
                 'approve' => $request->user()->hasPermission('student_discount.approve', $organization, $store),
                 'reject' => $request->user()->hasPermission('student_discount.reject', $organization, $store),
+                'deleteClaim' => $request->user()->hasPermission('student_discount.claim.delete', $organization, $store),
                 'manageCampaign' => $request->user()->hasPermission('student_discount.campaign.manage', $organization, $store),
                 'analytics' => $request->user()->hasPermission('student_discount.analytics.read', $organization, $store),
                 'audit' => $request->user()->hasPermission('student_discount.audit.read', $organization, $store),
@@ -141,6 +142,18 @@ class StudentDiscountController extends Controller
         }
 
         return back()->with('success', '申请已拒绝，通知邮件正在发送。');
+    }
+
+    public function destroy(Request $request, Organization $organization, Store $store, string $claim): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'student_discount.claim.delete');
+        try {
+            $this->claims->deleteClaim($organization, $store, $claim, $request->user());
+        } catch (StudentDiscountException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', '申请记录及关联证件文件已删除。');
     }
 
     public function evidence(Request $request, Organization $organization, Store $store, StudentDiscountClaim $claim): StreamedResponse

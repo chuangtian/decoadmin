@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
 #[Fillable([
@@ -19,6 +20,8 @@ use Illuminate\Support\Str;
 #[Hidden(['evidence_disk', 'evidence_path', 'recognition_result', 'claim_token_hash', 'claim_token_encrypted', 'request_fingerprint'])]
 class StudentDiscountClaim extends Model
 {
+    use SoftDeletes;
+
     public function getRouteKeyName(): string
     {
         return 'uuid';

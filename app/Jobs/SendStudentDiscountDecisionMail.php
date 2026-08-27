@@ -2,16 +2,15 @@
 
 namespace App\Jobs;
 
-use App\Mail\StudentDiscountDecisionMail;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Services\StudentDiscount\StudentDiscountMailDeliveryService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
 
@@ -52,7 +51,7 @@ class SendStudentDiscountDecisionMail implements ShouldBeUnique, ShouldQueue
 
         $code = $this->codeFor($claim);
         try {
-            Mail::to($claim->email)->send(new StudentDiscountDecisionMail($claim, $code));
+            app(StudentDiscountMailDeliveryService::class)->send($claim, $code);
         } catch (Throwable) {
             throw new RuntimeException('Student discount decision email delivery failed.');
         }
