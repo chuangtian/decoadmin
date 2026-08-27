@@ -36,12 +36,13 @@ class StudentDiscountMailDeliveryService
             ->where('organization_id', $claim->organization_id)
             ->where('store_id', $claim->store_id)
             ->first();
-        $storeName = Store::query()
+        $store = Store::query()
             ->where('organization_id', $claim->organization_id)
             ->whereKey($claim->store_id)
-            ->value('name');
+            ->first();
         $rendered = $this->templates->render($code ? 'approval' : 'rejection', $campaign?->email_templates, [
-            'store_name' => (string) ($storeName ?: config('app.name')),
+            'store_name' => (string) ($store?->name ?: config('app.name')),
+            'store_url' => $store?->shopify_domain ? 'https://'.$store->shopify_domain : '',
             'applicant_email' => $claim->email,
             'discount_code' => $code?->code,
             'expires_at' => $code?->expires_at?->toIso8601String(),
@@ -53,16 +54,15 @@ class StudentDiscountMailDeliveryService
             Mail::to($claim->email)->send(new StudentDiscountDecisionMail(
                 $claim,
                 $code,
-                $rendered['subject'],
-                $rendered['body'],
+                $rendered,
             ));
         } catch (Throwable) {
             throw new RuntimeException('Student discount decision email delivery failed.');
         }
     }
 
-    /** @param array{subject: string, body: string} $template */
-    public function sendTest(Organization $organization, Store $store, User $actor, string $type, string $recipient, array $template): void
+    /** @param array<string, mixed> $configuration */
+    public function sendTest(Organization $organization, Store $store, User $actor, string $type, string $recipient, array $configuration): void
     {
         abort_unless($store->organization_id === $organization->id, 403);
         if (! $this->hasDeliveringTransport()) {
@@ -72,11 +72,12 @@ class StudentDiscountMailDeliveryService
             throw new RuntimeException('Student discount email delivery is not configured.');
         }
 
-        $rendered = $this->templates->renderAdHoc($type, $template, [
+        $rendered = $this->templates->renderAdHoc($type, $configuration, [
             'store_name' => $store->name,
+            'store_url' => 'https://'.$store->shopify_domain,
         ]);
         try {
-            Mail::to($recipient)->send(new StudentDiscountTemplatePreviewMail($rendered['subject'], $rendered['body']));
+            Mail::to($recipient)->send(new StudentDiscountTemplatePreviewMail($rendered));
         } catch (Throwable) {
             throw new RuntimeException('Student discount template test email delivery failed.');
         }

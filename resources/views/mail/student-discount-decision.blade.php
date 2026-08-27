@@ -1,6 +1,1 @@
-<!doctype html>
-<html lang="en">
-<body style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.6">
-    <div style="white-space:pre-line">{{ $renderedBody }}</div>
-</body>
-</html>
+@include('mail.student-discount-layout')

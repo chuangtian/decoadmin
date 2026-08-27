@@ -14,22 +14,31 @@ class StudentDiscountDecisionMail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    public string $renderedSubject;
+
+    public string $renderedBody;
+
+    public bool $isTest = false;
+
     public function __construct(
         public StudentDiscountClaim $claim,
         public ?StudentDiscountCode $discountCode,
-        public ?string $renderedSubject = null,
-        public ?string $renderedBody = null,
-    ) {}
+        public array $renderedTemplate,
+    ) {
+        $this->renderedSubject = (string) ($renderedTemplate['subject'] ?? 'Your student discount update');
+        $this->renderedBody = (string) ($renderedTemplate['body'] ?? '');
+    }
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: $this->renderedSubject ?? ($this->discountCode
-            ? 'Your student discount code'
-            : 'Update on your student discount request'));
+        return new Envelope(subject: $this->renderedSubject);
     }
 
     public function content(): Content
     {
-        return new Content(view: 'mail.student-discount-decision');
+        return new Content(
+            view: 'mail.student-discount-decision',
+            text: 'mail.student-discount-decision-text',
+        );
     }
 }
