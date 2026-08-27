@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\StudentDiscountException;
 use App\Jobs\SendStudentDiscountDecisionMail;
+use App\Jobs\SyncStudentDiscountCodeUsage;
 use App\Mail\StudentDiscountDecisionMail;
 use App\Models\App;
 use App\Models\AppInstallation;
@@ -17,7 +18,9 @@ use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
 use App\Models\SystemSetting;
 use App\Models\User;
+use App\Services\StudentDiscount\GeminiStudentIdRecognitionService;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
+use App\Services\StudentDiscount\StudentDiscountCodeService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -258,6 +261,93 @@ class StudentDiscountTest extends TestCase
         Storage::disk('local')->assertExists($claim->evidence_path);
         Mail::assertNothingSent();
         $this->assertDatabaseMissing('student_discount_codes', ['store_id' => $store->id]);
+    }
+
+    public function test_gemini_provider_failures_map_to_safe_stable_codes_without_retaining_provider_text(): void
+    {
+        Storage::fake('local');
+        [, $organization, $store] = $this->context('store-admin');
+        $this->setting('student_ai', 'gemini_api_key', 'synthetic-test-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-test-model', false, null);
+        $path = "student-discounts/{$organization->id}/{$store->id}/safe-errors/student-id.jpg";
+        Storage::disk('local')->put($path, 'synthetic-image-bytes');
+        $claim = $this->claim($organization, $store, 'safe-errors', [
+            'evidence_disk' => 'local',
+            'evidence_path' => $path,
+            'evidence_mime' => 'image/jpeg',
+        ]);
+        $service = app(GeminiStudentIdRecognitionService::class);
+        $cases = [
+            'invalid_api_key' => [400, 'INVALID_ARGUMENT', 'API key not valid. private-provider-detail', 'API_KEY_INVALID'],
+            'permission_denied' => [403, 'PERMISSION_DENIED', 'Private permission detail', 'ACCESS_DENIED'],
+            'model_not_found' => [404, 'NOT_FOUND', 'Requested model not found. private detail', 'MODEL_NOT_FOUND'],
+            'rate_limited' => [429, 'RESOURCE_EXHAUSTED', 'Private quota detail', 'RATE_LIMITED'],
+            'api_error' => [500, 'INTERNAL', 'Private provider failure detail', 'INTERNAL'],
+        ];
+        $sequence = Http::fakeSequence('https://generativelanguage.googleapis.com/*');
+        foreach ($cases as [$status, $providerStatus, $message, $reason]) {
+            $sequence->push([
+                'error' => [
+                    'status' => $providerStatus,
+                    'message' => $message,
+                    'details' => [['reason' => $reason]],
+                ],
+            ], $status);
+        }
+
+        foreach (array_keys($cases) as $expected) {
+            $result = $service->recognize($claim);
+            $this->assertFalse($result['ok']);
+            $this->assertSame($expected, $result['failure_code']);
+            $this->assertNull($result['result']);
+            $encoded = json_encode($result, JSON_THROW_ON_ERROR);
+            $this->assertStringNotContainsString('private', strtolower($encoded));
+            $this->assertStringNotContainsString('synthetic-test-key', $encoded);
+        }
+    }
+
+    public function test_invalid_gemini_key_failure_is_stored_and_displayed_only_as_safe_code(): void
+    {
+        Storage::fake('local');
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $this->setting('student_ai', 'gemini_api_key', 'synthetic-invalid-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-test-model', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'error' => [
+                    'status' => 'INVALID_ARGUMENT',
+                    'message' => 'API key not valid. private-provider-detail',
+                    'details' => [['reason' => 'API_KEY_INVALID']],
+                ],
+            ], 400),
+        ]);
+
+        $response = $this->post($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'email' => 'safe-failure@example.com',
+            'idempotency_key' => 'safe-failure-001',
+            'evidence' => UploadedFile::fake()->create('student-id.jpg', 64, 'image/jpeg'),
+        ], ['Accept' => 'application/json']);
+
+        $response->assertAccepted()->assertJsonPath('data.status', 'pending')->assertDontSee('private-provider-detail');
+        $claim = StudentDiscountClaim::query()->sole();
+        $this->assertSame('invalid_api_key', $claim->recognition_failure_code);
+        $this->assertNull($claim->recognition_result);
+        $audit = AuditLog::query()->where('action', 'student_discount_claim_queued_for_manual_review')->sole();
+        $this->assertSame('invalid_api_key', data_get($audit->metadata, 'recognition_status'));
+        $this->assertStringNotContainsString('private-provider-detail', $audit->toJson());
+        $this->assertStringNotContainsString('synthetic-invalid-key', $audit->toJson());
+
+        $this->actingAs($admin)
+            ->get(route('student-discounts.index', [$organization, $store]).'?tab=claims')
+            ->assertOk()
+            ->assertDontSee('private-provider-detail')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('claims.data.0.id', $claim->uuid)
+                ->where('claims.data.0.recognition_failure_code', 'invalid_api_key')
+                ->where('claims.data.0.recognition_result', null));
     }
 
     public function test_high_confidence_non_student_id_is_never_auto_approved(): void
@@ -561,6 +651,242 @@ class StudentDiscountTest extends TestCase
         Storage::disk('local')->assertExists($path);
         $this->assertDatabaseHas('student_discount_claims', ['id' => $claim->id, 'deleted_at' => null]);
         $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_deleted']);
+    }
+
+    public function test_claim_list_combines_filters_usage_states_and_store_scope_without_n_plus_one_syncs(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Filter Store',
+            'shopify_domain' => 'other-filter-store.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+        $matching = $this->claim($organization, $store, 'target-manual', [
+            'email' => 'target.manual@example.edu',
+            'normalized_email' => 'target.manual@example.edu',
+            'source' => 'student_id',
+            'status' => 'approved',
+            'review_method' => 'manual',
+        ]);
+        DB::table('student_discount_claims')->where('id', $matching->id)->update(['created_at' => '2026-08-15 12:00:00']);
+        $this->discountCode($matching, 'partial', ['usage_count' => 1, 'usage_limit' => 3, 'expires_at' => '2026-09-15 12:00:00']);
+
+        $unused = $this->claim($organization, $store, 'unused', ['status' => 'approved', 'source' => 'education_email', 'review_method' => 'education_email']);
+        $this->discountCode($unused, 'unused', ['usage_count' => 0, 'usage_limit' => 2, 'expires_at' => '2026-09-15 12:00:00']);
+        $usedUp = $this->claim($organization, $store, 'used-up', ['status' => 'approved', 'review_method' => 'ai']);
+        $this->discountCode($usedUp, 'used-up', ['usage_count' => 2, 'usage_limit' => 2, 'expires_at' => '2026-09-15 12:00:00']);
+        $expired = $this->claim($organization, $store, 'expired', ['status' => 'approved', 'review_method' => 'manual']);
+        $this->discountCode($expired, 'expired', ['usage_count' => 0, 'usage_limit' => 1, 'expires_at' => '2026-07-15 12:00:00']);
+        $otherClaim = $this->claim($organization, $otherStore, 'other-target', [
+            'email' => 'target.manual.other@example.edu',
+            'normalized_email' => 'target.manual.other@example.edu',
+            'status' => 'approved',
+            'review_method' => 'manual',
+        ]);
+        DB::table('student_discount_claims')->where('id', $otherClaim->id)->update(['created_at' => '2026-08-15 12:00:00']);
+        $this->discountCode($otherClaim, 'other-partial', ['usage_count' => 1, 'usage_limit' => 3, 'expires_at' => '2026-09-15 12:00:00']);
+
+        $filters = [
+            'tab' => 'claims',
+            'status' => 'approved',
+            'source' => 'student_id',
+            'review_method' => 'manual',
+            'email' => 'TARGET.MANUAL',
+            'submitted_from' => '2026-08-10',
+            'submitted_to' => '2026-08-20',
+            'usage_status' => 'partially_used',
+        ];
+        $this->actingAs($admin)
+            ->get(route('student-discounts.index', [$organization, $store]).'?'.http_build_query($filters))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('filters.status', 'approved')
+                ->where('filters.email', 'target.manual')
+                ->where('claims.total', 1)
+                ->where('claims.data.0.id', $matching->uuid)
+                ->where('claims.data.0.discount.status', 'partially_used')
+                ->where('claims.data.0.discount.usage_count', 1)
+                ->where('claims.data.0.discount.usage_limit', 3)
+                ->has('filterOptions.sources', 2)
+                ->has('filterOptions.review_methods', 4)
+                ->has('filterOptions.usage_statuses', 4));
+
+        foreach ([
+            'unused' => $unused->uuid,
+            'partially_used' => $matching->uuid,
+            'used_up' => $usedUp->uuid,
+            'expired' => $expired->uuid,
+        ] as $usageStatus => $claimUuid) {
+            $this->actingAs($admin)
+                ->get(route('student-discounts.index', [$organization, $store]).'?'.http_build_query(['tab' => 'claims', 'usage_status' => $usageStatus]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('claims.total', 1)
+                    ->where('claims.data.0.id', $claimUuid)
+                    ->where('claims.data.0.discount.status', $usageStatus));
+        }
+    }
+
+    public function test_usage_sync_is_bounded_store_scoped_and_preserves_cached_usage_on_shopify_failure(): void
+    {
+        Queue::fake();
+        [$operator, $organization, $store] = $this->context('operator');
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
+        $claim = $this->claim($organization, $store, 'usage-sync', ['status' => 'approved']);
+        $code = $this->discountCode($claim, 'usage-sync', ['usage_count' => 1, 'usage_limit' => 3]);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Usage Store',
+            'shopify_domain' => 'other-usage-store.myshopify.com',
+            'status' => 'active',
+        ]);
+        $otherClaim = $this->claim($organization, $otherStore, 'other-usage', ['status' => 'approved']);
+        $otherCode = $this->discountCode($otherClaim, 'other-usage');
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.usage-sync', [$organization, $store]), ['code_ids' => [$code->uuid, $otherCode->uuid]])
+            ->assertRedirect();
+        Queue::assertPushed(SyncStudentDiscountCodeUsage::class, fn (SyncStudentDiscountCodeUsage $job): bool => $job->organizationId === $organization->id
+            && $job->storeId === $store->id
+            && $job->codeId === $code->id);
+        Queue::assertPushed(SyncStudentDiscountCodeUsage::class, 1);
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.usage-sync', [$organization, $store]), [
+                'code_ids' => collect(range(1, 51))->map(fn (): string => (string) Str::uuid())->all(),
+            ])
+            ->assertSessionHasErrors('code_ids');
+
+        Http::fake([
+            "https://{$store->shopify_domain}/*" => Http::response(['data' => ['codeDiscountNodeByCode' => [
+                'id' => 'gid://shopify/DiscountCodeNode/usage-sync',
+                'codeDiscount' => ['codes' => ['nodes' => [['code' => $code->code, 'asyncUsageCount' => 2]]]],
+            ]]]),
+        ]);
+        (new SyncStudentDiscountCodeUsage($organization->id, $store->id, $code->id))->handle(app(StudentDiscountCodeService::class));
+        $this->assertSame(2, $code->fresh()->usage_count);
+        $this->assertSame('partially_used', $code->fresh()->status);
+        $this->assertNotNull($code->fresh()->last_synced_at);
+
+        Http::fake(["https://{$store->shopify_domain}/*" => Http::response([], 503)]);
+        (new SyncStudentDiscountCodeUsage($organization->id, $store->id, $code->id))->handle(app(StudentDiscountCodeService::class));
+        $this->assertSame(2, $code->fresh()->usage_count);
+        $this->assertSame('partially_used', $code->fresh()->status);
+    }
+
+    public function test_bulk_reject_reports_partial_results_enforces_limit_reason_status_and_store_scope_idempotently(): void
+    {
+        Queue::fake();
+        [$operator, $organization, $store] = $this->context('operator');
+        $pendingOne = $this->claim($organization, $store, 'reject-one');
+        $pendingTwo = $this->claim($organization, $store, 'reject-two');
+        $alreadyRejected = $this->claim($organization, $store, 'already-rejected', ['status' => 'rejected', 'review_method' => 'manual']);
+        $approved = $this->claim($organization, $store, 'approved-reject', ['status' => 'approved']);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Reject Store',
+            'shopify_domain' => 'other-reject-store.myshopify.com',
+            'status' => 'active',
+        ]);
+        $otherPending = $this->claim($organization, $otherStore, 'other-reject');
+        $ids = [$pendingOne->uuid, $pendingTwo->uuid, $alreadyRejected->uuid, $approved->uuid, $otherPending->uuid];
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-reject', [$organization, $store]), ['claim_ids' => $ids])
+            ->assertSessionHasErrors('reason');
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-reject', [$organization, $store]), ['claim_ids' => $ids, 'reason' => '   '])
+            ->assertSessionHasErrors('reason');
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-reject', [$organization, $store]), ['claim_ids' => $ids, 'reason' => '统一验证失败'])
+            ->assertRedirect()
+            ->assertSessionHas('student_discount_batch_result', fn (array $result): bool => $result['succeeded'] === 2
+                && $result['unchanged'] === 1
+                && $result['failed'] === 2);
+
+        $this->assertSame('rejected', $pendingOne->fresh()->status);
+        $this->assertSame('统一验证失败', $pendingOne->fresh()->rejection_reason);
+        $this->assertSame('rejected', $pendingTwo->fresh()->status);
+        $this->assertSame('approved', $approved->fresh()->status);
+        $this->assertSame('pending', $otherPending->fresh()->status);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 2);
+        $this->assertStringNotContainsString('统一验证失败', AuditLog::query()->where('action', 'student_discount_claim_rejected')->get()->toJson());
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-reject', [$organization, $store]), ['claim_ids' => [$pendingOne->uuid, $pendingTwo->uuid], 'reason' => '重复操作'])
+            ->assertSessionHas('student_discount_batch_result', fn (array $result): bool => $result['succeeded'] === 0
+                && $result['unchanged'] === 2
+                && $result['failed'] === 0);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 2);
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-reject', [$organization, $store]), [
+                'claim_ids' => collect(range(1, 31))->map(fn (): string => (string) Str::uuid())->all(),
+                'reason' => '批量上限',
+            ])
+            ->assertSessionHasErrors('claim_ids');
+    }
+
+    public function test_bulk_approve_reuses_claim_service_and_blocks_unauthorized_or_cross_store_items(): void
+    {
+        Queue::fake();
+        [$operator, $organization, $store] = $this->context('operator');
+        $campaign = $this->campaign($organization, $store, ['enabled' => true]);
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
+        $pendingOne = $this->claim($organization, $store, 'approve-one');
+        $pendingTwo = $this->claim($organization, $store, 'approve-two');
+        $alreadyApproved = $this->claim($organization, $store, 'already-approved', ['status' => 'approved', 'review_method' => 'manual']);
+        $this->discountCode($alreadyApproved, 'already-approved');
+        $rejected = $this->claim($organization, $store, 'rejected-approve', ['status' => 'rejected']);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Approve Store',
+            'shopify_domain' => 'other-approve-store.myshopify.com',
+            'status' => 'active',
+        ]);
+        $otherPending = $this->claim($organization, $otherStore, 'other-approve');
+        Http::fake(function ($request) {
+            if (str_contains((string) ($request['query'] ?? ''), 'codeDiscountNodeByCode')) {
+                return Http::response(['data' => ['codeDiscountNodeByCode' => null]]);
+            }
+
+            return Http::response(['data' => ['discountCodeBasicCreate' => [
+                'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/batch-created'],
+                'userErrors' => [],
+            ]]]);
+        });
+
+        $ids = [$pendingOne->uuid, $pendingTwo->uuid, $alreadyApproved->uuid, $rejected->uuid, $otherPending->uuid];
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-approve', [$organization, $store]), ['claim_ids' => $ids])
+            ->assertRedirect()
+            ->assertSessionHas('student_discount_batch_result', fn (array $result): bool => $result['succeeded'] === 2
+                && $result['unchanged'] === 1
+                && $result['failed'] === 2);
+
+        $this->assertSame('approved', $pendingOne->fresh()->status);
+        $this->assertSame('approved', $pendingTwo->fresh()->status);
+        $this->assertSame('rejected', $rejected->fresh()->status);
+        $this->assertSame('pending', $otherPending->fresh()->status);
+        $this->assertSame($campaign->usage_limit, $pendingOne->fresh()->discountCode->usage_limit);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 2);
+
+        $this->actingAs($operator)
+            ->post(route('student-discounts.claims.bulk-approve', [$organization, $store]), ['claim_ids' => [$pendingOne->uuid, $pendingTwo->uuid]])
+            ->assertSessionHas('student_discount_batch_result', fn (array $result): bool => $result['succeeded'] === 0
+                && $result['unchanged'] === 2
+                && $result['failed'] === 0);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 2);
+
+        $viewer = User::factory()->create();
+        $organization->users()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $store->members()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $viewerRole = Role::query()->whereBelongsTo($organization)->where('slug', 'viewer')->firstOrFail();
+        $viewer->roles()->attach($viewerRole, ['organization_id' => $organization->id, 'store_id' => null]);
+        $viewerClaim = $this->claim($organization, $store, 'viewer-approve');
+        $this->actingAs($viewer)
+            ->post(route('student-discounts.claims.bulk-approve', [$organization, $store]), ['claim_ids' => [$viewerClaim->uuid]])
+            ->assertForbidden();
     }
 
     public function test_decision_mail_job_marks_claim_and_code_sent_once_without_serializing_pii(): void
@@ -1004,6 +1330,42 @@ class StudentDiscountTest extends TestCase
             'usage_limit' => 1,
             'validity_days' => 7,
             'education_email_domains' => [],
+            ...$overrides,
+        ]);
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function claim(Organization $organization, Store $store, string $key, array $overrides = []): StudentDiscountClaim
+    {
+        return StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => "{$key}@example.com",
+            'normalized_email' => "{$key}@example.com",
+            'source' => 'student_id',
+            'status' => 'pending',
+            'claim_token_hash' => hash('sha256', "{$key}-token"),
+            'claim_token_encrypted' => "{$key}-token",
+            ...$overrides,
+        ]);
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function discountCode(StudentDiscountClaim $claim, string $key, array $overrides = []): StudentDiscountCode
+    {
+        return StudentDiscountCode::query()->create([
+            'organization_id' => $claim->organization_id,
+            'store_id' => $claim->store_id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'shopify_discount_id' => "gid://shopify/DiscountCodeNode/{$key}",
+            'code' => 'STUDENT-'.strtoupper(str_replace('_', '-', $key)),
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 1,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
             ...$overrides,
         ]);
     }

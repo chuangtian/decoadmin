@@ -513,6 +513,15 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::post('/claims/{claim}/reject', [StudentDiscountController::class, 'reject'])
             ->middleware(['permission:student_discount.reject', 'throttle:30,1'])
             ->name('student-discounts.claims.reject');
+        Route::post('/claims/bulk-approve', [StudentDiscountController::class, 'bulkApprove'])
+            ->middleware(['permission:student_discount.approve', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-approve');
+        Route::post('/claims/bulk-reject', [StudentDiscountController::class, 'bulkReject'])
+            ->middleware(['permission:student_discount.reject', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-reject');
+        Route::post('/claims/usage-sync', [StudentDiscountController::class, 'syncUsage'])
+            ->middleware(['permission:student_discount.claim.read', 'throttle:10,1'])
+            ->name('student-discounts.claims.usage-sync');
         Route::delete('/claims/{claim}', [StudentDiscountController::class, 'destroy'])
             ->middleware(['permission:student_discount.claim.delete', 'throttle:30,1'])
             ->name('student-discounts.claims.destroy');

@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
     'uuid', 'organization_id', 'store_id', 'email', 'normalized_email', 'source', 'status',
     'review_method', 'evidence_disk', 'evidence_path', 'evidence_mime', 'evidence_size',
     'evidence_deleted_at', 'recognition_result', 'confidence', 'model_name', 'recognized_at',
+    'recognition_failure_code',
     'reviewed_at', 'reviewed_by', 'rejection_reason', 'idempotency_key', 'request_fingerprint',
     'claim_token_hash', 'claim_token_encrypted', 'submission_count', 'email_sent_at', 'email_failed_at',
 ])]
