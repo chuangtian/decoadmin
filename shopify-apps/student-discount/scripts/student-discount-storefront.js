@@ -1,7 +1,12 @@
 (() => {
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const HAN_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
   const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  const PUBLIC_LOCALE = 'en-US';
+  const INITIALIZER_VERSION = '3';
+  const INVALID_RESPONSE_MESSAGE = 'The student discount service returned an invalid response. Please try again later.';
+  const REVIEW_SUBMITTED_MESSAGE = 'Your request has been submitted. We will email you when the review is complete.';
   const STATUS_LABELS = {
     UNUSED: 'Status: Unused',
     PARTIALLY_USED: 'Status: Partially used',
@@ -19,9 +24,32 @@
       .forEach((dialog) => dialog.remove());
   }
 
+  function replaceLegacyInteractiveNodes(app) {
+    if (app.dataset.initialized !== 'true') return;
+
+    const trigger = app.querySelector('[data-student-discount-trigger]');
+    if (trigger) trigger.replaceWith(trigger.cloneNode(true));
+
+    let dialog = app.querySelector('[data-student-discount-dialog]');
+    if (!dialog) {
+      dialog = document.querySelector(
+        '[data-student-discount-dialog][data-student-discount-version="2"]',
+      );
+    }
+    if (dialog) {
+      const freshDialog = dialog.cloneNode(true);
+      dialog.replaceWith(freshDialog);
+      if (!app.contains(freshDialog)) app.appendChild(freshDialog);
+    }
+
+    app.dataset.initialized = 'false';
+  }
+
   function initialize(app) {
-    if (app.dataset.initialized === 'true') return;
+    if (app.dataset.studentDiscountInitializerVersion === INITIALIZER_VERSION) return;
+    replaceLegacyInteractiveNodes(app);
     app.dataset.initialized = 'true';
+    app.dataset.studentDiscountInitializerVersion = INITIALIZER_VERSION;
 
     const trigger = app.querySelector('[data-student-discount-trigger]');
     const dialog = app.querySelector('[data-student-discount-dialog]');
@@ -141,7 +169,7 @@
       successTitle.textContent = title;
       successMessage.textContent = publicMessage(
         message,
-        'Your request has been submitted. We will email you when the review is complete.',
+        REVIEW_SUBMITTED_MESSAGE,
       );
       showView('success');
     };
@@ -358,7 +386,7 @@
         }
         showSubmission(
           payload.status === 'pending' ? 'Submitted for review' : 'Submitted',
-          'Your request has been submitted. We will email you when the review is complete.',
+          REVIEW_SUBMITTED_MESSAGE,
         );
       } catch (error) {
         studentIdError.textContent = publicMessage(error?.message, 'Unable to submit your request. Please try again later.');
@@ -398,7 +426,7 @@
       && (Object.hasOwn(payload, 'data') || Object.hasOwn(payload, 'error'));
 
     if (!validEnvelope) {
-      const error = new Error('The student discount service returned an invalid response. Please try again later.');
+      const error = new Error(INVALID_RESPONSE_MESSAGE);
       error.code = 'INVALID_API_RESPONSE';
       error.status = response.status;
       throw error;
@@ -421,7 +449,7 @@
     }
 
     if (payload.data === null || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
-      const error = new Error('The student discount service returned an invalid response. Please try again later.');
+      const error = new Error(INVALID_RESPONSE_MESSAGE);
       error.code = 'INVALID_API_RESPONSE';
       error.status = response.status;
       throw error;
@@ -448,7 +476,7 @@
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(PUBLIC_LOCALE, {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(date);
@@ -465,7 +493,7 @@
 
   function publicMessage(message, fallback) {
     const value = String(message || '').trim();
-    return value && value.length <= 240 ? value : fallback;
+    return value && value.length <= 240 && !HAN_CHARACTER_PATTERN.test(value) ? value : fallback;
   }
 
   function initializeAll(root = document) {

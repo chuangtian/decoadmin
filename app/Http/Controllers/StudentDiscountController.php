@@ -10,6 +10,8 @@ use App\Services\StudentDiscount\StudentDiscountCampaignService;
 use App\Services\StudentDiscount\StudentDiscountClaimBatchService;
 use App\Services\StudentDiscount\StudentDiscountClaimQueryService;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
+use App\Services\StudentDiscount\StudentDiscountEmailTemplateService;
+use App\Services\StudentDiscount\StudentDiscountMailDeliveryService;
 use App\Services\StudentDiscount\StudentDiscountUsageSyncService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +30,8 @@ class StudentDiscountController extends Controller
         private StudentDiscountClaimQueryService $claimQuery,
         private StudentDiscountClaimBatchService $claimBatches,
         private StudentDiscountUsageSyncService $usageSync,
+        private StudentDiscountEmailTemplateService $emailTemplates,
+        private StudentDiscountMailDeliveryService $mailDelivery,
     ) {}
 
     public function index(Request $request, Organization $organization, Store $store): Response
@@ -55,6 +59,7 @@ class StudentDiscountController extends Controller
                 'combines_with_order_discounts', 'combines_with_product_discounts',
                 'combines_with_shipping_discounts', 'usage_limit', 'validity_days', 'education_email_domains',
             ]),
+            'emailTemplates' => $this->emailTemplates->configuration($campaign, $store),
             'claims' => $dashboard['claims'],
             'counts' => $dashboard['counts'],
             'filters' => $dashboard['filters'],
@@ -66,6 +71,7 @@ class StudentDiscountController extends Controller
                 'reject' => $request->user()->hasPermission('student_discount.reject', $organization, $store),
                 'deleteClaim' => $request->user()->hasPermission('student_discount.claim.delete', $organization, $store),
                 'manageCampaign' => $request->user()->hasPermission('student_discount.campaign.manage', $organization, $store),
+                'manageEmailTemplates' => $request->user()->hasPermission('student_discount.email_template.manage', $organization, $store),
                 'analytics' => $request->user()->hasPermission('student_discount.analytics.read', $organization, $store),
                 'audit' => $request->user()->hasPermission('student_discount.audit.read', $organization, $store),
             ],
@@ -97,6 +103,48 @@ class StudentDiscountController extends Controller
         $this->campaigns->update($organization, $store, $values, $request->user());
 
         return back()->with('success', '学生优惠活动配置已保存。');
+    }
+
+    public function updateEmailTemplates(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'student_discount.email_template.manage');
+        $values = $request->validate([
+            'approval' => ['required', 'array'],
+            'approval.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
+            'approval.body' => ['required', 'string', 'max:5000'],
+            'rejection' => ['required', 'array'],
+            'rejection.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
+            'rejection.body' => ['required', 'string', 'max:5000'],
+        ]);
+        $campaign = $this->campaigns->getOrCreate($organization, $store, $request->user());
+        $this->emailTemplates->update($organization, $store, $campaign, $values, $request->user());
+
+        return back()->with('success', '当前店铺的学生优惠邮件内容已保存。');
+    }
+
+    public function testEmailTemplate(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'student_discount.email_template.manage');
+        $values = $request->validate([
+            'type' => ['required', Rule::in(['approval', 'rejection'])],
+            'email' => ['required', 'email:rfc', 'max:254'],
+            'subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
+            'body' => ['required', 'string', 'max:5000'],
+        ]);
+        try {
+            $this->mailDelivery->sendTest(
+                $organization,
+                $store,
+                $request->user(),
+                $values['type'],
+                $values['email'],
+                ['subject' => $values['subject'], 'body' => $values['body']],
+            );
+        } catch (\RuntimeException) {
+            return back()->with('error', '测试邮件发送失败，请检查系统邮件配置后重试。');
+        }
+
+        return back()->with('success', '测试邮件已发送。');
     }
 
     public function approve(Request $request, Organization $organization, Store $store, StudentDiscountClaim $claim): RedirectResponse

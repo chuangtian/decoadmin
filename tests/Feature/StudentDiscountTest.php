@@ -7,6 +7,7 @@ use App\Jobs\DeleteSupersededStudentDiscountEvidence;
 use App\Jobs\SendStudentDiscountDecisionMail;
 use App\Jobs\SyncStudentDiscountCodeUsage;
 use App\Mail\StudentDiscountDecisionMail;
+use App\Mail\StudentDiscountTemplatePreviewMail;
 use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
@@ -1518,6 +1519,163 @@ class StudentDiscountTest extends TestCase
         $this->assertNull($claim->fresh()->email_failed_at);
         $this->assertNotNull($code->fresh()->email_sent_at);
         $this->assertNull($code->fresh()->email_failed_at);
+    }
+
+    public function test_store_email_templates_are_isolated_editable_and_audited_without_raw_body_content(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $campaign = $this->campaign($organization, $store);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Store',
+            'shopify_domain' => 'other-template-store.myshopify.com',
+            'status' => 'active',
+        ]);
+        $otherCampaign = $this->campaign($organization, $otherStore);
+        $templates = [
+            'approval' => [
+                'subject' => '{{ store_name }} approved',
+                'body' => 'Code {{ discount_code }} for {{ applicant_email }} expires {{ expires_at }}.',
+            ],
+            'rejection' => [
+                'subject' => '{{ store_name }} request update',
+                'body' => 'We could not approve this request: {{ rejection_reason }}',
+            ],
+        ];
+
+        $this->actingAs($admin)
+            ->get(route('student-discounts.index', [$organization, $store]).'?tab=emails')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('permissions.manageEmailTemplates', true)
+                ->where('emailTemplates.templates.approval.subject', 'Your {{ store_name }} student discount code')
+                ->where('emailTemplates.variables.0.sample', $store->name)
+                ->has('emailTemplates.variables', 6));
+
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $templates)
+            ->assertRedirect();
+
+        $this->assertSame($templates, $campaign->fresh()->email_templates);
+        $this->assertNull($otherCampaign->fresh()->email_templates);
+        $audit = AuditLog::query()->where('action', 'student_discount_email_templates_updated')->sole();
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertStringNotContainsString($templates['approval']['body'], $audit->toJson());
+        $this->assertSame(hash('sha256', $templates['approval']['body']), data_get($audit->new_values, 'approval.body_sha256'));
+    }
+
+    public function test_email_template_variables_are_whitelisted_and_critical_variables_are_required(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store);
+        $base = [
+            'approval' => ['subject' => 'Approved', 'body' => 'Code {{ discount_code }}'],
+            'rejection' => ['subject' => 'Rejected', 'body' => 'Reason {{ rejection_reason }}'],
+        ];
+
+        $invalidVariable = $base;
+        $invalidVariable['approval']['subject'] = 'Approved {{ unsafe_html }}';
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $invalidVariable)
+            ->assertSessionHasErrors('approval.subject');
+
+        $missingCode = $base;
+        $missingCode['approval']['body'] = 'Approved without a code.';
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $missingCode)
+            ->assertSessionHasErrors('approval.body');
+    }
+
+    public function test_operator_cannot_manage_or_test_student_discount_email_templates(): void
+    {
+        [$operator, $organization, $store] = $this->context('operator');
+        $this->campaign($organization, $store);
+        $payload = [
+            'approval' => ['subject' => 'Approved', 'body' => 'Code {{ discount_code }}'],
+            'rejection' => ['subject' => 'Rejected', 'body' => 'Reason {{ rejection_reason }}'],
+        ];
+
+        $this->actingAs($operator)
+            ->get(route('student-discounts.index', [$organization, $store]))
+            ->assertInertia(fn (Assert $page) => $page->where('permissions.manageEmailTemplates', false));
+        $this->actingAs($operator)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $payload)
+            ->assertForbidden();
+        $this->actingAs($operator)
+            ->post(route('student-discounts.email-templates.test', [$organization, $store]), [
+                'type' => 'approval',
+                'email' => 'recipient@example.com',
+                'subject' => 'Approved',
+                'body' => 'Code {{ discount_code }}',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_decision_and_test_emails_render_the_current_store_template(): void
+    {
+        Mail::fake();
+        $this->configureDeliveringMailTransport();
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $campaign = $this->campaign($organization, $store, [
+            'email_templates' => [
+                'approval' => [
+                    'subject' => '{{ store_name }} approved {{ applicant_email }}',
+                    'body' => 'Use {{ discount_code }} before {{ expires_at }}. Limit {{ usage_limit }}.',
+                ],
+                'rejection' => [
+                    'subject' => '{{ store_name }} rejected',
+                    'body' => 'Reason: {{ rejection_reason }}',
+                ],
+            ],
+        ]);
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'template-student@example.edu',
+            'normalized_email' => 'template-student@example.edu',
+            'source' => 'education_email',
+            'status' => 'approved',
+            'claim_token_hash' => hash('sha256', 'template-claim-token'),
+            'claim_token_encrypted' => 'template-claim-token',
+        ]);
+        $code = StudentDiscountCode::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'code' => 'STUDENT-TEMPLATE',
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 2,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        (new SendStudentDiscountDecisionMail($organization->id, $store->id, $claim->id, $code->id))->handle();
+
+        Mail::assertSent(StudentDiscountDecisionMail::class, function (StudentDiscountDecisionMail $mail) use ($store, $claim): bool {
+            return $mail->renderedSubject === "{$store->name} approved {$claim->email}"
+                && str_contains((string) $mail->renderedBody, 'STUDENT-TEMPLATE')
+                && str_contains((string) $mail->renderedBody, 'Limit 2.');
+        });
+
+        $this->actingAs($admin)
+            ->post(route('student-discounts.email-templates.test', [$organization, $store]), [
+                'type' => 'rejection',
+                'email' => 'preview-recipient@example.com',
+                'subject' => '{{ store_name }} preview',
+                'body' => 'Preview reason: {{ rejection_reason }}',
+            ])
+            ->assertRedirect();
+        Mail::assertSent(StudentDiscountTemplatePreviewMail::class, function (StudentDiscountTemplatePreviewMail $mail) use ($store): bool {
+            return $mail->hasTo('preview-recipient@example.com')
+                && $mail->renderedSubject === "{$store->name} preview"
+                && str_contains($mail->renderedBody, 'submitted image');
+        });
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'student_discount_email_template_test_sent',
+            'store_id' => $campaign->store_id,
+        ]);
     }
 
     public function test_decision_mail_job_sends_outside_a_transaction_and_preserves_concurrent_success_markers(): void

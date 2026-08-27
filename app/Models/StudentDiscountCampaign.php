@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'organization_id', 'store_id', 'enabled', 'code_prefix', 'discount_type', 'discount_value',
     'applies_to', 'target_ids', 'combines_with_order_discounts', 'combines_with_product_discounts',
-    'combines_with_shipping_discounts', 'usage_limit', 'validity_days', 'education_email_domains',
+    'combines_with_shipping_discounts', 'usage_limit', 'validity_days', 'education_email_domains', 'email_templates',
     'created_by', 'updated_by',
 ])]
 class StudentDiscountCampaign extends Model
@@ -36,6 +36,7 @@ class StudentDiscountCampaign extends Model
             'usage_limit' => 'integer',
             'validity_days' => 'integer',
             'education_email_domains' => 'array',
+            'email_templates' => 'array',
         ];
     }
 }

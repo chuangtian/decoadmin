@@ -17,11 +17,15 @@ class StudentDiscountDecisionMail extends Mailable
     public function __construct(
         public StudentDiscountClaim $claim,
         public ?StudentDiscountCode $discountCode,
+        public ?string $renderedSubject = null,
+        public ?string $renderedBody = null,
     ) {}
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: $this->discountCode ? '你的学生优惠码已生成' : '学生优惠申请审核结果');
+        return new Envelope(subject: $this->renderedSubject ?? ($this->discountCode
+            ? 'Your student discount code'
+            : 'Update on your student discount request'));
     }
 
     public function content(): Content
