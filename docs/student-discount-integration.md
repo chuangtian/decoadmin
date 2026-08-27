@@ -118,7 +118,7 @@ Content-Type: multipart/form-data
 
 同一已验证 Store 与请求 IP 每小时最多提交 5 次。限流发生在 App Proxy 签名和 Store 解析之后，服务端使用 Store ID 与 IP 的不可逆 HMAC 作为限流键，不信任请求体中的 `shop`、`store_id` 或 `organization_id`。
 
-同一 Store、同一规范化邮箱使用新的 `idempotency_key` 重新提交时，会创建独立申请。旧的 `pending` 申请转为 `voided`，旧证件文件立即删除；旧申请、关联关系及不含隐私正文的审计历史继续保留。重复使用相同 `idempotency_key` 且内容一致仍返回原申请，内容不一致仍返回 `IDEMPOTENCY_CONFLICT`。
+同一 Store、同一规范化邮箱使用新的 `idempotency_key` 重新提交时，会创建独立申请。旧的 `pending` 申请转为 `voided`，活跃证件字段在同一事务中清空；事务提交后立即尝试物理删除旧文件，失败则通过仅保存加密路径的持久化任务安全重试。只有确认文件不存在后才记录证件删除时间和成功审计。旧申请、关联关系及不含隐私正文的审计历史继续保留。重复使用相同 `idempotency_key` 且内容一致仍返回原申请，内容不一致仍返回 `IDEMPOTENCY_CONFLICT`。
 
 也可直接 POST 到 App Proxy 根目标 `/api/shopify-app/student-discounts/proxy`，请求字段相同。
 
@@ -234,5 +234,7 @@ GET /api/shopify-app/student-discounts/proxy/claims/{claim_uuid}?claim_token={cl
 
 - 申请人姓名与隐私同意时间；
 - 旧申请的作废时间及指向新申请的关联。
+
+`database/migrations/2026_08_27_000600_create_student_discount_evidence_deletions_table.php` 创建加密路径的证件清理任务表，用于事务提交后的物理删除、失败重试和安全状态审计；清理成功后路径与磁盘字段立即清空。
 
 Gemini 设置继续存放在既有 `system_settings` 表的 `student_ai` section，API Key 通过 Eloquent encrypted cast 加密，前端只收到配置状态。

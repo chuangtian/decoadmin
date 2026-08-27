@@ -3,12 +3,14 @@
 namespace App\Services\StudentDiscount;
 
 use App\Exceptions\StudentDiscountException;
+use App\Jobs\DeleteSupersededStudentDiscountEvidence;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Models\StudentDiscountEvidenceDeletion;
 use App\Models\User;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\UploadedFile;
@@ -23,6 +25,7 @@ class StudentDiscountClaimService
         private EducationEmailDomainService $domains,
         private GeminiStudentIdRecognitionService $gemini,
         private StudentDiscountCodeService $codes,
+        private StudentDiscountEvidenceCleanupService $evidenceCleanup,
         private SystemSettingsService $settings,
     ) {}
 
@@ -111,9 +114,10 @@ class StudentDiscountClaimService
         $claim = null;
         $token = '';
         $wasDuplicate = false;
+        $evidenceDeletionIds = [];
 
         try {
-            DB::transaction(function () use (&$claim, &$token, &$wasDuplicate, $campaign, $organization, $store, $claimUuid, $normalizedName, $normalizedEmail, $email, $domainFastPass, $idempotencyKey, $fingerprint, $evidenceDisk, $evidencePath, $evidenceMime, $evidenceSize): void {
+            DB::transaction(function () use (&$claim, &$token, &$wasDuplicate, &$evidenceDeletionIds, $campaign, $organization, $store, $claimUuid, $normalizedName, $normalizedEmail, $email, $domainFastPass, $idempotencyKey, $fingerprint, $evidenceDisk, $evidencePath, $evidenceMime, $evidenceSize): void {
                 StudentDiscountCampaign::query()->whereKey($campaign->id)->lockForUpdate()->firstOrFail();
                 $duplicateRequest = DB::table('student_discount_claim_idempotencies')
                     ->where('store_id', $store->id)
@@ -168,7 +172,18 @@ class StudentDiscountClaimService
                 ]);
 
                 foreach ($pendingClaims as $pendingClaim) {
-                    $hadEvidence = $this->deleteEvidenceFile($pendingClaim);
+                    $hadEvidence = filled($pendingClaim->evidence_path);
+                    if ($hadEvidence) {
+                        $deletion = StudentDiscountEvidenceDeletion::query()->create([
+                            'organization_id' => $pendingClaim->organization_id,
+                            'store_id' => $pendingClaim->store_id,
+                            'claim_id' => $pendingClaim->id,
+                            'disk' => (string) $pendingClaim->evidence_disk,
+                            'path' => (string) $pendingClaim->evidence_path,
+                            'status' => 'pending',
+                        ]);
+                        $evidenceDeletionIds[] = $deletion->id;
+                    }
                     $pendingClaim->forceFill([
                         'status' => 'voided',
                         'superseded_by_claim_id' => $claim->id,
@@ -177,12 +192,11 @@ class StudentDiscountClaimService
                         'evidence_path' => null,
                         'evidence_mime' => null,
                         'evidence_size' => null,
-                        'evidence_deleted_at' => $hadEvidence ? now() : $pendingClaim->evidence_deleted_at,
                     ])->save();
                     $this->audit($pendingClaim, null, 'student_discount_claim_voided', [
                         'reason' => 'superseded',
                         'superseded_by_claim_uuid' => $claim->uuid,
-                        'evidence_deleted' => $hadEvidence,
+                        'evidence_cleanup_status' => $hadEvidence ? 'pending' : 'not_required',
                     ]);
                 }
 
@@ -204,6 +218,18 @@ class StudentDiscountClaimService
             }
 
             return ['claim' => $claim, 'code' => $claim->discountCode, 'claim_token' => $token];
+        }
+
+        foreach ($evidenceDeletionIds as $deletionId) {
+            try {
+                $this->evidenceCleanup->cleanup($deletionId);
+            } catch (\Throwable) {
+                try {
+                    DeleteSupersededStudentDiscountEvidence::dispatch($deletionId);
+                } catch (\Throwable) {
+                    // The encrypted cleanup record remains retryable without exposing its location.
+                }
+            }
         }
 
         if ($domainFastPass) {

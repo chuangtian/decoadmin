@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Exceptions\StudentDiscountException;
+use App\Jobs\DeleteSupersededStudentDiscountEvidence;
 use App\Jobs\SendStudentDiscountDecisionMail;
 use App\Jobs\SyncStudentDiscountCodeUsage;
 use App\Mail\StudentDiscountDecisionMail;
@@ -16,11 +17,13 @@ use App\Models\Store;
 use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Models\StudentDiscountEvidenceDeletion;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\StudentDiscount\GeminiStudentIdRecognitionService;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
 use App\Services\StudentDiscount\StudentDiscountCodeService;
+use App\Services\StudentDiscount\StudentDiscountEvidenceCleanupService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -669,13 +672,25 @@ class StudentDiscountTest extends TestCase
             ->sole();
         $this->assertSame('superseded', data_get($voidedAudit->metadata, 'reason'));
         $this->assertSame($newClaim->uuid, data_get($voidedAudit->metadata, 'superseded_by_claim_uuid'));
-        $this->assertTrue((bool) data_get($voidedAudit->metadata, 'evidence_deleted'));
+        $this->assertSame('pending', data_get($voidedAudit->metadata, 'evidence_cleanup_status'));
         $submittedAudit = AuditLog::query()
             ->where('action', 'student_discount_claim_submitted')
             ->where('subject_id', $newClaim->id)
             ->sole();
         $this->assertSame([$oldClaim->uuid], data_get($submittedAudit->metadata, 'superseded_claim_uuids'));
-        $auditPayload = AuditLog::query()->whereIn('id', [$voidedAudit->id, $submittedAudit->id])->get()->toJson();
+        $deletion = StudentDiscountEvidenceDeletion::query()->sole();
+        $this->assertSame('completed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertNotNull($deletion->completed_at);
+        $rawDeletionPath = (string) DB::table('student_discount_evidence_deletions')->where('id', $deletion->id)->value('path');
+        $this->assertStringNotContainsString($oldPath, $rawDeletionPath);
+        $deletedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_deleted')
+            ->where('subject_id', $oldClaim->id)
+            ->sole();
+        $this->assertTrue((bool) data_get($deletedAudit->metadata, 'evidence_deleted'));
+        $this->assertSame($deletion->uuid, data_get($deletedAudit->metadata, 'cleanup_uuid'));
+        $auditPayload = AuditLog::query()->whereIn('id', [$voidedAudit->id, $submittedAudit->id, $deletedAudit->id])->get()->toJson();
         $this->assertStringNotContainsString('resubmit@example.com', strtolower($auditPayload));
         $this->assertStringNotContainsString('private-old-evidence', $auditPayload);
 
@@ -702,6 +717,186 @@ class StudentDiscountTest extends TestCase
         $this->assertSame('voided', $oldClaim->fresh()->status);
         $this->assertDatabaseMissing('student_discount_codes', ['claim_id' => $oldClaim->id]);
         Queue::assertNothingPushed();
+    }
+
+    public function test_submission_transaction_failure_preserves_previous_pending_record_and_evidence(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $oldPath = "student-discounts/{$organization->id}/{$store->id}/rollback-old/student-id.jpg";
+        Storage::disk('local')->put($oldPath, 'rollback-old-evidence');
+        $oldClaim = $this->claim($organization, $store, 'rollback-old', [
+            'name' => 'Rollback Student',
+            'email' => 'rollback@example.com',
+            'normalized_email' => 'rollback@example.com',
+            'evidence_disk' => 'local',
+            'evidence_path' => $oldPath,
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 21,
+        ]);
+        AuditLog::creating(function (AuditLog $audit): void {
+            if ($audit->action === 'student_discount_claim_submitted') {
+                throw new \RuntimeException('Synthetic transaction failure.');
+            }
+        });
+
+        try {
+            app(StudentDiscountClaimService::class)->submit(
+                $store,
+                'Replacement Student',
+                'rollback@example.com',
+                UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
+                'rollback-new-claim-001',
+            );
+            $this->fail('The synthetic audit failure must roll back the submission transaction.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Synthetic transaction failure.', $exception->getMessage());
+        }
+
+        $oldClaim->refresh();
+        $this->assertSame('pending', $oldClaim->status);
+        $this->assertNull($oldClaim->superseded_by_claim_id);
+        $this->assertNull($oldClaim->superseded_at);
+        $this->assertSame($oldPath, $oldClaim->evidence_path);
+        $this->assertNull($oldClaim->evidence_deleted_at);
+        Storage::disk('local')->assertExists($oldPath);
+        $this->assertSame([$oldPath], Storage::disk('local')->allFiles("student-discounts/{$organization->id}/{$store->id}"));
+        $this->assertDatabaseCount('student_discount_claims', 1);
+        $this->assertDatabaseCount('student_discount_evidence_deletions', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_post_commit_cleanup_failure_keeps_voided_state_and_queues_safe_retry(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        $oldClaim = $this->claim($organization, $store, 'post-commit-failure', [
+            'name' => 'Previous Student',
+            'email' => 'post-commit@example.com',
+            'normalized_email' => 'post-commit@example.com',
+            'evidence_disk' => 'missing-evidence-disk',
+            'evidence_path' => 'private/old-student-id.jpg',
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 32,
+        ]);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => false,
+                    'institution_name' => null,
+                    'confidence' => 10,
+                    'review_notes' => 'The image does not show a recognizable student card layout.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+        ]);
+
+        $result = app(StudentDiscountClaimService::class)->submit(
+            $store,
+            'Replacement Student',
+            'post-commit@example.com',
+            UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
+            'post-commit-new-001',
+        );
+
+        $this->assertSame('pending', $result['claim']->status);
+        $oldClaim->refresh();
+        $this->assertSame('voided', $oldClaim->status);
+        $this->assertNull($oldClaim->evidence_path);
+        $this->assertNull($oldClaim->evidence_disk);
+        $this->assertNull($oldClaim->evidence_deleted_at);
+        $deletion = StudentDiscountEvidenceDeletion::query()->sole();
+        $this->assertSame('failed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertSame('storage_delete_failed', $deletion->last_error_code);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_evidence_deleted']);
+        Queue::assertPushed(
+            DeleteSupersededStudentDiscountEvidence::class,
+            fn (DeleteSupersededStudentDiscountEvidence $job): bool => $job->deletionId === $deletion->id,
+        );
+    }
+
+    public function test_evidence_cleanup_failure_is_sanitized_retryable_and_marks_deletion_only_after_success(): void
+    {
+        Storage::fake('local');
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = $this->claim($organization, $store, 'cleanup-retry', [
+            'status' => 'voided',
+            'evidence_disk' => null,
+            'evidence_path' => null,
+            'evidence_mime' => null,
+            'evidence_size' => null,
+            'evidence_deleted_at' => null,
+            'superseded_at' => now(),
+        ]);
+        $sensitivePath = "student-discounts/{$organization->id}/{$store->id}/private/student-id.jpg";
+        $deletion = StudentDiscountEvidenceDeletion::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'disk' => 'missing-evidence-disk',
+            'path' => $sensitivePath,
+            'status' => 'pending',
+        ]);
+        $cleanup = app(StudentDiscountEvidenceCleanupService::class);
+        $job = new DeleteSupersededStudentDiscountEvidence($deletion->id);
+
+        try {
+            $job->handle($cleanup);
+            $this->fail('An unavailable evidence disk must fail safely.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Student discount evidence cleanup failed.', $exception->getMessage());
+            $this->assertStringNotContainsString($sensitivePath, $exception->getMessage());
+        }
+
+        $deletion->refresh();
+        $this->assertSame('failed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertSame('storage_delete_failed', $deletion->last_error_code);
+        $this->assertNull($deletion->completed_at);
+        $this->assertNull($claim->fresh()->evidence_deleted_at);
+        $rawPath = (string) DB::table('student_discount_evidence_deletions')->where('id', $deletion->id)->value('path');
+        $this->assertStringNotContainsString($sensitivePath, $rawPath);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_evidence_deleted']);
+
+        $job->failed(null);
+        $failedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_cleanup_failed')
+            ->where('subject_id', $claim->id)
+            ->sole();
+        $failedAuditPayload = $failedAudit->toJson();
+        $this->assertSame('storage_delete_failed', data_get($failedAudit->metadata, 'error_code'));
+        $this->assertStringNotContainsString($sensitivePath, $failedAuditPayload);
+
+        $retryPath = "student-discounts/{$organization->id}/{$store->id}/retry/student-id.jpg";
+        Storage::disk('local')->put($retryPath, 'retry-private-evidence');
+        $deletion->forceFill([
+            'disk' => 'local',
+            'path' => $retryPath,
+            'status' => 'failed',
+        ])->save();
+        $job->handle($cleanup);
+
+        $deletion->refresh();
+        $this->assertSame('completed', $deletion->status);
+        $this->assertSame(2, $deletion->attempts);
+        $this->assertNull($deletion->last_error_code);
+        $this->assertNotNull($deletion->completed_at);
+        $this->assertNotNull($claim->fresh()->evidence_deleted_at);
+        Storage::disk('local')->assertMissing($retryPath);
+        $deletedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_deleted')
+            ->where('subject_id', $claim->id)
+            ->sole();
+        $this->assertTrue((bool) data_get($deletedAudit->metadata, 'evidence_deleted'));
+        $this->assertStringNotContainsString($retryPath, $deletedAudit->toJson());
     }
 
     public function test_idempotency_rejects_different_evidence_with_the_same_size_and_mime(): void
