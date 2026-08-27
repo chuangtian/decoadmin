@@ -52,7 +52,11 @@ class ReputationController extends Controller
 
         return Inertia::render('Reputation/Overview', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'timezone' => $store->timezone ?: 'UTC'],
-            'dashboard' => $dashboard->overview($store, $filters),
+            'dashboard' => $dashboard->overview(
+                $store,
+                $filters,
+                $request->user()?->hasPermission('alerts.manage', $organization, $store) ?? false,
+            ),
             'canSync' => $request->user()?->hasPermission('sync.run', $organization, $store) ?? false,
             'canManage' => $request->user()?->hasPermission('alerts.manage', $organization, $store) ?? false,
         ]);

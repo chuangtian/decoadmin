@@ -9,7 +9,7 @@ type RecordItem = {
     uuid: string; source: string; url: string | null; title: string | null; content: string | null;
     rating: number | null; week_number: number | null; published_at: string | null; model_name: string | null;
     processing_status: string | null; response_note: string | null; metrics: Record<string, string | number>; is_negative: boolean;
-    origin: string; source_sheets: string[]; order_reference_masked: string | null;
+    origin: string; source_sheets: string[]; order_reference?: string | null; order_reference_masked: string | null;
 };
 type Paginator<T> = { data: T[]; links: Array<{ url: string | null; label: string; active: boolean }>; total: number; from: number | null; to: number | null };
 type ComparisonMetric = { current: number; previous: number; difference: number; change_percent: number | null };
@@ -131,8 +131,8 @@ const redditTopicNames = computed(() => Object.keys(redditTopicColors).filter((t
     redditTopicWeeks.value.some((week) => week.topic_distribution.some((item) => item.topic === topic && item.count > 0))
 )));
 const redditTopicViewMax = computed(() => Math.max(1, ...redditTopicAverages.value.map((row) => row.views)));
-const reviewModelOrder = ['X1S 系列', 'M16 系列', 'X7 / X7L', 'X2 系列'];
-const reviewModelColors: Record<string, string> = { 'X1S 系列': '#3b82f6', 'M16 系列': '#10b981', 'X7 / X7L': '#f97316', 'X2 系列': '#ec4899' };
+const reviewModelOrder = ['macfox-x1', 'macfox-x7', 'x1s-x-bs-zay', 'macfox-x2', 'macfox-m16-ebike'];
+const reviewModelColors: Record<string, string> = { 'macfox-x1': '#3b82f6', 'macfox-x7': '#10b981', 'x1s-x-bs-zay': '#f97316', 'macfox-x2': '#ec4899', 'macfox-m16-ebike': '#8b5cf6' };
 const orderedReviewModels = computed(() => [...props.dashboard.models].sort((left, right) => {
     const leftIndex = reviewModelOrder.indexOf(left.model);
     const rightIndex = reviewModelOrder.indexOf(right.model);
@@ -336,8 +336,20 @@ onBeforeUnmount(stopPolling);
 
             <template v-if="filters.tab === 'reviews'">
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <div class="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p class="text-sm font-semibold text-indigo-700">📊 对比：{{ dashboard.comparison ? `${dashboard.comparison.date_from} 至 ${dashboard.comparison.date_to}` : '未开启' }}</p>
+                        <select v-model="filters.comparison" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" @change="filters.comparison !== 'custom' && applyFilters()"><option value="none">无对比</option><option value="previous">对比上一时段</option><option value="custom">自定义对比</option></select>
+                    </div>
+                    <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                        <article v-for="card in reviewSummaryCards" :key="card.key" class="rounded-2xl border border-slate-200 p-5" :style="{ borderTopColor: card.color, borderTopWidth: '3px' }">
+                            <p class="text-xs font-semibold text-slate-500">{{ card.label }}</p><p class="mt-2 text-2xl font-black" :style="{ color: card.color }">{{ card.value }}</p><p class="mt-1 text-xs text-slate-500">{{ card.note }}</p><p class="mt-3 text-xs text-slate-400">{{ comparisonText(card.key, card.key === 'average_rating' ? 1 : 0) }}</p>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div><h2 class="text-lg font-black text-slate-950">按车型归类统计</h2><p class="mt-1 text-sm text-slate-500">按车型字段及评论标题、正文中的明确车型关键词自动归类，不使用 AI。</p></div>
+                        <div><h2 class="text-lg font-black text-slate-950">按车型归类统计</h2><p class="mt-1 text-sm text-slate-500">仅展示指定的五个飞书车型，其他车型不计入本区块。</p></div>
                         <span class="inline-flex w-fit items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700"><i class="h-2 w-2 rounded-full bg-sky-500" />数据来自当前店铺评论</span>
                     </div>
                     <div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -356,34 +368,22 @@ onBeforeUnmount(stopPolling);
                 </section>
 
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                    <div class="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p class="text-sm font-semibold text-indigo-700">📊 对比：{{ dashboard.comparison ? `${dashboard.comparison.date_from} 至 ${dashboard.comparison.date_to}` : '未开启' }}</p>
-                        <select v-model="filters.comparison" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" @change="filters.comparison !== 'custom' && applyFilters()"><option value="none">无对比</option><option value="previous">对比上一时段</option><option value="custom">自定义对比</option></select>
-                    </div>
-                    <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                        <article v-for="card in reviewSummaryCards" :key="card.key" class="rounded-2xl border border-slate-200 p-5" :style="{ borderTopColor: card.color, borderTopWidth: '3px' }">
-                            <p class="text-xs font-semibold text-slate-500">{{ card.label }}</p><p class="mt-2 text-2xl font-black" :style="{ color: card.color }">{{ card.value }}</p><p class="mt-1 text-xs text-slate-500">{{ card.note }}</p><p class="mt-3 text-xs text-slate-400">{{ comparisonText(card.key, card.key === 'average_rating' ? 1 : 0) }}</p>
-                        </article>
-                    </div>
-                </section>
-
-                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h2 class="text-lg font-black text-slate-950">评论列表</h2><p class="mt-1 text-sm text-slate-500">评论记录已移至页面底部；来源、日期、订单和周数分别展示。</p></div><div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><select v-model="filters.source" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部平台</option><option v-for="option in reviewSourceOptions" :key="option.key" :value="option.key">{{ option.label }}</option></select><select v-model="filters.rating" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部星级</option><option v-for="star in [5,4,3,2,1]" :key="star" :value="star">{{ star }} 星</option></select><select v-model="filters.status" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部处理状态</option><option value="pending">待处理低分</option><option value="done">已处理</option></select><form class="flex" @submit.prevent="applyFilters()"><input v-model="filters.search" class="min-w-0 flex-1 rounded-l-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="搜索内容或车型"><button class="rounded-r-xl bg-slate-950 px-4 text-sm font-semibold text-white">搜索</button></form></div></div>
                     <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
                         <table class="w-full min-w-[1180px] divide-y divide-slate-200 text-left text-sm">
                             <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                                <tr><th class="w-28 whitespace-nowrap px-4 py-3">来源</th><th class="w-32 whitespace-nowrap px-4 py-3">日期</th><th class="min-w-[340px] px-4 py-3">内容</th><th class="w-28 whitespace-nowrap px-4 py-3">订单</th><th class="w-20 whitespace-nowrap px-4 py-3">周数</th><th class="min-w-[140px] whitespace-nowrap px-4 py-3">评分 / 指标</th><th class="min-w-[150px] whitespace-nowrap px-4 py-3">跟进状态</th><th class="min-w-[170px] whitespace-nowrap px-4 py-3">数据来源</th></tr>
+                                <tr><th class="w-28 whitespace-nowrap px-4 py-3">来源</th><th class="w-32 whitespace-nowrap px-4 py-3">日期</th><th class="min-w-[340px] px-4 py-3">内容</th><th class="min-w-[160px] whitespace-nowrap px-4 py-3">订单</th><th class="min-w-[140px] whitespace-nowrap px-4 py-3">评分 / 指标</th><th class="min-w-[150px] whitespace-nowrap px-4 py-3">跟进状态</th><th class="min-w-[170px] whitespace-nowrap px-4 py-3">数据来源</th><th class="w-20 whitespace-nowrap px-4 py-3">周数</th></tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 <tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70">
                                     <td class="whitespace-nowrap px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{{ sourceLabels[record.source] ?? record.source }}</span><div v-if="record.model_name" class="mt-2 text-xs text-slate-500">{{ record.model_name }}</div></td>
                                     <td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td>
                                     <td class="px-4 py-4"><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td>
-                                    <td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-slate-600">{{ record.order_reference_masked ?? '—' }}</td>
-                                    <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-600">{{ record.week_number ? `W${record.week_number}` : '—' }}</td>
+                                    <td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-slate-600">{{ record.order_reference ?? record.order_reference_masked ?? '—' }}</td>
                                     <td class="min-w-[140px] px-4 py-4"><div v-if="record.rating !== null" class="whitespace-nowrap font-bold text-amber-500">★ {{ record.rating.toFixed(1) }}</div><div v-if="metricSummary(record)" class="mt-1 max-w-xs text-xs leading-5 text-slate-500">{{ metricSummary(record) }}</div></td>
                                     <td class="min-w-[150px] px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold" :class="record.is_negative ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'">{{ record.processing_status || (record.is_negative ? '待跟进' : '正常') }}</span><p v-if="record.response_note" class="mt-2 max-w-48 text-xs leading-5 text-slate-500">{{ record.response_note }}</p><button v-if="canManage && record.rating !== null" type="button" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800" @click="openFollowUp(record)">更新跟进</button></td>
                                     <td class="min-w-[170px] px-4 py-4 text-xs text-slate-500"><span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 font-bold" :class="record.origin === 'manual' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'">{{ record.origin === 'manual' ? '人工导入' : '系统同步' }}</span><p class="mt-2 max-w-[180px] break-words leading-5">{{ sourceSheetText(record) }}</p></td>
+                                    <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-600">{{ record.week_number ? `W${record.week_number}` : '—' }}</td>
                                 </tr>
                                 <tr v-if="dashboard.records.data.length === 0"><td colspan="8" class="px-6 py-14 text-center text-slate-500">当前筛选条件下暂无数据库记录。</td></tr>
                             </tbody>
