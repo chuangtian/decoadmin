@@ -250,6 +250,17 @@ class StudentDiscountTest extends TestCase
             ->push(['data' => ['discountCodeBasicCreate' => [
                 'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/123'],
                 'userErrors' => [],
+            ]]])
+            ->push(['data' => ['codeDiscountNodeByCode' => [
+                'id' => 'gid://shopify/DiscountCodeNode/123',
+                'codeDiscount' => [
+                    'endsAt' => now()->addDays(7)->toIso8601String(),
+                    'usageLimit' => 1,
+                    'codes' => ['nodes' => [[
+                        'code' => 'STUDENT-EXISTING',
+                        'asyncUsageCount' => 0,
+                    ]]],
+                ],
             ]]]);
 
         $url = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
@@ -279,6 +290,14 @@ class StudentDiscountTest extends TestCase
             ->assertJsonPath('data.id', $first->json('data.id'))
             ->assertJsonPath('data.discount.code', $first->json('data.discount.code'));
 
+        $this->postJson($this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com'), [
+            'email' => 'student@school.edu',
+            'idempotency_key' => 'claim-fast-pass-002',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.id', $first->json('data.id'))
+            ->assertJsonPath('data.discount.code', $first->json('data.discount.code'));
+
         $this->assertDatabaseCount('student_discount_claims', 1);
         $this->assertDatabaseCount('student_discount_codes', 1);
         Queue::assertPushed(SendStudentDiscountDecisionMail::class, function (SendStudentDiscountDecisionMail $job) use ($code): bool {
@@ -288,7 +307,7 @@ class StudentDiscountTest extends TestCase
                 && $job->codeId === $code->id;
         });
         Queue::assertPushed(SendStudentDiscountDecisionMail::class, 1);
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
         Http::assertSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'student-app-offline-token');
         Http::assertNotSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'shopify-test-token');
         Http::assertSent(function ($request): bool {
@@ -1081,6 +1100,21 @@ class StudentDiscountTest extends TestCase
         [$admin, $organization, $store] = $this->context('store-admin');
         $path = "student-discounts/{$organization->id}/{$store->id}/delete-test/student-id.jpg";
         Storage::disk('local')->put($path, 'private-student-evidence');
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
+        Http::fake(function ($request) {
+            if (str_contains((string) ($request['query'] ?? ''), 'discountCodeDelete')) {
+                return Http::response(['data' => ['discountCodeDelete' => [
+                    'deletedCodeDiscountId' => 'gid://shopify/DiscountCodeNode/delete-preserved',
+                    'userErrors' => [],
+                ]]]);
+            }
+
+            return Http::response(['data' => ['codeDiscountNodeByCode' => [
+                'id' => 'gid://shopify/DiscountCodeNode/delete-preserved',
+                'codeDiscount' => ['codes' => ['nodes' => [['asyncUsageCount' => 0]]]],
+            ]]]);
+        });
         $claim = StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -1133,7 +1167,7 @@ class StudentDiscountTest extends TestCase
         $this->assertNull($deleted->evidence_path);
         $this->assertNotNull($deleted->evidence_deleted_at);
         $this->assertNull($deleted->idempotency_key);
-        $this->assertDatabaseHas('student_discount_codes', ['id' => $code->id, 'claim_id' => $claim->id]);
+        $this->assertDatabaseMissing('student_discount_codes', ['id' => $code->id]);
         $this->assertDatabaseMissing('student_discount_claim_idempotencies', ['claim_id' => $claim->id]);
         $audit = AuditLog::query()->where('action', 'student_discount_claim_deleted')->sole();
         $this->assertSame($organization->id, $audit->organization_id);
@@ -1141,12 +1175,15 @@ class StudentDiscountTest extends TestCase
         $this->assertSame($admin->id, $audit->user_id);
         $this->assertSame($claim->id, $audit->subject_id);
         $this->assertTrue((bool) data_get($audit->metadata, 'evidence_deleted'));
+        $this->assertTrue((bool) data_get($audit->metadata, 'discount_code_deleted'));
         $auditPayload = json_encode($audit->toArray(), JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('delete-student@example.com', $auditPayload);
         $this->assertStringNotContainsString('private-student-evidence', $auditPayload);
 
         $this->actingAs($admin)->delete($deleteUrl)->assertRedirect();
         $this->assertSame(1, AuditLog::query()->where('action', 'student_discount_claim_deleted')->count());
+        Http::assertSent(fn ($request): bool => str_contains((string) ($request['query'] ?? ''), 'discountCodeDelete'));
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_contains((string) ($request['query'] ?? ''), 'discountCodeDelete')));
 
         $otherStore = $organization->stores()->create([
             'name' => 'Other Student Delete Store',

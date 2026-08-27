@@ -14,6 +14,7 @@ use App\Models\StudentDiscountEvidenceDeletion;
 use App\Models\User;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -345,38 +346,57 @@ class StudentDiscountClaimService
     {
         abort_unless((int) $store->organization_id === (int) $organization->id, 404);
 
-        return DB::transaction(function () use ($organization, $store, $claimUuid, $actor): bool {
-            $claim = StudentDiscountClaim::query()
-                ->where('organization_id', $organization->id)
-                ->where('store_id', $store->id)
-                ->where('uuid', $claimUuid)
-                ->lockForUpdate()
-                ->first();
-            if (! $claim) {
-                return false;
-            }
+        return Cache::lock("student-discount-claim-delete:{$store->id}:{$claimUuid}", 45)
+            ->block(10, function () use ($organization, $store, $claimUuid, $actor): bool {
+                $claim = StudentDiscountClaim::query()
+                    ->where('organization_id', $organization->id)
+                    ->where('store_id', $store->id)
+                    ->where('uuid', $claimUuid)
+                    ->first();
+                if (! $claim) {
+                    return false;
+                }
 
-            $hadEvidence = $this->deleteEvidenceFile($claim);
+                $discountCode = $claim->discountCode;
+                if ($discountCode) {
+                    $this->codes->delete($discountCode);
+                }
 
-            $this->audit($claim, $actor, 'student_discount_claim_deleted', [
-                'status' => $claim->status,
-                'evidence_deleted' => $hadEvidence,
-                'discount_code_present' => $claim->discountCode()->exists(),
-            ]);
-            DB::table('student_discount_claim_idempotencies')->where('claim_id', $claim->id)->delete();
-            $claim->forceFill([
-                'evidence_disk' => null,
-                'evidence_path' => null,
-                'evidence_mime' => null,
-                'evidence_size' => null,
-                'evidence_deleted_at' => $hadEvidence ? now() : $claim->evidence_deleted_at,
-                'idempotency_key' => null,
-                'request_fingerprint' => null,
-            ])->save();
-            $claim->delete();
+                return DB::transaction(function () use ($organization, $store, $claimUuid, $actor): bool {
+                    $claim = StudentDiscountClaim::query()
+                        ->where('organization_id', $organization->id)
+                        ->where('store_id', $store->id)
+                        ->where('uuid', $claimUuid)
+                        ->lockForUpdate()
+                        ->first();
+                    if (! $claim) {
+                        return false;
+                    }
 
-            return true;
-        });
+                    $hadEvidence = $this->deleteEvidenceFile($claim);
+                    $discountCode = $claim->discountCode()->lockForUpdate()->first();
+
+                    $this->audit($claim, $actor, 'student_discount_claim_deleted', [
+                        'status' => $claim->status,
+                        'evidence_deleted' => $hadEvidence,
+                        'discount_code_deleted' => (bool) $discountCode,
+                    ]);
+                    DB::table('student_discount_claim_idempotencies')->where('claim_id', $claim->id)->delete();
+                    $discountCode?->delete();
+                    $claim->forceFill([
+                        'evidence_disk' => null,
+                        'evidence_path' => null,
+                        'evidence_mime' => null,
+                        'evidence_size' => null,
+                        'evidence_deleted_at' => $hadEvidence ? now() : $claim->evidence_deleted_at,
+                        'idempotency_key' => null,
+                        'request_fingerprint' => null,
+                    ])->save();
+                    $claim->delete();
+
+                    return true;
+                });
+            });
     }
 
     public function verifyClaimToken(StudentDiscountClaim $claim, string $token): bool
