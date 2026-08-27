@@ -3,8 +3,14 @@
 namespace App\Services\StudentDiscount;
 
 use App\Mail\StudentDiscountDecisionMail;
+use App\Mail\StudentDiscountTemplatePreviewMail;
+use App\Models\AuditLog;
+use App\Models\Organization;
+use App\Models\Store;
+use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Models\User;
 use App\Services\SystemSettingsService;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
@@ -12,7 +18,10 @@ use Throwable;
 
 class StudentDiscountMailDeliveryService
 {
-    public function __construct(private SystemSettingsService $settings) {}
+    public function __construct(
+        private SystemSettingsService $settings,
+        private StudentDiscountEmailTemplateService $templates,
+    ) {}
 
     public function send(StudentDiscountClaim $claim, ?StudentDiscountCode $code): void
     {
@@ -23,11 +32,62 @@ class StudentDiscountMailDeliveryService
             throw new RuntimeException('Student discount decision email delivery is not configured.');
         }
 
+        $campaign = StudentDiscountCampaign::query()
+            ->where('organization_id', $claim->organization_id)
+            ->where('store_id', $claim->store_id)
+            ->first();
+        $storeName = Store::query()
+            ->where('organization_id', $claim->organization_id)
+            ->whereKey($claim->store_id)
+            ->value('name');
+        $rendered = $this->templates->render($code ? 'approval' : 'rejection', $campaign?->email_templates, [
+            'store_name' => (string) ($storeName ?: config('app.name')),
+            'applicant_email' => $claim->email,
+            'discount_code' => $code?->code,
+            'expires_at' => $code?->expires_at?->toIso8601String(),
+            'usage_limit' => $code?->usage_limit,
+            'rejection_reason' => $claim->rejection_reason,
+        ]);
+
         try {
-            Mail::to($claim->email)->send(new StudentDiscountDecisionMail($claim, $code));
+            Mail::to($claim->email)->send(new StudentDiscountDecisionMail(
+                $claim,
+                $code,
+                $rendered['subject'],
+                $rendered['body'],
+            ));
         } catch (Throwable) {
             throw new RuntimeException('Student discount decision email delivery failed.');
         }
+    }
+
+    /** @param array{subject: string, body: string} $template */
+    public function sendTest(Organization $organization, Store $store, User $actor, string $type, string $recipient, array $template): void
+    {
+        abort_unless($store->organization_id === $organization->id, 403);
+        if (! $this->hasDeliveringTransport()) {
+            $this->settings->applyRuntimeConfiguration();
+        }
+        if (! $this->hasDeliveringTransport()) {
+            throw new RuntimeException('Student discount email delivery is not configured.');
+        }
+
+        $rendered = $this->templates->renderAdHoc($type, $template, [
+            'store_name' => $store->name,
+        ]);
+        try {
+            Mail::to($recipient)->send(new StudentDiscountTemplatePreviewMail($rendered['subject'], $rendered['body']));
+        } catch (Throwable) {
+            throw new RuntimeException('Student discount template test email delivery failed.');
+        }
+
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'user_id' => $actor->id,
+            'action' => 'student_discount_email_template_test_sent',
+            'metadata' => ['scope' => 'store', 'template_type' => $type],
+        ]);
     }
 
     private function hasDeliveringTransport(): bool

@@ -465,6 +465,12 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::put('/campaign', [StudentDiscountController::class, 'updateCampaign'])
             ->middleware(['permission:student_discount.campaign.manage', 'throttle:30,1'])
             ->name('student-discounts.campaign.update');
+        Route::put('/email-templates', [StudentDiscountController::class, 'updateEmailTemplates'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:30,1'])
+            ->name('student-discounts.email-templates.update');
+        Route::post('/email-templates/test', [StudentDiscountController::class, 'testEmailTemplate'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:10,1'])
+            ->name('student-discounts.email-templates.test');
         Route::post('/claims/{claim}/approve', [StudentDiscountController::class, 'approve'])
             ->middleware(['permission:student_discount.approve', 'throttle:30,1'])
             ->name('student-discounts.claims.approve');

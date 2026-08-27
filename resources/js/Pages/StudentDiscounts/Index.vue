@@ -51,6 +51,15 @@ interface ClaimFilters {
 
 interface FilterOption { value: string; label: string }
 
+type EmailTemplateType = 'approval' | 'rejection';
+interface EmailTemplate { subject: string; body: string }
+interface EmailTemplateVariable { key: string; label: string; sample: string; types: EmailTemplateType[] }
+interface EmailTemplateConfiguration {
+    templates: Record<EmailTemplateType, EmailTemplate>;
+    defaults: Record<EmailTemplateType, EmailTemplate>;
+    variables: EmailTemplateVariable[];
+}
+
 interface BatchResult {
     requested: number;
     succeeded: number;
@@ -71,22 +80,24 @@ const props = defineProps<{
     organization: { id: number; name: string };
     store: { id: number; name: string; currency: string };
     campaign: Campaign;
+    emailTemplates: EmailTemplateConfiguration;
     claims: Pagination<Claim>;
     counts: { pending: number; approved: number; rejected: number };
     filters: ClaimFilters;
     filterOptions: { statuses: FilterOption[]; sources: FilterOption[]; review_methods: FilterOption[]; usage_statuses: FilterOption[] };
     batchResult: BatchResult | null;
-    permissions: { viewEvidence: boolean; approve: boolean; reject: boolean; deleteClaim: boolean; manageCampaign: boolean; analytics: boolean; audit: boolean };
+    permissions: { viewEvidence: boolean; approve: boolean; reject: boolean; deleteClaim: boolean; manageCampaign: boolean; manageEmailTemplates: boolean; analytics: boolean; audit: boolean };
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/student-discounts`;
-type StudentDiscountTab = 'campaign' | 'claims';
+type StudentDiscountTab = 'campaign' | 'claims' | 'emails';
 const tabOptions: Array<{ value: StudentDiscountTab; name: string; description: string }> = [
     { value: 'claims', name: '申请记录', description: '审核申请并管理优惠码' },
     { value: 'campaign', name: '活动配置', description: '设置优惠规则与适用范围' },
+    { value: 'emails', name: '邮件内容', description: '编辑批准与拒绝通知' },
 ];
 const requestedTab = new URL(usePage().url, 'http://localhost').searchParams.get('tab');
-const activeTab = ref<StudentDiscountTab>(requestedTab === 'campaign' ? 'campaign' : 'claims');
+const activeTab = ref<StudentDiscountTab>(requestedTab === 'campaign' || requestedTab === 'emails' ? requestedTab : 'claims');
 const selectTab = (tab: StudentDiscountTab) => {
     activeTab.value = tab;
 
@@ -152,6 +163,49 @@ const saveCampaign = () => campaignForm
         education_email_domains: lines(data.education_email_domains_text),
     }))
     .put(`${baseUrl}/campaign`, { preserveScroll: true });
+
+const selectedEmailTemplate = ref<EmailTemplateType>('approval');
+const emailTemplateForm = useForm({
+    approval: { ...props.emailTemplates.templates.approval },
+    rejection: { ...props.emailTemplates.templates.rejection },
+});
+const currentEmailSubject = computed({
+    get: () => emailTemplateForm[selectedEmailTemplate.value].subject,
+    set: (value: string) => { emailTemplateForm[selectedEmailTemplate.value].subject = value; },
+});
+const currentEmailBody = computed({
+    get: () => emailTemplateForm[selectedEmailTemplate.value].body,
+    set: (value: string) => { emailTemplateForm[selectedEmailTemplate.value].body = value; },
+});
+const availableEmailVariables = computed(() => props.emailTemplates.variables.filter(variable => variable.types.includes(selectedEmailTemplate.value)));
+const emailVariableToken = (key: string) => `{{ ${key} }}`;
+const renderEmailPreview = (content: string) => props.emailTemplates.variables.reduce(
+    (rendered, variable) => rendered.split(emailVariableToken(variable.key)).join(variable.sample),
+    content,
+);
+const emailPreviewSubject = computed(() => renderEmailPreview(currentEmailSubject.value));
+const emailPreviewBody = computed(() => renderEmailPreview(currentEmailBody.value));
+const insertEmailVariable = (key: string) => {
+    const token = emailVariableToken(key);
+    currentEmailBody.value = `${currentEmailBody.value}${currentEmailBody.value.endsWith(' ') || currentEmailBody.value.endsWith('\n') ? '' : ' '}${token}`;
+};
+const restoreEmailDefault = () => {
+    emailTemplateForm[selectedEmailTemplate.value] = { ...props.emailTemplates.defaults[selectedEmailTemplate.value] };
+    emailTemplateForm.clearErrors();
+};
+const saveEmailTemplates = () => emailTemplateForm.put(`${baseUrl}/email-templates`, {
+    preserveScroll: true,
+    onSuccess: () => emailTemplateForm.defaults(),
+});
+const testEmailForm = useForm({ email: '', subject: '', body: '' });
+const sendTestEmail = () => testEmailForm
+    .transform(data => ({
+        type: selectedEmailTemplate.value,
+        email: data.email,
+        subject: currentEmailSubject.value,
+        body: currentEmailBody.value,
+    }))
+    .post(`${baseUrl}/email-templates/test`, { preserveScroll: true });
 
 const filterForm = useForm({
     tab: 'claims',
@@ -390,7 +444,7 @@ const recognitionFailureLabel = (code: string | null) => ({
             </section>
 
             <nav class="overflow-x-auto" aria-label="学生优惠管理" role="tablist">
-                <div class="grid min-w-[520px] grid-cols-2 gap-1.5 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5">
+                <div class="grid min-w-[760px] grid-cols-3 gap-1.5 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5">
                     <button
                         v-for="(tab, index) in tabOptions"
                         :id="`${tab.value}-tab`"
@@ -413,6 +467,10 @@ const recognitionFailureLabel = (code: string | null) => ({
                         >
                             <svg v-if="tab.value === 'campaign'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h10m4 0h2M4 17h2m4 0h10M14 5v4M6 15v4" />
+                            </svg>
+                            <svg v-else-if="tab.value === 'emails'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5v10.5H3.75V6.75Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 7.5 7.5 5.25 7.5-5.25" />
                             </svg>
                             <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 3.75h7.5L19 8.25v12H7v-16.5Z" />
@@ -466,7 +524,7 @@ const recognitionFailureLabel = (code: string | null) => ({
             </section>
 
             <section
-                v-else
+                v-else-if="activeTab === 'claims'"
                 id="claims-panel"
                 role="tabpanel"
                 aria-labelledby="claims-tab"
@@ -536,6 +594,68 @@ const recognitionFailureLabel = (code: string | null) => ({
                     </table>
                 </div>
                 <footer v-if="claims.links.length > 3" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-xs text-slate-500"><span>第 {{ claims.from ?? 0 }}–{{ claims.to ?? 0 }} 条，共 {{ claims.total }} 条</span><div class="flex gap-1"><Link v-for="item in claims.links" :key="item.label" :href="claimPageUrl(item.url)" preserve-scroll class="rounded-lg px-2.5 py-1.5 ring-1" :class="[item.active ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200', !item.url ? 'pointer-events-none opacity-40' : '']"><span v-html="item.label" /></Link></div></footer>
+            </section>
+
+            <section
+                v-else
+                id="emails-panel"
+                role="tabpanel"
+                aria-labelledby="emails-tab"
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+                <header class="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">每店铺独立</p><h2 class="mt-1 text-xl font-semibold text-slate-950">邮件内容</h2><p class="mt-1 text-xs leading-5 text-slate-500">批准、自动发码和人工拒绝通知共用这里的内容；发送身份继续使用现有系统邮件配置。</p></div>
+                    <span class="text-xs font-semibold text-slate-500">{{ permissions.manageEmailTemplates ? '可编辑' : '只读' }}</span>
+                </header>
+
+                <div class="border-b border-slate-100 bg-slate-50/60 p-5 sm:p-7">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <button type="button" class="rounded-2xl border p-4 text-left transition" :class="selectedEmailTemplate === 'approval' ? 'border-emerald-300 bg-emerald-50 ring-1 ring-emerald-200' : 'border-slate-200 bg-white hover:border-slate-300'" @click="selectedEmailTemplate = 'approval'">
+                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">批准与发码邮件</span><span class="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">批准</span></span>
+                            <span class="mt-1 block text-xs leading-5 text-slate-500">教育邮箱快速通过、AI 通过和人工批准后发送。</span>
+                        </button>
+                        <button type="button" class="rounded-2xl border p-4 text-left transition" :class="selectedEmailTemplate === 'rejection' ? 'border-rose-300 bg-rose-50 ring-1 ring-rose-200' : 'border-slate-200 bg-white hover:border-slate-300'" @click="selectedEmailTemplate = 'rejection'">
+                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">拒绝通知邮件</span><span class="rounded-full bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">拒绝</span></span>
+                            <span class="mt-1 block text-xs leading-5 text-slate-500">人工拒绝申请后发送，并自动带入拒绝原因。</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="p-5 sm:p-7">
+                    <div class="grid gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+                        <div class="space-y-5">
+                            <label class="block"><span class="text-sm font-semibold text-slate-800">邮件主题</span><input v-model="currentEmailSubject" :disabled="!permissions.manageEmailTemplates" maxlength="180" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <label class="block"><span class="text-sm font-semibold text-slate-800">邮件正文</span><textarea v-model="currentEmailBody" :disabled="!permissions.manageEmailTemplates" rows="12" maxlength="5000" class="mt-2 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 outline-none focus:border-emerald-500 disabled:bg-slate-50" /></label>
+                            <div>
+                                <p class="text-xs font-semibold text-slate-600">插入变量</p>
+                                <div class="mt-2 flex flex-wrap gap-2">
+                                    <button v-for="variable in availableEmailVariables" :key="variable.key" type="button" :disabled="!permissions.manageEmailTemplates" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50" :title="variable.label" @click="insertEmailVariable(variable.key)">{{ emailVariableToken(variable.key) }}</button>
+                                </div>
+                                <p class="mt-2 text-xs leading-5 text-slate-400">仅支持上方安全变量，不执行 HTML、脚本或其他模板代码。批准正文必须保留优惠码变量，拒绝正文必须保留拒绝原因变量。</p>
+                            </div>
+                            <div v-if="emailTemplateForm.errors['approval.body'] || emailTemplateForm.errors['rejection.body'] || emailTemplateForm.errors['approval.subject'] || emailTemplateForm.errors['rejection.subject']" class="rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700">
+                                {{ emailTemplateForm.errors['approval.body'] || emailTemplateForm.errors['rejection.body'] || emailTemplateForm.errors['approval.subject'] || emailTemplateForm.errors['rejection.subject'] }}
+                            </div>
+                            <div v-if="permissions.manageEmailTemplates" class="flex flex-wrap gap-2">
+                                <button type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50" @click="restoreEmailDefault">恢复当前默认内容</button>
+                                <button type="button" :disabled="emailTemplateForm.processing" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" @click="saveEmailTemplates">{{ emailTemplateForm.processing ? '保存中…' : '保存两套邮件内容' }}</button>
+                            </div>
+                        </div>
+
+                        <aside class="space-y-4">
+                            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+                                <div class="border-b border-slate-200 bg-white px-4 py-3"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">实时预览</p><p class="mt-1 break-words text-sm font-semibold text-slate-900">{{ emailPreviewSubject }}</p></div>
+                                <div class="min-h-72 whitespace-pre-line px-5 py-5 text-sm leading-7 text-slate-700">{{ emailPreviewBody }}</div>
+                            </div>
+                            <form v-if="permissions.manageEmailTemplates" class="rounded-2xl border border-blue-100 bg-blue-50 p-4" @submit.prevent="sendTestEmail">
+                                <p class="text-sm font-semibold text-blue-950">发送测试邮件</p>
+                                <p class="mt-1 text-xs leading-5 text-blue-700">使用当前编辑内容和示例变量发送，不会创建申请或优惠码。</p>
+                                <div class="mt-3 flex flex-col gap-2 sm:flex-row xl:flex-col 2xl:flex-row"><input v-model="testEmailForm.email" type="email" maxlength="254" required placeholder="测试收件邮箱" class="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500" /><button :disabled="testEmailForm.processing" class="shrink-0 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{{ testEmailForm.processing ? '发送中…' : '发送测试' }}</button></div>
+                                <p v-if="testEmailForm.errors.email || testEmailForm.errors.subject || testEmailForm.errors.body" class="mt-2 text-xs text-rose-600">{{ testEmailForm.errors.email || testEmailForm.errors.subject || testEmailForm.errors.body }}</p>
+                            </form>
+                        </aside>
+                    </div>
+                </div>
             </section>
 
             <Teleport to="body">
