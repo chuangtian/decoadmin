@@ -8,6 +8,7 @@ use App\Models\Store;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Support\Facades\DB;
 
 class ShopifyStudentDiscountAppService
 {
@@ -29,7 +30,10 @@ class ShopifyStudentDiscountAppService
         }
         GRAPHQL;
 
-    public function __construct(private HttpFactory $http) {}
+    public function __construct(
+        private HttpFactory $http,
+        private StudentDiscountAppRegistryService $registry,
+    ) {}
 
     public function managementStore(User $user, string $shop): Store
     {
@@ -88,20 +92,36 @@ class ShopifyStudentDiscountAppService
             throw new StudentDiscountException('SHOPIFY_PROXY_PATH_WRITE_FAILED', 'Shopify 未能保存 App Proxy 路径。', 502);
         }
 
-        AuditLog::query()->create([
-            'organization_id' => $store->organization_id,
-            'store_id' => $store->id,
-            'action' => 'student_discount_shopify_app_bootstrapped',
-            'subject_type' => Store::class,
-            'subject_id' => $store->id,
-            'metadata' => [
-                'scope' => 'store',
-                'environment' => (string) config('student_discount.environment'),
-                'proxy_path' => $proxyPath,
-                'app_installation_id' => $installationId,
-                'granted_scopes' => $installationScopes,
-            ],
-        ]);
+        $connection = $store->shopifyConnection()->whereIn('status', ['connected', 'warning'])->first();
+        if (! $connection) {
+            throw new StudentDiscountException('STORE_NOT_CONNECTED', '该 Shopify 店铺尚未连接 DecoAdmin。', 409);
+        }
+
+        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath): void {
+            $this->registry->synchronizeInstallation(
+                $store,
+                $connection,
+                'active',
+                $installationScopes,
+                'student_discount_bootstrap',
+                $installationId,
+            );
+
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'action' => 'student_discount_shopify_app_bootstrapped',
+                'subject_type' => Store::class,
+                'subject_id' => $store->id,
+                'metadata' => [
+                    'scope' => 'store',
+                    'environment' => (string) config('student_discount.environment'),
+                    'proxy_path' => $proxyPath,
+                    'app_installation_id' => $installationId,
+                    'granted_scopes' => $installationScopes,
+                ],
+            ]);
+        });
 
         return ['app_installation_id' => $installationId, 'proxy_path' => $proxyPath];
     }
@@ -186,7 +206,9 @@ class ShopifyStudentDiscountAppService
                 ->timeout(20)
                 ->post("https://{$shop}/admin/api/".(string) config('shopify.api_version').'/graphql.json', [
                     'query' => $query,
-                    'variables' => $variables,
+                    // GraphQL requires variables to be a JSON object. PHP's empty array
+                    // would otherwise be encoded as `[]` and rejected by Shopify.
+                    'variables' => (object) $variables,
                 ]);
         } catch (ConnectionException) {
             throw new StudentDiscountException('SHOPIFY_ADMIN_API_TIMEOUT', 'Shopify Admin API 请求超时。', 502);

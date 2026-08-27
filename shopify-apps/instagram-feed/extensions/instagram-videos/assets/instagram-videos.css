@@ -1,0 +1,412 @@
+/* Instagram 视频 app block */
+
+.igv {
+  --igv-arrow-size: 40px;
+  box-sizing: border-box;
+  max-width: var(--igv-max-width, 100%);
+  margin: 0 auto;
+  color: var(--igv-text, currentColor);
+}
+
+.igv *,
+.igv *::before,
+.igv *::after {
+  box-sizing: border-box;
+}
+
+.igv--empty {
+  padding: 24px;
+  border: 1px dashed rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.igv__empty-text {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.75;
+}
+
+/* ---------- 头部 ---------- */
+
+.igv__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.igv__heading {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 28px);
+  line-height: 1.2;
+}
+
+.igv__account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.igv__account:hover span {
+  text-decoration: underline;
+}
+
+.igv__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* ---------- 列表 ---------- */
+
+.igv__viewport {
+  position: relative;
+}
+
+.igv__list {
+  display: grid;
+  grid-template-columns: repeat(var(--igv-columns, 4), minmax(0, 1fr));
+  gap: var(--igv-gap, 12px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.igv[data-layout="carousel"] .igv__list {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+
+.igv[data-layout="carousel"] .igv__list::-webkit-scrollbar {
+  display: none;
+}
+
+.igv[data-layout="carousel"] .igv__item {
+  flex: 0 0
+    calc(
+      (100% - (var(--igv-columns, 4) - 1) * var(--igv-gap, 12px)) /
+        var(--igv-columns, 4)
+    );
+  scroll-snap-align: start;
+}
+
+.igv__item {
+  margin: 0;
+  min-width: 0;
+}
+
+.igv__media {
+  position: relative;
+  aspect-ratio: var(--igv-ratio, 9 / 16);
+  overflow: hidden;
+  border-radius: var(--igv-radius, 12px);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.igv__video,
+.igv__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---------- 播放按钮 ---------- */
+
+.igv__play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+.igv__play-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.igv__play-icon svg {
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+}
+
+.igv__play:hover .igv__play-icon,
+.igv__play:focus-visible .igv__play-icon {
+  transform: scale(1.08);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.igv__play:focus-visible {
+  outline: 2px solid var(--igv-accent, #1a1a1a);
+  outline-offset: 2px;
+}
+
+/* ---------- 文案与商品 ---------- */
+
+.igv__caption {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.igv__products {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.igv__product {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.igv__product:hover {
+  background: var(--igv-accent, #1a1a1a);
+  border-color: var(--igv-accent, #1a1a1a);
+  color: #fff;
+}
+
+/* ---------- 轮播箭头 ---------- */
+
+.igv__arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--igv-arrow-size);
+  height: var(--igv-arrow-size);
+  transform: translateY(-50%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1a1a1a;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.igv__arrow[hidden] {
+  display: none;
+}
+
+.igv__arrow svg {
+  width: 20px;
+  height: 20px;
+}
+
+.igv__arrow--prev {
+  left: 0;
+  transform: translate(-40%, -50%);
+}
+
+.igv__arrow--next {
+  right: 0;
+  transform: translate(40%, -50%);
+}
+
+.igv__arrow:focus-visible {
+  outline: 2px solid var(--igv-accent, #1a1a1a);
+  outline-offset: 2px;
+}
+
+@media screen and (max-width: 749px) {
+  .igv__list {
+    grid-template-columns: repeat(var(--igv-columns-mobile, 2), minmax(0, 1fr));
+  }
+
+  .igv[data-layout="carousel"] .igv__item {
+    flex-basis: calc(
+      (100% - (var(--igv-columns-mobile, 2) - 1) * var(--igv-gap, 12px)) /
+        var(--igv-columns-mobile, 2)
+    );
+  }
+
+  .igv__arrow--prev {
+    transform: translate(8px, -50%);
+  }
+
+  .igv__arrow--next {
+    transform: translate(-8px, -50%);
+  }
+}
+
+/* ---------- 放大播放 ---------- */
+
+.igv-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.igv-lightbox[hidden] {
+  display: none;
+}
+
+.igv-lightbox__dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, 100%);
+  width: 100%;
+}
+
+.igv-lightbox__video {
+  width: 100%;
+  max-height: 78vh;
+  border-radius: 12px;
+  background: #000;
+}
+
+.igv-lightbox__meta {
+  width: 100%;
+  color: #fff;
+}
+
+.igv-lightbox__caption {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  max-height: 4.5em;
+  overflow-y: auto;
+}
+
+.igv-lightbox__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.igv-lightbox__link {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 999px;
+  font-size: 13px;
+  text-decoration: none;
+  color: #fff;
+}
+
+.igv-lightbox__link:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.igv-lightbox__button {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.igv-lightbox__button:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.igv-lightbox__close {
+  top: -52px;
+  right: 0;
+}
+
+.igv-lightbox__prev {
+  top: 50%;
+  left: -56px;
+  transform: translateY(-50%);
+}
+
+.igv-lightbox__next {
+  top: 50%;
+  right: -56px;
+  transform: translateY(-50%);
+}
+
+@media screen and (max-width: 749px) {
+  .igv-lightbox {
+    padding: 16px;
+  }
+
+  .igv-lightbox__close {
+    top: 0;
+    right: 0;
+  }
+
+  .igv-lightbox__prev {
+    left: 4px;
+    top: auto;
+    bottom: -4px;
+    transform: none;
+  }
+
+  .igv-lightbox__next {
+    right: 4px;
+    top: auto;
+    bottom: -4px;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .igv[data-layout="carousel"] .igv__list {
+    scroll-behavior: auto;
+  }
+
+  .igv__play-icon {
+    transition: none;
+  }
+}

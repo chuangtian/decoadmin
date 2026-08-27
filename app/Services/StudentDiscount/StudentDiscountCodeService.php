@@ -83,7 +83,7 @@ class StudentDiscountCodeService
 
                 $store = $claim->store;
                 $connection = $store->shopifyConnection;
-                if (! $connection || $connection->status !== 'active') {
+                if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
                     throw new StudentDiscountException('SHOPIFY_NOT_CONNECTED', '店铺尚未连接可用的 Shopify Admin API。', 409);
                 }
 
@@ -129,7 +129,7 @@ class StudentDiscountCodeService
     public function syncUsage(StudentDiscountCode $code): StudentDiscountCode
     {
         $connection = $code->store->shopifyConnection;
-        if (! $connection || $connection->status !== 'active') {
+        if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
             return $code->refreshStatus();
         }
 

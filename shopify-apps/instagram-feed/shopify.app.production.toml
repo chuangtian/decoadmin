@@ -1,0 +1,30 @@
+# 生产环境是 Dev Dashboard 里独立的 Shopify App。
+# 该 App 尚未创建，所以 client_id 留空；创建后用 `npm run config:link:production` 写入。
+# 留空而不是预填，是为了避免误把生产配置指向其他环境的 App。
+client_id = ""
+name = "Instagram Feed (Deco)"
+handle = "deco-instagram-feed"
+application_url = "https://admin.decomkt.com/shopify-app/instagram-feed"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://admin.decomkt.com/api/shopify-app/auth/callback" ]

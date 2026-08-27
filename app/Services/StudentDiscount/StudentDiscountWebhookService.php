@@ -3,7 +3,6 @@
 namespace App\Services\StudentDiscount;
 
 use App\Exceptions\StudentDiscountException;
-use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Store;
@@ -17,7 +16,10 @@ class StudentDiscountWebhookService
 {
     private const ALLOWED_TOPICS = ['app/uninstalled', 'app/scopes_update'];
 
-    public function __construct(private ShopifyWebhookHmacValidator $hmacValidator) {}
+    public function __construct(
+        private ShopifyWebhookHmacValidator $hmacValidator,
+        private StudentDiscountAppRegistryService $registry,
+    ) {}
 
     /**
      * @param  array<string, string|null>  $headers
@@ -65,7 +67,31 @@ class StudentDiscountWebhookService
         $payloadHash = hash('sha256', $rawPayload);
 
         return DB::transaction(function () use ($store, $connection, $webhookId, $topic, $shopDomain, $apiVersion, $headers, $rawPayload, $payloadHash, $scopes): array {
-            $app = $this->configuredApp();
+            $existingEvent = WebhookEvent::query()
+                ->where('webhook_id', $webhookId)
+                ->lockForUpdate()
+                ->first();
+            if ($existingEvent) {
+                $expectedHandle = trim((string) config('student_discount.active.handle'));
+                $existingAppHandle = $existingEvent->app?->handle;
+                if (! is_string($existingEvent->payload_sha256)
+                    || ! hash_equals($existingEvent->payload_sha256, $payloadHash)
+                    || ! is_string($existingAppHandle)
+                    || ! hash_equals($expectedHandle, $existingAppHandle)) {
+                    throw new StudentDiscountException('WEBHOOK_ID_CONFLICT', 'Webhook 事件 ID 与已保存事件冲突。', 409);
+                }
+
+                return ['event' => $existingEvent, 'created' => false];
+            }
+
+            $installation = $this->registry->synchronizeInstallation(
+                $store,
+                $connection,
+                $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
+                $scopes,
+                'student_discount_webhook',
+            );
+            $app = $installation->app;
             $receivedAt = now();
             $event = WebhookEvent::query()->firstOrCreate(
                 ['webhook_id' => $webhookId],
@@ -102,29 +128,6 @@ class StudentDiscountWebhookService
 
                 return ['event' => $event, 'created' => false];
             }
-
-            $installation = AppInstallation::withTrashed()
-                ->where('app_id', $app->id)
-                ->where('store_id', $store->id)
-                ->lockForUpdate()
-                ->first() ?? new AppInstallation;
-            $installation->fill([
-                'app_id' => $app->id,
-                'store_id' => $store->id,
-                'shopify_connection_id' => $connection->id,
-                'status' => $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
-                'granted_scopes' => $topic === 'app/scopes_update'
-                    ? $scopes
-                    : (is_array($installation->granted_scopes) ? $installation->granted_scopes : []),
-                'settings' => [
-                    'source' => 'student_discount_webhook',
-                    'environment' => (string) config('student_discount.environment'),
-                ],
-                'installed_at' => $installation->installed_at ?? $receivedAt,
-                'uninstalled_at' => $topic === 'app/uninstalled' ? $receivedAt : null,
-            ]);
-            $installation->deleted_at = null;
-            $installation->save();
 
             AuditLog::query()->create([
                 'organization_id' => $store->organization_id,
@@ -182,10 +185,10 @@ class StudentDiscountWebhookService
             ->where('shopify_domain', $shopDomain)
             ->where('status', 'active')
             ->whereHas('organization', fn ($query) => $query->where('status', 'active'))
-            ->whereHas('shopifyConnection', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('shopifyConnection', fn ($query) => $query->whereIn('status', ['connected', 'warning']))
             ->with([
                 'organization',
-                'shopifyConnection' => fn ($query) => $query->where('status', 'active'),
+                'shopifyConnection' => fn ($query) => $query->whereIn('status', ['connected', 'warning']),
             ])
             ->first();
         if (! $store || ! $store->organization || ! $store->shopifyConnection) {
@@ -193,58 +196,5 @@ class StudentDiscountWebhookService
         }
 
         return $store;
-    }
-
-    private function configuredApp(): App
-    {
-        $handle = trim((string) config('student_discount.active.handle'));
-        $name = trim((string) config('student_discount.active.name'));
-        $clientId = trim((string) config('student_discount.active.client_id'));
-        $secret = (string) config('student_discount.active.client_secret');
-        if ($handle === '' || $name === '' || $clientId === '' || $secret === '') {
-            throw new StudentDiscountException('STUDENT_DISCOUNT_APP_NOT_CONFIGURED', '学生优惠 App 当前环境尚未配置。', 503);
-        }
-
-        $app = App::withTrashed()->where('handle', $handle)->lockForUpdate()->first();
-        if ($app && ($app->organization_id !== null
-            || (filled($app->client_id) && ! hash_equals((string) $app->client_id, $clientId)))) {
-            throw new StudentDiscountException('STUDENT_DISCOUNT_APP_REGISTRY_CONFLICT', '学生优惠 App 注册信息冲突。', 409);
-        }
-        $app ??= new App(['handle' => $handle]);
-        $scopes = array_values((array) config('student_discount.required_scopes', []));
-        $apiVersion = (string) config('shopify.api_version');
-        $settings = [
-            'managed_by' => 'student_discount_config',
-            'environment' => (string) config('student_discount.environment'),
-        ];
-        $secretMatches = is_string($app->client_secret_encrypted)
-            && hash_equals($app->client_secret_encrypted, $secret);
-        $needsUpdate = ! $app->exists
-            || $app->trashed()
-            || $app->name !== $name
-            || $app->client_id !== $clientId
-            || ! $secretMatches
-            || $app->distribution !== 'custom'
-            || $app->status !== 'active'
-            || $app->scopes !== $scopes
-            || $app->webhook_api_version !== $apiVersion
-            || $app->settings !== $settings;
-        if ($needsUpdate) {
-            $app->fill([
-                'organization_id' => null,
-                'name' => $name,
-                'client_id' => $clientId,
-                'client_secret_encrypted' => $secret,
-                'distribution' => 'custom',
-                'status' => 'active',
-                'scopes' => $scopes,
-                'webhook_api_version' => $apiVersion,
-                'settings' => $settings,
-            ]);
-            $app->deleted_at = null;
-            $app->save();
-        }
-
-        return $app;
     }
 }

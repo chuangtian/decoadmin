@@ -1,0 +1,35 @@
+# 测试环境与 local 共用同一个 Shopify App（Cloudflare 隧道已废弃，local 不再单独维护）。
+# 因此这里的 client_id 与 shopify.app.toml、shopify.app.local.toml 相同。
+# 一个 App 只有一份 application_url 与一组 webhook 地址，共用后该 App 固定指向 testadmin，
+# 所以不要再执行 `deploy:local`：那会把地址改回隧道，直接打断测试环境。
+# 生产环境必须是 Dev Dashboard 里另一个独立 App，client_id 不可与此相同。
+#
+# 不要用 `shopify app config link` 覆盖本文件：它会从 Dashboard 拉取配置，
+# 把下面的 scopes 和 webhook 订阅冲成 Dashboard 的默认值。
+# 配置一律以本文件为准，改完用 `npm run deploy:test` 推送。
+client_id = "d3446448682d2950aa75cea4a399d50f"
+name = "Instagram Feed (Deco)"
+handle = "deco-instagram-feed-test"
+application_url = "https://testadmin.decomkt.com/shopify-app/instagram-feed"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://testadmin.decomkt.com/api/shopify-app/auth/callback" ]

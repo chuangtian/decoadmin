@@ -9,6 +9,7 @@
     "shopify": "shopify",
     "build": "npm run build:local",
     "build:storefront": "terser scripts/student-discount-storefront.js --compress --mangle --output extensions/student-discount-block/assets/student-discount.js",
+    "test:app-home": "node --test extensions/app-home/src/runtime.test.mjs",
     "build:local": "npm run build:storefront && shopify app build --config local",
     "build:test": "npm run build:storefront && shopify app build --config test",
     "build:production": "npm run build:storefront && shopify app build --config production",

@@ -103,7 +103,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertSame($rawPayload, $event->payload_encrypted);
         $this->assertArrayNotHasKey('hmac', $event->headers);
         $this->assertSame($store->id, $audit->store_id);
-        $this->assertSame('active', $connection->fresh()->status);
+        $this->assertSame('connected', $connection->fresh()->status);
         $this->assertSame('core-shopify-token', $connection->fresh()->access_token_encrypted);
         $this->assertStringNotContainsString('student-test-webhook-secret', (string) DB::table('apps')->value('client_secret_encrypted'));
         $this->assertStringNotContainsString('attacker.myshopify.com', (string) DB::table('webhook_events')->value('payload_encrypted'));
@@ -147,9 +147,47 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertNull($installation->uninstalled_at);
         $this->assertSame(['read_products', 'write_discounts'], $installation->granted_scopes);
         $this->assertSame($store->id, $installation->store_id);
-        $this->assertSame('active', $connection->fresh()->status);
+        $this->assertSame('connected', $connection->fresh()->status);
         $this->assertDatabaseCount('webhook_events', 2);
         $this->assertSame(1, AuditLog::query()->where('action', 'student_discount_shopify_app_scopes_updated')->count());
+    }
+
+    public function test_reconcile_command_registers_only_the_exact_previously_bootstrapped_store(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $connection = $this->connection($store);
+        $otherStore = $organization->stores()->create([
+            'name' => 'Do Not Touch',
+            'shopify_domain' => 'do-not-touch.myshopify.com',
+            'status' => 'active',
+        ]);
+        $this->connection($otherStore);
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'action' => 'student_discount_shopify_app_bootstrapped',
+            'subject_type' => Store::class,
+            'subject_id' => $store->id,
+            'metadata' => [
+                'app_installation_id' => 'gid://shopify/AppInstallation/789',
+                'granted_scopes' => ['write_discounts', 'read_products', 'read_discounts', 'write_app_proxy'],
+            ],
+        ]);
+
+        $this->artisan('student-discounts:reconcile-installation', ['shop' => $store->shopify_domain])
+            ->expectsOutput('学生优惠 App 安装记录已同步。')
+            ->assertSuccessful();
+
+        $app = App::query()->where('handle', 'deco-student-discount-test')->sole();
+        $installation = AppInstallation::query()->whereBelongsTo($app)->whereBelongsTo($store)->sole();
+        $this->assertSame($connection->id, $installation->shopify_connection_id);
+        $this->assertSame('gid://shopify/AppInstallation/789', $installation->external_installation_id);
+        $this->assertSame('active', $installation->status);
+        $this->assertFalse(AppInstallation::query()->whereBelongsTo($otherStore)->exists());
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'student_discount_shopify_app_reconciled',
+            'store_id' => $store->id,
+        ]);
     }
 
     public function test_webhook_rejects_wrong_environment_secret_unsupported_topic_and_body_only_shop(): void
@@ -180,7 +218,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
         $this->assertDatabaseCount('app_installations', 0);
         $this->assertDatabaseCount('webhook_events', 0);
         $this->assertDatabaseCount('audit_logs', 0);
-        $this->assertSame('active', $store->shopifyConnection->fresh()->status);
+        $this->assertSame('connected', $store->shopifyConnection->fresh()->status);
     }
 
     /** @return array{User, Organization, Store} */
@@ -219,7 +257,7 @@ class StudentDiscountShopifyAppEntryTest extends TestCase
             'access_token_encrypted' => 'core-shopify-token',
             'scopes' => ['read_products'],
             'api_version' => '2026-07',
-            'status' => 'active',
+            'status' => 'connected',
             'installed_at' => now(),
         ]);
     }

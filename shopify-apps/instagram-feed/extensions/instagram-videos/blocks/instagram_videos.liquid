@@ -1,0 +1,389 @@
+{%- liquid
+  # 前台数据来自 DecoAdmin 写入的 app-data metafield，不依赖 DecoAdmin 在线。
+  assign feed = app.metafields.instagram_videos.feed.value
+
+  # 优先按商家填写的展示组标识取内容；未填或找不到时回退到第一个组。
+  # feed.items 是旧版兼容字段，等价于第一个组的内容。
+  assign gallery_handle = block.settings.gallery_handle | strip
+  assign items = feed.items
+  assign gallery_missing = false
+
+  if gallery_handle != blank
+    assign matched = feed.galleries | where: 'handle', gallery_handle | first
+    if matched
+      assign items = matched.items
+    else
+      assign gallery_missing = true
+    endif
+  endif
+
+  if block.settings.media_filter == 'videos'
+    assign items = items | where: 'media_type', 'VIDEO'
+  endif
+
+  case block.settings.aspect_ratio
+    when 'portrait'
+      assign ratio = '9 / 16'
+    when 'four_five'
+      assign ratio = '4 / 5'
+    when 'square'
+      assign ratio = '1 / 1'
+    else
+      assign ratio = '16 / 9'
+  endcase
+-%}
+
+{%- if items == blank -%}
+  {%- comment -%} 只在主题编辑器里提示，店面访客看不到空占位。 {%- endcomment -%}
+  {%- if request.design_mode -%}
+    <div class="igv igv--empty">
+      <p class="igv__empty-text">
+        {%- if gallery_missing -%}
+          找不到标识为「{{ gallery_handle | escape }}」的展示组。请在 DecoAdmin 的 Instagram 内容页面确认组标识后重新填写。
+        {%- else -%}
+          还没有可展示的内容。请在 DecoAdmin 的 Instagram 内容页面连接账号、同步内容、把内容加入展示组，然后点「发布到前台」。
+        {%- endif -%}
+      </p>
+    </div>
+  {%- endif -%}
+{%- else -%}
+  <div
+    class="igv"
+    id="igv-{{ block.id }}"
+    data-igv
+    data-layout="{{ block.settings.layout }}"
+    data-autoplay="{{ block.settings.autoplay }}"
+    data-lightbox="{{ block.settings.enable_lightbox }}"
+    style="
+      --igv-columns: {{ block.settings.columns_desktop }};
+      --igv-columns-mobile: {{ block.settings.columns_mobile }};
+      --igv-gap: {{ block.settings.gap }}px;
+      --igv-radius: {{ block.settings.corner_radius }}px;
+      --igv-ratio: {{ ratio }};
+      --igv-max-width: {% if block.settings.full_width %}100%{% else %}{{ block.settings.max_width }}px{% endif %};
+      --igv-text: {{ block.settings.text_color }};
+      --igv-accent: {{ block.settings.accent_color }};
+    "
+  >
+    {%- if block.settings.heading != blank or block.settings.show_account -%}
+      <div class="igv__header">
+        {%- if block.settings.heading != blank -%}
+          <h2 class="igv__heading">{{ block.settings.heading | escape }}</h2>
+        {%- endif -%}
+
+        {%- if block.settings.show_account and feed.username != blank -%}
+          <a
+            class="igv__account"
+            href="{{ feed.profile_url | default: '#' }}"
+            target="_blank"
+            rel="noopener nofollow"
+          >
+            {%- if feed.avatar_url != blank -%}
+              <img
+                class="igv__avatar"
+                src="{{ feed.avatar_url }}"
+                alt="{{ feed.username | escape }}"
+                width="32"
+                height="32"
+                loading="lazy"
+              >
+            {%- endif -%}
+            <span>@{{ feed.username | escape }}</span>
+          </a>
+        {%- endif -%}
+      </div>
+    {%- endif -%}
+
+    <div class="igv__viewport">
+      {%- if block.settings.layout == 'carousel' -%}
+        <button
+          class="igv__arrow igv__arrow--prev"
+          type="button"
+          data-igv-prev
+          aria-label="上一个视频"
+          hidden
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      {%- endif -%}
+
+      <ul class="igv__list" data-igv-list role="list">
+        {%- for item in items limit: block.settings.items_to_show -%}
+          <li class="igv__item" data-igv-item data-index="{{ forloop.index0 }}">
+            <div class="igv__media">
+              {%- if item.video_url != blank -%}
+                <video
+                  class="igv__video"
+                  data-igv-video
+                  poster="{{ item.poster_url }}"
+                  preload="none"
+                  muted
+                  loop
+                  playsinline
+                  disablepictureinpicture
+                  {% if block.settings.autoplay == false %}controls{% endif %}
+                  aria-label="{{ item.caption | default: 'Instagram 视频' | strip_newlines | truncate: 100 | escape }}"
+                >
+                  <source src="{{ item.video_url }}" type="video/mp4">
+                </video>
+              {%- elsif item.poster_url != blank -%}
+                <img
+                  class="igv__image"
+                  src="{{ item.poster_url }}"
+                  alt="{{ item.caption | default: 'Instagram' | strip_newlines | truncate: 100 | escape }}"
+                  width="{{ item.width | default: 1080 }}"
+                  height="{{ item.height | default: 1920 }}"
+                  loading="lazy"
+                >
+              {%- endif -%}
+
+              {%- if block.settings.enable_lightbox -%}
+                <button
+                  class="igv__play"
+                  type="button"
+                  data-igv-open="{{ forloop.index0 }}"
+                  aria-label="播放视频{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
+                >
+                  <span class="igv__play-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M8 5v14l11-7z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                </button>
+              {%- endif -%}
+            </div>
+
+            {%- if block.settings.show_caption and item.caption != blank -%}
+              <p class="igv__caption">{{ item.caption | strip_newlines | truncate: 90 | escape }}</p>
+            {%- endif -%}
+
+            {%- if block.settings.show_products and item.products.size > 0 -%}
+              <div class="igv__products">
+                {%- for product in item.products limit: 3 -%}
+                  {%- assign shop_product = all_products[product.handle] -%}
+                  <a
+                    class="igv__product"
+                    href="{% if shop_product %}{{ shop_product.url }}{% else %}/products/{{ product.handle }}{% endif %}"
+                  >
+                    {{ product.title | default: product.handle | escape }}
+                  </a>
+                {%- endfor -%}
+              </div>
+            {%- endif -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+
+      {%- if block.settings.layout == 'carousel' -%}
+        <button
+          class="igv__arrow igv__arrow--next"
+          type="button"
+          data-igv-next
+          aria-label="下一个视频"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      {%- endif -%}
+    </div>
+
+    {%- if block.settings.enable_lightbox -%}
+      {%- capture feed_json -%}
+        [
+        {%- for item in items limit: block.settings.items_to_show -%}
+          {
+            "video_url": {{ item.video_url | default: '' | json }},
+            "poster_url": {{ item.poster_url | default: '' | json }},
+            "caption": {{ item.caption | default: '' | json }},
+            "permalink": {{ item.permalink | default: '' | json }},
+            "products": [
+              {%- for product in item.products -%}
+                {
+                  "title": {{ product.title | default: product.handle | json }},
+                  "url": {{ product.handle | prepend: '/products/' | json }}
+                }{%- unless forloop.last -%},{%- endunless -%}
+              {%- endfor -%}
+            ]
+          }{%- unless forloop.last -%},{%- endunless -%}
+        {%- endfor -%}
+        ]
+      {%- endcapture -%}
+      <script type="application/json" data-igv-json>{{ feed_json }}</script>
+    {%- endif -%}
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Instagram 视频",
+  "target": "section",
+  "stylesheet": "instagram-videos.css",
+  "javascript": "instagram-videos.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "gallery_handle",
+      "label": "展示组标识",
+      "info": "在 DecoAdmin 的 Instagram 内容页面复制展示组标识。留空则展示第一个组。"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "标题",
+      "default": "Instagram"
+    },
+    {
+      "type": "select",
+      "id": "layout",
+      "label": "展现方式",
+      "options": [
+        { "value": "carousel", "label": "轮播（横向滑动）" },
+        { "value": "grid", "label": "网格" }
+      ],
+      "default": "carousel"
+    },
+    {
+      "type": "select",
+      "id": "media_filter",
+      "label": "展示内容",
+      "options": [
+        { "value": "videos", "label": "只展示视频" },
+        { "value": "all", "label": "视频和图片" }
+      ],
+      "default": "videos"
+    },
+    {
+      "type": "range",
+      "id": "items_to_show",
+      "label": "展示数量",
+      "min": 2,
+      "max": 24,
+      "step": 1,
+      "default": 8
+    },
+    {
+      "type": "select",
+      "id": "aspect_ratio",
+      "label": "画面比例",
+      "options": [
+        { "value": "portrait", "label": "竖屏 9:16（Reels）" },
+        { "value": "four_five", "label": "4:5" },
+        { "value": "square", "label": "正方形 1:1" },
+        { "value": "landscape", "label": "横屏 16:9" }
+      ],
+      "default": "portrait"
+    },
+    {
+      "type": "header",
+      "content": "排版"
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "桌面端每屏数量",
+      "min": 2,
+      "max": 6,
+      "step": 1,
+      "default": 4
+    },
+    {
+      "type": "range",
+      "id": "columns_mobile",
+      "label": "移动端每屏数量",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "range",
+      "id": "gap",
+      "label": "间距",
+      "min": 0,
+      "max": 40,
+      "step": 2,
+      "unit": "px",
+      "default": 12
+    },
+    {
+      "type": "range",
+      "id": "corner_radius",
+      "label": "圆角",
+      "min": 0,
+      "max": 32,
+      "step": 2,
+      "unit": "px",
+      "default": 12
+    },
+    {
+      "type": "checkbox",
+      "id": "full_width",
+      "label": "撑满容器宽度",
+      "default": true
+    },
+    {
+      "type": "range",
+      "id": "max_width",
+      "label": "最大宽度（未撑满时生效）",
+      "min": 600,
+      "max": 1600,
+      "step": 50,
+      "unit": "px",
+      "default": 1200
+    },
+    {
+      "type": "header",
+      "content": "行为"
+    },
+    {
+      "type": "checkbox",
+      "id": "autoplay",
+      "label": "进入视野后静音自动播放",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_lightbox",
+      "label": "点击放大播放（带声音）",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_caption",
+      "label": "显示文案",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_account",
+      "label": "显示账号信息",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_products",
+      "label": "显示关联商品",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "颜色"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "文字颜色",
+      "default": "#1a1a1a"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "按钮/强调色",
+      "default": "#1a1a1a"
+    }
+  ]
+}
+{% endschema %}

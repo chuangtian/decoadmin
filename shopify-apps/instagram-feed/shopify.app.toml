@@ -1,0 +1,32 @@
+# Shopify CLI 的「当前选中配置」，由 `shopify app config use` 维护。
+# local 与 test 共用同一个 Shopify App，Cloudflare 隧道已废弃，
+# 所以这里指向 test，与 shopify.app.test.toml 保持一致，
+# 避免漏写 --config 时把配置推到失效的隧道地址上。
+client_id = "d3446448682d2950aa75cea4a399d50f"
+name = "Instagram Feed (Deco)"
+handle = "deco-instagram-feed-test"
+application_url = "https://testadmin.decomkt.com/shopify-app/instagram-feed"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+# 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://testadmin.decomkt.com/api/shopify-app/auth/callback" ]

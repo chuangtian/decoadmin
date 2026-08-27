@@ -1,0 +1,30 @@
+{
+  "name": "instagram-feed",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "workspaces": [
+    "extensions/*"
+  ],
+  "scripts": {
+    "shopify": "shopify",
+    "build": "npm run build:test",
+    "build:test": "shopify app build --config test",
+    "build:production": "shopify app build --config production",
+    "check": "npm run check:project && npm run build:test",
+    "check:project": "node scripts/validate-project.mjs",
+    "check:config:test": "shopify app config validate --config test --json",
+    "check:config:production": "shopify app config validate --config production --json",
+    "config:use": "shopify app config use",
+    "info": "shopify app info --config test",
+    "generate": "shopify app generate",
+    "deploy:test": "shopify app deploy --config test",
+    "deploy:production": "shopify app deploy --config production"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "trustedDependencies": [
+    "@shopify/plugin-cloudflare"
+  ],
+  "author": "tianchuang"
+}
