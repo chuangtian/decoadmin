@@ -21,9 +21,7 @@
     const panel = dialog.querySelector('.student-discount-dialog__panel');
     const views = [...dialog.querySelectorAll('[data-sd-view]')];
     const emailForm = dialog.querySelector('[data-sd-email-form]');
-    const emailNameInput = emailForm.querySelector('input[name="fullName"]');
     const emailInput = emailForm.querySelector('input[name="email"]');
-    const emailConsentInput = emailForm.querySelector('input[name="privacyConsent"]');
     const emailSubmit = emailForm.querySelector('button[type="submit"]');
     const emailError = dialog.querySelector('[data-sd-email-error]');
     const alternative = dialog.querySelector('[data-sd-alternative]');
@@ -73,25 +71,18 @@
     };
 
     const validateEmail = () => {
-      const name = emailNameInput.value.trim();
       const value = emailInput.value.trim().toLowerCase();
       const emailValid = EMAIL_PATTERN.test(value) && !value.includes('..');
-      const nameValid = name.length >= 2 && name.length <= 120;
-      const valid = nameValid && emailValid && emailConsentInput.checked;
-      emailNameInput.classList.toggle('is-invalid', Boolean(name) && !nameValid);
       emailInput.classList.toggle('is-invalid', Boolean(value) && !emailValid);
-      if (name && !nameValid) emailNameInput.setAttribute('aria-invalid', 'true');
-      else emailNameInput.removeAttribute('aria-invalid');
       if (value && !emailValid) emailInput.setAttribute('aria-invalid', 'true');
       else emailInput.removeAttribute('aria-invalid');
-      emailSubmit.disabled = !valid;
+      emailSubmit.disabled = !emailValid;
       emailError.hidden = true;
       alternative.hidden = true;
-      return valid;
+      return emailValid;
     };
 
     const openStudentId = () => {
-      studentIdForm.querySelector('input[name="fullName"]').value = emailNameInput.value.trim();
       studentIdForm.querySelector('input[name="email"]').value = emailInput.value.trim();
       showView('student-id');
       window.setTimeout(() => studentIdForm.querySelector('input[name="fullName"]').focus(), 0);
@@ -182,8 +173,6 @@
       emailForm.reset();
       studentIdForm.reset();
       clearSelectedFile();
-      emailNameInput.classList.remove('is-invalid');
-      emailNameInput.removeAttribute('aria-invalid');
       emailInput.classList.remove('is-invalid');
       emailInput.removeAttribute('aria-invalid');
       emailSubmit.disabled = true;
@@ -240,11 +229,8 @@
       studentIdInput.focus();
     });
 
-    emailNameInput.addEventListener('input', validateEmail);
-    emailNameInput.addEventListener('blur', validateEmail);
     emailInput.addEventListener('input', validateEmail);
     emailInput.addEventListener('blur', validateEmail);
-    emailConsentInput.addEventListener('change', validateEmail);
 
     studentIdInput.addEventListener('change', () => {
       clearSelectedFile();
@@ -286,7 +272,7 @@
       if (emailSubmitting || !validateEmail()) return;
 
       const originalText = emailSubmit.textContent;
-      const controls = [emailNameInput, emailInput, emailConsentInput];
+      const controls = [emailInput];
       emailSubmitting = true;
       emailSubmit.disabled = true;
       controls.forEach((control) => {
@@ -299,9 +285,7 @@
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            name: emailNameInput.value.trim(),
             email: emailInput.value.trim(),
-            privacy_consent: emailConsentInput.checked,
             idempotency_key: createIdempotencyKey(),
           }),
         });
@@ -326,10 +310,8 @@
           control.disabled = false;
         });
         emailSubmit.textContent = originalText;
-        emailSubmit.disabled = !(emailNameInput.value.trim().length >= 2
-          && EMAIL_PATTERN.test(emailInput.value.trim())
-          && !emailInput.value.trim().includes('..')
-          && emailConsentInput.checked);
+        emailSubmit.disabled = !(EMAIL_PATTERN.test(emailInput.value.trim())
+          && !emailInput.value.trim().includes('..'));
       }
     });
 

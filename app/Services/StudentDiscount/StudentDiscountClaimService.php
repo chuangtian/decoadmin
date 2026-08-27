@@ -30,17 +30,29 @@ class StudentDiscountClaimService
     ) {}
 
     /** @return array{claim: StudentDiscountClaim, code: StudentDiscountCode|null, claim_token: string} */
-    public function submit(Store $store, string $name, string $email, ?UploadedFile $evidence, string $idempotencyKey): array
-    {
+    public function submit(
+        Store $store,
+        ?string $name,
+        string $email,
+        ?UploadedFile $evidence,
+        string $idempotencyKey,
+        bool $privacyConsented,
+    ): array {
         $organization = $store->organization;
         $campaign = $this->campaigns->getOrCreate($organization, $store);
         if (! $campaign->enabled) {
             throw new StudentDiscountException('CAMPAIGN_DISABLED', '该店铺当前未开放学生优惠。', 409);
         }
 
-        $normalizedName = preg_replace('/\s+/u', ' ', trim($name));
-        $normalizedName = is_string($normalizedName) ? $normalizedName : trim($name);
+        $normalizedName = is_string($name) ? preg_replace('/\s+/u', ' ', trim($name)) : null;
+        $normalizedName = is_string($normalizedName) && $normalizedName !== '' ? $normalizedName : null;
         $normalizedEmail = strtolower(trim($email));
+        if ($evidence && $normalizedName === null) {
+            throw new StudentDiscountException('NAME_REQUIRED', '上传学生证时必须填写姓名。', 422);
+        }
+        if ($evidence && ! $privacyConsented) {
+            throw new StudentDiscountException('PRIVACY_CONSENT_REQUIRED', '上传学生证前必须同意隐私政策和服务条款。', 422);
+        }
         $evidenceHash = 'none';
         if ($evidence) {
             $realPath = $evidence->getRealPath();
@@ -50,12 +62,12 @@ class StudentDiscountClaimService
             }
         }
         $fingerprint = hash('sha256', implode('|', [
-            $normalizedName,
+            $normalizedName ?? 'none',
             $normalizedEmail,
             (string) ($evidence?->getSize() ?? 0),
             (string) ($evidence?->getMimeType() ?? 'none'),
             $evidenceHash,
-            'privacy-consent-v1',
+            $privacyConsented ? 'privacy-consent-v1' : 'privacy-consent-none',
         ]));
         $duplicateRequest = DB::table('student_discount_claim_idempotencies')
             ->where('store_id', $store->id)
@@ -117,7 +129,7 @@ class StudentDiscountClaimService
         $evidenceDeletionIds = [];
 
         try {
-            DB::transaction(function () use (&$claim, &$token, &$wasDuplicate, &$evidenceDeletionIds, $campaign, $organization, $store, $claimUuid, $normalizedName, $normalizedEmail, $email, $domainFastPass, $idempotencyKey, $fingerprint, $evidenceDisk, $evidencePath, $evidenceMime, $evidenceSize): void {
+            DB::transaction(function () use (&$claim, &$token, &$wasDuplicate, &$evidenceDeletionIds, $campaign, $organization, $store, $claimUuid, $normalizedName, $normalizedEmail, $email, $privacyConsented, $domainFastPass, $idempotencyKey, $fingerprint, $evidenceDisk, $evidencePath, $evidenceMime, $evidenceSize): void {
                 StudentDiscountCampaign::query()->whereKey($campaign->id)->lockForUpdate()->firstOrFail();
                 $duplicateRequest = DB::table('student_discount_claim_idempotencies')
                     ->where('store_id', $store->id)
@@ -149,7 +161,7 @@ class StudentDiscountClaimService
                     'name' => $normalizedName,
                     'email' => trim($email),
                     'normalized_email' => $normalizedEmail,
-                    'privacy_consented_at' => now(),
+                    'privacy_consented_at' => $privacyConsented ? now() : null,
                     'source' => $domainFastPass ? 'education_email' : 'student_id',
                     'status' => 'pending',
                     'evidence_disk' => $evidenceDisk,
