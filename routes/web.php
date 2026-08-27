@@ -101,7 +101,7 @@ Route::prefix('/api/shopify-app/student-discounts')->group(function (): void {
 });
 
 Route::prefix('/api/shopify-app/student-discounts/proxy')
-    ->middleware(['shopify.app-proxy', 'throttle:student-discount-public'])
+    ->middleware(['shopify.app-proxy', 'shopify.app-proxy-response', 'throttle:student-discount-public'])
     ->group(function (): void {
         Route::get('/', [PublicStudentDiscountController::class, 'info'])
             ->name('student-discounts.public.info');

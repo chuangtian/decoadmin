@@ -114,7 +114,7 @@ Content-Type: multipart/form-data
 - `idempotency_key`：必填，8–120 位，只允许字母、数字、`.`、`_`、`:`、`-`；
 - `evidence`：非教育邮箱必填；单张 JPG/JPEG/PNG/WebP，最大 5MB。
 
-教育邮箱快速验证使用 JSON，仅提交 `email` 与 `idempotency_key`。邮箱匹配当前店铺教育域名规则时直接发码；不匹配且未上传证件时返回 `422 EVIDENCE_REQUIRED`，店面据此显示学生证入口。
+教育邮箱快速验证使用 JSON，仅提交 `email` 与 `idempotency_key`。邮箱匹配当前店铺教育域名规则时直接发码；不匹配且未上传证件时返回 `EVIDENCE_REQUIRED`，店面据此显示学生证入口。由于 Shopify App Proxy 可能丢弃非 2xx 响应正文，已验证且 `path_prefix` 匹配当前环境的代理请求统一使用 HTTP 200 传输结构化业务错误，并在 `error.status` 保留原始 HTTP 状态；签名失败等代理边界错误仍使用真实的 4xx 状态。
 
 学生证申请使用 `multipart/form-data`，必须同时提交 `name`、`email`、`privacy_consent`、`evidence` 与 `idempotency_key`。缺少姓名或隐私同意时返回 `422 VALIDATION_FAILED`，服务端不会自动填充默认值。
 
@@ -178,6 +178,7 @@ GET /api/shopify-app/student-discounts/proxy/claims/{claim_uuid}?claim_token={cl
   "error": {
     "code": "VALIDATION_FAILED",
     "message": "提交内容不符合要求。",
+    "status": 422,
     "fields": {
       "evidence": ["evidence 字段必须是 jpg、jpeg、png、webp 类型的文件。"]
     }
@@ -187,13 +188,14 @@ GET /api/shopify-app/student-discounts/proxy/claims/{claim_uuid}?claim_token={cl
 
 常见错误码包括：`INVALID_APP_PROXY_SIGNATURE`、`INVALID_SHOPIFY_ID_TOKEN`、`SHOPIFY_REQUIRED_SCOPES_MISSING`、`STORE_NOT_AVAILABLE`、`STORE_NOT_CONNECTED`、`CAMPAIGN_DISABLED`、`EVIDENCE_REQUIRED`、`IDEMPOTENCY_CONFLICT`、`STUDENT_DISCOUNT_RATE_LIMITED`、`SHOPIFY_DISCOUNT_CREATE_FAILED`、`STUDENT_DISCOUNT_UNAVAILABLE`。
 
-超过提交频率时返回 `429`，并携带秒数形式的 `Retry-After` 响应头：
+超过提交频率时，App Proxy 响应在 `error.status` 中返回逻辑状态 `429`，并携带秒数形式的 `Retry-After` 响应头：
 
 ```json
 {
   "error": {
     "code": "STUDENT_DISCOUNT_RATE_LIMITED",
     "message": "提交过于频繁，请稍后重试。",
+    "status": 429,
     "retry_after": 3598
   }
 }

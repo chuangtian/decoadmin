@@ -157,6 +157,29 @@ class StudentDiscountTest extends TestCase
         $this->assertDatabaseCount('student_discount_claims', 0);
     }
 
+    public function test_shopify_app_proxy_preserves_structured_business_errors_over_successful_transport(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        config([
+            'student_discount.active.client_secret' => 'proxy-shared-secret',
+            'student_discount.active.proxy_path' => '/apps/student-discount',
+        ]);
+
+        $this->postJson($this->signedProxyUrl(
+            route('student-discounts.public.claims.store'),
+            $store->shopify_domain,
+        ), [
+            'email' => 'student@example.com',
+            'idempotency_key' => 'proxy-error-transport-001',
+        ])->assertOk()
+            ->assertHeader('X-Student-Discount-Status', '422')
+            ->assertJsonPath('error.code', 'EVIDENCE_REQUIRED')
+            ->assertJsonPath('error.status', 422);
+
+        $this->assertDatabaseCount('student_discount_claims', 0);
+    }
+
     public function test_submission_rate_limit_runs_after_verified_store_resolution_and_isolated_by_store_and_ip(): void
     {
         [, $organization, $store] = $this->context('store-admin');
