@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import type { RequestPayload } from '@inertiajs/core';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -96,7 +97,7 @@ const connect = async (provider: 'instagram_login' | 'facebook_login') => {
     }
 };
 
-const post = (path: string, data: Record<string, unknown> = {}) =>
+const post = (path: string, data: RequestPayload = {}) =>
     router.post(`${baseUrl}${path}`, data, { preserveScroll: true });
 
 const selectPage = (option: PageOption) => post('/select-page', { page_id: option.page_id });
