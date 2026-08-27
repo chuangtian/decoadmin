@@ -48,28 +48,17 @@ class ReputationDashboardService
     ];
 
     private const REVIEW_MODELS = [
-        'x1s' => [
-            'model' => 'X1S 系列',
-            'patterns' => ['/(?<![a-z0-9])x[\s_-]*1[\s_-]*s(?![a-z0-9])/iu'],
-        ],
-        'm16' => [
-            'model' => 'M16 系列',
-            'patterns' => ['/(?<![a-z0-9])m[\s_-]*16(?:[a-z])?(?![a-z0-9])/iu'],
-        ],
-        'x7' => [
-            'model' => 'X7 / X7L',
-            'patterns' => ['/(?<![a-z0-9])x[\s_-]*7(?:[\s_-]*l)?(?![a-z0-9])/iu'],
-        ],
-        'x2' => [
-            'model' => 'X2 系列',
-            'patterns' => ['/(?<![a-z0-9])x[\s_-]*2(?:[\s_-]*(?:s|l|pro|max|plus))?(?![a-z0-9])/iu'],
-        ],
+        'macfox-x1' => ['model' => 'macfox-x1'],
+        'macfox-x7' => ['model' => 'macfox-x7'],
+        'x1s-x-bs-zay' => ['model' => 'x1s-x-bs-zay'],
+        'macfox-x2' => ['model' => 'macfox-x2'],
+        'macfox-m16-ebike' => ['model' => 'macfox-m16-ebike'],
     ];
 
     public function __construct(private StoreFeishuDataLinkService $dataLinks) {}
 
     /** @param array<string, mixed> $filters @return array<string, mixed> */
-    public function overview(Store $store, array $filters): array
+    public function overview(Store $store, array $filters, bool $includeFullOrderReference = false): array
     {
         [$dateFrom, $dateTo] = $this->dateRange($store, $filters);
         $periodQuery = $this->periodQuery($store, $dateFrom, $dateTo);
@@ -109,7 +98,7 @@ class ReputationDashboardService
                 $this->modelComparisonQuery($store, $comparison),
             ),
             'goals' => $this->goalCards($goals, $summary, $social),
-            'records' => $this->records($store, $filters, $dateFrom, $dateTo),
+            'records' => $this->records($store, $filters, $dateFrom, $dateTo, $includeFullOrderReference),
             'freshness' => $this->freshness($store),
             'source_status' => $this->dataLinks->sectionStatusForFrontend($store, 'reputation'),
         ];
@@ -664,11 +653,11 @@ class ReputationDashboardService
 
         (clone $query)
             ->whereNotNull('rating')
-            ->select(['id', 'model_name', 'title', 'content', 'rating'])
+            ->whereNotNull('model_name')
+            ->select(['id', 'model_name', 'rating'])
             ->lazyById(500)
             ->each(function (ReputationMention $mention) use (&$totals): void {
-                $key = $this->reviewModelKey($mention->model_name)
-                    ?? $this->reviewModelKey(trim((string) $mention->title.' '.(string) $mention->content));
+                $key = $this->reviewModelKey($mention->model_name);
                 if ($key === null) {
                     return;
                 }
@@ -687,15 +676,9 @@ class ReputationDashboardService
             return null;
         }
 
-        foreach (self::REVIEW_MODELS as $key => $definition) {
-            foreach ($definition['patterns'] as $pattern) {
-                if (preg_match($pattern, $text) === 1) {
-                    return $key;
-                }
-            }
-        }
+        $key = mb_strtolower($text);
 
-        return null;
+        return array_key_exists($key, self::REVIEW_MODELS) ? $key : null;
     }
 
     /** @param array<string, mixed>|null $comparison */
@@ -757,7 +740,7 @@ class ReputationDashboardService
         return $cards;
     }
 
-    private function records(Store $store, array $filters, CarbonImmutable $from, CarbonImmutable $to): LengthAwarePaginator
+    private function records(Store $store, array $filters, CarbonImmutable $from, CarbonImmutable $to, bool $includeFullOrderReference = false): LengthAwarePaginator
     {
         $tab = in_array($filters['tab'] ?? null, ['targets', 'reviews', 'reddit', 'threads'], true) ? $filters['tab'] : 'targets';
         $query = ReputationMention::query()->forOrganization((int) $store->organization_id)->forStore((int) $store->id)
@@ -808,6 +791,7 @@ class ReputationDashboardService
                 ->values()
                 ->all(),
             'order_reference_masked' => $this->maskOrderReference($mention->order_reference_encrypted),
+            ...($includeFullOrderReference ? ['order_reference' => $mention->order_reference_encrypted] : []),
         ]);
     }
 

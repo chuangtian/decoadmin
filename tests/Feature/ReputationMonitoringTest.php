@@ -148,7 +148,7 @@ class ReputationMonitoringTest extends TestCase
         }
     }
 
-    public function test_review_model_stats_use_fixed_non_ai_rules_comparison_and_store_scope(): void
+    public function test_review_model_stats_keep_only_requested_feishu_models_in_fixed_order_and_store_scope(): void
     {
         [$user, $organization, $store] = $this->context('operator', 'review-models');
         $otherStore = $organization->stores()->create([
@@ -158,78 +158,81 @@ class ReputationMonitoringTest extends TestCase
             'timezone' => 'UTC',
         ]);
 
-        $this->mention($organization, $store, 'website', 'x1s-model-name', [
-            'model_name' => 'Macfox X1S Pro',
-            'title' => 'X2 must not override an explicit model name',
+        $this->mention($organization, $store, 'website', 'x1-first', [
+            'model_name' => 'macfox-x1',
             'rating' => 5,
             'published_at' => '2026-08-03 12:00:00',
         ]);
-        $this->mention($organization, $store, 'trustpilot', 'x1s-title', [
-            'title' => 'X1-S commuting review',
+        $this->mention($organization, $store, 'trustpilot', 'x1-case-insensitive', [
+            'model_name' => ' MACFOX-X1 ',
             'rating' => 3,
             'published_at' => '2026-08-04 12:00:00',
         ]);
-        $this->mention($organization, $store, 'facebook', 'x1s-one-model-only', [
-            'content' => 'Comparing X1S and X2 after a week of riding.',
-            'rating' => 1,
+        $this->mention($organization, $store, 'website', 'x7', [
+            'model_name' => 'macfox-x7',
+            'rating' => 4,
             'published_at' => '2026-08-05 12:00:00',
         ]);
-        $this->mention($organization, $store, 'website', 'm16-model-name', [
-            'model_name' => 'M16A',
-            'title' => 'X2 text must not override M16 model_name',
-            'rating' => 4,
+        $this->mention($organization, $store, 'website', 'x1s-x-bs-zay', [
+            'model_name' => 'x1s-x-bs-zay',
+            'rating' => 2,
             'published_at' => '2026-08-06 12:00:00',
         ]);
-        $this->mention($organization, $store, 'trustpilot', 'x7l-content', [
-            'content' => 'My X7L ride has been reliable.',
-            'rating' => 2,
+        $this->mention($organization, $store, 'website', 'x2', [
+            'model_name' => 'macfox-x2',
+            'rating' => 5,
             'published_at' => '2026-08-07 12:00:00',
         ]);
-        $this->mention($organization, $store, 'website', 'x2-title', [
-            'title' => 'X2 Pro owner review',
-            'rating' => 5,
+        $this->mention($organization, $store, 'website', 'm16', [
+            'model_name' => 'macfox-m16-ebike',
+            'rating' => 1,
             'published_at' => '2026-08-08 12:00:00',
         ]);
-        $this->mention($organization, $store, 'website', 'not-a-review', [
-            'model_name' => 'X2',
-            'rating' => null,
+        $this->mention($organization, $store, 'website', 'excluded-product', [
+            'model_name' => 'shipping-protection',
+            'rating' => 5,
             'published_at' => '2026-08-09 12:00:00',
         ]);
-        $this->mention($organization, $store, 'website', 'ai-payload-only', [
-            'content' => 'Generic review without a model token.',
-            'rating' => 5,
-            'source_payloads_encrypted' => [[
-                'AI标签' => 'X2',
-                '帖子类型' => 'must-never-classify-x2',
-            ]],
+        $this->mention($organization, $store, 'website', 'not-a-review', [
+            'model_name' => 'macfox-x2',
+            'rating' => null,
             'published_at' => '2026-08-10 12:00:00',
         ]);
-        $this->mention($organization, $otherStore, 'website', 'other-store-x1s', [
-            'model_name' => 'X1S',
-            'rating' => 1,
+        $this->mention($organization, $store, 'website', 'ai-payload-only', [
+            'model_name' => 'another-product',
+            'rating' => 5,
+            'source_payloads_encrypted' => [[
+                'AI标签' => 'macfox-x1',
+                '帖子类型' => 'must-never-classify-model',
+            ]],
             'published_at' => '2026-08-11 12:00:00',
         ]);
+        $this->mention($organization, $otherStore, 'website', 'other-store-x1', [
+            'model_name' => 'macfox-x1',
+            'rating' => 1,
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
 
-        $this->mention($organization, $store, 'website', 'previous-x1s', [
-            'model_name' => 'X1S',
+        $this->mention($organization, $store, 'website', 'previous-x1', [
+            'model_name' => 'macfox-x1',
             'rating' => 4,
             'published_at' => '2026-07-03 12:00:00',
         ]);
-        $this->mention($organization, $store, 'website', 'previous-x7', [
-            'content' => 'Previous X7 review',
-            'rating' => 4,
-            'published_at' => '2026-07-04 12:00:00',
-        ]);
-        foreach ([5, 3] as $index => $rating) {
-            $this->mention($organization, $store, 'website', "previous-x2-{$index}", [
-                'title' => 'Previous X2 review',
+        foreach ([4, 2] as $index => $rating) {
+            $this->mention($organization, $store, 'website', "previous-x7-{$index}", [
+                'model_name' => 'macfox-x7',
                 'rating' => $rating,
-                'published_at' => '2026-07-0'.(5 + $index).' 12:00:00',
+                'published_at' => '2026-07-0'.(4 + $index).' 12:00:00',
             ]);
         }
+        $this->mention($organization, $store, 'website', 'previous-x2', [
+            'model_name' => 'macfox-x2',
+            'rating' => 3,
+            'published_at' => '2026-07-06 12:00:00',
+        ]);
         foreach ([2, 4] as $index => $rating) {
             $this->mention($organization, $store, 'website', "custom-m16-{$index}", [
-                'model_name' => 'M16',
+                'model_name' => 'macfox-m16-ebike',
                 'rating' => $rating,
                 'published_at' => '2026-06-0'.(5 + $index).' 12:00:00',
             ]);
@@ -238,7 +241,13 @@ class ReputationMonitoringTest extends TestCase
         $baseFilters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews'];
         $withoutComparison = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'none']);
         $this->assertNull($withoutComparison['comparison']);
-        $this->assertSame(['x1s', 'm16', 'x7', 'x2'], collect($withoutComparison['models'])->pluck('key')->all());
+        $this->assertSame([
+            'macfox-x1',
+            'macfox-x7',
+            'x1s-x-bs-zay',
+            'macfox-x2',
+            'macfox-m16-ebike',
+        ], collect($withoutComparison['models'])->pluck('key')->all());
         $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => $model['previous_count'] === null
             && $model['difference'] === null
             && $model['change_percent'] === null));
@@ -246,29 +255,27 @@ class ReputationMonitoringTest extends TestCase
         $previous = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'previous']);
         $models = collect($previous['models'])->keyBy('key');
         $this->assertSame([
-            'model' => 'X1S 系列',
-            'key' => 'x1s',
-            'count' => 3,
-            'average_rating' => 3.0,
+            'model' => 'macfox-x1',
+            'key' => 'macfox-x1',
+            'count' => 2,
+            'average_rating' => 4.0,
             'previous_count' => 1,
-            'difference' => 2,
-            'change_percent' => 200.0,
-        ], $models->get('x1s'));
-        $this->assertSame(1, $models->get('m16')['count']);
-        $this->assertSame(4.0, $models->get('m16')['average_rating']);
-        $this->assertSame(0, $models->get('m16')['previous_count']);
-        $this->assertSame(1, $models->get('m16')['difference']);
-        $this->assertNull($models->get('m16')['change_percent']);
-        $this->assertSame(1, $models->get('x7')['count']);
-        $this->assertSame(1, $models->get('x7')['previous_count']);
-        $this->assertSame(0.0, $models->get('x7')['change_percent']);
-        $this->assertSame(1, $models->get('x2')['count']);
-        $this->assertSame(2, $models->get('x2')['previous_count']);
-        $this->assertSame(-1, $models->get('x2')['difference']);
-        $this->assertSame(-50.0, $models->get('x2')['change_percent']);
+            'difference' => 1,
+            'change_percent' => 100.0,
+        ], $models->get('macfox-x1'));
+        $this->assertSame(1, $models->get('macfox-x7')['count']);
+        $this->assertSame(2, $models->get('macfox-x7')['previous_count']);
+        $this->assertSame(-50.0, $models->get('macfox-x7')['change_percent']);
+        $this->assertSame(1, $models->get('x1s-x-bs-zay')['count']);
+        $this->assertSame(1, $models->get('macfox-x2')['count']);
+        $this->assertSame(1, $models->get('macfox-x2')['previous_count']);
+        $this->assertSame(0.0, $models->get('macfox-x2')['change_percent']);
+        $this->assertSame(1, $models->get('macfox-m16-ebike')['count']);
+        $this->assertSame(0, $models->get('macfox-m16-ebike')['previous_count']);
+        $this->assertNull($models->get('macfox-m16-ebike')['change_percent']);
         $this->assertSame(6, collect($previous['models'])->sum('count'));
         $this->assertStringNotContainsString(
-            'must-never-classify-x2',
+            'must-never-classify-model',
             json_encode($previous['models'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
         );
 
@@ -278,7 +285,7 @@ class ReputationMonitoringTest extends TestCase
             'compare_date_from' => '2026-06-01',
             'compare_date_to' => '2026-06-30',
         ]);
-        $customM16 = collect($custom['models'])->firstWhere('key', 'm16');
+        $customM16 = collect($custom['models'])->firstWhere('key', 'macfox-m16-ebike');
         $this->assertSame('custom', $custom['comparison']['mode']);
         $this->assertSame(2, $customM16['previous_count']);
         $this->assertSame(-1, $customM16['difference']);
@@ -288,12 +295,12 @@ class ReputationMonitoringTest extends TestCase
             ->withSession($this->contextSession($organization, $store))
             ->get(route('reputation.overview', [...$baseFilters, 'comparison' => 'previous']))
             ->assertOk()
-            ->assertDontSee('must-never-classify-x2')
+            ->assertDontSee('must-never-classify-model')
             ->assertInertia(fn (Assert $page) => $page
-                ->where('dashboard.models.0.key', 'x1s')
-                ->where('dashboard.models.0.count', 3)
-                ->where('dashboard.models.3.key', 'x2')
-                ->where('dashboard.models.3.previous_count', 2));
+                ->where('dashboard.models.0.key', 'macfox-x1')
+                ->where('dashboard.models.0.count', 2)
+                ->where('dashboard.models.4.key', 'macfox-m16-ebike')
+                ->where('dashboard.models.4.previous_count', 0));
     }
 
     public function test_reddit_topics_use_only_current_store_period_content_and_return_stable_weekly_aggregation(): void
@@ -513,7 +520,7 @@ class ReputationMonitoringTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'reputation_sync_requested', 'store_id' => $store->id]);
     }
 
-    public function test_manual_review_is_scoped_audited_masked_and_follow_up_can_be_updated(): void
+    public function test_manual_review_is_scoped_audited_and_full_order_reference_requires_manage_permission(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
         $session = $this->contextSession($organization, $store);
@@ -541,7 +548,22 @@ class ReputationMonitoringTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('dashboard.records.data.0.origin', 'manual')
+                ->where('dashboard.records.data.0.order_reference', 'ORDER-123456')
                 ->where('dashboard.records.data.0.order_reference_masked', '••••3456')
+                ->missing('dashboard.records.data.0.order_reference_encrypted'));
+
+        $viewer = User::factory()->create(['email_verified_at' => now()]);
+        $organization->users()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $store->members()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $viewerRole = Role::query()->whereBelongsTo($organization)->where('slug', 'viewer')->firstOrFail();
+        $viewer->roles()->attach($viewerRole, ['organization_id' => $organization->id, 'store_id' => null]);
+
+        $this->actingAs($viewer)->withSession($session)
+            ->get(route('reputation.overview', ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.records.data.0.order_reference_masked', '••••3456')
+                ->missing('dashboard.records.data.0.order_reference')
                 ->missing('dashboard.records.data.0.order_reference_encrypted'));
 
         $this->actingAs($admin)->withSession($session)->patch(route('reputation.mentions.update', $mention), [
