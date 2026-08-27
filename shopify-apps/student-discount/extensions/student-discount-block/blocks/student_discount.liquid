@@ -1,13 +1,14 @@
 {% liquid
   assign selected_image = block.settings.image
   assign image_alt = block.settings.image_alt | default: block.settings.text
-  assign app_proxy_path = app.metafields.deco_student_discount.proxy_path.value | default: '/apps/deco-student-discount'
+  assign app_proxy_path = app.metafields.deco_student_discount.proxy_path.value
 %}
 
 {% if block.settings.enabled %}
   <div
     class="student-discount-app student-discount-app--{{ block.settings.alignment }}"
     data-student-discount-app
+    data-student-discount-version="2"
     data-proxy-path="{{ app_proxy_path | escape }}"
     {{ block.shopify_attributes }}
   >
@@ -38,14 +39,14 @@
   </div>
 {% endif %}
 
-<script src="{{ 'student-discount-portal.js' | asset_url }}" defer></script>
+<script src="{{ 'student-discount-portal-v2.js' | asset_url }}" defer></script>
 
 {% schema %}
 {
   "name": "t:student_discount.name",
   "target": "section",
   "stylesheet": "student-discount.css",
-  "javascript": "student-discount.js",
+  "javascript": "student-discount-v2.js",
   "settings": [
     {
       "type": "checkbox",

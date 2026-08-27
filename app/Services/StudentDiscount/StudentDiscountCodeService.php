@@ -38,6 +38,15 @@ class StudentDiscountCodeService
         }
         GRAPHQL;
 
+    private const DELETE_MUTATION = <<<'GRAPHQL'
+        mutation DeleteStudentDiscount($id: ID!) {
+          discountCodeDelete(id: $id) {
+            deletedCodeDiscountId
+            userErrors { field message code }
+          }
+        }
+        GRAPHQL;
+
     public function __construct(
         private ShopifyGraphQLClient $shopify,
         private StudentDiscountAppTokenService $tokens,
@@ -46,6 +55,8 @@ class StudentDiscountCodeService
     public function reusableForEmail(Store $store, string $normalizedEmail): ?StudentDiscountCode
     {
         $code = StudentDiscountCode::query()
+            ->with('claim')
+            ->whereHas('claim')
             ->where('store_id', $store->id)
             ->where('normalized_email', $normalizedEmail)
             ->where('expires_at', '>', now())
@@ -59,7 +70,35 @@ class StudentDiscountCodeService
 
         $this->syncUsage($code);
 
-        return $code->fresh()->isReusable() ? $code->fresh() : null;
+        $code = $code->fresh('claim');
+
+        return $code->claim && $code->isReusable() ? $code : null;
+    }
+
+    public function delete(StudentDiscountCode $code): void
+    {
+        $store = $code->store;
+        $accessToken = $this->tokens->accessTokenFor($store);
+        $shopifyId = $this->findShopifyId($store->shopify_domain, $accessToken, $code->code);
+        if (! $shopifyId) {
+            return;
+        }
+
+        $payload = $this->shopify->queryWithAccessToken(
+            $store->shopify_domain,
+            $accessToken,
+            self::DELETE_MUTATION,
+            ['id' => $shopifyId],
+        );
+        $errors = data_get($payload, 'data.discountCodeDelete.userErrors', []);
+        $deletedId = data_get($payload, 'data.discountCodeDelete.deletedCodeDiscountId');
+        if (! is_string($deletedId) || $deletedId === '') {
+            throw new StudentDiscountException(
+                'SHOPIFY_DISCOUNT_DELETE_FAILED',
+                is_array($errors) && $errors !== [] ? 'Shopify 未能删除优惠券，请稍后重试。' : 'Shopify 返回了无效的优惠券删除结果。',
+                502,
+            );
+        }
     }
 
     public function issue(StudentDiscountClaim $claim, StudentDiscountCampaign $campaign): StudentDiscountCode

@@ -9,6 +9,16 @@
     EXPIRED: 'Status: Expired',
   };
 
+  function removeLegacyInstances(root = document) {
+    root
+      .querySelectorAll('[data-student-discount-app][data-endpoint]:not([data-proxy-path])')
+      .forEach((app) => app.remove());
+
+    root
+      .querySelectorAll('[data-student-discount-dialog]:not([data-student-discount-version="2"])')
+      .forEach((dialog) => dialog.remove());
+  }
+
   function initialize(app) {
     if (app.dataset.initialized === 'true') return;
     app.dataset.initialized = 'true';
@@ -459,6 +469,7 @@
   }
 
   function initializeAll(root = document) {
+    removeLegacyInstances(root);
     root.querySelectorAll('[data-student-discount-app]').forEach(initialize);
   }
 
