@@ -195,7 +195,7 @@ class StudentDiscountCodeService
             'code' => $code,
             'startsAt' => $startsAt,
             'endsAt' => $endsAt,
-            'context' => ['all' => true],
+            'context' => ['all' => 'ALL'],
             'customerGets' => ['value' => $value, 'items' => $items],
             'usageLimit' => $campaign->usage_limit,
             'appliesOncePerCustomer' => false,
