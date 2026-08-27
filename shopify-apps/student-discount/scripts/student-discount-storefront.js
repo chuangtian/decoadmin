@@ -1,7 +1,9 @@
 (() => {
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const HAN_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
   const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  const PUBLIC_LOCALE = 'en-US';
   const STATUS_LABELS = {
     UNUSED: 'Status: Unused',
     PARTIALLY_USED: 'Status: Partially used',
@@ -448,7 +450,7 @@
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(PUBLIC_LOCALE, {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(date);
@@ -465,7 +467,7 @@
 
   function publicMessage(message, fallback) {
     const value = String(message || '').trim();
-    return value && value.length <= 240 ? value : fallback;
+    return value && value.length <= 240 && !HAN_CHARACTER_PATTERN.test(value) ? value : fallback;
   }
 
   function initializeAll(root = document) {
