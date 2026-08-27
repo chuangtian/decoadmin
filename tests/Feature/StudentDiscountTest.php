@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Exceptions\StudentDiscountException;
+use App\Jobs\DeleteSupersededStudentDiscountEvidence;
 use App\Jobs\SendStudentDiscountDecisionMail;
 use App\Jobs\SyncStudentDiscountCodeUsage;
 use App\Mail\StudentDiscountDecisionMail;
@@ -16,11 +17,13 @@ use App\Models\Store;
 use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Models\StudentDiscountEvidenceDeletion;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\StudentDiscount\GeminiStudentIdRecognitionService;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
 use App\Services\StudentDiscount\StudentDiscountCodeService;
+use App\Services\StudentDiscount\StudentDiscountEvidenceCleanupService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -95,6 +98,111 @@ class StudentDiscountTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_public_claim_requires_name_privacy_consent_and_safe_evidence_fields(): void
+    {
+        [, , $store] = $this->context('store-admin');
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        $url = fn (): string => $this->signedProxyUrl(
+            route('student-discounts.public.claims.store'),
+            $store->shopify_domain,
+        );
+
+        $this->postJson($url(), [
+            'email' => 'legacy@school.edu',
+            'idempotency_key' => 'legacy-contract-001',
+        ])->assertUnprocessable()
+            ->assertJsonPath('error.code', 'VALIDATION_FAILED')
+            ->assertJsonStructure(['error' => ['fields' => ['name', 'privacy_consent']]]);
+
+        $this->postJson($url(), [
+            'name' => '<script>',
+            'email' => 'student@school.edu',
+            'privacy_consent' => true,
+            'idempotency_key' => 'invalid-name-001',
+        ])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['name']]]);
+
+        $this->postJson($url(), [
+            'name' => 'Student Example',
+            'email' => 'student@school.edu',
+            'privacy_consent' => false,
+            'idempotency_key' => 'missing-consent-001',
+        ])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['privacy_consent']]]);
+
+        $this->post($url(), [
+            'name' => 'Student Example',
+            'email' => 'student@example.com',
+            'privacy_consent' => true,
+            'idempotency_key' => 'invalid-evidence-001',
+            'evidence' => UploadedFile::fake()->create('student-id.pdf', 32, 'application/pdf'),
+        ], ['Accept' => 'application/json'])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['evidence']]]);
+
+        $this->post($url(), [
+            'name' => 'Student Example',
+            'email' => 'student@example.com',
+            'privacy_consent' => true,
+            'idempotency_key' => 'oversized-evidence-001',
+            'evidence' => UploadedFile::fake()->create('student-id.jpg', 5121, 'image/jpeg'),
+        ], ['Accept' => 'application/json'])->assertUnprocessable()->assertJsonStructure(['error' => ['fields' => ['evidence']]]);
+
+        $this->assertDatabaseCount('student_discount_claims', 0);
+    }
+
+    public function test_submission_rate_limit_runs_after_verified_store_resolution_and_isolated_by_store_and_ip(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Rate Limit Store',
+            'shopify_domain' => 'other-rate-limit.myshopify.com',
+            'status' => 'active',
+        ]);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+        $ip = '203.0.113.42';
+        $payload = fn (int $attempt): array => [
+            'name' => 'Rate Limit Student',
+            'privacy_consent' => true,
+            'idempotency_key' => "rate-limit-{$attempt}",
+            'shop' => $otherStore->shopify_domain,
+            'store_id' => $otherStore->id,
+            'organization_id' => 999999,
+        ];
+
+        for ($attempt = 1; $attempt <= 8; $attempt++) {
+            $this->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+                route('student-discounts.public.claims.store').'?shop='.$store->shopify_domain.'&timestamp='.now()->timestamp.'&signature=invalid',
+                $payload($attempt),
+            )->assertUnauthorized()->assertJsonPath('error.code', 'INVALID_APP_PROXY_SIGNATURE');
+        }
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            $this->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+                $this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain),
+                $payload($attempt),
+            )->assertUnprocessable();
+        }
+
+        $limited = $this->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+            $this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain),
+            $payload(6),
+        );
+        $limited->assertStatus(429)
+            ->assertHeader('Retry-After')
+            ->assertJsonPath('error.code', 'STUDENT_DISCOUNT_RATE_LIMITED')
+            ->assertJsonPath('error.message', '提交过于频繁，请稍后重试。')
+            ->assertDontSee($ip);
+        $this->assertGreaterThan(0, (int) $limited->json('error.retry_after'));
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            $this->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+                $this->signedProxyUrl(route('student-discounts.public.claims.store'), $otherStore->shopify_domain),
+                $payload(100 + $attempt),
+            )->assertUnprocessable();
+        }
+        $this->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+            $this->signedProxyUrl(route('student-discounts.public.claims.store'), $otherStore->shopify_domain),
+            $payload(106),
+        )->assertStatus(429)->assertJsonPath('error.code', 'STUDENT_DISCOUNT_RATE_LIMITED');
+    }
+
     public function test_signed_education_email_claim_creates_and_reuses_shopify_discount_idempotently(): void
     {
         Mail::fake();
@@ -112,19 +220,32 @@ class StudentDiscountTest extends TestCase
             ]]]);
 
         $url = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
-        $first = $this->postJson($url, ['email' => 'student@school.edu', 'idempotency_key' => 'claim-fast-pass-001'])
+        $first = $this->postJson($url, [
+            'name' => 'Student Example',
+            'email' => 'student@school.edu',
+            'privacy_consent' => true,
+            'idempotency_key' => 'claim-fast-pass-001',
+        ])
             ->assertOk()
             ->assertJsonPath('data.status', 'approved')
             ->assertJsonPath('data.discount.status', 'unused')
             ->assertJsonPath('data.discount.usage_limit', 1);
 
         $code = StudentDiscountCode::query()->sole();
+        $createdClaim = $code->claim;
+        $this->assertSame('Student Example', $createdClaim->name);
+        $this->assertNotNull($createdClaim->privacy_consented_at);
         $this->assertSame('gid://shopify/DiscountCodeNode/123', $code->shopify_discount_id);
         $this->assertEquals(7, $code->generated_at->diffInDays($code->expires_at));
         Mail::assertNothingSent();
 
         $secondUrl = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
-        $this->postJson($secondUrl, ['email' => 'student@school.edu', 'idempotency_key' => 'claim-fast-pass-001'])
+        $this->postJson($secondUrl, [
+            'name' => 'Student Example',
+            'email' => 'student@school.edu',
+            'privacy_consent' => true,
+            'idempotency_key' => 'claim-fast-pass-001',
+        ])
             ->assertOk()
             ->assertJsonPath('data.id', $first->json('data.id'))
             ->assertJsonPath('data.discount.code', $first->json('data.discount.code'));
@@ -169,7 +290,12 @@ class StudentDiscountTest extends TestCase
         $this->studentInstallation($otherStore, $this->connection($otherStore));
         Http::fake();
 
-        $payload = ['email' => 'student@school.edu', 'idempotency_key' => 'claim-current-store-token-001'];
+        $payload = [
+            'name' => 'Student Example',
+            'email' => 'student@school.edu',
+            'privacy_consent' => true,
+            'idempotency_key' => 'claim-current-store-token-001',
+        ];
         $this->postJson($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), $payload)
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'STUDENT_DISCOUNT_APP_REAUTH_REQUIRED');
@@ -207,7 +333,9 @@ class StudentDiscountTest extends TestCase
             ]]]);
 
         $this->postJson($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'name' => 'Student Example',
             'email' => 'student@school.edu',
+            'privacy_consent' => true,
             'idempotency_key' => 'claim-token-refresh-001',
         ])->assertOk()->assertJsonPath('data.status', 'approved');
 
@@ -232,7 +360,7 @@ class StudentDiscountTest extends TestCase
         $this->campaign($organization, $store, ['enabled' => true]);
         $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
         $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
-        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 60, false, null);
         config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
         Http::fake([
             'https://generativelanguage.googleapis.com/*' => Http::response([
@@ -247,7 +375,9 @@ class StudentDiscountTest extends TestCase
 
         $url = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
         $response = $this->post($url, [
+            'name' => 'Student Example',
             'email' => 'student@example.com',
+            'privacy_consent' => true,
             'idempotency_key' => 'claim-evidence-001',
             'evidence' => UploadedFile::fake()->create('student-id.webp', 128, 'image/webp'),
         ], ['Accept' => 'application/json']);
@@ -261,6 +391,88 @@ class StudentDiscountTest extends TestCase
         Storage::disk('local')->assertExists($claim->evidence_path);
         Mail::assertNothingSent();
         $this->assertDatabaseMissing('student_discount_codes', ['store_id' => $store->id]);
+    }
+
+    public function test_sample_watermark_does_not_prevent_student_card_document_from_auto_approval(): void
+    {
+        Storage::fake('local');
+        Mail::fake();
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $connection = $this->connection($store);
+        $this->studentInstallation($store, $connection);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+
+        $evidence = UploadedFile::fake()->create('test-sample-student-id.jpg', 64, 'image/jpeg');
+        file_put_contents((string) $evidence->getRealPath(), "\nTEST SAMPLE — NOT VALID", FILE_APPEND);
+
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => true,
+                    'institution_name' => 'Example University',
+                    'student_name' => null,
+                    'student_identifier_masked' => '***1234',
+                    'expiry_date' => null,
+                    'confidence' => 94,
+                    'review_notes' => 'Student identity card layout with a readable institution field.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+            "https://{$store->shopify_domain}/*" => Http::sequence()
+                ->push(['data' => ['codeDiscountNodeByCode' => null]])
+                ->push(['data' => ['discountCodeBasicCreate' => [
+                    'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/sample-watermark'],
+                    'userErrors' => [],
+                ]]]),
+        ]);
+
+        $response = $this->post($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'name' => 'Student Example',
+            'email' => 'student@example.com',
+            'privacy_consent' => true,
+            'idempotency_key' => 'claim-sample-watermark-001',
+            'evidence' => $evidence,
+        ], ['Accept' => 'application/json']);
+
+        $response->assertOk()->assertJsonPath('data.status', 'approved');
+        $claim = StudentDiscountClaim::query()->sole();
+        $this->assertSame('approved', $claim->status);
+        $this->assertSame('ai', $claim->review_method);
+        $this->assertSame('94.00', $claim->confidence);
+        $this->assertTrue(data_get($claim->recognition_result, 'is_student_id'));
+        $this->assertDatabaseHas('student_discount_codes', [
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/sample-watermark',
+        ]);
+        Queue::assertPushed(SendStudentDiscountDecisionMail::class, 1);
+
+        Http::assertSent(function ($request): bool {
+            if (! str_contains($request->url(), 'generativelanguage.googleapis.com')) {
+                return false;
+            }
+
+            $prompt = mb_strtolower((string) data_get($request->data(), 'contents.0.parts.0.text'));
+            $encodedEvidence = data_get($request->data(), 'contents.0.parts.1.inlineData.data');
+            $sentEvidence = is_string($encodedEvidence) ? base64_decode($encodedEvidence, true) : false;
+
+            return str_contains($prompt, 'only visual document-type recognition')
+                && str_contains($prompt, 'school name or logo')
+                && str_contains($prompt, 'portrait photo')
+                && str_contains($prompt, 'test sample')
+                && str_contains($prompt, 'not valid')
+                && str_contains($prompt, 'must not cause is_student_id to be false')
+                && str_contains($prompt, 'not owned by the submitter')
+                && str_contains($prompt, 'displayed name might not match a submitted name')
+                && str_contains($prompt, 'current enrollment cannot be proven')
+                && str_contains($prompt, 'confidence must not measure authenticity or validity')
+                && is_string($sentEvidence)
+                && str_contains($sentEvidence, 'TEST SAMPLE — NOT VALID');
+        });
     }
 
     public function test_gemini_provider_failures_map_to_safe_stable_codes_without_retaining_provider_text(): void
@@ -326,7 +538,9 @@ class StudentDiscountTest extends TestCase
         ]);
 
         $response = $this->post($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'name' => 'Student Example',
             'email' => 'safe-failure@example.com',
+            'privacy_consent' => true,
             'idempotency_key' => 'safe-failure-001',
             'evidence' => UploadedFile::fake()->create('student-id.jpg', 64, 'image/jpeg'),
         ], ['Accept' => 'application/json']);
@@ -350,7 +564,7 @@ class StudentDiscountTest extends TestCase
                 ->where('claims.data.0.recognition_result', null));
     }
 
-    public function test_high_confidence_non_student_id_is_never_auto_approved(): void
+    public function test_unrelated_image_is_queued_for_manual_review_without_auto_rejection(): void
     {
         Storage::fake('local');
         Mail::fake();
@@ -365,15 +579,17 @@ class StudentDiscountTest extends TestCase
                 'candidates' => [['content' => ['parts' => [['text' => json_encode([
                     'is_student_id' => false,
                     'institution_name' => null,
-                    'confidence' => 99,
-                    'review_notes' => 'Not a student ID',
+                    'confidence' => 5,
+                    'review_notes' => 'Unrelated image without a student card layout.',
                 ], JSON_THROW_ON_ERROR)]]]]],
             ]),
         ]);
 
         $url = $this->signedProxyUrl(route('student-discounts.public.claims.store'), 'student-test.myshopify.com');
         $this->post($url, [
+            'name' => 'Student Example',
             'email' => 'student@example.com',
+            'privacy_consent' => true,
             'idempotency_key' => 'claim-not-student-001',
             'evidence' => UploadedFile::fake()->create('not-a-student-id.webp', 128, 'image/webp'),
         ], ['Accept' => 'application/json'])
@@ -388,6 +604,301 @@ class StudentDiscountTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    public function test_new_submission_voids_prior_pending_claim_deletes_old_evidence_and_preserves_scoped_history(): void
+    {
+        Storage::fake('local');
+        Mail::fake();
+        Queue::fake();
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        config(['student_discount.active.client_secret' => 'proxy-shared-secret']);
+
+        $oldPath = "student-discounts/{$organization->id}/{$store->id}/old-pending/student-id.jpg";
+        Storage::disk('local')->put($oldPath, 'private-old-evidence');
+        $oldClaim = $this->claim($organization, $store, 'old-pending', [
+            'name' => 'Previous Student',
+            'email' => 'resubmit@example.com',
+            'normalized_email' => 'resubmit@example.com',
+            'privacy_consented_at' => now()->subDay(),
+            'evidence_disk' => 'local',
+            'evidence_path' => $oldPath,
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 20,
+            'submission_count' => 1,
+        ]);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => false,
+                    'institution_name' => null,
+                    'confidence' => 10,
+                    'review_notes' => 'The image does not show a recognizable student card layout.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+        ]);
+
+        $response = $this->post($this->signedProxyUrl(route('student-discounts.public.claims.store'), $store->shopify_domain), [
+            'name' => 'Updated Student',
+            'email' => 'RESUBMIT@example.com',
+            'privacy_consent' => true,
+            'idempotency_key' => 'resubmit-new-claim-001',
+            'evidence' => UploadedFile::fake()->create('new-student-id.jpg', 64, 'image/jpeg'),
+        ], ['Accept' => 'application/json']);
+
+        $response->assertAccepted()->assertJsonPath('data.status', 'pending');
+        $this->assertDatabaseCount('student_discount_claims', 2);
+        $newClaim = StudentDiscountClaim::query()->where('id', '!=', $oldClaim->id)->sole();
+        $oldClaim->refresh();
+
+        $this->assertSame('voided', $oldClaim->status);
+        $this->assertSame($newClaim->id, $oldClaim->superseded_by_claim_id);
+        $this->assertNotNull($oldClaim->superseded_at);
+        $this->assertNull($oldClaim->evidence_path);
+        $this->assertNotNull($oldClaim->evidence_deleted_at);
+        Storage::disk('local')->assertMissing($oldPath);
+        $this->assertSame('Updated Student', $newClaim->name);
+        $this->assertSame('resubmit@example.com', $newClaim->normalized_email);
+        $this->assertNotNull($newClaim->privacy_consented_at);
+        $this->assertFalse(array_key_exists('privacy_consent', $newClaim->getAttributes()));
+        $this->assertSame(2, $newClaim->submission_count);
+        Storage::disk('local')->assertExists((string) $newClaim->evidence_path);
+
+        $voidedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_voided')
+            ->where('subject_id', $oldClaim->id)
+            ->sole();
+        $this->assertSame('superseded', data_get($voidedAudit->metadata, 'reason'));
+        $this->assertSame($newClaim->uuid, data_get($voidedAudit->metadata, 'superseded_by_claim_uuid'));
+        $this->assertSame('pending', data_get($voidedAudit->metadata, 'evidence_cleanup_status'));
+        $submittedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_submitted')
+            ->where('subject_id', $newClaim->id)
+            ->sole();
+        $this->assertSame([$oldClaim->uuid], data_get($submittedAudit->metadata, 'superseded_claim_uuids'));
+        $deletion = StudentDiscountEvidenceDeletion::query()->sole();
+        $this->assertSame('completed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertNotNull($deletion->completed_at);
+        $rawDeletionPath = (string) DB::table('student_discount_evidence_deletions')->where('id', $deletion->id)->value('path');
+        $this->assertStringNotContainsString($oldPath, $rawDeletionPath);
+        $deletedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_deleted')
+            ->where('subject_id', $oldClaim->id)
+            ->sole();
+        $this->assertTrue((bool) data_get($deletedAudit->metadata, 'evidence_deleted'));
+        $this->assertSame($deletion->uuid, data_get($deletedAudit->metadata, 'cleanup_uuid'));
+        $auditPayload = AuditLog::query()->whereIn('id', [$voidedAudit->id, $submittedAudit->id, $deletedAudit->id])->get()->toJson();
+        $this->assertStringNotContainsString('resubmit@example.com', strtolower($auditPayload));
+        $this->assertStringNotContainsString('private-old-evidence', $auditPayload);
+
+        $this->actingAs($admin)
+            ->get(route('student-discounts.index', [$organization, $store]).'?status=voided')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('claims.data', 1)
+                ->where('claims.data.0.id', $oldClaim->uuid)
+                ->where('claims.data.0.name', 'Previous Student')
+                ->where('claims.data.0.status', 'voided')
+                ->where('claims.data.0.has_evidence', false)
+                ->where('filterOptions.statuses.3.value', 'voided')
+                ->where('filterOptions.statuses.3.label', '已作废'));
+
+        $batchResponse = $this->actingAs($admin)->post(
+            route('student-discounts.claims.bulk-approve', [$organization, $store]),
+            ['claim_ids' => [$oldClaim->uuid]],
+        );
+        $batchResponse->assertRedirect()->assertSessionHas('student_discount_batch_result', function (array $result): bool {
+            return data_get($result, 'items.0.code') === 'CLAIM_NOT_PENDING'
+                && data_get($result, 'failed') === 1;
+        });
+        $this->assertSame('voided', $oldClaim->fresh()->status);
+        $this->assertDatabaseMissing('student_discount_codes', ['claim_id' => $oldClaim->id]);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_submission_transaction_failure_preserves_previous_pending_record_and_evidence(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $oldPath = "student-discounts/{$organization->id}/{$store->id}/rollback-old/student-id.jpg";
+        Storage::disk('local')->put($oldPath, 'rollback-old-evidence');
+        $oldClaim = $this->claim($organization, $store, 'rollback-old', [
+            'name' => 'Rollback Student',
+            'email' => 'rollback@example.com',
+            'normalized_email' => 'rollback@example.com',
+            'evidence_disk' => 'local',
+            'evidence_path' => $oldPath,
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 21,
+        ]);
+        AuditLog::creating(function (AuditLog $audit): void {
+            if ($audit->action === 'student_discount_claim_submitted') {
+                throw new \RuntimeException('Synthetic transaction failure.');
+            }
+        });
+
+        try {
+            app(StudentDiscountClaimService::class)->submit(
+                $store,
+                'Replacement Student',
+                'rollback@example.com',
+                UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
+                'rollback-new-claim-001',
+            );
+            $this->fail('The synthetic audit failure must roll back the submission transaction.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Synthetic transaction failure.', $exception->getMessage());
+        }
+
+        $oldClaim->refresh();
+        $this->assertSame('pending', $oldClaim->status);
+        $this->assertNull($oldClaim->superseded_by_claim_id);
+        $this->assertNull($oldClaim->superseded_at);
+        $this->assertSame($oldPath, $oldClaim->evidence_path);
+        $this->assertNull($oldClaim->evidence_deleted_at);
+        Storage::disk('local')->assertExists($oldPath);
+        $this->assertSame([$oldPath], Storage::disk('local')->allFiles("student-discounts/{$organization->id}/{$store->id}"));
+        $this->assertDatabaseCount('student_discount_claims', 1);
+        $this->assertDatabaseCount('student_discount_evidence_deletions', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_post_commit_cleanup_failure_keeps_voided_state_and_queues_safe_retry(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, ['enabled' => true]);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        $oldClaim = $this->claim($organization, $store, 'post-commit-failure', [
+            'name' => 'Previous Student',
+            'email' => 'post-commit@example.com',
+            'normalized_email' => 'post-commit@example.com',
+            'evidence_disk' => 'missing-evidence-disk',
+            'evidence_path' => 'private/old-student-id.jpg',
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 32,
+        ]);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => false,
+                    'institution_name' => null,
+                    'confidence' => 10,
+                    'review_notes' => 'The image does not show a recognizable student card layout.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+        ]);
+
+        $result = app(StudentDiscountClaimService::class)->submit(
+            $store,
+            'Replacement Student',
+            'post-commit@example.com',
+            UploadedFile::fake()->create('replacement.jpg', 64, 'image/jpeg'),
+            'post-commit-new-001',
+        );
+
+        $this->assertSame('pending', $result['claim']->status);
+        $oldClaim->refresh();
+        $this->assertSame('voided', $oldClaim->status);
+        $this->assertNull($oldClaim->evidence_path);
+        $this->assertNull($oldClaim->evidence_disk);
+        $this->assertNull($oldClaim->evidence_deleted_at);
+        $deletion = StudentDiscountEvidenceDeletion::query()->sole();
+        $this->assertSame('failed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertSame('storage_delete_failed', $deletion->last_error_code);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_evidence_deleted']);
+        Queue::assertPushed(
+            DeleteSupersededStudentDiscountEvidence::class,
+            fn (DeleteSupersededStudentDiscountEvidence $job): bool => $job->deletionId === $deletion->id,
+        );
+    }
+
+    public function test_evidence_cleanup_failure_is_sanitized_retryable_and_marks_deletion_only_after_success(): void
+    {
+        Storage::fake('local');
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = $this->claim($organization, $store, 'cleanup-retry', [
+            'status' => 'voided',
+            'evidence_disk' => null,
+            'evidence_path' => null,
+            'evidence_mime' => null,
+            'evidence_size' => null,
+            'evidence_deleted_at' => null,
+            'superseded_at' => now(),
+        ]);
+        $sensitivePath = "student-discounts/{$organization->id}/{$store->id}/private/student-id.jpg";
+        $deletion = StudentDiscountEvidenceDeletion::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'disk' => 'missing-evidence-disk',
+            'path' => $sensitivePath,
+            'status' => 'pending',
+        ]);
+        $cleanup = app(StudentDiscountEvidenceCleanupService::class);
+        $job = new DeleteSupersededStudentDiscountEvidence($deletion->id);
+
+        try {
+            $job->handle($cleanup);
+            $this->fail('An unavailable evidence disk must fail safely.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Student discount evidence cleanup failed.', $exception->getMessage());
+            $this->assertStringNotContainsString($sensitivePath, $exception->getMessage());
+        }
+
+        $deletion->refresh();
+        $this->assertSame('failed', $deletion->status);
+        $this->assertSame(1, $deletion->attempts);
+        $this->assertSame('storage_delete_failed', $deletion->last_error_code);
+        $this->assertNull($deletion->completed_at);
+        $this->assertNull($claim->fresh()->evidence_deleted_at);
+        $rawPath = (string) DB::table('student_discount_evidence_deletions')->where('id', $deletion->id)->value('path');
+        $this->assertStringNotContainsString($sensitivePath, $rawPath);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_evidence_deleted']);
+
+        $job->failed(null);
+        $failedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_cleanup_failed')
+            ->where('subject_id', $claim->id)
+            ->sole();
+        $failedAuditPayload = $failedAudit->toJson();
+        $this->assertSame('storage_delete_failed', data_get($failedAudit->metadata, 'error_code'));
+        $this->assertStringNotContainsString($sensitivePath, $failedAuditPayload);
+
+        $retryPath = "student-discounts/{$organization->id}/{$store->id}/retry/student-id.jpg";
+        Storage::disk('local')->put($retryPath, 'retry-private-evidence');
+        $deletion->forceFill([
+            'disk' => 'local',
+            'path' => $retryPath,
+            'status' => 'failed',
+        ])->save();
+        $job->handle($cleanup);
+
+        $deletion->refresh();
+        $this->assertSame('completed', $deletion->status);
+        $this->assertSame(2, $deletion->attempts);
+        $this->assertNull($deletion->last_error_code);
+        $this->assertNotNull($deletion->completed_at);
+        $this->assertNotNull($claim->fresh()->evidence_deleted_at);
+        Storage::disk('local')->assertMissing($retryPath);
+        $deletedAudit = AuditLog::query()
+            ->where('action', 'student_discount_claim_evidence_deleted')
+            ->where('subject_id', $claim->id)
+            ->sole();
+        $this->assertTrue((bool) data_get($deletedAudit->metadata, 'evidence_deleted'));
+        $this->assertStringNotContainsString($retryPath, $deletedAudit->toJson());
+    }
+
     public function test_idempotency_rejects_different_evidence_with_the_same_size_and_mime(): void
     {
         Storage::fake('local');
@@ -397,6 +908,7 @@ class StudentDiscountTest extends TestCase
 
         $claims->submit(
             $store,
+            'Student Example',
             'student@example.com',
             UploadedFile::fake()->createWithContent('first.webp', str_repeat('A', 128)),
             'claim-content-hash-001',
@@ -405,6 +917,7 @@ class StudentDiscountTest extends TestCase
         try {
             $claims->submit(
                 $store,
+                'Student Example',
                 'student@example.com',
                 UploadedFile::fake()->createWithContent('second.webp', str_repeat('B', 128)),
                 'claim-content-hash-001',
@@ -1340,8 +1853,10 @@ class StudentDiscountTest extends TestCase
         return StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
+            'name' => 'Test Student',
             'email' => "{$key}@example.com",
             'normalized_email' => "{$key}@example.com",
+            'privacy_consented_at' => now(),
             'source' => 'student_id',
             'status' => 'pending',
             'claim_token_hash' => hash('sha256', "{$key}-token"),

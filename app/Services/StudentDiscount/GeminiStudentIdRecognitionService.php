@@ -12,6 +12,16 @@ use JsonException;
 
 class GeminiStudentIdRecognitionService
 {
+    private const DOCUMENT_CLASSIFICATION_PROMPT = <<<'PROMPT'
+Classify the document type shown in this image and return only the requested structured JSON.
+
+This task is only visual document-type recognition. It is not an authenticity, forgery, validity, ownership, identity-match, enrollment-status, or fraud assessment. Set is_student_id to true when the overall layout looks like a student ID or campus student identity card. Relevant visual features can include a school name or logo and student-card elements such as a person name, portrait photo, or student identifier. Use the overall card layout and any readable combination of those features; do not require every field.
+
+Watermarks, labels, or wording such as "TEST SAMPLE", "NOT VALID", "SAMPLE", "样本", "仿制", or statements that authenticity is uncertain must not cause is_student_id to be false when the image otherwise looks like a student identity card. Do not make is_student_id false because the card may be forged, expired, invalid, not current, not owned by the submitter, because a displayed name might not match a submitted name, or because current enrollment cannot be proven. All of those questions are outside this classification task.
+
+Set is_student_id to false only when the image does not present a recognizable student-card form or is unrelated. Use confidence from 0 to 100 to measure how strongly the image resembles a student identity card and how readable its relevant identity information is; confidence must not measure authenticity or validity. Do not invent unreadable values. Mask any student identifier and never return it in full. Keep review_notes brief, categorical, and free of transcribed document text.
+PROMPT;
+
     public function __construct(
         private HttpFactory $http,
         private SystemSettingsService $settings,
@@ -37,7 +47,7 @@ class GeminiStudentIdRecognitionService
                 ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent", [
                     'contents' => [[
                         'parts' => [
-                            ['text' => 'Analyze this student ID. Return only the requested structured data. Confidence must be a number from 0 to 100 measuring whether this is a valid current student ID. Do not invent unreadable values.'],
+                            ['text' => self::DOCUMENT_CLASSIFICATION_PROMPT],
                             ['inlineData' => ['mimeType' => $claim->evidence_mime, 'data' => base64_encode($bytes)]],
                         ],
                     ]],

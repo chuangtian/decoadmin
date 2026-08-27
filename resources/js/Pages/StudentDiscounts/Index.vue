@@ -20,9 +20,10 @@ interface Campaign {
 
 interface Claim {
     id: string;
+    name: string | null;
     email: string;
     source: string;
-    status: 'pending' | 'approved' | 'rejected';
+    status: 'pending' | 'approved' | 'rejected' | 'voided';
     review_method: string | null;
     confidence: number | null;
     model_name: string | null;
@@ -343,13 +344,14 @@ const badge = (status: string) => ({
     pending: 'bg-amber-50 text-amber-700 ring-amber-200',
     approved: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     rejected: 'bg-rose-50 text-rose-700 ring-rose-200',
+    voided: 'bg-slate-100 text-slate-500 ring-slate-200',
     unused: 'bg-blue-50 text-blue-700 ring-blue-200',
     partially_used: 'bg-violet-50 text-violet-700 ring-violet-200',
     used_up: 'bg-slate-100 text-slate-700 ring-slate-200',
     expired: 'bg-slate-100 text-slate-500 ring-slate-200',
 }[status] ?? 'bg-slate-100 text-slate-600 ring-slate-200');
 const label = (status: string) => ({
-    pending: '待人工审核', approved: '已通过', rejected: '已拒绝', unused: '未使用',
+    pending: '待人工审核', approved: '已通过', rejected: '已拒绝', voided: '已作废', unused: '未使用',
     partially_used: '部分使用', used_up: '已用完', expired: '已失效',
 }[status] ?? status);
 const sourceLabel = (source: string) => source === 'education_email' ? '教育邮箱' : '学生证';
@@ -516,7 +518,7 @@ const recognitionFailureLabel = (code: string | null) => ({
                         <tbody class="divide-y divide-slate-100">
                             <tr v-for="claim in claims.data" :key="claim.id" class="align-top">
                                 <td class="px-4 py-4"><input v-if="claim.status === 'pending' && (permissions.approve || permissions.reject)" v-model="selectedClaimIds" :value="claim.id" type="checkbox" :disabled="!selectedClaimIds.includes(claim.id) && selectedClaimIds.length >= bulkSelectionLimit" :aria-label="`选择 ${claim.email} 的申请`" /></td>
-                                <td class="px-4 py-4"><div class="flex items-start gap-3"><div class="min-w-0"><p class="font-semibold text-slate-900">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-500">第 {{ claim.submission_count }} 次提交</p></div><button v-if="canPreviewEvidence(claim)" type="button" class="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" :aria-label="`预览 ${claim.email} 的学生证`" @click="openEvidencePreview(claim)"><img :src="evidenceUrl(claim)" alt="学生证缩略图" class="h-10 w-10 object-cover" loading="lazy" /></button></div></td>
+                                <td class="px-4 py-4"><div class="flex items-start gap-3"><div class="min-w-0"><p class="font-semibold text-slate-900">{{ claim.name || '未填写姓名' }}</p><p class="mt-1 break-all text-xs text-slate-500">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-400">第 {{ claim.submission_count }} 次提交</p></div><button v-if="canPreviewEvidence(claim)" type="button" class="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" :aria-label="`预览 ${claim.name || claim.email} 的学生证`" @click="openEvidencePreview(claim)"><img :src="evidenceUrl(claim)" alt="学生证缩略图" class="h-10 w-10 object-cover" loading="lazy" /></button></div></td>
                                 <td class="px-4 py-4"><p class="font-semibold text-slate-800">{{ sourceLabel(claim.source) }}</p><p class="mt-1 text-xs text-slate-500">{{ verificationLabel(claim) }}<span v-if="claim.confidence !== null"> · {{ claim.confidence }}/100</span></p><p v-if="claim.recognition_failure_code" class="mt-1 text-xs font-semibold text-amber-700">{{ recognitionFailureLabel(claim.recognition_failure_code) }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
                                 <td class="px-4 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">有效期至 {{ new Date(claim.discount.expires_at).toLocaleDateString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
                                 <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-[11px] text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>

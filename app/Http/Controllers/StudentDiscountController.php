@@ -36,7 +36,7 @@ class StudentDiscountController extends Controller
         $campaign = $this->campaigns->getOrCreate($organization, $store, $request->user());
         $canViewEvidence = $request->user()->hasPermission('student_discount.view_evidence', $organization, $store);
         $filters = $request->validate([
-            'status' => ['nullable', Rule::in(['pending', 'approved', 'rejected'])],
+            'status' => ['nullable', Rule::in(['pending', 'approved', 'rejected', 'voided'])],
             'source' => ['nullable', Rule::in(['education_email', 'student_id'])],
             'review_method' => ['nullable', Rule::in(['education_email', 'ai', 'manual', 'unreviewed'])],
             'email' => ['nullable', 'string', 'max:120'],
