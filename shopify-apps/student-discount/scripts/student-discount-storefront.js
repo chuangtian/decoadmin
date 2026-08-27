@@ -78,7 +78,6 @@
       else emailInput.removeAttribute('aria-invalid');
       emailSubmit.disabled = !valid;
       emailError.hidden = true;
-      alternative.hidden = true;
       return valid;
     };
 
@@ -167,7 +166,7 @@
       emailInput.removeAttribute('aria-invalid');
       emailSubmit.disabled = true;
       emailError.hidden = true;
-      alternative.hidden = true;
+      alternative.hidden = false;
       dialog.hidden = false;
       document.documentElement.style.overflow = 'hidden';
       showView('method');
@@ -285,10 +284,12 @@
         showSubmission('Request in progress', 'Your request is already being reviewed. We will email you when it is complete.');
       } catch (error) {
         if (error?.code === 'EVIDENCE_REQUIRED') {
+          emailError.hidden = true;
           alternative.hidden = false;
         } else {
           emailError.textContent = publicMessage(error?.message, 'Unable to submit your request. Please try again later.');
           emailError.hidden = false;
+          alternative.hidden = false;
         }
       } finally {
         emailSubmitting = false;

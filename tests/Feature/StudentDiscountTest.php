@@ -138,6 +138,17 @@ class StudentDiscountTest extends TestCase
         Http::assertSentCount(2);
         Http::assertSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'student-app-offline-token');
         Http::assertNotSent(fn ($request): bool => $request->header('X-Shopify-Access-Token')[0] === 'shopify-test-token');
+        Http::assertSent(function ($request): bool {
+            if (! str_contains((string) ($request['query'] ?? ''), 'discountCodeBasicCreate')) {
+                return false;
+            }
+
+            $input = data_get($request['variables'] ?? [], 'basicCodeDiscount', []);
+
+            return data_get($input, 'context.all') === 'ALL'
+                && data_get($input, 'customerGets.items.all') === true
+                && is_bool(data_get($input, 'customerGets.items.all'));
+        });
     }
 
     public function test_education_email_claim_requires_current_store_student_app_token(): void
