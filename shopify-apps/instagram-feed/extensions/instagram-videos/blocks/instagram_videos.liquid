@@ -133,6 +133,8 @@
                   class="igv__image"
                   src="{{ item.poster_url }}"
                   alt="{{ item.caption | default: 'Instagram' | strip_newlines | truncate: 100 | escape }}"
+                  width="{{ item.width | default: 1080 }}"
+                  height="{{ item.height | default: 1920 }}"
                   loading="lazy"
                 >
               {%- endif -%}
