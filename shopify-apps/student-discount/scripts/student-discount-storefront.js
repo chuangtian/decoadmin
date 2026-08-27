@@ -78,6 +78,7 @@
       else emailInput.removeAttribute('aria-invalid');
       emailSubmit.disabled = !valid;
       emailError.hidden = true;
+      alternative.hidden = true;
       return valid;
     };
 
@@ -85,6 +86,16 @@
       studentIdForm.querySelector('input[name="email"]').value = emailInput.value.trim();
       showView('student-id');
       window.setTimeout(() => studentIdForm.querySelector('input[name="fullName"]').focus(), 0);
+    };
+
+    const revealStudentIdAlternative = () => {
+      emailError.hidden = true;
+      alternative.hidden = false;
+      window.setTimeout(() => {
+        if (alternative.hidden) return;
+        alternative.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        openIdButton.focus({preventScroll: true});
+      }, 0);
     };
 
     const showCode = (payload) => {
@@ -166,7 +177,7 @@
       emailInput.removeAttribute('aria-invalid');
       emailSubmit.disabled = true;
       emailError.hidden = true;
-      alternative.hidden = false;
+      alternative.hidden = true;
       dialog.hidden = false;
       document.documentElement.style.overflow = 'hidden';
       showView('method');
@@ -284,12 +295,11 @@
         showSubmission('Request in progress', 'Your request is already being reviewed. We will email you when it is complete.');
       } catch (error) {
         if (error?.code === 'EVIDENCE_REQUIRED') {
-          emailError.hidden = true;
-          alternative.hidden = false;
+          revealStudentIdAlternative();
         } else {
           emailError.textContent = publicMessage(error?.message, 'Unable to submit your request. Please try again later.');
           emailError.hidden = false;
-          alternative.hidden = false;
+          alternative.hidden = true;
         }
       } finally {
         emailSubmitting = false;

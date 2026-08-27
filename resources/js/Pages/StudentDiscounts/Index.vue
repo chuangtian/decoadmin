@@ -51,7 +51,7 @@ const props = defineProps<{
     claims: Pagination<Claim>;
     counts: { pending: number; approved: number; rejected: number };
     filters: { status: string };
-    permissions: { viewEvidence: boolean; approve: boolean; reject: boolean; manageCampaign: boolean; analytics: boolean; audit: boolean };
+    permissions: { viewEvidence: boolean; approve: boolean; reject: boolean; deleteClaim: boolean; manageCampaign: boolean; analytics: boolean; audit: boolean };
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/student-discounts`;
@@ -131,6 +131,10 @@ const reject = (claim: Claim) => {
     const reason = window.prompt(`请输入拒绝 ${claim.email} 的原因（必填）：`);
     if (!reason?.trim()) return;
     router.post(`${baseUrl}/claims/${claim.id}/reject`, { reason: reason.trim() }, { preserveScroll: true });
+};
+const deleteClaim = (claim: Claim) => {
+    if (!window.confirm(`确认将 ${claim.email} 的申请记录从列表移除？学生证文件会立即删除；审计记录和已生成优惠码关联将保留。`)) return;
+    router.delete(`${baseUrl}/claims/${claim.id}`, { preserveScroll: true, preserveState: true });
 };
 const badge = (status: string) => ({
     pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -257,7 +261,7 @@ const label = (status: string) => ({
                                 <td class="px-5 py-4"><p class="font-semibold text-slate-800">{{ claim.confidence === null ? '—' : `${claim.confidence} / 100` }}</p><p class="mt-1 text-xs text-slate-500">{{ claim.model_name ?? claim.review_method ?? '未识别' }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
                                 <td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">{{ label(claim.discount.status) }} · {{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} · {{ new Date(claim.discount.expires_at).toLocaleString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
                                 <td class="whitespace-nowrap px-5 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
-                                <td class="px-5 py-4"><div class="flex justify-end gap-2"><a v-if="permissions.viewEvidence && claim.has_evidence" :href="`${baseUrl}/claims/${claim.id}/evidence`" target="_blank" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">证件</a><button v-if="claim.status === 'pending' && permissions.approve" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="approve(claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="reject(claim)">拒绝</button></div></td>
+                                <td class="px-5 py-4"><div class="flex flex-wrap justify-end gap-2"><a v-if="permissions.viewEvidence && claim.has_evidence" :href="`${baseUrl}/claims/${claim.id}/evidence`" target="_blank" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">证件</a><button v-if="claim.status === 'pending' && permissions.approve" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="approve(claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="reject(claim)">拒绝</button><button v-if="permissions.deleteClaim" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="deleteClaim(claim)">删除</button></div></td>
                             </tr>
                             <tr v-if="claims.data.length === 0"><td colspan="5" class="px-5 py-12 text-center text-sm text-slate-500">暂无申请记录。</td></tr>
                         </tbody>

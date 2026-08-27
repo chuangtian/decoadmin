@@ -258,6 +258,59 @@ class StudentDiscountClaimService
         return $claim;
     }
 
+    public function deleteClaim(Organization $organization, Store $store, string $claimUuid, User $actor): bool
+    {
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+
+        return DB::transaction(function () use ($organization, $store, $claimUuid, $actor): bool {
+            $claim = StudentDiscountClaim::query()
+                ->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)
+                ->where('uuid', $claimUuid)
+                ->lockForUpdate()
+                ->first();
+            if (! $claim) {
+                return false;
+            }
+
+            $hadEvidence = filled($claim->evidence_path);
+            if ($hadEvidence) {
+                $disk = trim((string) $claim->evidence_disk);
+                $path = trim((string) $claim->evidence_path);
+                if ($disk === '' || $path === '') {
+                    throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+                }
+
+                $storage = Storage::disk($disk);
+                if ($storage->exists($path) && ! $storage->delete($path)) {
+                    throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+                }
+                if ($storage->exists($path)) {
+                    throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+                }
+            }
+
+            $this->audit($claim, $actor, 'student_discount_claim_deleted', [
+                'status' => $claim->status,
+                'evidence_deleted' => $hadEvidence,
+                'discount_code_present' => $claim->discountCode()->exists(),
+            ]);
+            DB::table('student_discount_claim_idempotencies')->where('claim_id', $claim->id)->delete();
+            $claim->forceFill([
+                'evidence_disk' => null,
+                'evidence_path' => null,
+                'evidence_mime' => null,
+                'evidence_size' => null,
+                'evidence_deleted_at' => $hadEvidence ? now() : $claim->evidence_deleted_at,
+                'idempotency_key' => null,
+                'request_fingerprint' => null,
+            ])->save();
+            $claim->delete();
+
+            return true;
+        });
+    }
+
     public function verifyClaimToken(StudentDiscountClaim $claim, string $token): bool
     {
         return $token !== '' && hash_equals($claim->claim_token_hash, hash('sha256', $token));

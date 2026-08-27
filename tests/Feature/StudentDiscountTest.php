@@ -396,6 +396,7 @@ class StudentDiscountTest extends TestCase
             ->where('organization.id', $organization->id)
             ->where('store.id', $store->id)
             ->where('permissions.approve', true)
+            ->where('permissions.deleteClaim', false)
             ->where('permissions.manageCampaign', false)
             ->has('claims.data', 1));
 
@@ -438,9 +439,134 @@ class StudentDiscountTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_store_admin_can_soft_delete_current_store_claim_and_evidence_idempotently_without_cross_store_deletion(): void
+    {
+        Storage::fake('local');
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $path = "student-discounts/{$organization->id}/{$store->id}/delete-test/student-id.jpg";
+        Storage::disk('local')->put($path, 'private-student-evidence');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'delete-student@example.com',
+            'normalized_email' => 'delete-student@example.com',
+            'source' => 'student_id',
+            'status' => 'approved',
+            'evidence_disk' => 'local',
+            'evidence_path' => $path,
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 24,
+            'idempotency_key' => 'delete-claim-001',
+            'request_fingerprint' => hash('sha256', 'delete-claim-001'),
+            'claim_token_hash' => hash('sha256', 'delete-claim-token'),
+            'claim_token_encrypted' => 'delete-claim-token',
+        ]);
+        $code = StudentDiscountCode::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'normalized_email' => $claim->normalized_email,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/delete-preserved',
+            'code' => 'STUDENT-DELETE-PRESERVED',
+            'status' => 'unused',
+            'usage_count' => 0,
+            'usage_limit' => 1,
+            'idempotency_key' => 'claim:'.$claim->uuid,
+            'generated_at' => now(),
+            'expires_at' => now()->addDays(7),
+        ]);
+        DB::table('student_discount_claim_idempotencies')->insert([
+            'store_id' => $store->id,
+            'claim_id' => $claim->id,
+            'idempotency_key' => 'delete-claim-001',
+            'request_fingerprint' => hash('sha256', 'delete-claim-001'),
+            'created_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('student-discounts.index', [$organization, $store]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('permissions.deleteClaim', true));
+
+        $deleteUrl = route('student-discounts.claims.destroy', [$organization, $store, 'claim' => $claim->uuid]);
+        $this->actingAs($admin)->delete($deleteUrl)->assertRedirect();
+
+        Storage::disk('local')->assertMissing($path);
+        $this->assertSoftDeleted('student_discount_claims', ['id' => $claim->id]);
+        $deleted = StudentDiscountClaim::withTrashed()->findOrFail($claim->id);
+        $this->assertNull($deleted->evidence_path);
+        $this->assertNotNull($deleted->evidence_deleted_at);
+        $this->assertNull($deleted->idempotency_key);
+        $this->assertDatabaseHas('student_discount_codes', ['id' => $code->id, 'claim_id' => $claim->id]);
+        $this->assertDatabaseMissing('student_discount_claim_idempotencies', ['claim_id' => $claim->id]);
+        $audit = AuditLog::query()->where('action', 'student_discount_claim_deleted')->sole();
+        $this->assertSame($organization->id, $audit->organization_id);
+        $this->assertSame($store->id, $audit->store_id);
+        $this->assertSame($admin->id, $audit->user_id);
+        $this->assertSame($claim->id, $audit->subject_id);
+        $this->assertTrue((bool) data_get($audit->metadata, 'evidence_deleted'));
+        $auditPayload = json_encode($audit->toArray(), JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('delete-student@example.com', $auditPayload);
+        $this->assertStringNotContainsString('private-student-evidence', $auditPayload);
+
+        $this->actingAs($admin)->delete($deleteUrl)->assertRedirect();
+        $this->assertSame(1, AuditLog::query()->where('action', 'student_discount_claim_deleted')->count());
+
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Student Delete Store',
+            'shopify_domain' => 'other-student-delete.myshopify.com',
+            'status' => 'active',
+        ]);
+        $otherClaim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'email' => 'other-delete@example.com',
+            'normalized_email' => 'other-delete@example.com',
+            'source' => 'student_id',
+            'status' => 'pending',
+            'claim_token_hash' => hash('sha256', 'other-delete-token'),
+            'claim_token_encrypted' => 'other-delete-token',
+        ]);
+        $this->actingAs($admin)
+            ->delete(route('student-discounts.claims.destroy', [$organization, $store, 'claim' => $otherClaim->uuid]))
+            ->assertRedirect();
+        $this->assertDatabaseHas('student_discount_claims', ['id' => $otherClaim->id, 'deleted_at' => null]);
+    }
+
+    public function test_operator_without_delete_permission_cannot_delete_claim_or_evidence(): void
+    {
+        Storage::fake('local');
+        [$operator, $organization, $store] = $this->context('operator');
+        $path = "student-discounts/{$organization->id}/{$store->id}/forbidden-delete/student-id.jpg";
+        Storage::disk('local')->put($path, 'private-student-evidence');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'forbidden-delete@example.com',
+            'normalized_email' => 'forbidden-delete@example.com',
+            'source' => 'student_id',
+            'status' => 'pending',
+            'evidence_disk' => 'local',
+            'evidence_path' => $path,
+            'evidence_mime' => 'image/jpeg',
+            'evidence_size' => 24,
+            'claim_token_hash' => hash('sha256', 'forbidden-delete-token'),
+            'claim_token_encrypted' => 'forbidden-delete-token',
+        ]);
+
+        $this->actingAs($operator)
+            ->delete(route('student-discounts.claims.destroy', [$organization, $store, 'claim' => $claim->uuid]))
+            ->assertForbidden();
+
+        Storage::disk('local')->assertExists($path);
+        $this->assertDatabaseHas('student_discount_claims', ['id' => $claim->id, 'deleted_at' => null]);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student_discount_claim_deleted']);
+    }
+
     public function test_decision_mail_job_marks_claim_and_code_sent_once_without_serializing_pii(): void
     {
         Mail::fake();
+        $this->configureDeliveringMailTransport();
         [, $organization, $store] = $this->context('store-admin');
         $claim = StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
@@ -487,6 +613,7 @@ class StudentDiscountTest extends TestCase
 
     public function test_decision_mail_job_sends_outside_a_transaction_and_preserves_concurrent_success_markers(): void
     {
+        $this->configureDeliveringMailTransport();
         [, $organization, $store] = $this->context('store-admin');
         $claim = StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
@@ -548,6 +675,7 @@ class StudentDiscountTest extends TestCase
 
     public function test_decision_mail_job_marks_claim_and_code_failed_with_sanitized_exception(): void
     {
+        $this->configureDeliveringMailTransport();
         [, $organization, $store] = $this->context('store-admin');
         $claim = StudentDiscountClaim::query()->create([
             'organization_id' => $organization->id,
@@ -590,6 +718,37 @@ class StudentDiscountTest extends TestCase
         $this->assertNotNull($claim->fresh()->email_failed_at);
         $this->assertNull($code->fresh()->email_sent_at);
         $this->assertNotNull($code->fresh()->email_failed_at);
+    }
+
+    public function test_decision_mail_job_never_marks_log_transport_as_sent(): void
+    {
+        Mail::fake();
+        config(['mail.default' => 'log']);
+        [, $organization, $store] = $this->context('store-admin');
+        $claim = StudentDiscountClaim::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'email' => 'log-transport@example.edu',
+            'normalized_email' => 'log-transport@example.edu',
+            'source' => 'student_id',
+            'status' => 'approved',
+            'claim_token_hash' => hash('sha256', 'log-transport-token'),
+            'claim_token_encrypted' => 'log-transport-token',
+        ]);
+        $job = new SendStudentDiscountDecisionMail($organization->id, $store->id, $claim->id, null);
+
+        try {
+            $job->handle();
+            $this->fail('A non-delivering mail transport must fail safely.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Student discount decision email delivery failed.', $exception->getMessage());
+            $this->assertStringNotContainsString($claim->email, $exception->getMessage());
+            $job->failed($exception);
+        }
+
+        Mail::assertNothingSent();
+        $this->assertNull($claim->fresh()->email_sent_at);
+        $this->assertNotNull($claim->fresh()->email_failed_at);
     }
 
     public function test_shopify_app_connection_validates_oidc_claims_and_bootstrap_sets_installation_proxy_path(): void
@@ -948,6 +1107,20 @@ class StudentDiscountTest extends TestCase
         $signature = rtrim(strtr(base64_encode(hash_hmac('sha256', $header.'.'.$payload, $secret, true)), '+/', '-_'), '=');
 
         return $header.'.'.$payload.'.'.$signature;
+    }
+
+    private function configureDeliveringMailTransport(): void
+    {
+        config([
+            'mail.default' => 'student-discount-test',
+            'mail.mailers.student-discount-test' => [
+                'transport' => 'smtp',
+                'host' => 'smtp.test.invalid',
+                'port' => 587,
+            ],
+            'mail.from.address' => 'no-reply@test.invalid',
+            'mail.from.name' => 'DecoAdmin Test',
+        ]);
     }
 
     /** @return array{current_organization_id: int, current_store_id: int} */
