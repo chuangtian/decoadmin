@@ -115,6 +115,7 @@ class StudentDiscountClaimService
                     'recognition_result' => null,
                     'confidence' => null,
                     'model_name' => null,
+                    'recognition_failure_code' => null,
                     'recognized_at' => null,
                     'idempotency_key' => $idempotencyKey,
                     'request_fingerprint' => $fingerprint,
@@ -179,6 +180,7 @@ class StudentDiscountClaimService
             'recognition_result' => $recognition['result'],
             'confidence' => $recognition['confidence'],
             'model_name' => $recognition['model'],
+            'recognition_failure_code' => $recognition['failure_code'],
             'recognized_at' => now(),
             'review_method' => 'ai',
         ])->save();

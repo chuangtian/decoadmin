@@ -6,6 +6,7 @@ use App\Models\StudentDiscountClaim;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Storage;
 use JsonException;
 
@@ -64,7 +65,7 @@ class GeminiStudentIdRecognitionService
         }
 
         if ($response->failed()) {
-            return $this->failure($model, $response->status() === 429 ? 'rate_limited' : 'api_error');
+            return $this->failure($model, $this->classifyApiFailure($response));
         }
 
         $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
@@ -97,5 +98,34 @@ class GeminiStudentIdRecognitionService
     private function failure(string $model, string $code): array
     {
         return ['ok' => false, 'result' => null, 'confidence' => null, 'model' => $model, 'failure_code' => $code];
+    }
+
+    private function classifyApiFailure(Response $response): string
+    {
+        $payload = $response->json();
+        $providerStatus = strtoupper((string) data_get($payload, 'error.status', ''));
+        $message = mb_strtolower((string) data_get($payload, 'error.message', ''));
+        $reasons = collect((array) data_get($payload, 'error.details', []))
+            ->map(fn (mixed $detail): string => strtoupper((string) data_get($detail, 'reason', '')))
+            ->filter()
+            ->all();
+
+        if (in_array('API_KEY_INVALID', $reasons, true)
+            || ($providerStatus === 'INVALID_ARGUMENT' && str_contains($message, 'api key'))) {
+            return 'invalid_api_key';
+        }
+        if (in_array($response->status(), [401, 403], true) || $providerStatus === 'PERMISSION_DENIED') {
+            return 'permission_denied';
+        }
+        if ($response->status() === 404
+            || $providerStatus === 'NOT_FOUND'
+            || (str_contains($message, 'model') && str_contains($message, 'not found'))) {
+            return 'model_not_found';
+        }
+        if ($response->status() === 429 || $providerStatus === 'RESOURCE_EXHAUSTED') {
+            return 'rate_limited';
+        }
+
+        return 'api_error';
     }
 }

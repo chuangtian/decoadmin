@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 interface Campaign {
@@ -26,6 +26,7 @@ interface Claim {
     review_method: string | null;
     confidence: number | null;
     model_name: string | null;
+    recognition_failure_code: string | null;
     recognition_result: Record<string, unknown> | null;
     has_evidence: boolean;
     submission_count: number;
@@ -33,7 +34,28 @@ interface Claim {
     rejection_reason: string | null;
     created_at: string;
     reviewed_at: string | null;
-    discount: { code: string; status: string; usage_count: number; usage_limit: number; expires_at: string } | null;
+    discount: { id: string; code: string; status: string; usage_count: number; usage_limit: number; expires_at: string; last_synced_at: string | null } | null;
+}
+
+interface ClaimFilters {
+    status: string;
+    source: string;
+    review_method: string;
+    email: string;
+    submitted_from: string;
+    submitted_to: string;
+    usage_status: string;
+    per_page: number;
+}
+
+interface FilterOption { value: string; label: string }
+
+interface BatchResult {
+    requested: number;
+    succeeded: number;
+    unchanged: number;
+    failed: number;
+    items: Array<{ id: string; status: 'succeeded' | 'unchanged' | 'failed'; code: string | null; message: string }>;
 }
 
 interface Pagination<T> {
@@ -50,7 +72,9 @@ const props = defineProps<{
     campaign: Campaign;
     claims: Pagination<Claim>;
     counts: { pending: number; approved: number; rejected: number };
-    filters: { status: string };
+    filters: ClaimFilters;
+    filterOptions: { statuses: FilterOption[]; sources: FilterOption[]; review_methods: FilterOption[]; usage_statuses: FilterOption[] };
+    batchResult: BatchResult | null;
     permissions: { viewEvidence: boolean; approve: boolean; reject: boolean; deleteClaim: boolean; manageCampaign: boolean; analytics: boolean; audit: boolean };
 }>();
 
@@ -64,7 +88,7 @@ const requestedTab = typeof window === 'undefined'
     ? null
     : new URLSearchParams(window.location.search).get('tab');
 const activeTab = ref<StudentDiscountTab>(
-    requestedTab === 'claims' || (requestedTab !== 'campaign' && props.filters.status !== '')
+    requestedTab === 'claims' || (requestedTab !== 'campaign' && Object.entries(props.filters).some(([key, value]) => key !== 'per_page' && value !== ''))
         ? 'claims'
         : 'campaign',
 );
@@ -76,12 +100,6 @@ const selectTab = (tab: StudentDiscountTab) => {
     const url = new URL(window.location.href);
     url.searchParams.set('tab', tab);
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-};
-const claimFilterUrl = (status: string) => {
-    const query = new URLSearchParams({ tab: 'claims' });
-    if (status) query.set('status', status);
-
-    return `${baseUrl}?${query.toString()}`;
 };
 const claimPageUrl = (url: string | null) => {
     if (!url) return '';
@@ -123,19 +141,146 @@ const saveCampaign = () => campaignForm
     }))
     .put(`${baseUrl}/campaign`, { preserveScroll: true });
 
-const approve = (claim: Claim) => {
-    if (!window.confirm(`确认通过 ${claim.email} 的申请并生成 Shopify 优惠码？`)) return;
-    router.post(`${baseUrl}/claims/${claim.id}/approve`, {}, { preserveScroll: true });
+const filterForm = useForm({ tab: 'claims', ...props.filters });
+const submitFilters = () => filterForm.get(baseUrl, {
+    preserveScroll: true,
+    preserveState: true,
+    replace: true,
+    onSuccess: () => { activeTab.value = 'claims'; },
+});
+const applyStatus = (status: string) => {
+    filterForm.status = status;
+    submitFilters();
 };
-const reject = (claim: Claim) => {
-    const reason = window.prompt(`请输入拒绝 ${claim.email} 的原因（必填）：`);
-    if (!reason?.trim()) return;
-    router.post(`${baseUrl}/claims/${claim.id}/reject`, { reason: reason.trim() }, { preserveScroll: true });
+const resetFilters = () => router.get(baseUrl, { tab: 'claims', per_page: props.filters.per_page }, {
+    preserveScroll: true,
+    preserveState: true,
+    replace: true,
+});
+const hasActiveFilters = computed(() => [
+    filterForm.status,
+    filterForm.source,
+    filterForm.review_method,
+    filterForm.email,
+    filterForm.submitted_from,
+    filterForm.submitted_to,
+    filterForm.usage_status,
+].some(Boolean));
+
+const selectedClaimIds = ref<string[]>([]);
+const bulkSelectionLimit = 30;
+const currentPendingIds = computed(() => props.claims.data.filter(claim => claim.status === 'pending').slice(0, bulkSelectionLimit).map(claim => claim.id));
+const allPendingSelected = computed({
+    get: () => currentPendingIds.value.length > 0 && currentPendingIds.value.every(id => selectedClaimIds.value.includes(id)),
+    set: (selected: boolean) => { selectedClaimIds.value = selected ? [...currentPendingIds.value] : []; },
+});
+watch(() => props.claims.data.map(claim => claim.id).join(','), () => { selectedClaimIds.value = []; });
+type ReviewAction = 'approve' | 'reject' | 'bulk_approve' | 'bulk_reject';
+const reviewDialog = ref<{ action: ReviewAction; claim: Claim | null } | null>(null);
+const reviewDialogElement = ref<HTMLElement | null>(null);
+const reviewReason = ref('');
+const reviewError = ref('');
+const reviewProcessing = ref(false);
+const reviewNeedsReason = computed(() => reviewDialog.value?.action === 'reject' || reviewDialog.value?.action === 'bulk_reject');
+const reviewDialogTitle = computed(() => ({
+    approve: '批准学生优惠申请',
+    reject: '拒绝学生优惠申请',
+    bulk_approve: `批量批准 ${selectedClaimIds.value.length} 条申请`,
+    bulk_reject: `批量拒绝 ${selectedClaimIds.value.length} 条申请`,
+}[reviewDialog.value?.action ?? 'approve']));
+const reviewDialogDescription = computed(() => {
+    if (reviewDialog.value?.action === 'approve') return `将为 ${reviewDialog.value.claim?.email ?? ''} 生成 Shopify 优惠码并发送通知邮件。`;
+    if (reviewDialog.value?.action === 'reject') return `拒绝 ${reviewDialog.value.claim?.email ?? ''} 的申请，原因将发送给申请人。`;
+    if (reviewDialog.value?.action === 'bulk_approve') return '系统会逐条重新校验当前店铺和待审核状态，再生成优惠码并发送通知邮件。';
+    return '统一原因会写入每条申请，但不会写入审计日志正文。';
+});
+const openReviewDialog = (action: ReviewAction, claim: Claim | null = null) => {
+    if (action.startsWith('bulk_') && selectedClaimIds.value.length === 0) return;
+    reviewReason.value = '';
+    reviewError.value = '';
+    reviewDialog.value = { action, claim };
+    nextTick(() => reviewDialogElement.value?.focus());
 };
-const deleteClaim = (claim: Claim) => {
-    if (!window.confirm(`确认将 ${claim.email} 的申请记录从列表移除？学生证文件会立即删除；审计记录和已生成优惠码关联将保留。`)) return;
-    router.delete(`${baseUrl}/claims/${claim.id}`, { preserveScroll: true, preserveState: true });
+const closeReviewDialog = () => {
+    if (!reviewProcessing.value) reviewDialog.value = null;
 };
+const submitReview = () => {
+    if (!reviewDialog.value || reviewProcessing.value) return;
+    const reason = reviewReason.value.trim();
+    if (reviewNeedsReason.value && !reason) {
+        reviewError.value = '请输入拒绝原因。';
+        return;
+    }
+
+    const action = reviewDialog.value.action;
+    const claim = reviewDialog.value.claim;
+    const endpoint = action === 'approve' ? `${baseUrl}/claims/${claim?.id}/approve`
+        : action === 'reject' ? `${baseUrl}/claims/${claim?.id}/reject`
+            : action === 'bulk_approve' ? `${baseUrl}/claims/bulk-approve`
+                : `${baseUrl}/claims/bulk-reject`;
+    const payload = action === 'approve' ? {}
+        : action === 'reject' ? { reason }
+            : action === 'bulk_approve' ? { claim_ids: selectedClaimIds.value }
+                : { claim_ids: selectedClaimIds.value, reason };
+    reviewProcessing.value = true;
+    reviewError.value = '';
+    router.post(endpoint, payload, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            if (action.startsWith('bulk_')) selectedClaimIds.value = [];
+            reviewDialog.value = null;
+        },
+        onError: errors => { reviewError.value = Object.values(errors)[0] ?? '操作失败，请检查输入后重试。'; },
+        onFinish: () => { reviewProcessing.value = false; },
+    });
+};
+
+const deleteTarget = ref<Claim | null>(null);
+const deleteDialogElement = ref<HTMLElement | null>(null);
+const deleteProcessing = ref(false);
+const deleteError = ref('');
+const openDelete = (claim: Claim) => {
+    deleteError.value = '';
+    deleteTarget.value = claim;
+    nextTick(() => deleteDialogElement.value?.focus());
+};
+const closeDelete = () => {
+    if (!deleteProcessing.value) deleteTarget.value = null;
+};
+const confirmDelete = () => {
+    if (!deleteTarget.value) return;
+    deleteProcessing.value = true;
+    router.delete(`${baseUrl}/claims/${deleteTarget.value.id}`, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => { deleteTarget.value = null; },
+        onError: errors => { deleteError.value = Object.values(errors)[0] ?? '移除失败，请稍后重试。'; },
+        onFinish: () => { deleteProcessing.value = false; },
+    });
+};
+
+const syncableCodeIds = computed(() => [...new Set(props.claims.data.flatMap(claim => claim.discount ? [claim.discount.id] : []))]);
+const usageRefreshing = ref(false);
+let usageReloadTimer: ReturnType<typeof setTimeout> | null = null;
+const syncUsage = () => {
+    if (syncableCodeIds.value.length === 0 || usageRefreshing.value) return;
+    usageRefreshing.value = true;
+    router.post(`${baseUrl}/claims/usage-sync`, { code_ids: syncableCodeIds.value }, {
+        preserveScroll: true,
+        preserveState: true,
+        onFinish: () => {
+            if (usageReloadTimer) clearTimeout(usageReloadTimer);
+            usageReloadTimer = setTimeout(() => router.reload({
+                only: ['claims'],
+                onFinish: () => { usageRefreshing.value = false; },
+            }), 2000);
+        },
+    });
+};
+onBeforeUnmount(() => {
+    if (usageReloadTimer) clearTimeout(usageReloadTimer);
+});
 const badge = (status: string) => ({
     pending: 'bg-amber-50 text-amber-700 ring-amber-200',
     approved: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
@@ -149,6 +294,21 @@ const label = (status: string) => ({
     pending: '待人工审核', approved: '已通过', rejected: '已拒绝', unused: '未使用',
     partially_used: '部分使用', used_up: '已用完', expired: '已失效',
 }[status] ?? status);
+const sourceLabel = (source: string) => source === 'education_email' ? '教育邮箱' : '学生证';
+const verificationLabel = (claim: Claim) => ({
+    education_email: '教育邮箱快速通过',
+    ai: 'AI 自动验证',
+    manual: '人工审核',
+}[claim.review_method ?? (claim.source === 'education_email' ? 'education_email' : '')] ?? '尚未验证');
+const recognitionFailureLabel = (code: string | null) => ({
+    invalid_api_key: 'AI 服务凭证无效',
+    permission_denied: 'AI 服务权限不足',
+    model_not_found: 'AI 模型不可用',
+    rate_limited: 'AI 服务请求过于频繁',
+    api_error: 'AI 服务暂时不可用',
+    timeout: 'AI 服务响应超时',
+    not_configured: 'AI 服务尚未配置',
+}[code ?? ''] ?? 'AI 验证未完成');
 </script>
 
 <template>
@@ -248,27 +408,60 @@ const label = (status: string) => ({
                 aria-labelledby="claims-tab"
                 class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
             >
-                <header class="border-b border-slate-100 px-5 py-5 sm:px-7"><p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">审核与发码</p><h2 class="mt-1 text-xl font-semibold text-slate-950">申请记录</h2></header>
-                <div class="flex flex-wrap gap-2 border-b border-slate-100 px-5 py-4 sm:px-7">
-                    <Link v-for="option in [{ value: '', name: '全部' }, { value: 'pending', name: '待审核' }, { value: 'approved', name: '已通过' }, { value: 'rejected', name: '已拒绝' }]" :key="option.value" :href="claimFilterUrl(option.value)" class="rounded-full px-3 py-1.5 text-xs font-semibold ring-1" :class="filters.status === option.value ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200'">{{ option.name }}</Link>
+                <header class="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">审核与发码</p><h2 class="mt-1 text-xl font-semibold text-slate-950">申请记录</h2></div>
+                    <button type="button" :disabled="syncableCodeIds.length === 0 || usageRefreshing" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" @click="syncUsage">
+                        {{ usageRefreshing ? '刷新中…' : '刷新本页使用情况' }}
+                    </button>
+                </header>
+                <form class="space-y-4 border-b border-slate-100 bg-slate-50/60 px-5 py-5 sm:px-7" @submit.prevent="submitFilters">
+                    <div class="flex flex-wrap gap-2">
+                        <button v-for="option in [{ value: '', label: '全部' }, ...filterOptions.statuses]" :key="option.value" type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold ring-1" :class="filterForm.status === option.value ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200'" @click="applyStatus(option.value)">{{ option.label }}</button>
+                    </div>
+                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <label class="text-xs font-semibold text-slate-600"><span>证明</span><select v-model="filterForm.source" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部证明</option><option v-for="option in filterOptions.sources" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>验证方式</span><select v-model="filterForm.review_method" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部方式</option><option v-for="option in filterOptions.review_methods" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>使用情况</span><select v-model="filterForm.usage_status" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option value="">全部使用情况</option><option v-for="option in filterOptions.usage_statuses" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>申请人邮箱</span><input v-model="filterForm.email" type="search" maxlength="120" placeholder="模糊搜索邮箱" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>提交开始日期</span><input v-model="filterForm.submitted_from" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>提交结束日期</span><input v-model="filterForm.submitted_to" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800" /></label>
+                        <label class="text-xs font-semibold text-slate-600"><span>每页条数</span><select v-model="filterForm.per_page" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800"><option :value="20">20 条</option><option :value="30">30 条</option><option :value="50">50 条</option></select></label>
+                        <div class="flex items-end gap-2"><button :disabled="filterForm.processing" class="flex-1 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">筛选</button><button v-if="hasActiveFilters" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600" @click="resetFilters">重置</button></div>
+                    </div>
+                </form>
+                <div v-if="batchResult" class="border-b border-slate-100 bg-blue-50 px-5 py-3 text-sm text-blue-800 sm:px-7">上次批量处理：成功 {{ batchResult.succeeded }} 条，已处理 {{ batchResult.unchanged }} 条，失败 {{ batchResult.failed }} 条。</div>
+                <div v-if="selectedClaimIds.length > 0" class="flex flex-col gap-3 border-b border-slate-100 bg-amber-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                    <p class="text-sm font-semibold text-amber-900">已选择当前页 {{ selectedClaimIds.length }} 条待审核申请（每次最多 {{ bulkSelectionLimit }} 条）</p>
+                    <div class="flex flex-wrap gap-2"><button v-if="permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" @click="openReviewDialog('bulk_approve')">批量批准</button><button v-if="permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white" @click="openReviewDialog('bulk_reject')">批量拒绝</button><button type="button" class="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800" @click="selectedClaimIds = []">取消选择</button></div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-slate-100 text-sm">
-                        <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">申请人</th><th class="px-5 py-3">识别</th><th class="px-5 py-3">状态 / 优惠码</th><th class="px-5 py-3">提交时间</th><th class="px-5 py-3 text-right">操作</th></tr></thead>
+                    <table class="min-w-[1180px] divide-y divide-slate-100 text-sm">
+                        <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="w-12 px-4 py-3"><input v-if="permissions.approve || permissions.reject" v-model="allPendingSelected" type="checkbox" :disabled="currentPendingIds.length === 0" aria-label="选择当前页全部待审核申请" /></th><th class="px-4 py-3">申请人</th><th class="px-4 py-3">证明 / 验证</th><th class="px-4 py-3">申请状态</th><th class="px-4 py-3">使用情况</th><th class="px-4 py-3">提交时间</th><th class="px-4 py-3 text-right">操作</th></tr></thead>
                         <tbody class="divide-y divide-slate-100">
                             <tr v-for="claim in claims.data" :key="claim.id" class="align-top">
-                                <td class="px-5 py-4"><p class="font-semibold text-slate-900">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-500">{{ claim.source === 'education_email' ? '教育邮箱快速通过' : '学生证' }} · 第 {{ claim.submission_count }} 次提交</p></td>
-                                <td class="px-5 py-4"><p class="font-semibold text-slate-800">{{ claim.confidence === null ? '—' : `${claim.confidence} / 100` }}</p><p class="mt-1 text-xs text-slate-500">{{ claim.model_name ?? claim.review_method ?? '未识别' }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
-                                <td class="px-5 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">{{ label(claim.discount.status) }} · {{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} · {{ new Date(claim.discount.expires_at).toLocaleString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
-                                <td class="whitespace-nowrap px-5 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
-                                <td class="px-5 py-4"><div class="flex flex-wrap justify-end gap-2"><a v-if="permissions.viewEvidence && claim.has_evidence" :href="`${baseUrl}/claims/${claim.id}/evidence`" target="_blank" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">证件</a><button v-if="claim.status === 'pending' && permissions.approve" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="approve(claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="reject(claim)">拒绝</button><button v-if="permissions.deleteClaim" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="deleteClaim(claim)">删除</button></div></td>
+                                <td class="px-4 py-4"><input v-if="claim.status === 'pending' && (permissions.approve || permissions.reject)" v-model="selectedClaimIds" :value="claim.id" type="checkbox" :disabled="!selectedClaimIds.includes(claim.id) && selectedClaimIds.length >= bulkSelectionLimit" :aria-label="`选择 ${claim.email} 的申请`" /></td>
+                                <td class="px-4 py-4"><p class="font-semibold text-slate-900">{{ claim.email }}</p><p class="mt-1 text-xs text-slate-500">第 {{ claim.submission_count }} 次提交</p></td>
+                                <td class="px-4 py-4"><p class="font-semibold text-slate-800">{{ sourceLabel(claim.source) }}</p><p class="mt-1 text-xs text-slate-500">{{ verificationLabel(claim) }}<span v-if="claim.confidence !== null"> · {{ claim.confidence }}/100</span></p><p v-if="claim.recognition_failure_code" class="mt-1 text-xs font-semibold text-amber-700">{{ recognitionFailureLabel(claim.recognition_failure_code) }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
+                                <td class="px-4 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">有效期至 {{ new Date(claim.discount.expires_at).toLocaleDateString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
+                                <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-[11px] text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>
+                                <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
+                                <td class="px-4 py-4"><div class="flex flex-wrap justify-end gap-2"><a v-if="permissions.viewEvidence && claim.has_evidence" :href="`${baseUrl}/claims/${claim.id}/evidence`" target="_blank" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">证件</a><button v-if="claim.status === 'pending' && permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('approve', claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('reject', claim)">拒绝</button><button v-if="permissions.deleteClaim" type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="openDelete(claim)">删除</button></div></td>
                             </tr>
-                            <tr v-if="claims.data.length === 0"><td colspan="5" class="px-5 py-12 text-center text-sm text-slate-500">暂无申请记录。</td></tr>
+                            <tr v-if="claims.data.length === 0"><td colspan="7" class="px-5 py-14 text-center"><p class="text-sm font-semibold text-slate-700">没有符合条件的申请记录</p><p class="mt-1 text-xs text-slate-400">调整筛选条件或等待新的学生优惠申请。</p><button v-if="hasActiveFilters" type="button" class="mt-4 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" @click="resetFilters">清除筛选</button></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <footer v-if="claims.links.length > 3" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-xs text-slate-500"><span>第 {{ claims.from ?? 0 }}–{{ claims.to ?? 0 }} 条，共 {{ claims.total }} 条</span><div class="flex gap-1"><Link v-for="item in claims.links" :key="item.label" :href="claimPageUrl(item.url)" preserve-scroll class="rounded-lg px-2.5 py-1.5 ring-1" :class="[item.active ? 'bg-slate-950 text-white ring-slate-950' : 'bg-white text-slate-600 ring-slate-200', !item.url ? 'pointer-events-none opacity-40' : '']"><span v-html="item.label" /></Link></div></footer>
             </section>
+
+            <Teleport to="body">
+                <div v-if="reviewDialog" ref="reviewDialogElement" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 outline-none" role="dialog" aria-modal="true" aria-labelledby="review-dialog-title" aria-describedby="review-dialog-description" @keydown.esc="closeReviewDialog" @click.self="closeReviewDialog">
+                    <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div class="flex h-11 w-11 items-center justify-center rounded-full" :class="reviewNeedsReason ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5"><path v-if="reviewNeedsReason" stroke-linecap="round" stroke-linejoin="round" d="m7 7 10 10M17 7 7 17" /><path v-else stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" /></svg></div><h3 id="review-dialog-title" class="mt-4 text-lg font-semibold text-slate-950">{{ reviewDialogTitle }}</h3><p id="review-dialog-description" class="mt-2 text-sm leading-6 text-slate-600">{{ reviewDialogDescription }}</p><label v-if="reviewNeedsReason" class="mt-4 block text-sm font-semibold text-slate-700"><span>拒绝原因</span><textarea v-model="reviewReason" autofocus rows="4" maxlength="1000" :disabled="reviewProcessing" class="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal" placeholder="请输入拒绝原因" @input="reviewError = ''" /></label><p v-if="reviewError" class="mt-2 text-xs text-rose-600" role="alert">{{ reviewError }}</p><div class="mt-5 flex justify-end gap-2"><button type="button" :disabled="reviewProcessing" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50" @click="closeReviewDialog">取消</button><button type="button" :disabled="reviewProcessing" class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :class="reviewNeedsReason ? 'bg-rose-600' : 'bg-emerald-600'" @click="submitReview">{{ reviewProcessing ? '处理中…' : (reviewNeedsReason ? '确认拒绝' : '确认批准') }}</button></div></div>
+                </div>
+                <div v-if="deleteTarget" ref="deleteDialogElement" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 outline-none" role="dialog" aria-modal="true" aria-labelledby="delete-claim-title" aria-describedby="delete-claim-description" @keydown.esc="closeDelete" @click.self="closeDelete">
+                    <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div class="flex h-11 w-11 items-center justify-center rounded-full bg-rose-50 text-rose-600"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" /></svg></div><h3 id="delete-claim-title" class="mt-4 text-lg font-semibold text-slate-950">从申请列表移除</h3><p id="delete-claim-description" class="mt-2 text-sm leading-6 text-slate-600">将移除 <span class="font-semibold text-slate-900">{{ deleteTarget.email }}</span> 的申请记录，学生证文件会立即删除；审计记录和已生成优惠码关联将保留。</p><p v-if="deleteError" class="mt-2 text-xs text-rose-600" role="alert">{{ deleteError }}</p><div class="mt-5 flex justify-end gap-2"><button type="button" :disabled="deleteProcessing" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50" @click="closeDelete">取消</button><button type="button" :disabled="deleteProcessing" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" @click="confirmDelete">{{ deleteProcessing ? '处理中…' : '确认移除' }}</button></div></div>
+                </div>
+            </Teleport>
         </div>
     </AppLayout>
 </template>
