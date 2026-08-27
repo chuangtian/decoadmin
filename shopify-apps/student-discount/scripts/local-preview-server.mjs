@@ -71,7 +71,7 @@ const html = String.raw`<!doctype html>
               <h2>Get Student Discount</h2>
               <p class="student-discount-dialog__lead">Enter the email address provided by your educational institution.</p>
               <form data-sd-email-form novalidate><div class="student-discount-dialog__email-row"><input type="email" name="email" autocomplete="email" maxlength="254" placeholder="School email address" required><button type="submit" disabled>Submit</button></div><p class="student-discount-dialog__error" data-sd-email-error hidden></p></form>
-              <div class="student-discount-dialog__alternative" data-sd-alternative><strong>Don't have an eligible school email?</strong><p>Upload your student ID instead to request a review.</p><button type="button" class="student-discount-dialog__primary" data-sd-open-id>Upload student ID</button></div>
+              <div class="student-discount-dialog__alternative" data-sd-alternative hidden><strong>Don't have an eligible school email?</strong><p>Upload your student ID instead to request a review.</p><button type="button" class="student-discount-dialog__primary" data-sd-open-id>Upload student ID</button></div>
             </div>
 
             <div data-sd-view="student-id" hidden>
