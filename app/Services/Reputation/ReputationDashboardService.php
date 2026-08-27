@@ -47,6 +47,25 @@ class ReputationDashboardService
         '其他' => [],
     ];
 
+    private const REVIEW_MODELS = [
+        'x1s' => [
+            'model' => 'X1S 系列',
+            'patterns' => ['/(?<![a-z0-9])x[\s_-]*1[\s_-]*s(?![a-z0-9])/iu'],
+        ],
+        'm16' => [
+            'model' => 'M16 系列',
+            'patterns' => ['/(?<![a-z0-9])m[\s_-]*16(?:[a-z])?(?![a-z0-9])/iu'],
+        ],
+        'x7' => [
+            'model' => 'X7 / X7L',
+            'patterns' => ['/(?<![a-z0-9])x[\s_-]*7(?:[\s_-]*l)?(?![a-z0-9])/iu'],
+        ],
+        'x2' => [
+            'model' => 'X2 系列',
+            'patterns' => ['/(?<![a-z0-9])x[\s_-]*2(?:[\s_-]*(?:s|l|pro|max|plus))?(?![a-z0-9])/iu'],
+        ],
+    ];
+
     public function __construct(private StoreFeishuDataLinkService $dataLinks) {}
 
     /** @param array<string, mixed> $filters @return array<string, mixed> */
@@ -85,7 +104,10 @@ class ReputationDashboardService
             'source_breakdown' => $this->sourceBreakdown(clone $periodQuery),
             'star_distribution' => $this->starDistribution(clone $periodQuery),
             'trends' => $this->trends(clone $periodQuery, $dateFrom, $dateTo),
-            'models' => $this->modelStats(clone $periodQuery),
+            'models' => $this->modelStats(
+                clone $periodQuery,
+                $this->modelComparisonQuery($store, $comparison),
+            ),
             'goals' => $this->goalCards($goals, $summary, $social),
             'records' => $this->records($store, $filters, $dateFrom, $dateTo),
             'freshness' => $this->freshness($store),
@@ -599,17 +621,95 @@ class ReputationDashboardService
         }, $days));
     }
 
-    /** @return list<array{model: string, count: int, average_rating: float}> */
-    private function modelStats(Builder $query): array
+    /**
+     * @return list<array{
+     *     model: string,
+     *     key: string,
+     *     count: int,
+     *     average_rating: float,
+     *     previous_count: int|null,
+     *     difference: int|null,
+     *     change_percent: float|null
+     * }>
+     */
+    private function modelStats(Builder $query, ?Builder $comparisonQuery): array
     {
-        return (clone $query)->whereNotNull('model_name')->where('model_name', '!=', '')
-            ->selectRaw('model_name, COUNT(*) as total, AVG(rating) as average_rating')
-            ->groupBy('model_name')->orderByDesc('total')->limit(12)->get()
-            ->map(fn (ReputationMention $row): array => [
-                'model' => $row->model_name,
-                'count' => (int) $row->getAttribute('total'),
-                'average_rating' => round((float) ($row->getAttribute('average_rating') ?? 0), 2),
-            ])->all();
+        $current = $this->aggregateReviewModels($query);
+        $previous = $comparisonQuery ? $this->aggregateReviewModels($comparisonQuery) : null;
+
+        return collect(self::REVIEW_MODELS)->map(function (array $definition, string $key) use ($current, $previous): array {
+            $count = $current[$key]['count'];
+            $previousCount = $previous === null ? null : $previous[$key]['count'];
+
+            return [
+                'model' => $definition['model'],
+                'key' => $key,
+                'count' => $count,
+                'average_rating' => $count > 0 ? round($current[$key]['rating_total'] / $count, 2) : 0.0,
+                'previous_count' => $previousCount,
+                'difference' => $previousCount === null ? null : $count - $previousCount,
+                'change_percent' => $previousCount === null || $previousCount === 0
+                    ? null
+                    : round((($count - $previousCount) / $previousCount) * 100, 2),
+            ];
+        })->values()->all();
+    }
+
+    /** @return array<string, array{count: int, rating_total: float}> */
+    private function aggregateReviewModels(Builder $query): array
+    {
+        $totals = collect(array_keys(self::REVIEW_MODELS))->mapWithKeys(fn (string $key): array => [
+            $key => ['count' => 0, 'rating_total' => 0.0],
+        ])->all();
+
+        (clone $query)
+            ->whereNotNull('rating')
+            ->select(['id', 'model_name', 'title', 'content', 'rating'])
+            ->lazyById(500)
+            ->each(function (ReputationMention $mention) use (&$totals): void {
+                $key = $this->reviewModelKey($mention->model_name)
+                    ?? $this->reviewModelKey(trim((string) $mention->title.' '.(string) $mention->content));
+                if ($key === null) {
+                    return;
+                }
+
+                $totals[$key]['count']++;
+                $totals[$key]['rating_total'] += (float) $mention->rating;
+            });
+
+        return $totals;
+    }
+
+    private function reviewModelKey(?string $text): ?string
+    {
+        $text = trim((string) $text);
+        if ($text === '') {
+            return null;
+        }
+
+        foreach (self::REVIEW_MODELS as $key => $definition) {
+            foreach ($definition['patterns'] as $pattern) {
+                if (preg_match($pattern, $text) === 1) {
+                    return $key;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** @param array<string, mixed>|null $comparison */
+    private function modelComparisonQuery(Store $store, ?array $comparison): ?Builder
+    {
+        if ($comparison === null) {
+            return null;
+        }
+
+        $timezone = $store->timezone ?: 'UTC';
+        $from = CarbonImmutable::parse((string) $comparison['date_from'], $timezone)->startOfDay();
+        $to = CarbonImmutable::parse((string) $comparison['date_to'], $timezone)->endOfDay();
+
+        return $this->periodQuery($store, $from, $to);
     }
 
     /** @return array<string, float> */

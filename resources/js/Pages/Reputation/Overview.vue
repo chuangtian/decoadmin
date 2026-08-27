@@ -25,6 +25,10 @@ type WeeklyTrend = {
 type RedditTopicAverage = { topic: string; views: number; comments: number; upvotes: number; posts: number };
 type RedditTopicDistribution = { topic: string; count: number; percent: number };
 type RedditTopicWeek = { week: string; label: string; posts: number; topic_distribution: RedditTopicDistribution[] };
+type ReviewModelStat = {
+    key?: string; model: string; count: number; average_rating: number;
+    previous_count?: number; difference?: number; change_percent?: number | null;
+};
 
 const props = defineProps<{
     store: { id: number; name: string; timezone: string };
@@ -48,7 +52,7 @@ const props = defineProps<{
         };
         star_distribution: Array<{ rating: number; count: number; percent: number }>;
         trends: TrendRow[];
-        models: Array<{ model: string; count: number; average_rating: number }>;
+        models: ReviewModelStat[];
         goals: Array<{ metric: string; label: string; actual: number; target: number; completion_percent: number | null; gap: number | null; status: string }>;
         records: Paginator<RecordItem>;
         freshness: { last_synced_at: string | null; database_total: number; sync: SyncState };
@@ -127,8 +131,23 @@ const redditTopicNames = computed(() => Object.keys(redditTopicColors).filter((t
     redditTopicWeeks.value.some((week) => week.topic_distribution.some((item) => item.topic === topic && item.count > 0))
 )));
 const redditTopicViewMax = computed(() => Math.max(1, ...redditTopicAverages.value.map((row) => row.views)));
+const reviewModelOrder = ['X1S 系列', 'M16 系列', 'X7 / X7L', 'X2 系列'];
+const reviewModelColors: Record<string, string> = { 'X1S 系列': '#3b82f6', 'M16 系列': '#10b981', 'X7 / X7L': '#f97316', 'X2 系列': '#ec4899' };
+const orderedReviewModels = computed(() => [...props.dashboard.models].sort((left, right) => {
+    const leftIndex = reviewModelOrder.indexOf(left.model);
+    const rightIndex = reviewModelOrder.indexOf(right.model);
+    return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
+}));
+const reviewModelMax = computed(() => Math.max(1, ...orderedReviewModels.value.map((model) => model.count)));
 
 const formatNumber = (value: number) => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value ?? 0);
+const reviewSummaryCards = computed(() => [
+    { key: 'average_rating', label: '综合评分', value: `${props.dashboard.summary.average_rating.toFixed(1)}★`, note: `${formatNumber(props.dashboard.summary.reviews)} 条评价`, color: '#6366f1' },
+    { key: 'positive_rate', label: '正面占比', value: `${formatNumber(props.dashboard.summary.positive_rate)}%`, note: `${formatNumber(props.dashboard.summary.satisfied_reviews)} 条 4-5★`, color: '#10b981' },
+    { key: 'negative_rate', label: '负面占比', value: `${formatNumber(props.dashboard.summary.negative_rate)}%`, note: `${formatNumber(props.dashboard.summary.low_rating_reviews)} 条 1-2★`, color: '#f43f5e' },
+    { key: 'pending_low_rating', label: '待处理', value: formatNumber(props.dashboard.summary.pending_low_rating), note: '低分待跟进', color: '#e11d48' },
+    { key: 'reviews', label: '总评论数', value: formatNumber(props.dashboard.summary.reviews), note: '当前周期', color: '#6366f1' },
+]);
 const formatDate = (value: string | null, withTime = false) => value
     ? new Intl.DateTimeFormat('zh-CN', withTime ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' }).format(new Date(value))
     : '未标日期';
@@ -148,6 +167,15 @@ const comparisonText = (key: string, digits = 0) => {
     if (!metric) return '未启用对比';
     const change = metric.change_percent === null ? '无可比基数' : `${metric.change_percent >= 0 ? '+' : ''}${metric.change_percent.toFixed(1)}%`;
     return `上期 ${metric.previous.toFixed(digits)} · ${change}`;
+};
+const modelComparisonText = (model: ReviewModelStat) => {
+    if (!props.dashboard.comparison) return '环比 未开启';
+    if (model.change_percent === null || model.change_percent === undefined) return `上期 ${formatNumber(model.previous_count ?? 0)} · 无可比基数`;
+    return `环比 ${model.change_percent >= 0 ? '↑' : '↓'} ${Math.abs(model.change_percent).toFixed(2)}%`;
+};
+const modelComparisonClass = (model: ReviewModelStat) => {
+    if (!props.dashboard.comparison || model.change_percent === null || model.change_percent === undefined) return 'text-slate-400';
+    return model.change_percent >= 0 ? 'text-emerald-600' : 'text-rose-600';
 };
 const goalStatusLabel = (status: string) => ({ achieved: '已达成', near: '接近目标', behind: '需追赶', risk: '高风险', not_configured: '未设置' }[status] ?? status);
 const goalTrendMetric = (metric: string) => comparisonMetric({ satisfied_reviews: 'satisfied_reviews', reddit_views: 'reddit_views', reddit_comments: 'reddit_comments' }[metric] ?? '');
@@ -307,6 +335,38 @@ onBeforeUnmount(stopPolling);
             </section>
 
             <template v-if="filters.tab === 'reviews'">
+                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div><h2 class="text-lg font-black text-slate-950">按车型归类统计</h2><p class="mt-1 text-sm text-slate-500">按车型字段及评论标题、正文中的明确车型关键词自动归类，不使用 AI。</p></div>
+                        <span class="inline-flex w-fit items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700"><i class="h-2 w-2 rounded-full bg-sky-500" />数据来自当前店铺评论</span>
+                    </div>
+                    <div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <article v-for="model in orderedReviewModels" :key="model.key ?? model.model" class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-5" :style="{ borderLeftColor: reviewModelColors[model.model] ?? '#94a3b8', borderLeftWidth: '4px' }">
+                            <p class="text-sm font-bold" :style="{ color: reviewModelColors[model.model] ?? '#64748b' }">{{ model.model }}</p>
+                            <p class="mt-2 text-3xl font-black text-slate-950">{{ formatNumber(model.count) }}</p>
+                            <p class="mt-1 text-xs text-slate-500">{{ formatNumber(model.count) }} 条评论<span v-if="model.average_rating > 0"> · 均分 {{ model.average_rating.toFixed(1) }}★</span></p>
+                            <div class="mt-4 h-2 overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full" :style="{ width: `${Math.max(model.count ? 4 : 0, model.count / reviewModelMax * 100)}%`, backgroundColor: reviewModelColors[model.model] ?? '#94a3b8' }" /></div>
+                            <div class="mt-3 flex items-center justify-between gap-3 text-xs"><span :class="modelComparisonClass(model)">{{ modelComparisonText(model) }}</span><span class="whitespace-nowrap text-slate-500">{{ formatNumber(model.count) }} 条</span></div>
+                        </article>
+                    </div>
+                    <div class="mt-5 flex flex-wrap gap-2">
+                        <button v-if="canSync" type="button" class="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!sourceReady || syncing" @click="requestSync">{{ syncing ? `同步中 ${sync?.progress_percent ?? 0}%` : '从飞书同步车型' }}</button>
+                        <button v-if="canManage" type="button" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="mentionOpen = true">＋ 新增评论</button>
+                    </div>
+                </section>
+
+                <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <div class="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p class="text-sm font-semibold text-indigo-700">📊 对比：{{ dashboard.comparison ? `${dashboard.comparison.date_from} 至 ${dashboard.comparison.date_to}` : '未开启' }}</p>
+                        <select v-model="filters.comparison" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" @change="filters.comparison !== 'custom' && applyFilters()"><option value="none">无对比</option><option value="previous">对比上一时段</option><option value="custom">自定义对比</option></select>
+                    </div>
+                    <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                        <article v-for="card in reviewSummaryCards" :key="card.key" class="rounded-2xl border border-slate-200 p-5" :style="{ borderTopColor: card.color, borderTopWidth: '3px' }">
+                            <p class="text-xs font-semibold text-slate-500">{{ card.label }}</p><p class="mt-2 text-2xl font-black" :style="{ color: card.color }">{{ card.value }}</p><p class="mt-1 text-xs text-slate-500">{{ card.note }}</p><p class="mt-3 text-xs text-slate-400">{{ comparisonText(card.key, card.key === 'average_rating' ? 1 : 0) }}</p>
+                        </article>
+                    </div>
+                </section>
+
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h2 class="text-lg font-black text-slate-950">评论列表</h2><p class="mt-1 text-sm text-slate-500">评论记录已移至页面底部；来源、日期、订单和周数分别展示。</p></div><div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><select v-model="filters.source" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部平台</option><option v-for="option in reviewSourceOptions" :key="option.key" :value="option.key">{{ option.label }}</option></select><select v-model="filters.rating" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部星级</option><option v-for="star in [5,4,3,2,1]" :key="star" :value="star">{{ star }} 星</option></select><select v-model="filters.status" class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" @change="applyFilters()"><option value="">全部处理状态</option><option value="pending">待处理低分</option><option value="done">已处理</option></select><form class="flex" @submit.prevent="applyFilters()"><input v-model="filters.search" class="min-w-0 flex-1 rounded-l-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="搜索内容或车型"><button class="rounded-r-xl bg-slate-950 px-4 text-sm font-semibold text-white">搜索</button></form></div></div>
                     <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200">

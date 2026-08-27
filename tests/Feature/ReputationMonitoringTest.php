@@ -148,6 +148,154 @@ class ReputationMonitoringTest extends TestCase
         }
     }
 
+    public function test_review_model_stats_use_fixed_non_ai_rules_comparison_and_store_scope(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'review-models');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Review Model Store',
+            'shopify_domain' => 'other-review-model.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'website', 'x1s-model-name', [
+            'model_name' => 'Macfox X1S Pro',
+            'title' => 'X2 must not override an explicit model name',
+            'rating' => 5,
+            'published_at' => '2026-08-03 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'trustpilot', 'x1s-title', [
+            'title' => 'X1-S commuting review',
+            'rating' => 3,
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'facebook', 'x1s-one-model-only', [
+            'content' => 'Comparing X1S and X2 after a week of riding.',
+            'rating' => 1,
+            'published_at' => '2026-08-05 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'm16-model-name', [
+            'model_name' => 'M16A',
+            'title' => 'X2 text must not override M16 model_name',
+            'rating' => 4,
+            'published_at' => '2026-08-06 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'trustpilot', 'x7l-content', [
+            'content' => 'My X7L ride has been reliable.',
+            'rating' => 2,
+            'published_at' => '2026-08-07 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'x2-title', [
+            'title' => 'X2 Pro owner review',
+            'rating' => 5,
+            'published_at' => '2026-08-08 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'not-a-review', [
+            'model_name' => 'X2',
+            'rating' => null,
+            'published_at' => '2026-08-09 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'ai-payload-only', [
+            'content' => 'Generic review without a model token.',
+            'rating' => 5,
+            'source_payloads_encrypted' => [[
+                'AI标签' => 'X2',
+                '帖子类型' => 'must-never-classify-x2',
+            ]],
+            'published_at' => '2026-08-10 12:00:00',
+        ]);
+        $this->mention($organization, $otherStore, 'website', 'other-store-x1s', [
+            'model_name' => 'X1S',
+            'rating' => 1,
+            'published_at' => '2026-08-11 12:00:00',
+        ]);
+
+        $this->mention($organization, $store, 'website', 'previous-x1s', [
+            'model_name' => 'X1S',
+            'rating' => 4,
+            'published_at' => '2026-07-03 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'previous-x7', [
+            'content' => 'Previous X7 review',
+            'rating' => 4,
+            'published_at' => '2026-07-04 12:00:00',
+        ]);
+        foreach ([5, 3] as $index => $rating) {
+            $this->mention($organization, $store, 'website', "previous-x2-{$index}", [
+                'title' => 'Previous X2 review',
+                'rating' => $rating,
+                'published_at' => '2026-07-0'.(5 + $index).' 12:00:00',
+            ]);
+        }
+        foreach ([2, 4] as $index => $rating) {
+            $this->mention($organization, $store, 'website', "custom-m16-{$index}", [
+                'model_name' => 'M16',
+                'rating' => $rating,
+                'published_at' => '2026-06-0'.(5 + $index).' 12:00:00',
+            ]);
+        }
+
+        $baseFilters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews'];
+        $withoutComparison = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'none']);
+        $this->assertNull($withoutComparison['comparison']);
+        $this->assertSame(['x1s', 'm16', 'x7', 'x2'], collect($withoutComparison['models'])->pluck('key')->all());
+        $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => $model['previous_count'] === null
+            && $model['difference'] === null
+            && $model['change_percent'] === null));
+
+        $previous = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'previous']);
+        $models = collect($previous['models'])->keyBy('key');
+        $this->assertSame([
+            'model' => 'X1S 系列',
+            'key' => 'x1s',
+            'count' => 3,
+            'average_rating' => 3.0,
+            'previous_count' => 1,
+            'difference' => 2,
+            'change_percent' => 200.0,
+        ], $models->get('x1s'));
+        $this->assertSame(1, $models->get('m16')['count']);
+        $this->assertSame(4.0, $models->get('m16')['average_rating']);
+        $this->assertSame(0, $models->get('m16')['previous_count']);
+        $this->assertSame(1, $models->get('m16')['difference']);
+        $this->assertNull($models->get('m16')['change_percent']);
+        $this->assertSame(1, $models->get('x7')['count']);
+        $this->assertSame(1, $models->get('x7')['previous_count']);
+        $this->assertSame(0.0, $models->get('x7')['change_percent']);
+        $this->assertSame(1, $models->get('x2')['count']);
+        $this->assertSame(2, $models->get('x2')['previous_count']);
+        $this->assertSame(-1, $models->get('x2')['difference']);
+        $this->assertSame(-50.0, $models->get('x2')['change_percent']);
+        $this->assertSame(6, collect($previous['models'])->sum('count'));
+        $this->assertStringNotContainsString(
+            'must-never-classify-x2',
+            json_encode($previous['models'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        );
+
+        $custom = app(ReputationDashboardService::class)->overview($store, [
+            ...$baseFilters,
+            'comparison' => 'custom',
+            'compare_date_from' => '2026-06-01',
+            'compare_date_to' => '2026-06-30',
+        ]);
+        $customM16 = collect($custom['models'])->firstWhere('key', 'm16');
+        $this->assertSame('custom', $custom['comparison']['mode']);
+        $this->assertSame(2, $customM16['previous_count']);
+        $this->assertSame(-1, $customM16['difference']);
+        $this->assertSame(-50.0, $customM16['change_percent']);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', [...$baseFilters, 'comparison' => 'previous']))
+            ->assertOk()
+            ->assertDontSee('must-never-classify-x2')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.models.0.key', 'x1s')
+                ->where('dashboard.models.0.count', 3)
+                ->where('dashboard.models.3.key', 'x2')
+                ->where('dashboard.models.3.previous_count', 2));
+    }
+
     public function test_reddit_topics_use_only_current_store_period_content_and_return_stable_weekly_aggregation(): void
     {
         [$user, $organization, $store] = $this->context('operator', 'reddit-topics');
