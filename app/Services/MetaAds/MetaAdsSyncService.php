@@ -641,7 +641,6 @@ class MetaAdsSyncService
 
         $accountExternalIds = array_keys($accountRows);
         $updatedSince = $since?->utc()->subSecond()->getTimestamp();
-        $hourly = $mode === 'incremental';
         $accountFor = function (string $accountExternalId) use ($accountModels): MetaAdAccount {
             /** @var MetaAdAccount|null $account */
             $account = $accountModels->get($accountExternalId);
@@ -694,7 +693,7 @@ class MetaAdsSyncService
             $updatedSince,
         );
         $insightSince = $since?->toDateString();
-        $insightUntil = ($hourly ? $until->subSecond() : $until)->toDateString();
+        $insightUntil = $until->toDateString();
         $this->api->eachInsightPageForAccounts(
             $store,
             $accountExternalIds,
@@ -705,21 +704,18 @@ class MetaAdsSyncService
                 string $accountExternalId,
                 string $level,
                 array $rows,
-            ) use ($store, $accountFor, $since, $until, $hourly, $syncedAt, &$counts): void {
+            ) use ($store, $accountFor, $syncedAt, &$counts): void {
                 $account = $accountFor($accountExternalId);
-                $selectedRows = $hourly && $since !== null
-                    ? $this->forPreviousAccountHour($rows, $account, $store, $since, $until)
-                    : $rows;
                 $counts['insights'] += $this->persistInsights(
                     $store,
                     $account,
                     $level,
-                    $selectedRows,
+                    $rows,
                     $syncedAt,
-                    $hourly,
+                    false,
                 );
             },
-            $hourly,
+            false,
         );
 
         if ($mode === 'full' && $since !== null) {
@@ -1001,13 +997,13 @@ class MetaAdsSyncService
                     ?? $this->actionMetric($purchaseRoas, $this->purchaseTypes())
                     ?? $this->firstActionValue($websitePurchaseRoas)
                     ?? $this->firstActionValue($purchaseRoas),
-                'outbound_clicks' => $this->jsonOrNull($record['outbound_clicks'] ?? null),
-                'actions' => $this->jsonOrNull($record['actions'] ?? null),
-                'action_values' => $this->jsonOrNull($record['action_values'] ?? null),
-                'cost_per_action_type' => $this->jsonOrNull($record['cost_per_action_type'] ?? null),
-                'purchase_roas_breakdown' => $this->jsonOrNull($record['purchase_roas'] ?? null),
-                'website_purchase_roas' => $this->jsonOrNull($record['website_purchase_roas'] ?? null),
-                'raw_payload' => $this->json($record),
+                'outbound_clicks' => null,
+                'actions' => null,
+                'action_values' => null,
+                'cost_per_action_type' => null,
+                'purchase_roas_breakdown' => null,
+                'website_purchase_roas' => null,
+                'raw_payload' => '{}',
                 'synced_at' => $syncedAt,
                 'created_at' => $syncedAt,
                 'updated_at' => $syncedAt,
@@ -1050,27 +1046,24 @@ class MetaAdsSyncService
         array &$replacementShardIds,
     ): bool {
         $level = (string) $shard->level;
-        $hourly = $shard->mode === 'incremental';
+        $incrementalDay = $shard->mode === 'incremental_day';
         if (! in_array($level, self::INSIGHT_LEVELS, true)) {
             throw new MetaAdsApiException('Meta Ads 洞察分片层级无效。', 'meta_ads_invalid_level');
         }
 
-        $consume = function (array $rows) use ($shard, $store, $account, $level, $since, $until, $hourly, $syncedAt, &$counts): void {
+        $consume = function (array $rows) use ($shard, $store, $account, $level, $syncedAt, &$counts): void {
             $this->ensureShardActive($shard, $store);
-            $selectedRows = $hourly && $since
-                ? $this->forPreviousAccountHour($rows, $account, $store, $since, $until)
-                : $rows;
             $counts['insights'] += $this->persistInsights(
                 $store,
                 $account,
                 $level,
-                $selectedRows,
+                $rows,
                 $syncedAt,
-                $hourly,
+                false,
             );
         };
 
-        if (! $hourly) {
+        if (! $incrementalDay) {
             $sinceDate = $shard->since_date?->toDateString();
             $untilDate = $shard->until_date?->toDateString();
             if (! $sinceDate || ! $untilDate) {
@@ -1131,7 +1124,7 @@ class MetaAdsSyncService
             $shard->since_date?->toDateString(),
             $shard->until_date?->toDateString(),
             $consume,
-            $hourly,
+            false,
         );
 
         return true;
@@ -1444,8 +1437,21 @@ class MetaAdsSyncService
                     $date = $hourSince->utc()->toDateString();
                 }
                 foreach (self::INSIGHT_LEVELS as $level) {
-                    $key = "{$account->meta_account_id}:insights:{$level}:{$date}:hour";
-                    $rows[] = $this->shardRow($store, $job, $account, $key, 'insights', $level, $mode, $hourSince, $until, $date, $date, $timestamp);
+                    $key = "{$account->meta_account_id}:insights:{$level}:{$date}:day";
+                    $rows[] = $this->shardRow(
+                        $store,
+                        $job,
+                        $account,
+                        $key,
+                        'insights',
+                        $level,
+                        'incremental_day',
+                        $hourSince,
+                        $until,
+                        $date,
+                        $date,
+                        $timestamp,
+                    );
                 }
 
                 if (! $reconcileIncremental) {
