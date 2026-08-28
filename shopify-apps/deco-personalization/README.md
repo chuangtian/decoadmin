@@ -43,6 +43,12 @@ App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久�
 
 Pixel 只声明分析用途：`analytics = true`，营销、偏好和数据销售均关闭。DecoAdmin 只保存哈希后的 Shopify client/session 标识、已验证的组件/策略/商品引用及订单 ID；不保存 IP、邮箱、电话、姓名、原始 URL 或完整事件载荷。结账事件只能作为候选信号，后续收入归因必须与 Commerce Hub 已同步订单核对。
 
+## 归因与分析
+
+归因固定为 7 天窗口、最后一次推荐点击、只计算点击归因。结账 Pixel 订单 ID 必须与当前 Organization / Store 下的 Commerce Hub 非测试订单匹配；浏览器传入的金额不参与计算。每个订单最多生成一条归因，部分退款按订单总额减退款额冲销，取消或全额退款将订单和收入归因置为已冲销。
+
+后台每五分钟运行一次店铺隔离的归因核对，并按店铺时区输出最近 30 天曝光、点击、加购、归因订单、净归因收入、AOV、每日趋势和展示位置表现。不同订单币种不混合汇总。
+
 ## 当前状态
 
 App Home 工程与离线测试已建立。Test Client ID 和实际 Shopify 配置将在发布阶段只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。

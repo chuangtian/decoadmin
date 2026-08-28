@@ -83,7 +83,24 @@ const props = defineProps<{
     products: ProductOption[];
     options: { algorithms: Array<{ value: Algorithm; label: string }>; placements: Array<{ value: Placement; label: string }> };
     permissions: { manage: boolean; manageSmartCart: boolean; viewAnalytics: boolean };
-    analytics: { status: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; aov: string };
+    analytics: {
+        status: string;
+        period: { days: number; from: string; to: string; timezone: string };
+        currency: string;
+        impressions: number;
+        clicks: number;
+        add_to_carts: number;
+        orders: number;
+        attributed_revenue: string;
+        aov: string;
+        click_through_rate: number;
+        add_to_cart_rate: number;
+        reversed_orders: number;
+        excluded_currency_orders: number;
+        attribution: { model: string; window_days: number; click_only: boolean; refund_cancel_reversal: boolean };
+        daily: Array<{ date: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string }>;
+        placements: Array<{ placement: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; click_through_rate: number }>;
+    };
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/personalization`;
@@ -96,7 +113,7 @@ const tabs: Array<{ value: Tab; label: string; description: string }> = [
 ];
 const activeTab = ref<Tab>('overview');
 const algorithmLabel = (value: Algorithm) => props.options.algorithms.find(option => option.value === value)?.label ?? value;
-const placementLabel = (value: Placement) => props.options.placements.find(option => option.value === value)?.label ?? value;
+const placementLabel = (value: string) => props.options.placements.find(option => option.value === value)?.label ?? value;
 const statusLabel = (status: ComponentStatus) => ({ draft: '草稿', active: '后端已启用', disabled: '已停用' }[status]);
 
 const createStrategyForm = useForm({ name: '', algorithm: 'manual' as Algorithm, item_limit: 8 });
@@ -497,7 +514,26 @@ const analyticsCards = computed(() => [
 
             <section v-else class="space-y-5">
                 <div v-if="!permissions.viewAnalytics" class="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-500">当前账号没有个性化推荐分析权限。</div>
-                <template v-else><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"><div v-for="card in analyticsCards" :key="card[0]" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">{{ card[0] }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ card[1] }}</p></div></div><div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-900">事件采集和 7 天最后推荐点击归因将在后续阶段接入。当前保持 0 值，不使用模拟分析数据。</div></template>
+                <template v-else>
+                    <div class="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-900 lg:flex-row lg:items-center lg:justify-between">
+                        <div><strong>归因口径：</strong>7 天内最后一次推荐点击；仅点击归因；每个订单只归给一个组件和策略；退款与取消自动冲销。</div>
+                        <div class="shrink-0 text-indigo-700">{{ analytics.period.from }} 至 {{ analytics.period.to }} · {{ analytics.period.timezone }}</div>
+                    </div>
+                    <div v-if="analytics.status === 'awaiting_events'" class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">Web Pixel 尚未收到 Test 店事件，以下均为真实 0 值，不使用模拟数据。</div>
+                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"><div v-for="card in analyticsCards" :key="card[0]" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">{{ card[0] }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ card[1] }}</p></div></div>
+                    <div class="grid gap-5 xl:grid-cols-2">
+                        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                            <div class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-950">最近 14 天趋势</h2><p class="mt-1 text-sm text-slate-500">按店铺时区统计真实事件与净归因收入。</p></div>
+                            <div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">日期</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">加购</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analytics.daily.slice(-14)" :key="row.date" class="border-t border-slate-100"><td class="px-4 py-3 font-medium">{{ row.date }}</td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }}</td><td class="px-4 py-3">{{ row.add_to_carts }}</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div>
+                        </div>
+                        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                            <div class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-950">展示位置表现</h2><p class="mt-1 text-sm text-slate-500">CTR 为推荐点击 ÷ 推荐曝光。</p></div>
+                            <div v-if="analytics.placements.length === 0" class="p-10 text-center text-sm text-slate-500">暂无展示位置事件。</div>
+                            <div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">位置</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">CTR</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analytics.placements" :key="row.placement" class="border-t border-slate-100"><td class="px-4 py-3 font-medium">{{ placementLabel(row.placement) }}</td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }}</td><td class="px-4 py-3">{{ row.click_through_rate.toFixed(2) }}%</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div>
+                            <div class="border-t border-slate-200 bg-slate-50 px-5 py-4 text-xs text-slate-600">已冲销订单 {{ analytics.reversed_orders }} 个<span v-if="analytics.excluded_currency_orders">；另有 {{ analytics.excluded_currency_orders }} 个非 {{ analytics.currency }} 订单未计入金额与 AOV</span>。</div>
+                        </div>
+                    </div>
+                </template>
             </section>
         </div>
     </AppLayout>

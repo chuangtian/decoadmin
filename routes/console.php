@@ -33,6 +33,12 @@ Schedule::command('shopify:prune-uninstalled-data')
     ->onOneServer()
     ->withoutOverlapping(60);
 
+Schedule::command('personalization:reconcile-attribution')
+    ->name('personalization:reconcile-attribution')
+    ->everyFiveMinutes()
+    ->onOneServer()
+    ->withoutOverlapping(10);
+
 Schedule::command('student-discounts:prune-evidence --days=30')
     ->name('student-discounts:prune-reviewed-evidence')
     ->dailyAt('04:35')

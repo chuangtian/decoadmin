@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\PersonalizationRecommendationComponent;
 use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\Store;
+use App\Services\Personalization\PersonalizationAnalyticsService;
 use App\Services\Personalization\PersonalizationCatalogService;
 use App\Services\Personalization\PersonalizationConfigurationService;
 use App\Services\Personalization\PersonalizationRecommendationService;
@@ -25,6 +26,7 @@ class PersonalizationController extends Controller
         private PersonalizationConfigurationService $configuration,
         private PersonalizationRecommendationService $recommendations,
         private PersonalizationCatalogService $catalog,
+        private PersonalizationAnalyticsService $analytics,
     ) {}
 
     public function index(Request $request, Organization $organization, Store $store): Response
@@ -36,6 +38,14 @@ class PersonalizationController extends Controller
             abort($exception->statusCode, $exception->getMessage());
         }
         $products = $this->catalog->candidates($store, ['in_stock_only' => false, 'limit' => 100]);
+        $canViewAnalytics = $request->user()->hasPermission('personalization.analytics.read', $organization, $store);
+        try {
+            $analytics = $canViewAnalytics
+                ? $this->analytics->dashboard($store, $request->user())
+                : $this->emptyAnalytics($store);
+        } catch (PersonalizationException $exception) {
+            abort($exception->statusCode, $exception->getMessage());
+        }
 
         return Inertia::render('Personalization/Index', [
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
@@ -121,17 +131,9 @@ class PersonalizationController extends Controller
             'permissions' => [
                 'manage' => $request->user()->hasPermission('personalization.manage', $organization, $store),
                 'manageSmartCart' => $request->user()->hasPermission('personalization.smart_cart.manage', $organization, $store),
-                'viewAnalytics' => $request->user()->hasPermission('personalization.analytics.read', $organization, $store),
+                'viewAnalytics' => $canViewAnalytics,
             ],
-            'analytics' => [
-                'status' => 'pending_event_collection',
-                'impressions' => 0,
-                'clicks' => 0,
-                'add_to_carts' => 0,
-                'orders' => 0,
-                'attributed_revenue' => '0.00',
-                'aov' => '0.00',
-            ],
+            'analytics' => $analytics,
         ]);
     }
 
@@ -381,6 +383,36 @@ class PersonalizationController extends Controller
         abort_unless($store->organization_id === $organization->id, 403);
         abort_unless($request->user()->canAccessStore($store), 403);
         abort_unless($request->user()->hasPermission($permission, $organization, $store), 403);
+    }
+
+    /** @return array<string, mixed> */
+    private function emptyAnalytics(Store $store): array
+    {
+        $today = now($store->timezone ?: 'UTC')->toDateString();
+
+        return [
+            'status' => 'not_authorized',
+            'period' => ['days' => 30, 'from' => $today, 'to' => $today, 'timezone' => $store->timezone ?: 'UTC'],
+            'currency' => strtoupper((string) ($store->currency ?: 'USD')),
+            'impressions' => 0,
+            'clicks' => 0,
+            'add_to_carts' => 0,
+            'orders' => 0,
+            'attributed_revenue' => '0.00',
+            'aov' => '0.00',
+            'click_through_rate' => 0.0,
+            'add_to_cart_rate' => 0.0,
+            'reversed_orders' => 0,
+            'excluded_currency_orders' => 0,
+            'attribution' => [
+                'model' => 'last_recommendation_click',
+                'window_days' => 7,
+                'click_only' => true,
+                'refund_cancel_reversal' => true,
+            ],
+            'daily' => [],
+            'placements' => [],
+        ];
     }
 
     /** @return array<string, array<int, mixed>> */
