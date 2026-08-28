@@ -14,10 +14,16 @@ use App\Models\Store;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class SeoOverviewDashboardService
 {
+    public function __construct(
+        private GscMetricQueryService $gscMetrics,
+        private SeoAnalyticsCacheVersionService $cacheVersion,
+    ) {}
+
     /** @param array{date_from?: mixed, date_to?: mixed, comparison?: mixed} $filters */
     public function forStore(Store $store, array $filters = []): array
     {
@@ -122,6 +128,19 @@ class SeoOverviewDashboardService
     /** @param array<string, mixed> $filters */
     public function gscSourceDetails(Store $store, array $filters = []): array
     {
+        ksort($filters);
+        $version = $this->cacheVersion->current((int) $store->getKey());
+        $key = implode(':', [
+            'seo-gsc-details', 'schema-v2', 'organization', $store->organization_id,
+            'store', $store->getKey(), "v{$version}", sha1((string) json_encode($filters)),
+        ]);
+
+        return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildGscSourceDetails($store, $filters));
+    }
+
+    /** @param array<string, mixed> $filters */
+    private function buildGscSourceDetails(Store $store, array $filters = []): array
+    {
         [$from, $to] = $this->dates($store, $filters, 'gsc');
         [, $comparisonFrom, $comparisonTo] = $this->comparisonDates($from, $to, $filters);
         $segment = in_array($filters['segment'] ?? null, ['total', 'brand', 'industry', 'blog'], true)
@@ -135,13 +154,10 @@ class SeoOverviewDashboardService
         if ($segment === 'blog') {
             $type = 'pages';
         }
-        $query = $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query();
-        $hashColumn = $type === 'queries' ? 'query_hash' : 'page_hash';
-        $labelColumn = $type === 'queries' ? 'query' : 'page';
         $segments = $type === 'queries' && $segment === 'total'
             ? ['brand', 'industry']
             : ($type === 'pages' && $segment === 'blog' ? ['total'] : [$segment]);
-        $requiredLabelContains = $type === 'pages' && $segment === 'blog' ? '/blogs/' : '';
+        $blogOnly = $type === 'pages' && $segment === 'blog';
         [$page, $perPage] = $this->pageFilters($filters, [12, 25, 50, 100], 50);
         $search = mb_substr(trim((string) ($filters['search'] ?? '')), 0, 200);
         $sort = in_array($filters['sort'] ?? null, ['clicks', 'impressions', 'ctr', 'position', 'label'], true)
@@ -151,7 +167,7 @@ class SeoOverviewDashboardService
         $base = $dimension !== ''
             ? $this->gscBreakdownAggregate($store, $from, $to, $searchType, $dimension, $search)
             : ($searchType === 'web'
-                ? $this->gscDimensionAggregate($query, $store, $hashColumn, $labelColumn, $segments, $from, $to, $search, [], $requiredLabelContains)
+                ? $this->gscMetrics->aggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly)
                 : null);
         if ($base === null) {
             return [
@@ -162,22 +178,21 @@ class SeoOverviewDashboardService
                 'pagination' => $this->pagination(1, $perPage, 0),
             ];
         }
-        $total = $dimension !== ''
-            ? $this->gscBreakdownCount($store, $from, $to, $searchType, $dimension, $search)
-            : $this->gscDimensionCount(
-                $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $from, $to, $search, $requiredLabelContains,
-            );
-        $page = min($page, max(1, (int) ceil($total / $perPage)));
         $sortColumn = ['ctr' => 'ctr', 'position' => 'position', 'label' => 'label'][$sort] ?? $sort;
-        $rows = (clone $base)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        $ranked = DB::query()->fromSub((clone $base), 'gsc_detail_rows')
+            ->select('gsc_detail_rows.*')->selectRaw('COUNT(*) OVER() total_rows');
+        $rows = (clone $ranked)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        $total = (int) ($rows->first()?->total_rows ?? 0);
+        if ($rows->isEmpty() && $page > 1) {
+            $total = (int) DB::query()->fromSub((clone $base), 'gsc_detail_count')->count();
+            $page = min($page, max(1, (int) ceil($total / $perPage)));
+            $rows = (clone $ranked)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        }
         $hashes = $rows->pluck('hash')->map(fn ($value): string => (string) $value)->all();
         $previous = $hashes === [] ? collect() : ($dimension !== ''
             ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
-            : $this->gscDimensionAggregate(
-                $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $requiredLabelContains,
-            ))->get()->keyBy('hash');
+            : $this->gscMetrics->aggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $blogOnly))
+            ->get()->keyBy('hash');
 
         $summary = $searchType === 'web'
             ? $this->gscSummary($store, $segment, $from, $to)

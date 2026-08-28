@@ -14,13 +14,18 @@ use App\Models\SeoGa4LandingPageDailyMetric;
 use App\Models\SeoGoalWorkRecord;
 use App\Models\SeoGscBreakdownDailyMetric;
 use App\Models\SeoGscDailyMetric;
+use App\Models\SeoGscPage;
 use App\Models\SeoGscPageDailyMetric;
+use App\Models\SeoGscQuery;
 use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\User;
 use App\Services\SeoAnalytics\GoogleSeoApiClient;
+use App\Services\SeoAnalytics\GscDimensionBackfillService;
+use App\Services\SeoAnalytics\GscMetricQueryService;
+use App\Services\SeoAnalytics\SeoAnalyticsCacheVersionService;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncManager;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncService;
 use App\Services\SeoAnalytics\SeoOverviewDashboardService;
@@ -627,6 +632,66 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertJsonPath('rows.0.difference.clicks', 5);
     }
 
+    public function test_gsc_dimension_backfill_preserves_page_and_query_details(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $blogPage = 'https://example.com/blogs/news/dimension-guide';
+
+        $this->gscPage($organization, $store, '2026-08-22', 'total', $blogPage, 15, 300, 4);
+        $this->gscPage($organization, $store, '2026-08-15', 'total', $blogPage, 10, 200, 5);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'dimension ebike', 8, 120, 6);
+
+        $status = app(GscDimensionBackfillService::class)->backfill($store->id, 1000);
+
+        $this->assertSame(0, $status['pages']['missing_rows']);
+        $this->assertSame(0, $status['queries']['missing_rows']);
+        $this->assertSame(1, $status['pages']['dimension_rows']);
+        $this->assertSame(1, $status['queries']['dimension_rows']);
+        $this->assertTrue(SeoGscPage::query()->sole()->is_blog);
+        $this->assertSame('dimension ebike', SeoGscQuery::query()->sole()->query);
+        $this->assertTrue(app(GscMetricQueryService::class)->dimensionsReady($store, 'pages'));
+        $this->assertTrue(app(GscMetricQueryService::class)->dimensionsReady($store, 'queries'));
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', ['page_id' => null]);
+        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', ['query_id' => null]);
+
+        $session = $this->contextSession($organization, $store);
+        $this->actingAs($user)->withSession($session)->getJson(route('natural-traffic.seo-geo.source-details', [
+            'source' => 'gsc', 'date_from' => '2026-08-16', 'date_to' => '2026-08-22',
+            'segment' => 'blog', 'detail_type' => 'pages',
+        ]))->assertOk()
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', $blogPage)
+            ->assertJsonPath('rows.0.clicks', 15)
+            ->assertJsonPath('rows.0.previous.clicks', 10);
+
+        $this->actingAs($user)->withSession($session)->getJson(route('natural-traffic.seo-geo.source-details', [
+            'source' => 'gsc', 'date_from' => '2026-08-22', 'date_to' => '2026-08-22',
+            'segment' => 'industry', 'detail_type' => 'queries', 'search' => 'dimension',
+        ]))->assertOk()
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', 'dimension ebike')
+            ->assertJsonPath('rows.0.clicks', 8);
+    }
+
+    public function test_gsc_detail_cache_is_invalidated_by_store_version(): void
+    {
+        [, $organization, $store] = $this->context('operator');
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'cached ebike', 5, 100, 4);
+        $filters = [
+            'date_from' => '2026-08-22', 'date_to' => '2026-08-22',
+            'segment' => 'industry', 'detail_type' => 'queries',
+        ];
+        $overview = app(SeoOverviewDashboardService::class);
+
+        $this->assertSame(5, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+        SeoGscQueryDailyMetric::query()->update(['clicks' => 9]);
+        $this->assertSame(5, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+
+        app(SeoAnalyticsCacheVersionService::class)->bump((int) $store->id);
+
+        $this->assertSame(9, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+    }
+
     public function test_gsc_sync_skips_blog_page_request_and_removes_legacy_rows(): void
     {
         [$user, $organization, $store] = $this->context('organization-admin');
@@ -649,9 +714,25 @@ class NaturalTrafficPagesTest extends TestCase
         $google->shouldReceive('ga4Rows')->twice()->andReturn([]);
         $google->shouldReceive('gscRows')->andReturn([]);
         $google->shouldReceive('gscRowPages')->andReturnUsing(
-            function (Store $candidate, string $from, string $to, array $dimensions, array $filters = []) use (&$pageRequests): \Generator {
+            function (Store $candidate, string $from, string $to, array $dimensions, array $filters = []) use (&$pageRequests, $legacyBlogPage): \Generator {
                 if ($dimensions === ['date', 'page']) {
                     $pageRequests[] = $filters;
+                }
+
+                if ($dimensions === ['date', 'page'] && $filters === []) {
+                    yield [[
+                        'keys' => ['2026-08-22', $legacyBlogPage], 'clicks' => 5, 'impressions' => 100, 'position' => 3,
+                    ]];
+
+                    return;
+                }
+
+                if ($dimensions === ['date', 'query'] && ($filters[0]['operator'] ?? null) === 'includingRegex') {
+                    yield [[
+                        'keys' => ['2026-08-22', 'macfox'], 'clicks' => 3, 'impressions' => 50, 'position' => 2,
+                    ]];
+
+                    return;
                 }
 
                 yield from [];
@@ -672,6 +753,14 @@ class NaturalTrafficPagesTest extends TestCase
         $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
             'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'blog',
             'page_hash' => hash('sha256', $legacyBlogPage),
+        ]);
+        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'total',
+            'page_hash' => hash('sha256', $legacyBlogPage), 'page_id' => SeoGscPage::query()->sole()->id,
+        ]);
+        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'brand',
+            'query_hash' => hash('sha256', 'macfox'), 'query_id' => SeoGscQuery::query()->sole()->id,
         ]);
     }
 
