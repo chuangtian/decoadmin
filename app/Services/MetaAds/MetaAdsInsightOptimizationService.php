@@ -80,7 +80,11 @@ class MetaAdsInsightOptimizationService
     {
         return $this->facts($storeId)->where('granularity', '!=', 'hour')
             ->where(function (Builder $query): void {
-                $query->where('raw_payload', '!=', '{}');
+                if (DB::getDriverName() === 'mysql') {
+                    $query->whereRaw('JSON_LENGTH(raw_payload) > 0');
+                } else {
+                    $query->whereNotIn('raw_payload', ['{}', '[]']);
+                }
                 foreach (self::REDUNDANT_JSON_COLUMNS as $column) {
                     $query->orWhereNotNull($column);
                 }
