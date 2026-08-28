@@ -25,10 +25,7 @@ type WeeklyTrend = {
 type RedditTopicAverage = { topic: string; views: number; comments: number; upvotes: number; posts: number };
 type RedditTopicDistribution = { topic: string; count: number; percent: number };
 type RedditTopicWeek = { week: string; label: string; posts: number; topic_distribution: RedditTopicDistribution[] };
-type ReviewModelStat = {
-    key?: string; model: string; count: number; average_rating: number;
-    previous_count?: number; difference?: number; change_percent?: number | null;
-};
+type ReviewModelStat = { key: string; model: string; count: number; average_rating: number };
 
 const props = defineProps<{
     store: { id: number; name: string; timezone: string };
@@ -131,14 +128,10 @@ const redditTopicNames = computed(() => Object.keys(redditTopicColors).filter((t
     redditTopicWeeks.value.some((week) => week.topic_distribution.some((item) => item.topic === topic && item.count > 0))
 )));
 const redditTopicViewMax = computed(() => Math.max(1, ...redditTopicAverages.value.map((row) => row.views)));
-const reviewModelOrder = ['macfox-x1', 'macfox-x7', 'x1s-x-bs-zay', 'macfox-x2', 'macfox-m16-ebike'];
-const reviewModelColors: Record<string, string> = { 'macfox-x1': '#3b82f6', 'macfox-x7': '#10b981', 'x1s-x-bs-zay': '#f97316', 'macfox-x2': '#ec4899', 'macfox-m16-ebike': '#8b5cf6' };
-const orderedReviewModels = computed(() => [...props.dashboard.models].sort((left, right) => {
-    const leftIndex = reviewModelOrder.indexOf(left.model);
-    const rightIndex = reviewModelOrder.indexOf(right.model);
-    return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
-}));
-const reviewModelMax = computed(() => Math.max(1, ...orderedReviewModels.value.map((model) => model.count)));
+const reviewModels = computed(() => props.dashboard.models);
+const reviewModelPalette = ['#3b82f6', '#10b981', '#f97316', '#ec4899', '#8b5cf6', '#06b6d4', '#eab308', '#6366f1'];
+const reviewModelColor = (index: number) => reviewModelPalette[index % reviewModelPalette.length];
+const reviewModelMax = computed(() => Math.max(1, ...reviewModels.value.map((model) => model.count)));
 
 const formatNumber = (value: number) => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value ?? 0);
 const reviewSummaryCards = computed(() => [
@@ -167,15 +160,6 @@ const comparisonText = (key: string, digits = 0) => {
     if (!metric) return '未启用对比';
     const change = metric.change_percent === null ? '无可比基数' : `${metric.change_percent >= 0 ? '+' : ''}${metric.change_percent.toFixed(1)}%`;
     return `上期 ${metric.previous.toFixed(digits)} · ${change}`;
-};
-const modelComparisonText = (model: ReviewModelStat) => {
-    if (!props.dashboard.comparison) return '环比 未开启';
-    if (model.change_percent === null || model.change_percent === undefined) return `上期 ${formatNumber(model.previous_count ?? 0)} · 无可比基数`;
-    return `环比 ${model.change_percent >= 0 ? '↑' : '↓'} ${Math.abs(model.change_percent).toFixed(2)}%`;
-};
-const modelComparisonClass = (model: ReviewModelStat) => {
-    if (!props.dashboard.comparison || model.change_percent === null || model.change_percent === undefined) return 'text-slate-400';
-    return model.change_percent >= 0 ? 'text-emerald-600' : 'text-rose-600';
 };
 const goalStatusLabel = (status: string) => ({ achieved: '已达成', near: '接近目标', behind: '需追赶', risk: '高风险', not_configured: '未设置' }[status] ?? status);
 const goalTrendMetric = (metric: string) => comparisonMetric({ satisfied_reviews: 'satisfied_reviews', reddit_views: 'reddit_views', reddit_comments: 'reddit_comments' }[metric] ?? '');
@@ -349,20 +333,19 @@ onBeforeUnmount(stopPolling);
 
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div><h2 class="text-lg font-black text-slate-950">按车型归类统计</h2><p class="mt-1 text-sm text-slate-500">仅展示指定的五个飞书车型，其他车型不计入本区块。</p></div>
+                        <div><h2 class="text-lg font-black text-slate-950">按车型归类统计</h2><p class="mt-1 text-sm text-slate-500">展示所选日期范围内官网评论表出现的全部车型，按评论数从高到低排列。</p></div>
                         <span class="inline-flex w-fit items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700"><i class="h-2 w-2 rounded-full bg-sky-500" />数据来自当前店铺评论</span>
                     </div>
-                    <div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                        <article v-for="model in orderedReviewModels" :key="model.key ?? model.model" class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-5" :style="{ borderLeftColor: reviewModelColors[model.model] ?? '#94a3b8', borderLeftWidth: '4px' }">
-                            <p class="text-sm font-bold" :style="{ color: reviewModelColors[model.model] ?? '#64748b' }">{{ model.model }}</p>
+                    <div v-if="reviewModels.length" class="mt-5 grid gap-4" :style="{ gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }">
+                        <article v-for="(model, index) in reviewModels" :key="model.key" class="relative min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-5" :style="{ borderLeftColor: reviewModelColor(index), borderLeftWidth: '4px' }">
+                            <p class="truncate text-sm font-bold" :title="model.model" :style="{ color: reviewModelColor(index) }">{{ model.model }}</p>
                             <p class="mt-2 text-3xl font-black text-slate-950">{{ formatNumber(model.count) }}</p>
                             <p class="mt-1 text-xs text-slate-500">{{ formatNumber(model.count) }} 条评论<span v-if="model.average_rating > 0"> · 均分 {{ model.average_rating.toFixed(1) }}★</span></p>
-                            <div class="mt-4 h-2 overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full" :style="{ width: `${Math.max(model.count ? 4 : 0, model.count / reviewModelMax * 100)}%`, backgroundColor: reviewModelColors[model.model] ?? '#94a3b8' }" /></div>
-                            <div class="mt-3 flex items-center justify-between gap-3 text-xs"><span :class="modelComparisonClass(model)">{{ modelComparisonText(model) }}</span><span class="whitespace-nowrap text-slate-500">{{ formatNumber(model.count) }} 条</span></div>
+                            <div class="mt-4 h-2 overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full" :style="{ width: `${Math.max(4, model.count / reviewModelMax * 100)}%`, backgroundColor: reviewModelColor(index) }" /></div>
                         </article>
                     </div>
+                    <div v-else class="mt-5 rounded-2xl bg-slate-50 py-12 text-center text-sm text-slate-500">所选日期范围内暂无官网车型评论。</div>
                     <div class="mt-5 flex flex-wrap gap-2">
-                        <button v-if="canSync" type="button" class="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!sourceReady || syncing" @click="requestSync">{{ syncing ? `同步中 ${sync?.progress_percent ?? 0}%` : '从飞书同步车型' }}</button>
                         <button v-if="canManage" type="button" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="mentionOpen = true">＋ 新增评论</button>
                     </div>
                 </section>

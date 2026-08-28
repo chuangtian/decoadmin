@@ -148,7 +148,7 @@ class ReputationMonitoringTest extends TestCase
         }
     }
 
-    public function test_review_model_stats_keep_only_requested_feishu_models_in_fixed_order_and_store_scope(): void
+    public function test_review_model_stats_include_all_website_models_in_selected_period_and_store_scope(): void
     {
         [$user, $organization, $store] = $this->context('operator', 'review-models');
         $otherStore = $organization->stores()->create([
@@ -163,10 +163,15 @@ class ReputationMonitoringTest extends TestCase
             'rating' => 5,
             'published_at' => '2026-08-03 12:00:00',
         ]);
-        $this->mention($organization, $store, 'trustpilot', 'x1-case-insensitive', [
+        $this->mention($organization, $store, 'website', 'x1-case-insensitive', [
             'model_name' => ' MACFOX-X1 ',
             'rating' => 3,
             'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'trustpilot', 'trustpilot-model-excluded', [
+            'model_name' => 'trustpilot-model',
+            'rating' => 5,
+            'published_at' => '2026-08-04 13:00:00',
         ]);
         $this->mention($organization, $store, 'website', 'x7', [
             'model_name' => 'macfox-x7',
@@ -243,53 +248,30 @@ class ReputationMonitoringTest extends TestCase
         $this->assertNull($withoutComparison['comparison']);
         $this->assertSame([
             'macfox-x1',
-            'macfox-x7',
-            'x1s-x-bs-zay',
-            'macfox-x2',
+            'another-product',
             'macfox-m16-ebike',
+            'macfox-x2',
+            'macfox-x7',
+            'shipping-protection',
+            'x1s-x-bs-zay',
         ], collect($withoutComparison['models'])->pluck('key')->all());
-        $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => $model['previous_count'] === null
-            && $model['difference'] === null
-            && $model['change_percent'] === null));
-
-        $previous = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'previous']);
-        $models = collect($previous['models'])->keyBy('key');
+        $this->assertSame(8, collect($withoutComparison['models'])->sum('count'));
         $this->assertSame([
             'model' => 'macfox-x1',
             'key' => 'macfox-x1',
             'count' => 2,
             'average_rating' => 4.0,
-            'previous_count' => 1,
-            'difference' => 1,
-            'change_percent' => 100.0,
-        ], $models->get('macfox-x1'));
-        $this->assertSame(1, $models->get('macfox-x7')['count']);
-        $this->assertSame(2, $models->get('macfox-x7')['previous_count']);
-        $this->assertSame(-50.0, $models->get('macfox-x7')['change_percent']);
-        $this->assertSame(1, $models->get('x1s-x-bs-zay')['count']);
-        $this->assertSame(1, $models->get('macfox-x2')['count']);
-        $this->assertSame(1, $models->get('macfox-x2')['previous_count']);
-        $this->assertSame(0.0, $models->get('macfox-x2')['change_percent']);
-        $this->assertSame(1, $models->get('macfox-m16-ebike')['count']);
-        $this->assertSame(0, $models->get('macfox-m16-ebike')['previous_count']);
-        $this->assertNull($models->get('macfox-m16-ebike')['change_percent']);
-        $this->assertSame(6, collect($previous['models'])->sum('count'));
+        ], $withoutComparison['models'][0]);
+        $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => ! array_key_exists('change_percent', $model)
+            && ! array_key_exists('previous_count', $model)
+            && ! array_key_exists('difference', $model)));
+
+        $previous = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'previous']);
+        $this->assertSame($withoutComparison['models'], $previous['models']);
         $this->assertStringNotContainsString(
             'must-never-classify-model',
             json_encode($previous['models'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
         );
-
-        $custom = app(ReputationDashboardService::class)->overview($store, [
-            ...$baseFilters,
-            'comparison' => 'custom',
-            'compare_date_from' => '2026-06-01',
-            'compare_date_to' => '2026-06-30',
-        ]);
-        $customM16 = collect($custom['models'])->firstWhere('key', 'macfox-m16-ebike');
-        $this->assertSame('custom', $custom['comparison']['mode']);
-        $this->assertSame(2, $customM16['previous_count']);
-        $this->assertSame(-1, $customM16['difference']);
-        $this->assertSame(-50.0, $customM16['change_percent']);
 
         $this->actingAs($user)
             ->withSession($this->contextSession($organization, $store))
@@ -299,8 +281,8 @@ class ReputationMonitoringTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('dashboard.models.0.key', 'macfox-x1')
                 ->where('dashboard.models.0.count', 2)
-                ->where('dashboard.models.4.key', 'macfox-m16-ebike')
-                ->where('dashboard.models.4.previous_count', 0));
+                ->where('dashboard.models.6.key', 'x1s-x-bs-zay')
+                ->missing('dashboard.models.0.change_percent'));
     }
 
     public function test_reddit_topics_use_only_current_store_period_content_and_return_stable_weekly_aggregation(): void
