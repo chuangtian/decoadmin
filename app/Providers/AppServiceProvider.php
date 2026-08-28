@@ -16,6 +16,7 @@ use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
 use App\Services\AppCenter\AppConfigurationCatalog;
 use App\Services\AppCenter\GenericAppConfigurationProvider;
+use App\Services\AppCenter\PersonalizationAppConfigurationProvider;
 use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
 use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
@@ -50,6 +51,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(CurrentStore::class);
         $this->app->tag([
             StudentDiscountAppConfigurationProvider::class,
+            PersonalizationAppConfigurationProvider::class,
             GenericAppConfigurationProvider::class,
         ], 'app-center.configuration-providers');
         $this->app->singleton(AppConfigurationCatalog::class, fn ($app) => new AppConfigurationCatalog(

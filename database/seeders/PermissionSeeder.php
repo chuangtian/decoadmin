@@ -14,6 +14,7 @@ class PermissionSeeder extends Seeder
         'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
         'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'reports' => '报表', 'system' => '系统',
         'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram 内容',
+        'personalization' => '个性化推荐',
     ];
 
     /** @var array<string, string> */
@@ -108,6 +109,7 @@ class PermissionSeeder extends Seeder
         'instagram_feed.sync',
         'instagram_feed.gallery.manage',
         'instagram_feed.publish',
+        'personalization.view',
     ];
 
     public function run(): void

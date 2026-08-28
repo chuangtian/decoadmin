@@ -64,7 +64,8 @@ class ApplicationCenterController extends Controller
                 $query->where('action', 'like', 'shopify_app_%')
                     ->orWhere('action', 'like', 'shopify_connection_%')
                     ->orWhere('action', 'like', 'store_business_credential_%')
-                    ->orWhere('action', 'like', 'student_discount_%');
+                    ->orWhere('action', 'like', 'student_discount_%')
+                    ->orWhere('action', 'like', 'personalization_%');
             })
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                 $query->where('action', 'like', "%{$search}%")
@@ -120,6 +121,9 @@ class ApplicationCenterController extends Controller
             'student_discount_claim_resubmitted' => '学生优惠申请已重新提交',
             'student_discount_claim_approved' => '学生优惠申请已通过',
             'student_discount_claim_rejected' => '学生优惠申请已拒绝',
+            'personalization_shopify_app_bootstrapped' => '个性化推荐应用连接成功',
+            'personalization_shopify_app_uninstalled' => '个性化推荐应用已卸载',
+            'personalization_shopify_app_scopes_updated' => '个性化推荐应用权限已更新',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }

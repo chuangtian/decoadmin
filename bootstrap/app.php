@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/shopify-app/webhooks',
             'api/shopify-app/student-discounts/*',
             'api/shopify-app/instagram-feed/*',
+            'api/shopify-app/personalization/*',
             // Meta 的回调不带 CSRF token，靠 signed_request 验签。
             'instagram-feed/meta/*',
         ]);

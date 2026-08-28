@@ -41,6 +41,8 @@ use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyInstagramFeedAppController;
 use App\Http\Controllers\ShopifyInstagramFeedWebhookController;
 use App\Http\Controllers\ShopifyOAuthController;
+use App\Http\Controllers\ShopifyPersonalizationAppController;
+use App\Http\Controllers\ShopifyPersonalizationWebhookController;
 use App\Http\Controllers\ShopifyStudentDiscountAppController;
 use App\Http\Controllers\ShopifyStudentDiscountWebhookController;
 use App\Http\Controllers\ShopifyWebhookController;
@@ -131,6 +133,23 @@ Route::prefix('/api/shopify-app/instagram-feed')->group(function (): void {
     Route::post('/bootstrap', [ShopifyInstagramFeedAppController::class, 'bootstrap'])
         ->middleware(['shopify.id-token:instagram_feed', 'throttle:20,1'])
         ->name('instagram-feed.shopify-app.bootstrap');
+});
+
+Route::get('/shopify-app/personalization', [ShopifyPersonalizationAppController::class, 'management'])
+    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->name('personalization.shopify-app.management');
+
+Route::post('/api/shopify-app/personalization/webhooks', ShopifyPersonalizationWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.shopify-app.webhooks');
+
+Route::prefix('/api/shopify-app/personalization')->group(function (): void {
+    Route::get('/connection', [ShopifyPersonalizationAppController::class, 'connection'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:60,1'])
+        ->name('personalization.shopify-app.connection');
+    Route::post('/bootstrap', [ShopifyPersonalizationAppController::class, 'bootstrap'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
+        ->name('personalization.shopify-app.bootstrap');
 });
 
 // Meta 侧的公开回调：OAuth 靠一次性 state，合规回调靠 signed_request 验签。
