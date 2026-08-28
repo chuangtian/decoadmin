@@ -271,6 +271,56 @@ class StoreChannelSettingsTest extends TestCase
         )->assertForbidden();
     }
 
+    public function test_feishu_data_link_section_is_configured_only_when_every_field_is_present(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $session = $this->contextSession($organization, $store);
+
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'brand_spreadsheet_token',
+            'credential_value' => 'partial-secret',
+            'updated_by' => $user->id,
+        ]);
+
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.feishu'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dataLinks.0.key', 'brand')
+                ->where('dataLinks.0.configured', false));
+
+        StoreBusinessCredential::query()->insert([
+            [
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'provider' => 'feishu_data_links',
+                'credential_key' => 'brand_license_sheet_id',
+                'credential_value' => encrypt('sheet-current'),
+                'updated_by' => $user->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'provider' => 'feishu_data_links',
+                'credential_key' => 'brand_wiki_url',
+                'credential_value' => encrypt('https://example.feishu.cn/wiki/current'),
+                'updated_by' => $user->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->actingAs($user)->withSession($session)->get(route('store-settings.feishu'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dataLinks.0.key', 'brand')
+                ->where('dataLinks.0.configured', true));
+    }
+
     private function context(string $roleSlug): array
     {
         $this->seed(PermissionSeeder::class);
