@@ -19,6 +19,7 @@ use App\Services\MetaAds\MetaAdsApiClient;
 use App\Services\MetaAds\MetaAdsRateLimitService;
 use App\Services\MetaAds\MetaAdsSyncService;
 use App\Services\StoreBusinessCredentialService;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -97,7 +98,7 @@ class MetaAdsSyncTest extends TestCase
         $job = SyncJob::query()->sole();
         $this->assertSame('completed', $job->status);
         $this->assertSame('full', $job->mode);
-        $this->assertSame('2025-08-22 00:00:00', $job->since_at?->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-01-01 00:00:00', $job->since_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-22 12:00:00', $job->until_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertStringNotContainsString('secret-token', json_encode($job->toArray(), JSON_THROW_ON_ERROR));
         $state = StoreSyncState::query()->sole();
@@ -557,6 +558,34 @@ class MetaAdsSyncTest extends TestCase
             ->count());
     }
 
+    public function test_queued_shard_before_current_year_completes_without_requesting_meta(): void
+    {
+        $store = $this->configuredStore(
+            'Old Shard Org',
+            'old-shard-meta-org',
+            'Old Shard Store',
+            'old-shard-meta.myshopify.com',
+            'old-shard-token',
+        );
+        $service = app(MetaAdsSyncService::class);
+        $service->orchestrate($store, 'full');
+        $shard = MetaAdSyncShard::query()->where('kind', 'insights')->firstOrFail();
+        $shard->forceFill([
+            'since_at' => '2025-01-01 00:00:00',
+            'until_at' => '2025-12-31 23:59:59',
+            'since_date' => '2025-01-01',
+            'until_date' => '2025-12-31',
+        ])->save();
+        $requestCount = Http::recorded()->count();
+
+        $result = $service->runShard($shard->fresh());
+
+        $this->assertSame($requestCount, Http::recorded()->count());
+        $this->assertSame(0, array_sum($result));
+        $this->assertSame('completed', $shard->fresh()->status);
+        $this->assertTrue((bool) data_get($shard->fresh()->result, 'skipped_before_current_year'));
+    }
+
     public function test_failed_large_async_report_is_replaced_with_bounded_date_shards(): void
     {
         $store = $this->configuredStore(
@@ -584,19 +613,19 @@ class MetaAdsSyncTest extends TestCase
         $recoveryService = new MetaAdsSyncService(new MetaAdsApiClient(
             $http,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
         $recovered = $recoveryService->runShard($shard->fresh());
         $replacementIds = $recovered['replacement_shard_ids'] ?? [];
 
-        $this->assertCount(12, $replacementIds);
+        $this->assertCount(8, $replacementIds);
         $this->assertSame('completed', $shard->fresh()->status);
         $this->assertTrue((bool) data_get($shard->fresh()->result, 'async_recovered_by_split'));
-        $this->assertSame(19, SyncJob::query()->findOrFail($run['sync_job_id'])->total_items);
+        $this->assertSame(15, SyncJob::query()->findOrFail($run['sync_job_id'])->total_items);
         $ranges = MetaAdSyncShard::query()
             ->whereIn('id', $replacementIds)
             ->orderBy('since_date')
             ->get();
-        $this->assertSame('2025-08-22', $ranges->first()?->since_date?->toDateString());
+        $this->assertSame('2026-01-01', $ranges->first()?->since_date?->toDateString());
         $this->assertSame('2026-08-22', $ranges->last()?->until_date?->toDateString());
         $this->assertTrue($ranges->every(
             fn (MetaAdSyncShard $range): bool => $range->since_date?->diffInDays($range->until_date) < 31,
@@ -640,7 +669,7 @@ class MetaAdsSyncTest extends TestCase
         $recoveryService = new MetaAdsSyncService(new MetaAdsApiClient(
             $http,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         $retry = $recoveryService->runShard($shard->fresh());
         $this->assertSame(1, $retry['async_pending']);
@@ -690,7 +719,7 @@ class MetaAdsSyncTest extends TestCase
         $firstAttemptService = new MetaAdsSyncService(new MetaAdsApiClient(
             $firstHttp,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         try {
             $firstAttemptService->runShard($shard);
@@ -716,7 +745,7 @@ class MetaAdsSyncTest extends TestCase
         $resumeService = new MetaAdsSyncService(new MetaAdsApiClient(
             $resumeHttp,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         $completed = $resumeService->runShard($shard->fresh());
         $this->assertSame(['ads-page-2'], $seenAfter);
