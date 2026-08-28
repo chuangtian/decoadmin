@@ -68,3 +68,8 @@ npm run check
 ```
 
 该命令不连接 Shopify，不安装 App，也不修改任何环境。
+
+## 发布文档
+
+- Test 发布与回滚：[`TEST_RELEASE.md`](./TEST_RELEASE.md)
+- Production 规划与未来授权闸门：[`PRODUCTION_RELEASE.md`](./PRODUCTION_RELEASE.md)
