@@ -21,6 +21,10 @@ class ShopifyPersonalizationProjectTest extends TestCase
             'extensions/app-home/shopify.extension.toml',
             'extensions/app-home/src/AppHome.jsx',
             'extensions/app-home/src/runtime.mjs',
+            'extensions/recommendations/shopify.extension.toml',
+            'extensions/recommendations/blocks/recommendations.liquid',
+            'extensions/recommendations/assets/recommendations.js',
+            'extensions/recommendations/assets/recommendations.css',
         ];
 
         foreach ($required as $file) {
@@ -49,11 +53,14 @@ class ShopifyPersonalizationProjectTest extends TestCase
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
 
         foreach ($iterator as $file) {
-            if (! $file->isFile() || in_array($file->getFilename(), ['AGENTS.md', 'README.md', 'package-lock.json', 'validate-project.mjs'], true)) {
+            $relative = str_replace($root.'/', '', $file->getPathname());
+            if (! $file->isFile()
+                || str_starts_with($relative, 'node_modules/')
+                || str_starts_with($relative, '.shopify/')
+                || in_array($file->getFilename(), ['AGENTS.md', 'README.md', 'package-lock.json', 'validate-project.mjs'], true)) {
                 continue;
             }
 
-            $relative = str_replace($root.'/', '', $file->getPathname());
             $contents = (string) file_get_contents($file->getPathname());
             $this->assertStringNotContainsString('macfox-test-app', $contents, $relative);
             if ($relative === 'extensions/app-home/src/runtime.mjs') {

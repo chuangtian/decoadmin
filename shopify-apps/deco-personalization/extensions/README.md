@@ -1,5 +1,6 @@
 # Extensions
 
-Personalization-owned Shopify extensions will live here. No extension is created in the project-skeleton stage.
+- `app-home`: verifies Shopify identity and opens the store-scoped DecoAdmin workspace.
+- `recommendations`: Theme App Extension App Block for homepage, product-page, cart-page, and Smart Cart recommendation surfaces.
 
-Planned P0 extension types are App Home, Theme App Extension blocks/app embed, and Web Pixel. Each is added and validated in its own later stage.
+Both are Test-first source projects. This directory contains no Local or Production Shopify configuration and does not install or activate a theme block by itself. Web Pixel is added in its own later stage.

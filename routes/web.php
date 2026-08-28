@@ -32,6 +32,7 @@ use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
@@ -152,6 +153,13 @@ Route::prefix('/api/shopify-app/personalization')->group(function (): void {
         ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
         ->name('personalization.shopify-app.bootstrap');
 });
+
+Route::prefix('/api/shopify-app/personalization/proxy')
+    ->middleware(['shopify.app-proxy:personalization,personalization_store', 'throttle:personalization-public'])
+    ->group(function (): void {
+        Route::get('/recommendations/{component}', [PublicPersonalizationController::class, 'recommendations'])
+            ->name('personalization.public.recommendations');
+    });
 
 // Meta 侧的公开回调：OAuth 靠一次性 state，合规回调靠 signed_request 验签。
 Route::prefix('/instagram-feed')->group(function (): void {

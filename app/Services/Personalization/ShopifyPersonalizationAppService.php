@@ -22,6 +22,15 @@ class ShopifyPersonalizationAppService
         }
         GRAPHQL;
 
+    private const SET_PROXY_PATH_MUTATION = <<<'GRAPHQL'
+        mutation SetPersonalizationProxyPath($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields { id namespace key value }
+            userErrors { field message code }
+          }
+        }
+        GRAPHQL;
+
     public function __construct(
         private HttpFactory $http,
         private PersonalizationAppRegistryService $registry,
@@ -55,7 +64,7 @@ class ShopifyPersonalizationAppService
             ->first();
     }
 
-    /** @return array{app_installation_id: string, granted_scopes: list<string>} */
+    /** @return array{app_installation_id: string, granted_scopes: list<string>, proxy_path: string} */
     public function bootstrap(Store $store, string $idToken): array
     {
         $shop = $this->shopGuard->assertAllowed((string) $store->shopify_domain);
@@ -85,7 +94,30 @@ class ShopifyPersonalizationAppService
             ->all();
         $this->assertRequiredScopes($installationScopes);
 
-        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $token): void {
+        $proxyPath = (string) config('personalization.active_proxy_path');
+        $proxyPayload = $this->graphql($shop, $token['access_token'], self::SET_PROXY_PATH_MUTATION, [
+            'metafields' => [[
+                'ownerId' => $installationId,
+                'namespace' => 'deco_personalization',
+                'key' => 'proxy_path',
+                'type' => 'single_line_text_field',
+                'value' => $proxyPath,
+            ]],
+        ]);
+        $proxyErrors = data_get($proxyPayload, 'data.metafieldsSet.userErrors', []);
+        $savedProxyPath = data_get($proxyPayload, 'data.metafieldsSet.metafields.0.value');
+        if ($proxyPath === ''
+            || (is_array($proxyErrors) && $proxyErrors !== [])
+            || ! is_string($savedProxyPath)
+            || ! hash_equals($proxyPath, $savedProxyPath)) {
+            throw new PersonalizationException(
+                'SHOPIFY_PROXY_PATH_WRITE_FAILED',
+                'Shopify 未能保存个性化推荐 App Proxy 路径。',
+                502,
+            );
+        }
+
+        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $token): void {
             $installation = $this->registry->synchronizeInstallation(
                 $store,
                 $connection,
@@ -107,11 +139,16 @@ class ShopifyPersonalizationAppService
                     'environment' => (string) config('personalization.environment'),
                     'app_installation_id' => $installationId,
                     'granted_scopes' => $installationScopes,
+                    'proxy_path' => $proxyPath,
                 ],
             ]);
         });
 
-        return ['app_installation_id' => $installationId, 'granted_scopes' => $installationScopes];
+        return [
+            'app_installation_id' => $installationId,
+            'granted_scopes' => $installationScopes,
+            'proxy_path' => $proxyPath,
+        ];
     }
 
     /**

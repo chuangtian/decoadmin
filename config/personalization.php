@@ -33,10 +33,12 @@ return [
     // them, after validating the current Shopify configuration and documentation.
     'required_scopes' => array_values(array_filter(array_map(
         'trim',
-        explode(',', (string) env('PERSONALIZATION_REQUIRED_SCOPES', '')),
+        explode(',', (string) env('PERSONALIZATION_REQUIRED_SCOPES', 'write_app_proxy')),
     ))),
 
     'id_token_leeway_seconds' => 5,
+    'app_proxy_target' => '/api/shopify-app/personalization/proxy',
+    'active_proxy_path' => '/apps/deco-personalization-test',
 
     // Permanent safety boundary. Runtime code must never infer an allow-list from
     // this value; installations remain dynamic across all non-denied stores.

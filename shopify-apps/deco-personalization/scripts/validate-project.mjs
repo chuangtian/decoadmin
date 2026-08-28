@@ -15,6 +15,10 @@ const requiredFiles = [
   'extensions/app-home/shopify.extension.toml',
   'extensions/app-home/src/AppHome.jsx',
   'extensions/app-home/src/runtime.mjs',
+  'extensions/recommendations/shopify.extension.toml',
+  'extensions/recommendations/blocks/recommendations.liquid',
+  'extensions/recommendations/assets/recommendations.js',
+  'extensions/recommendations/assets/recommendations.css',
 ];
 const failures = [];
 

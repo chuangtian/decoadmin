@@ -86,6 +86,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('personalization-public', function (Request $request) {
+            $store = $request->attributes->get('personalization_store');
+            if (! $store instanceof Store) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)->by('personalization-public:'.hash_hmac(
+                'sha256',
+                $store->id.'|'.(string) $request->ip(),
+                (string) config('app.key'),
+            ));
+        });
         RateLimiter::for('student-discount-public', function (Request $request) {
             $key = $this->studentDiscountRateLimitKey($request);
 

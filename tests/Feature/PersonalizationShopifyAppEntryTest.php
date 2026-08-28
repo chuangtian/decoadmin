@@ -35,6 +35,7 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             'personalization.active.client_secret' => 'personalization-test-secret',
             'personalization.active.name' => 'Deco 个性化推荐测试',
             'personalization.active.handle' => 'deco-personalization-test',
+            'personalization.active_proxy_path' => '/apps/deco-personalization-test',
             'personalization.required_scopes' => ['read_products'],
             'personalization.denied_shop_domains' => ['macfoxebike.myshopify.com'],
             'shopify.api_version' => '2026-07',
@@ -98,13 +99,23 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             ->push(['data' => ['currentAppInstallation' => [
                 'id' => 'gid://shopify/AppInstallation/123',
                 'accessScopes' => [['handle' => 'read_products']],
+            ]]])
+            ->push(['data' => ['metafieldsSet' => [
+                'metafields' => [[
+                    'id' => 'gid://shopify/Metafield/456',
+                    'namespace' => 'deco_personalization',
+                    'key' => 'proxy_path',
+                    'value' => '/apps/deco-personalization-test',
+                ]],
+                'userErrors' => [],
             ]]]);
 
         $this->withToken($token)
             ->postJson(route('personalization.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
             ->assertOk()
             ->assertJsonPath('data.app_installation_id', 'gid://shopify/AppInstallation/123')
-            ->assertJsonPath('data.granted_scopes.0', 'read_products');
+            ->assertJsonPath('data.granted_scopes.0', 'read_products')
+            ->assertJsonPath('data.proxy_path', '/apps/deco-personalization-test');
 
         Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
             && $request['subject_token'] === $token
@@ -113,6 +124,11 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
             && str_contains($request->body(), '"variables":{}')
             && str_contains((string) $request['query'], 'currentAppInstallation'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
+            && data_get($request->data(), 'variables.metafields.0.ownerId') === 'gid://shopify/AppInstallation/123'
+            && data_get($request->data(), 'variables.metafields.0.namespace') === 'deco_personalization'
+            && data_get($request->data(), 'variables.metafields.0.key') === 'proxy_path'
+            && data_get($request->data(), 'variables.metafields.0.value') === '/apps/deco-personalization-test');
 
         $app = App::query()->sole();
         $installation = AppInstallation::query()->whereBelongsTo($app)->whereBelongsTo($store)->sole();

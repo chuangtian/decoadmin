@@ -1,0 +1,13 @@
+{
+  "recommendations": {
+    "name": "Deco recommendations",
+    "settings": {
+      "component_uuid": "Recommendation component ID",
+      "component_uuid_info": "Copy the component ID from the DecoAdmin recommendation workspace.",
+      "heading_override": "Heading override",
+      "heading_override_info": "Leave blank to use the heading configured in DecoAdmin.",
+      "proxy_path_override": "App Proxy path override",
+      "proxy_path_override_info": "Leave blank unless the store has customized the App Proxy URL."
+    }
+  }
+}

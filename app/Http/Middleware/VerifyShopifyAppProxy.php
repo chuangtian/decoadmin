@@ -17,12 +17,16 @@ class VerifyShopifyAppProxy
         private CurrentStore $currentStore,
     ) {}
 
-    public function handle(Request $request, Closure $next): Response
-    {
+    public function handle(
+        Request $request,
+        Closure $next,
+        string $configKey = 'student_discount',
+        string $storeAttribute = 'student_discount_store',
+    ): Response {
         $signature = (string) $request->query('signature', '');
         $shop = strtolower((string) $request->query('shop', ''));
         $timestamp = $request->query('timestamp');
-        $secret = (string) config('student_discount.active.client_secret', '');
+        $secret = (string) config($configKey.'.active.client_secret', '');
 
         if ($signature === '' || $secret === '' || ! is_numeric($timestamp)
             || abs(now()->timestamp - (int) $timestamp) > 300
@@ -51,13 +55,13 @@ class VerifyShopifyAppProxy
         if (! $store || ! $store->organization || $store->organization->status !== 'active') {
             return response()->json(['error' => [
                 'code' => 'STORE_NOT_AVAILABLE',
-                'message' => '当前店铺未启用学生优惠服务。',
+                'message' => '当前店铺未启用此应用服务。',
             ]], 404);
         }
 
         $this->currentOrganization->set($store->organization);
         $this->currentStore->set($store);
-        $request->attributes->set('student_discount_store', $store);
+        $request->attributes->set($storeAttribute, $store);
 
         return $next($request);
     }

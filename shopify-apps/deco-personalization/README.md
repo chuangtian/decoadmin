@@ -31,6 +31,12 @@ App Home / Theme App Extension / Web Pixel
 
 App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久禁止店铺会在发出任何后端请求前被拒绝。
 
+## Theme App Extension
+
+`extensions/recommendations` 提供可添加到首页、商品页和购物车 JSON 模板的 App Block。区块只请求店铺同源 App Proxy，代理由 DecoAdmin 使用 Personalization 独立 Secret 验签，再返回已启用、当前店铺范围内的推荐结果。
+
+按 Shopify 当前官方要求，App Proxy 使用 P0 最小 scope `write_app_proxy`。Theme App Extension 不读取或写入主题文件，因此不申请 `read_themes` / `write_themes`。区块不会自动加入任何主题，必须由商家在指定测试主题中添加并保存。
+
 ## 当前状态
 
 App Home 工程与离线测试已建立。Test Client ID 和实际 Shopify 配置将在发布阶段只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。
