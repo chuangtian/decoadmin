@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const expectedScopes = 'read_products,read_inventory,read_orders,read_customers,read_locations,read_reports,read_discounts,write_discounts';
 const configurations = new Map([
-  ['shopify.app.toml', 'https://testadmin.decomkt.com'],
-  ['shopify.app.test.toml', 'https://testadmin.decomkt.com'],
-  ['shopify.app.production.toml', 'https://admin.decomkt.com'],
+  ['shopify.app.toml', { origin: 'https://testadmin.decomkt.com', path: '/shopify/aftership' }],
+  ['shopify.app.test.toml', { origin: 'https://testadmin.decomkt.com', path: '/shopify/aftership' }],
+  ['shopify.app.production.toml', { origin: 'https://admin.decomkt.com', path: '/shopify' }],
 ]);
 
 function check(condition, message) {
@@ -28,13 +28,13 @@ function walk(directory) {
   });
 }
 
-for (const [fileName, origin] of configurations) {
+for (const [fileName, target] of configurations) {
   const filePath = join(projectRoot, fileName);
   check(existsSync(filePath), `${fileName} is missing`);
 
   const contents = readFileSync(filePath, 'utf8');
-  check(contents.includes(`application_url = "${origin}/shopify/launch"`), `${fileName} has the wrong Shopify-facing launch URL`);
-  check(contents.includes(`"${origin}/shopify/oauth/callback"`), `${fileName} has the wrong OAuth callback URL`);
+  check(contents.includes(`application_url = "${target.origin}${target.path}/launch"`), `${fileName} has the wrong Shopify-facing launch URL`);
+  check(contents.includes(`"${target.origin}${target.path}/oauth/callback"`), `${fileName} has the wrong OAuth callback URL`);
   check(contents.includes('embedded = false'), `${fileName} must remain non-embedded`);
   check(contents.includes(`scopes = "${expectedScopes}"`), `${fileName} scopes differ from Laravel config/shopify.php`);
   check(contents.includes('use_legacy_install_flow = true'), `${fileName} must preserve Laravel's OAuth flow`);

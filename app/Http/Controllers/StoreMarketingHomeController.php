@@ -14,7 +14,8 @@ class StoreMarketingHomeController extends Controller
         $this->authorize('view', $store);
         $installation = $store->appInstallations()
             ->where('status', 'active')
-            ->whereHas('app', fn ($query) => $query->where('handle', config('shopify.app_handle')))
+            ->whereNotNull('access_token_encrypted')
+            ->whereHas('app', fn ($query) => $query->where('handle', config('aftership.active.handle')))
             ->first();
 
         abort_unless($installation, 403, '当前店铺尚未安装 Deco Marketing 应用。');
