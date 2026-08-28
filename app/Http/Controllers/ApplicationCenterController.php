@@ -63,7 +63,6 @@ class ApplicationCenterController extends Controller
             ->where(function (Builder $query): void {
                 $query->where('action', 'like', 'shopify_app_%')
                     ->orWhere('action', 'like', 'shopify_connection_%')
-                    ->orWhere('action', 'like', 'marketing_module_%')
                     ->orWhere('action', 'like', 'store_business_credential_%')
                     ->orWhere('action', 'like', 'student_discount_%');
             })
@@ -85,7 +84,6 @@ class ApplicationCenterController extends Controller
                 'action_label' => $this->actionLabel($log->action),
                 'store' => $log->store ? ['id' => $log->store->id, 'name' => $log->store->name] : null,
                 'actor' => $log->user?->name ?? '系统',
-                'module' => data_get($log->metadata, 'module'),
                 'created_at' => $log->created_at?->toIso8601String(),
             ]);
 
@@ -111,7 +109,6 @@ class ApplicationCenterController extends Controller
             'shopify_connection_reconnected' => '应用重新连接',
             'shopify_connection_disconnected' => '应用连接已断开',
             'shopify_connection_invalid' => '应用授权失效',
-            'marketing_module_configured' => '营销模块配置已更新',
             'store_business_credential_updated' => '应用凭证已更新',
             'store_business_credential_cleared' => '应用凭证已清除',
             'student_discount_shopify_app_bootstrapped' => '学生优惠应用连接成功',

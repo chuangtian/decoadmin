@@ -77,8 +77,8 @@ deploys Laravel.
 - Leave `client_id` empty in the test and production configurations until the
   matching app is linked, so a fresh clone cannot point them at the development
   app.
-- Do not add code or assets belonging to Student Discount, decoAfterShip, or
-  another Shopify App.
+- Do not add code or assets belonging to Student Discount or any other Shopify
+  App.
 - Do not restore the Remix, Prisma, or Node backend into this project.
   `npm run check:project` fails on `app/`, `build/`, `prisma/`, `public/`,
   `.react-router/`, `Dockerfile`, `vite.config.ts`, `tsconfig.json`, `env.d.ts`,
