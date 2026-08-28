@@ -4,6 +4,9 @@ namespace App\Services\AppCenter;
 
 use App\Contracts\AppConfigurationProvider;
 use App\Models\AppInstallation;
+use App\Models\PersonalizationRecommendationComponent;
+use App\Models\PersonalizationRecommendationStrategy;
+use App\Models\PersonalizationSmartCartSetting;
 use App\Models\User;
 
 class PersonalizationAppConfigurationProvider implements AppConfigurationProvider
@@ -19,9 +22,28 @@ class PersonalizationAppConfigurationProvider implements AppConfigurationProvide
         $store = $installation->store;
         $organization = $store->organization;
         $canRead = $user->hasPermission('personalization.view', $organization, $store);
+        $strategies = $canRead
+            ? PersonalizationRecommendationStrategy::query()
+                ->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)
+                ->count()
+            : null;
+        $components = $canRead
+            ? PersonalizationRecommendationComponent::query()
+                ->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)
+                ->count()
+            : null;
+        $smartCart = $canRead
+            ? PersonalizationSmartCartSetting::query()
+                ->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)
+                ->first(['enabled'])
+            : null;
         $status = match (true) {
             $installation->status !== 'active' => 'unavailable',
             ! $canRead => 'restricted',
+            $strategies > 0 && $components > 0 => 'configured',
             default => 'pending',
         };
 
@@ -30,6 +52,7 @@ class PersonalizationAppConfigurationProvider implements AppConfigurationProvide
             'description' => '管理店铺推荐策略、展示组件、Smart Cart 和归因分析。',
             'configuration_status' => $status,
             'configuration_status_label' => match ($status) {
+                'configured' => '已配置',
                 'restricted' => '权限不足',
                 'unavailable' => '当前不可用',
                 default => '待配置',
@@ -43,10 +66,12 @@ class PersonalizationAppConfigurationProvider implements AppConfigurationProvide
                 ! $canRead => '当前账号缺少个性化推荐查看权限。',
                 default => null,
             },
-            'metrics' => [
-                ['label' => '配置状态', 'value' => '待配置'],
+            'metrics' => array_values(array_filter([
+                $strategies === null ? null : ['label' => '推荐策略', 'value' => (string) $strategies],
+                $components === null ? null : ['label' => '推荐组件', 'value' => (string) $components],
+                $canRead ? ['label' => 'Smart Cart', 'value' => $smartCart?->enabled ? '已启用' : '默认关闭'] : null,
                 ['label' => '配置范围', 'value' => '当前店铺'],
-            ],
+            ])),
         ];
     }
 }

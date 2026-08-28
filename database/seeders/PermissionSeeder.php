@@ -30,6 +30,7 @@ class PermissionSeeder extends Seeder
         'reject' => '拒绝申请', 'campaign.manage' => '管理活动', 'email_template.manage' => '管理邮件内容',
         'analytics.read' => '查看分析', 'audit.read' => '查看审计',
         'gallery.manage' => '管理展示组', 'publish' => '发布前台',
+        'smart_cart.manage' => '管理 Smart Cart',
     ];
 
     /** @var list<string> */
@@ -110,6 +111,9 @@ class PermissionSeeder extends Seeder
         'instagram_feed.gallery.manage',
         'instagram_feed.publish',
         'personalization.view',
+        'personalization.manage',
+        'personalization.analytics.read',
+        'personalization.smart_cart.manage',
     ];
 
     public function run(): void
