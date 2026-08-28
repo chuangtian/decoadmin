@@ -24,6 +24,7 @@ class SeoAnalyticsSyncService
         private SeoAnalyticsConfigurationService $configuration,
         private CurrentYearSyncWindow $currentYear,
         private GscDimensionRegistry $dimensions,
+        private GscDetailRetentionPolicy $detailRetention,
         private SeoAnalyticsCacheVersionService $cacheVersion,
     ) {}
 
@@ -255,7 +256,7 @@ class SeoAnalyticsSyncService
     private function syncExtendedGsc(Store $store, CarbonImmutable $from, CarbonImmutable $to, array $scope, mixed $now): int
     {
         $typeRecords = [];
-        foreach (['web', 'image', 'video', 'news'] as $searchType) {
+        foreach (['image', 'video', 'news'] as $searchType) {
             $rows = $this->google->gscRows($store, $from->toDateString(), $to->toDateString(), ['date'], [], $searchType);
             $indexed = collect($rows)->keyBy(fn (array $row): string => (string) data_get($row, 'keys.0'));
             for ($date = $from; $date->lte($to); $date = $date->addDay()) {
@@ -278,7 +279,10 @@ class SeoAnalyticsSyncService
                 foreach ($rows as $row) {
                     $date = (string) data_get($row, 'keys.0');
                     $value = trim((string) data_get($row, 'keys.1'));
-                    if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    $clicks = max(0, (int) ($row['clicks'] ?? 0));
+                    $impressions = max(0, (int) ($row['impressions'] ?? 0));
+                    if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                        || ($clicks === 0 && $impressions === 0)) {
                         continue;
                     }
                     $breakdownRecords[] = [
@@ -288,8 +292,8 @@ class SeoAnalyticsSyncService
                         'dimension' => $dimension === 'searchAppearance' ? 'search_appearance' : $dimension,
                         'value_hash' => hash('sha256', $value),
                         'value' => mb_substr($value, 0, 1000),
-                        'clicks' => max(0, (int) ($row['clicks'] ?? 0)),
-                        'impressions' => max(0, (int) ($row['impressions'] ?? 0)),
+                        'clicks' => $clicks,
+                        'impressions' => $impressions,
                         'average_position' => max(0, (float) ($row['position'] ?? 0)),
                         'synced_at' => $now, 'created_at' => $now, 'updated_at' => $now,
                     ];
@@ -325,7 +329,10 @@ class SeoAnalyticsSyncService
         return collect($rows)->map(function (array $row) use ($scope, $segment, $dimension, $hashColumn, $now): ?array {
             $value = trim((string) data_get($row, 'keys.1'));
             $date = (string) data_get($row, 'keys.0');
-            if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $clicks = max(0, (int) ($row['clicks'] ?? 0));
+            $impressions = max(0, (int) ($row['impressions'] ?? 0));
+            if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                || ! $this->detailRetention->shouldStore($clicks, $impressions)) {
                 return null;
             }
 
@@ -335,8 +342,8 @@ class SeoAnalyticsSyncService
                 'segment' => $segment,
                 $hashColumn => hash('sha256', $value),
                 $dimension => $value,
-                'clicks' => max(0, (int) ($row['clicks'] ?? 0)),
-                'impressions' => max(0, (int) ($row['impressions'] ?? 0)),
+                'clicks' => $clicks,
+                'impressions' => $impressions,
                 'average_position' => max(0, (float) ($row['position'] ?? 0)),
                 'synced_at' => $now,
                 'created_at' => $now,
