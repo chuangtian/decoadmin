@@ -11,15 +11,15 @@ return new class extends Migration
         Schema::create('personalization_recommendation_strategies', function (Blueprint $table): void {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('organization_id')->constrained(indexName: 'pers_rec_strategies_org_fk')->cascadeOnDelete();
+            $table->foreignId('store_id')->constrained(indexName: 'pers_rec_strategies_store_fk')->cascadeOnDelete();
             $table->string('name', 80);
             $table->string('algorithm', 40);
             $table->boolean('enabled')->default(false);
             $table->unsignedTinyInteger('item_limit')->default(8);
             $table->json('settings')->nullable();
-            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
-            $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('created_by')->nullable()->constrained('users', indexName: 'pers_rec_strategies_created_by_fk')->nullOnDelete();
+            $table->foreignId('updated_by')->nullable()->constrained('users', indexName: 'pers_rec_strategies_updated_by_fk')->nullOnDelete();
             $table->timestamps();
             $table->softDeletes();
 
@@ -44,10 +44,10 @@ return new class extends Migration
 
         Schema::create('personalization_strategy_product_overrides', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('strategy_id')->constrained('personalization_recommendation_strategies')->cascadeOnDelete();
-            $table->foreignId('product_id')->nullable()->constrained('products')->nullOnDelete();
+            $table->foreignId('organization_id')->constrained(indexName: 'pers_product_overrides_org_fk')->cascadeOnDelete();
+            $table->foreignId('store_id')->constrained(indexName: 'pers_product_overrides_store_fk')->cascadeOnDelete();
+            $table->foreignId('strategy_id')->constrained('personalization_recommendation_strategies', indexName: 'pers_product_overrides_strategy_fk')->cascadeOnDelete();
+            $table->foreignId('product_id')->nullable()->constrained('products', indexName: 'pers_product_overrides_product_fk')->nullOnDelete();
             $table->string('shopify_product_id', 255);
             $table->string('type', 16);
             $table->unsignedSmallInteger('position')->default(0);
@@ -64,9 +64,9 @@ return new class extends Migration
         Schema::create('personalization_recommendation_components', function (Blueprint $table): void {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('strategy_id')->constrained('personalization_recommendation_strategies')->restrictOnDelete();
+            $table->foreignId('organization_id')->constrained(indexName: 'pers_rec_components_org_fk')->cascadeOnDelete();
+            $table->foreignId('store_id')->constrained(indexName: 'pers_rec_components_store_fk')->cascadeOnDelete();
+            $table->foreignId('strategy_id')->constrained('personalization_recommendation_strategies', indexName: 'pers_rec_components_strategy_fk')->restrictOnDelete();
             $table->string('name', 80);
             $table->string('placement', 24);
             $table->string('status', 16)->default('draft');
@@ -75,8 +75,8 @@ return new class extends Migration
             $table->unsignedSmallInteger('position')->default(0);
             $table->json('settings')->nullable();
             $table->timestamp('published_at')->nullable();
-            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
-            $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('created_by')->nullable()->constrained('users', indexName: 'pers_rec_components_created_by_fk')->nullOnDelete();
+            $table->foreignId('updated_by')->nullable()->constrained('users', indexName: 'pers_rec_components_updated_by_fk')->nullOnDelete();
             $table->timestamps();
             $table->softDeletes();
 
@@ -124,6 +124,11 @@ return new class extends Migration
     }
 
     public function down(): void
+    {
+        $this->dropTables();
+    }
+
+    private function dropTables(): void
     {
         Schema::dropIfExists('personalization_smart_cart_settings');
         Schema::dropIfExists('personalization_component_styles');
