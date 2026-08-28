@@ -68,6 +68,7 @@ class ShopifyPersonalizationProjectTest extends TestCase
             if (! $file->isFile()
                 || str_starts_with($relative, 'node_modules/')
                 || str_starts_with($relative, '.shopify/')
+                || str_contains($relative, '/dist/')
                 || in_array($file->getFilename(), ['AGENTS.md', 'README.md', 'TEST_RELEASE.md', 'package-lock.json', 'validate-project.mjs'], true)) {
                 continue;
             }

@@ -115,7 +115,10 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                 ]],
                 'userErrors' => [],
             ]]])
-            ->push(['data' => ['webPixel' => null]])
+            ->push(['errors' => [[
+                'message' => 'Web pixel was not found.',
+                'extensions' => ['code' => 'RESOURCE_NOT_FOUND'],
+            ]]])
             ->push(['data' => ['webPixelCreate' => [
                 'webPixel' => [
                     'id' => 'gid://shopify/WebPixel/789',
@@ -270,6 +273,57 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             && data_get($request->data(), 'variables.id') === 'gid://shopify/WebPixel/789'
             && data_get($request->data(), 'variables.webPixel.settings.endpoint')
                 === "https://testadmin.decomkt.com/api/shopify-app/personalization/events/{$originalKey}");
+    }
+
+    public function test_bootstrap_rejects_unexpected_web_pixel_query_errors(): void
+    {
+        [, , $store] = $this->context('store-admin');
+        $this->connection($store);
+        $token = $this->shopifyIdToken(
+            $store->shopify_domain,
+            'personalization-test-client-id',
+            'personalization-test-secret',
+        );
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push([
+                'access_token' => 'personalization-offline-token',
+                'refresh_token' => 'personalization-refresh-token',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'write_app_proxy,write_pixels,read_customer_events',
+            ])
+            ->push(['data' => ['currentAppInstallation' => [
+                'id' => 'gid://shopify/AppInstallation/123',
+                'accessScopes' => [
+                    ['handle' => 'write_app_proxy'],
+                    ['handle' => 'write_pixels'],
+                    ['handle' => 'read_customer_events'],
+                ],
+            ]]])
+            ->push(['data' => ['metafieldsSet' => [
+                'metafields' => [[
+                    'id' => 'gid://shopify/Metafield/456',
+                    'namespace' => 'deco_personalization',
+                    'key' => 'proxy_path',
+                    'value' => '/apps/deco-personalization-test',
+                ]],
+                'userErrors' => [],
+            ]]])
+            ->push(['errors' => [[
+                'message' => 'Access denied.',
+                'extensions' => ['code' => 'ACCESS_DENIED'],
+            ]]]);
+
+        $this->withToken($token)
+            ->postJson(route('personalization.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
+            ->assertStatus(502)
+            ->assertJsonPath('error.code', 'SHOPIFY_ADMIN_API_FAILED');
+
+        $this->assertDatabaseCount('app_installations', 0);
+        $this->assertDatabaseHas('personalization_event_sources', [
+            'store_id' => $store->id,
+            'status' => 'inactive',
+        ]);
     }
 
     public function test_denylisted_shop_is_blocked_before_connection_bootstrap_or_webhook_writes(): void

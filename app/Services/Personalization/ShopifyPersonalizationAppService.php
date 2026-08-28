@@ -228,7 +228,12 @@ class ShopifyPersonalizationAppService
             );
         }
 
-        $currentPayload = $this->graphql($shop, $accessToken, self::WEB_PIXEL_QUERY);
+        $currentPayload = $this->graphql(
+            $shop,
+            $accessToken,
+            self::WEB_PIXEL_QUERY,
+            allowedErrorCodes: ['RESOURCE_NOT_FOUND'],
+        );
         $currentId = data_get($currentPayload, 'data.webPixel.id');
         $input = ['settings' => ['endpoint' => $endpoint]];
         if (is_string($currentId) && $currentId !== '') {
@@ -364,7 +369,13 @@ class ShopifyPersonalizationAppService
     }
 
     /** @param array<string, mixed> $variables @return array<string, mixed> */
-    private function graphql(string $shop, string $accessToken, string $query, array $variables = []): array
+    private function graphql(
+        string $shop,
+        string $accessToken,
+        string $query,
+        array $variables = [],
+        array $allowedErrorCodes = [],
+    ): array
     {
         try {
             $response = $this->http
@@ -386,7 +397,11 @@ class ShopifyPersonalizationAppService
         }
 
         $payload = $response->json();
-        if ($response->failed() || ! is_array($payload) || ! empty($payload['errors'])) {
+        $errors = is_array($payload) ? ($payload['errors'] ?? []) : null;
+        if ($response->failed()
+            || ! is_array($payload)
+            || ! is_array($errors)
+            || ($errors !== [] && ! $this->onlyAllowedTopLevelErrors($errors, $allowedErrorCodes))) {
             throw new PersonalizationException(
                 'SHOPIFY_ADMIN_API_FAILED',
                 'Shopify Admin API 请求失败。',
@@ -395,6 +410,23 @@ class ShopifyPersonalizationAppService
         }
 
         return $payload;
+    }
+
+    /** @param array<int, mixed> $errors @param list<string> $allowedErrorCodes */
+    private function onlyAllowedTopLevelErrors(array $errors, array $allowedErrorCodes): bool
+    {
+        if ($allowedErrorCodes === []) {
+            return false;
+        }
+
+        foreach ($errors as $error) {
+            $code = is_array($error) ? data_get($error, 'extensions.code') : null;
+            if (! is_string($code) || ! in_array($code, $allowedErrorCodes, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function activeStore(string $shop): Store
