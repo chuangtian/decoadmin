@@ -459,6 +459,54 @@ const recognitionFailureLabel = (code: string | null) => ({
     timeout: 'AI 服务响应超时',
     not_configured: 'AI 服务尚未配置',
 }[code ?? ''] ?? 'AI 验证未完成');
+type RecognitionFieldKey = 'institution_name' | 'student_name' | 'student_identifier_masked' | 'expiry_date';
+const recognitionValue = (result: Record<string, unknown>, key: RecognitionFieldKey) => {
+    const value = result[key];
+
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+};
+const recognitionIsStudentId = (result: Record<string, unknown>) => result.is_student_id;
+const recognitionConclusion = (result: Record<string, unknown>) => {
+    if (recognitionIsStudentId(result) === true) return '识别为学生证';
+    if (recognitionIsStudentId(result) === false) return '未识别为学生证';
+
+    return '识别结论不明确';
+};
+const recognitionConclusionClass = (result: Record<string, unknown>) => {
+    if (recognitionIsStudentId(result) === true) return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    if (recognitionIsStudentId(result) === false) return 'bg-rose-50 text-rose-700 ring-rose-200';
+
+    return 'bg-amber-50 text-amber-700 ring-amber-200';
+};
+const recognitionSuggestion = (result: Record<string, unknown>) => {
+    const confidence = typeof result.confidence === 'number' ? result.confidence : null;
+
+    if (recognitionIsStudentId(result) === false) {
+        return '系统未识别到清晰的学生证版式，需要人工结合证件图片复核。';
+    }
+
+    if (recognitionIsStudentId(result) === true && confidence !== null && confidence < 80) {
+        return '系统识别到学生证版式，但置信度较低，需要人工复核。';
+    }
+
+    if (recognitionIsStudentId(result) === true) {
+        return '系统识别到学生证版式，请结合申请信息确认后完成审核。';
+    }
+
+    return '系统没有返回明确的版式识别结论，需要人工复核。';
+};
+const recognitionExpiryDate = (result: Record<string, unknown>) => {
+    const value = recognitionValue(result, 'expiry_date');
+    const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    return match ? `${match[1]}年${match[2]}月${match[3]}日` : value;
+};
+const recognitionFields = (result: Record<string, unknown>) => [
+    { key: 'institution_name', label: '学校 / 机构', value: recognitionValue(result, 'institution_name') },
+    { key: 'student_name', label: '证件姓名', value: recognitionValue(result, 'student_name') },
+    { key: 'student_identifier_masked', label: '学号（已脱敏）', value: recognitionValue(result, 'student_identifier_masked') },
+    { key: 'expiry_date', label: '证件有效期', value: recognitionExpiryDate(result) },
+].filter((field): field is { key: string; label: string; value: string } => field.value !== null);
 </script>
 
 <template>
@@ -620,7 +668,28 @@ const recognitionFailureLabel = (code: string | null) => ({
                                     </button>
                                     <span v-else class="text-xs text-slate-400">—</span>
                                 </td>
-                                <td class="px-4 py-4"><p class="font-semibold text-slate-800">{{ sourceLabel(claim.source) }}</p><p class="mt-1 text-xs text-slate-500">{{ verificationLabel(claim) }}<span v-if="claim.confidence !== null"> · {{ claim.confidence }}/100</span></p><p v-if="claim.recognition_failure_code" class="mt-1 text-xs font-semibold text-amber-700">{{ recognitionFailureLabel(claim.recognition_failure_code) }}</p><details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看结构化识别</summary><pre class="mt-2 max-w-md overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{{ JSON.stringify(claim.recognition_result, null, 2) }}</pre></details></td>
+                                <td class="px-4 py-4">
+                                    <p class="font-semibold text-slate-800">{{ sourceLabel(claim.source) }}</p>
+                                    <p class="mt-1 text-xs text-slate-500">{{ verificationLabel(claim) }}<span v-if="claim.confidence !== null"> · {{ claim.confidence }}/100</span></p>
+                                    <p v-if="claim.recognition_failure_code" class="mt-1 text-xs font-semibold text-amber-700">{{ recognitionFailureLabel(claim.recognition_failure_code) }}</p>
+                                    <details v-if="permissions.viewEvidence && claim.recognition_result" class="mt-2">
+                                        <summary class="cursor-pointer text-xs font-semibold text-emerald-700">查看识别结论</summary>
+                                        <div class="mt-2 max-w-md rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 shadow-sm">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <span class="font-semibold text-slate-500">AI 识别结论</span>
+                                                <span class="inline-flex rounded-full px-2.5 py-1 font-semibold ring-1" :class="recognitionConclusionClass(claim.recognition_result)">{{ recognitionConclusion(claim.recognition_result) }}</span>
+                                            </div>
+                                            <p class="mt-3 leading-5 text-slate-700">{{ recognitionSuggestion(claim.recognition_result) }}</p>
+                                            <dl v-if="recognitionFields(claim.recognition_result).length > 0" class="mt-3 grid gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2">
+                                                <div v-for="field in recognitionFields(claim.recognition_result)" :key="field.key" class="min-w-0">
+                                                    <dt class="text-[11px] font-semibold text-slate-400">{{ field.label }}</dt>
+                                                    <dd class="mt-0.5 break-words font-medium text-slate-700">{{ field.value }}</dd>
+                                                </div>
+                                            </dl>
+                                            <p class="mt-3 border-t border-slate-200 pt-2 text-[11px] leading-4 text-slate-400">该结论仅表示证件版式识别结果，不代表证件真实性或当前在校状态。</p>
+                                        </div>
+                                    </details>
+                                </td>
                                 <td class="px-4 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">有效期至 {{ new Date(claim.discount.expires_at).toLocaleDateString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
                                 <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-[11px] text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>
                                 <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
