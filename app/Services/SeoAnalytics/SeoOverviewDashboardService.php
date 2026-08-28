@@ -7,8 +7,6 @@ use App\Models\SeoGa4ChannelDailyMetric;
 use App\Models\SeoGa4LandingPageDailyMetric;
 use App\Models\SeoGscBreakdownDailyMetric;
 use App\Models\SeoGscDailyMetric;
-use App\Models\SeoGscPageDailyMetric;
-use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
 use Carbon\CarbonImmutable;
@@ -497,14 +495,39 @@ class SeoOverviewDashboardService
     /** @return array{series: list<array{key: string, page: string, channel: string}>, points: list<array<string, mixed>>} */
     private function landingTrend(Store $store, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $rows = $this->dateRange(SeoGa4LandingPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id), $from, $to)->get();
-        $top = $rows->groupBy(fn ($row): string => $row->landing_page_hash.'|'.$row->channel_group)
-            ->map(fn (Collection $items): float => (float) $items->sum('total_revenue'))->sortDesc()->take(5)->keys();
-        $series = $top->map(function (string $key) use ($rows): array {
-            $row = $rows->first(fn ($item): bool => $item->landing_page_hash.'|'.$item->channel_group === $key);
+        $scope = fn () => $this->dateRange(
+            SeoGa4LandingPageDailyMetric::query()
+                ->forOrganization($store->organization_id)
+                ->forStore($store->id),
+            $from,
+            $to,
+        );
+        $topRows = $scope()
+            ->selectRaw('landing_page_hash, channel_group, MAX(landing_page) landing_page, SUM(total_revenue) revenue')
+            ->groupBy('landing_page_hash', 'channel_group')
+            ->orderByDesc('revenue')
+            ->orderBy('landing_page_hash')
+            ->orderBy('channel_group')
+            ->limit(5)
+            ->get();
+        if ($topRows->isEmpty()) {
+            return ['series' => [], 'points' => []];
+        }
 
-            return ['key' => $key, 'page' => (string) $row?->landing_page, 'channel' => (string) $row?->channel_group];
-        })->values()->all();
+        $rows = $scope()->where(function (Builder $pairs) use ($topRows): void {
+            foreach ($topRows as $top) {
+                $pairs->orWhere(function (Builder $pair) use ($top): void {
+                    $pair->where('landing_page_hash', $top->landing_page_hash)
+                        ->where('channel_group', $top->channel_group);
+                });
+            }
+        })->get(['metric_date', 'landing_page_hash', 'channel_group', 'total_revenue']);
+        $top = $topRows->map(fn ($row): string => $row->landing_page_hash.'|'.$row->channel_group);
+        $series = $topRows->map(fn ($row): array => [
+            'key' => $row->landing_page_hash.'|'.$row->channel_group,
+            'page' => (string) $row->landing_page,
+            'channel' => (string) $row->channel_group,
+        ])->values()->all();
         $points = $rows->filter(fn ($row): bool => $top->contains($row->landing_page_hash.'|'.$row->channel_group))
             ->groupBy(fn ($row): string => $row->metric_date->toDateString())->map(function (Collection $dateRows, string $date) use ($top): array {
                 $point = ['date' => $date];
@@ -592,53 +615,6 @@ class SeoOverviewDashboardService
                 'date' => $row->metric_date->toDateString(), 'clicks' => (int) $row->clicks, 'impressions' => (int) $row->impressions,
                 'ctr' => $row->impressions > 0 ? round((int) $row->clicks / (int) $row->impressions * 100, 2) : 0.0, 'position' => round((float) $row->average_position, 2),
             ])->values()->all();
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function queryRows(Store $store, string $segment, CarbonImmutable $from, CarbonImmutable $to, CarbonImmutable $previousFrom, CarbonImmutable $previousTo): array
-    {
-        $segments = $segment === 'total' ? ['brand', 'industry'] : [$segment];
-        $current = $this->dimensionRows(SeoGscQueryDailyMetric::query(), $store, 'query_hash', 'query', $segments, $from, $to);
-        $previous = collect($this->dimensionRows(SeoGscQueryDailyMetric::query(), $store, 'query_hash', 'query', $segments, $previousFrom, $previousTo))->keyBy('hash');
-
-        return $this->compareDimensionRows($current, $previous);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function pageRows(Store $store, string $segment, CarbonImmutable $from, CarbonImmutable $to, CarbonImmutable $previousFrom, CarbonImmutable $previousTo): array
-    {
-        $current = $this->dimensionRows(SeoGscPageDailyMetric::query(), $store, 'page_hash', 'page', [$segment], $from, $to);
-        $previous = collect($this->dimensionRows(SeoGscPageDailyMetric::query(), $store, 'page_hash', 'page', [$segment], $previousFrom, $previousTo))->keyBy('hash');
-
-        return $this->compareDimensionRows($current, $previous);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function dimensionRows(Builder $query, Store $store, string $hashColumn, string $labelColumn, array $segments, CarbonImmutable $from, CarbonImmutable $to): array
-    {
-        return $this->dateRange($query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments), $from, $to)
-            ->selectRaw("{$hashColumn} hash, MAX({$labelColumn}) label, SUM(clicks) clicks, SUM(impressions) impressions")
-            ->selectRaw('CASE WHEN SUM(impressions) > 0 THEN SUM(average_position * impressions) / SUM(impressions) ELSE 0 END position')
-            ->groupBy($hashColumn)->orderByDesc('clicks')->limit(200)->get()->map(function ($row): array {
-                $impressions = (int) $row->impressions;
-                $clicks = (int) $row->clicks;
-
-                return ['hash' => (string) $row->hash, 'label' => (string) $row->label, 'clicks' => $clicks, 'impressions' => $impressions,
-                    'ctr' => $impressions > 0 ? round($clicks / $impressions * 100, 2) : 0.0, 'position' => round((float) $row->position, 2)];
-            })->values()->all();
-    }
-
-    /** @param list<array<string, mixed>> $current @param Collection<string, array<string, mixed>> $previous */
-    private function compareDimensionRows(array $current, Collection $previous): array
-    {
-        return collect($current)->map(function (array $row) use ($previous): array {
-            $prev = $previous->get($row['hash'], ['clicks' => 0, 'impressions' => 0, 'ctr' => 0, 'position' => 0]);
-
-            return [...$row, 'previous' => $prev, 'difference' => [
-                'clicks' => $row['clicks'] - $prev['clicks'], 'impressions' => $row['impressions'] - $prev['impressions'],
-                'ctr' => round($row['ctr'] - $prev['ctr'], 2), 'position' => round($row['position'] - $prev['position'], 2),
-            ]];
-        })->values()->all();
     }
 
     /** @param list<int> $allowed @return array{int, int} */

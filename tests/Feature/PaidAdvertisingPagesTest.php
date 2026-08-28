@@ -1115,6 +1115,19 @@ class PaidAdvertisingPagesTest extends TestCase
                 'last_seen_at' => now(),
                 'synced_at' => now(),
             ]);
+            DB::table('meta_ad_insight_entities')->insert([
+                'organization_id' => $organization->id,
+                'store_id' => $targetStore->id,
+                'level' => 'ad',
+                'entity_id' => $adId,
+                'account_name' => $targetAccount->name,
+                'meta_campaign_id' => 'campaign-'.$adId,
+                'campaign_name' => '系列 '.$title,
+                'meta_ad_id' => $adId,
+                'ad_name' => '广告 '.$title,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
             MetaAdInsight::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $targetStore->id,
@@ -1122,21 +1135,16 @@ class PaidAdvertisingPagesTest extends TestCase
                 'level' => 'ad',
                 'entity_id' => $adId,
                 'account_external_id' => $targetAccount->meta_account_id === 'act_current' ? 'current' : 'other',
-                'account_name' => $targetAccount->name,
                 'meta_campaign_id' => 'campaign-'.$adId,
-                'campaign_name' => '系列 '.$title,
                 'meta_ad_id' => $adId,
-                'ad_name' => '广告 '.$title,
                 'date_start' => '2026-08-22',
                 'date_stop' => '2026-08-22',
                 'granularity' => 'day',
-                'hourly_range' => '',
                 'spend' => $spend,
                 'purchase_value' => $revenue,
                 'purchases' => $purchases,
                 'impressions' => $impressions,
                 'clicks' => $clicks,
-                'raw_payload' => [],
                 'synced_at' => now(),
             ]);
         }
@@ -3053,6 +3061,21 @@ class PaidAdvertisingPagesTest extends TestCase
         ?float $frequency = null,
     ): void {
         $entityId = $level === 'account' ? $account->meta_account_id : ($campaignId ?? 'campaign-'.$date);
+        DB::table('meta_ad_insight_entities')->updateOrInsert(
+            [
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'level' => $level,
+                'entity_id' => $entityId,
+            ],
+            [
+                'account_name' => $account->name,
+                'meta_campaign_id' => $level === 'campaign' ? $entityId : null,
+                'campaign_name' => $level === 'campaign' ? $campaignName : null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
         MetaAdInsight::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -3060,13 +3083,10 @@ class PaidAdvertisingPagesTest extends TestCase
             'level' => $level,
             'entity_id' => $entityId,
             'account_external_id' => $account->meta_account_id,
-            'account_name' => $account->name,
             'meta_campaign_id' => $level === 'campaign' ? $entityId : null,
-            'campaign_name' => $level === 'campaign' ? $campaignName : null,
             'date_start' => $date,
             'date_stop' => $dateStop ?? $date,
             'granularity' => $granularity,
-            'hourly_range' => $granularity === 'hour' ? '00:00:00 - 00:59:59' : '',
             'spend' => $spend,
             'purchase_value' => $purchaseValue,
             'purchases' => $purchases,
@@ -3075,7 +3095,6 @@ class PaidAdvertisingPagesTest extends TestCase
             'clicks' => $clicks,
             'inline_link_clicks' => $linkClicks,
             'frequency' => $frequency,
-            'raw_payload' => [],
             'synced_at' => now(),
         ]);
     }

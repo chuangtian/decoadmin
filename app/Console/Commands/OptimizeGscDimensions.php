@@ -10,7 +10,7 @@ class OptimizeGscDimensions extends Command
 {
     protected $signature = 'seo-analytics:optimize-gsc-dimensions {--store=} {--chunk=50000} {--verify}';
 
-    protected $description = '将 GSC Page 与 Query 明细关联到去重维度表';
+    protected $description = '验证 GSC Page 与 Query 明细已关联到去重维度表';
 
     public function handle(GscDimensionBackfillService $backfill): int
     {

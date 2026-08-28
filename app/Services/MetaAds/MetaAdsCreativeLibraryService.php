@@ -56,6 +56,12 @@ class MetaAdsCreativeLibraryService
                     ->on('ads.store_id', '=', 'metrics.store_id')
                     ->on('ads.meta_ad_id', '=', 'metrics.meta_ad_id');
             })
+            ->leftJoin('meta_ad_insight_entities as insight_entity', function ($join): void {
+                $join->on('insight_entity.organization_id', '=', 'metrics.organization_id')
+                    ->on('insight_entity.store_id', '=', 'metrics.store_id')
+                    ->on('insight_entity.entity_id', '=', 'metrics.meta_ad_id')
+                    ->where('insight_entity.level', '=', 'ad');
+            })
             ->join('meta_ad_creatives as creatives', function ($join): void {
                 $join->on('creatives.organization_id', '=', 'ads.organization_id')
                     ->on('creatives.store_id', '=', 'ads.store_id')
@@ -73,11 +79,11 @@ class MetaAdsCreativeLibraryService
             )
             ->select([
                 'metrics.account_external_id',
-                'metrics.account_name',
+                'insight_entity.account_name',
                 'metrics.meta_ad_id',
                 'metrics.meta_campaign_id',
-                'metrics.campaign_name',
-                'metrics.ad_name',
+                'insight_entity.campaign_name',
+                'insight_entity.ad_name',
                 'metrics.spend',
                 'metrics.purchase_value',
                 'metrics.purchases',
@@ -131,10 +137,7 @@ class MetaAdsCreativeLibraryService
                 fn ($query) => $query->whereIn('account_external_id', $this->accountExternalIds($account)),
             )
             ->selectRaw('organization_id, store_id, account_external_id, meta_ad_id')
-            ->selectRaw('MAX(account_name) AS account_name')
             ->selectRaw('MAX(meta_campaign_id) AS meta_campaign_id')
-            ->selectRaw('MAX(campaign_name) AS campaign_name')
-            ->selectRaw('MAX(ad_name) AS ad_name')
             ->selectRaw('COALESCE(SUM(spend), 0) AS spend')
             ->selectRaw('COALESCE(SUM(purchase_value), 0) AS purchase_value')
             ->selectRaw('COALESCE(SUM(purchases), 0) AS purchases')
