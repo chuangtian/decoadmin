@@ -7,11 +7,11 @@
         ? $branding['support_url']
         : (filled($branding['support_email'] ?? null) ? 'mailto:'.$branding['support_email'] : null);
     $socials = collect([
-        'Instagram' => $branding['instagram_url'] ?? '',
-        'Facebook' => $branding['facebook_url'] ?? '',
-        'TikTok' => $branding['tiktok_url'] ?? '',
-        'YouTube' => $branding['youtube_url'] ?? '',
-    ])->filter();
+        ['label' => 'Instagram', 'url' => $branding['instagram_url'] ?? '', 'icon' => 'images/email/social/instagram.png'],
+        ['label' => 'Facebook', 'url' => $branding['facebook_url'] ?? '', 'icon' => 'images/email/social/facebook.png'],
+        ['label' => 'TikTok', 'url' => $branding['tiktok_url'] ?? '', 'icon' => 'images/email/social/tiktok.png'],
+        ['label' => 'YouTube', 'url' => $branding['youtube_url'] ?? '', 'icon' => 'images/email/social/youtube.png'],
+    ])->filter(fn (array $social): bool => filled($social['url']));
 @endphp
 <!doctype html>
 <html lang="en">
@@ -62,8 +62,10 @@
                         @endif
                         @if ($socials->isNotEmpty())
                             <div style="padding-top:20px;text-align:center;">
-                                @foreach ($socials as $label => $url)
-                                    <a href="{{ $url }}" style="display:inline-block;margin:0 8px;color:{{ $primaryColor }};font-size:13px;font-weight:700;text-decoration:none;">{{ $label }}</a>
+                                @foreach ($socials as $social)
+                                    <a href="{{ $social['url'] }}" aria-label="{{ $social['label'] }}" title="{{ $social['label'] }}" style="display:inline-block;margin:0 9px;text-decoration:none;">
+                                        <img src="{{ asset($social['icon']) }}" alt="{{ $social['label'] }}" width="28" height="28" style="display:block;width:28px;height:28px;border:0;">
+                                    </a>
                                 @endforeach
                             </div>
                         @endif

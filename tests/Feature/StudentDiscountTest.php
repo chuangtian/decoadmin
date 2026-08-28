@@ -1627,6 +1627,10 @@ class StudentDiscountTest extends TestCase
         [$admin, $organization, $store] = $this->context('store-admin');
         $campaign = $this->campaign($organization, $store, [
             'email_templates' => [
+                'branding' => [
+                    'instagram_url' => 'https://www.instagram.com/example',
+                    'youtube_url' => 'https://www.youtube.com/@example',
+                ],
                 'approval' => [
                     'subject' => '{{ store_name }} approved {{ applicant_email }}',
                     'body' => 'Use {{ discount_code }} before {{ expires_at }}. Limit {{ usage_limit }}.',
@@ -1668,7 +1672,11 @@ class StudentDiscountTest extends TestCase
                 && str_contains((string) $mail->renderedBody, 'STUDENT-TEMPLATE')
                 && str_contains((string) $mail->renderedBody, 'Limit 2.')
                 && str_contains($mail->render(), 'STUDENT-TEMPLATE')
-                && str_contains($mail->render(), 'SHOP NOW');
+                && str_contains($mail->render(), 'SHOP NOW')
+                && str_contains($mail->render(), 'images/email/social/instagram.png')
+                && str_contains($mail->render(), 'aria-label="Instagram"')
+                && str_contains($mail->render(), 'images/email/social/youtube.png')
+                && ! str_contains($mail->render(), '>Instagram</a>');
         });
 
         $this->actingAs($admin)
