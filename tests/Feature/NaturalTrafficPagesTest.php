@@ -444,13 +444,15 @@ class NaturalTrafficPagesTest extends TestCase
 
         $run = SeoAnalyticsSyncRun::query()->sole();
         $this->assertSame('queued', $run->status);
+        $this->assertSame('2026-01-01', $run->date_from?->toDateString());
+        $this->assertSame('2026-08-22', $run->date_to?->toDateString());
         Queue::assertPushed(SyncSeoAnalyticsForStore::class, fn (SyncSeoAnalyticsForStore $job): bool => $job->storeId === $store->id && $job->syncRunId === $run->id);
 
         app(SeoAnalyticsSyncManager::class)->dispatchShards($store, $run);
         $run->refresh();
-        $this->assertSame(18, data_get($run->result, 'total_shards'));
+        $this->assertSame(9, data_get($run->result, 'total_shards'));
         $this->assertSame(['2026-08-16', '2026-08-22'], data_get($run->result, 'priority_period'));
-        Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, 18);
+        Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, 9);
         Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, fn (SyncSeoAnalyticsShardForStore $job): bool => $job->shardIndex === 0
             && $job->phase === 'priority'
             && $job->dateFrom === '2026-08-16'

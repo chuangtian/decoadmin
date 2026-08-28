@@ -12,6 +12,7 @@ use App\Models\GoogleAdsSearchTermDailyMetric;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
+use App\Models\SyncJob;
 use App\Models\TikTokAdsAdDailyMetric;
 use App\Models\TikTokAdsCampaignDailyMetric;
 use App\Models\User;
@@ -331,6 +332,33 @@ class AdvertisingChannelSyncTest extends TestCase
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view')
             && str_contains((string) ($request->data()['query'] ?? ''), "ad_group_criterion.status != 'REMOVED'")
             && ! array_key_exists('pageSize', $request->data()));
+    }
+
+    public function test_google_backfill_never_requests_dates_before_current_year(): void
+    {
+        CarbonImmutable::setTestNow('2026-02-10 08:30:00 UTC');
+        config()->set('services.advertising_sync.chunk_days', 366);
+        [$store] = $this->googleStore();
+        $api = Mockery::mock(AdvertisingChannelApiService::class);
+        $api->shouldReceive('syncPayload')
+            ->once()
+            ->with($store, 'google', '2026-01-01', '2026-02-03')
+            ->andReturn([
+                'accounts' => [],
+                'daily_metrics' => [],
+                'campaign_daily_metrics' => [],
+                'ad_daily_metrics' => [],
+                'search_term_daily_metrics' => [],
+                'keyword_daily_metrics' => [],
+            ]);
+        $this->app->instance(AdvertisingChannelApiService::class, $api);
+
+        $sync = app(AdvertisingChannelSyncService::class);
+        $sync->sync($store, 'google', 'backfill', $sync->credentialVersion($store, 'google'));
+
+        $job = SyncJob::query()->where('type', 'advertising_channel:google')->sole();
+        $this->assertSame('2026-01-01 00:00:00', $job->since_at?->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-02-03 23:59:59', $job->until_at?->utc()->format('Y-m-d H:i:s'));
     }
 
     public function test_channel_records_are_store_isolated_and_clear_removes_only_target_store_data_and_jobs(): void

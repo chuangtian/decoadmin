@@ -11,6 +11,7 @@ use App\Models\SeoGscPageDailyMetric;
 use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -21,6 +22,7 @@ class SeoAnalyticsSyncService
     public function __construct(
         private GoogleSeoApiClient $google,
         private SeoAnalyticsConfigurationService $configuration,
+        private CurrentYearSyncWindow $currentYear,
     ) {}
 
     public function syncRange(Store $store, string $from, string $to): int
@@ -30,8 +32,16 @@ class SeoAnalyticsSyncService
             throw new RuntimeException('GA4 / GSC 数据源配置不完整：'.implode(', ', $status['missing']));
         }
 
-        $rangeFrom = CarbonImmutable::parse($from)->startOfDay();
-        $rangeTo = CarbonImmutable::parse($to)->startOfDay();
+        $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
+        $range = $this->currentYear->clampExistingRange(
+            CarbonImmutable::parse($from, $timezone)->startOfDay(),
+            CarbonImmutable::parse($to, $timezone)->startOfDay(),
+            $timezone,
+        );
+        if ($range === null) {
+            return 0;
+        }
+        [$rangeFrom, $rangeTo] = $range;
 
         return $this->syncGa4($store, $rangeFrom, $rangeTo)
             + $this->syncGsc($store, $rangeFrom, $rangeTo);
@@ -45,8 +55,25 @@ class SeoAnalyticsSyncService
             throw new RuntimeException('GA4 / GSC 数据源配置不完整：'.implode(', ', $status['missing']));
         }
 
-        $from = CarbonImmutable::parse((string) $run->date_from)->startOfDay();
-        $to = CarbonImmutable::parse((string) $run->date_to)->startOfDay();
+        $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
+        $range = $this->currentYear->clampExistingRange(
+            CarbonImmutable::parse((string) $run->date_from, $timezone)->startOfDay(),
+            CarbonImmutable::parse((string) $run->date_to, $timezone)->startOfDay(),
+            $timezone,
+        );
+        if ($range === null) {
+            $run->forceFill([
+                'status' => 'completed',
+                'progress_percent' => 100,
+                'processed_rows' => 0,
+                'result' => ['processed_rows' => 0, 'chunks' => 0],
+                'completed_at' => now(),
+            ])->save();
+
+            return ['processed_rows' => 0, 'chunks' => 0];
+        }
+        [$from, $to] = $range;
+        $run->forceFill(['date_from' => $from->toDateString(), 'date_to' => $to->toDateString()])->save();
         $chunks = $this->monthChunks($from, $to);
         $processed = 0;
         $run->forceFill(['status' => 'running', 'started_at' => now(), 'progress_percent' => 1, 'last_error' => null])->save();

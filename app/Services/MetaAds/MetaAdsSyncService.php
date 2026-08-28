@@ -15,6 +15,7 @@ use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -31,7 +32,10 @@ class MetaAdsSyncService
 
     private const INSIGHT_LEVELS = ['account', 'campaign', 'adset', 'ad'];
 
-    public function __construct(private MetaAdsApiClient $api) {}
+    public function __construct(
+        private MetaAdsApiClient $api,
+        private CurrentYearSyncWindow $currentYear,
+    ) {}
 
     /** @return array<string, int|string> */
     public function sync(Store $store, string $requestedMode = 'incremental'): array
@@ -270,6 +274,24 @@ class MetaAdsSyncService
         $until = $shard->until_at ? CarbonImmutable::parse($shard->until_at)->utc() : null;
         if (! $until) {
             throw new MetaAdsApiException('Meta Ads 分片缺少结束时间。', 'meta_ads_shard_period_invalid');
+        }
+        if ($since) {
+            $range = $this->currentYear->clampExistingRange($since, $until, $store->timezone ?: 'UTC');
+            if ($range === null) {
+                $counts = $this->partialShardCounts($shard);
+                $shard->forceFill([
+                    'status' => 'completed',
+                    'records_count' => array_sum($counts),
+                    'result' => [...($shard->result ?? []), ...$counts, 'skipped_before_current_year' => true],
+                    'finished_at' => now(),
+                    'error_code' => null,
+                    'last_error' => null,
+                ])->save();
+                $this->refreshJobProgress((int) $shard->sync_job_id);
+
+                return $counts;
+            }
+            [$since, $until] = $range;
         }
 
         $shard->forceFill([
@@ -1683,38 +1705,55 @@ class MetaAdsSyncService
         if ($mode === 'full') {
             $historyMonths = max(1, (int) config('services.meta_ads.history_months', 1));
 
-            return [$until->subMonthsNoOverflow($historyMonths)->startOfDay(), $until];
+            return $this->currentYear->clampGeneratedRange(
+                $until->subMonthsNoOverflow($historyMonths)->startOfDay(),
+                $until,
+                $timezone,
+            );
         }
 
         if ($mode === 'priority') {
             $priorityDays = max(1, (int) config('services.meta_ads.priority_days', 7));
 
-            return [$until->subDays($priorityDays - 1)->startOfDay(), $until];
+            return $this->currentYear->clampGeneratedRange(
+                $until->subDays($priorityDays - 1)->startOfDay(),
+                $until,
+                $timezone,
+            );
         }
 
         if ($mode === 'backfill') {
             $historyMonths = max(1, (int) config('services.meta_ads.history_months', 6));
             $priorityDays = max(1, (int) config('services.meta_ads.priority_days', 7));
 
-            return [
+            return $this->currentYear->clampGeneratedRange(
                 $until->subMonthsNoOverflow($historyMonths)->startOfDay(),
                 $until->subDays($priorityDays)->endOfDay(),
-            ];
+                $timezone,
+            );
         }
 
         if ($mode === 'structure') {
             $rollingDays = max(1, (int) config('services.meta_ads.rolling_days', 3));
 
-            return [$until->subDays($rollingDays - 1)->startOfDay(), $until];
+            return $this->currentYear->clampGeneratedRange(
+                $until->subDays($rollingDays - 1)->startOfDay(),
+                $until,
+                $timezone,
+            );
         }
 
         if (! $rollingIncremental) {
-            return [$until->subHour(), $until];
+            return $this->currentYear->clampGeneratedRange($until->subHour(), $until, $timezone);
         }
 
         $rollingDays = max(1, (int) config('services.meta_ads.rolling_days', 3));
 
-        return [$until->subDays($rollingDays - 1)->startOfDay(), $until];
+        return $this->currentYear->clampGeneratedRange(
+            $until->subDays($rollingDays - 1)->startOfDay(),
+            $until,
+            $timezone,
+        );
     }
 
     private function startJob(
