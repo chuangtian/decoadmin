@@ -35,8 +35,6 @@ use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
-use App\Http\Controllers\ShopifyAfterShipAppController;
-use App\Http\Controllers\ShopifyAppLaunchController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
@@ -51,8 +49,6 @@ use App\Http\Controllers\StoreBusinessCredentialController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
-use App\Http\Controllers\StoreMarketingHomeController;
-use App\Http\Controllers\StoreMarketingModuleController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\StoreStatusController;
 use App\Http\Controllers\StudentDiscountController;
@@ -74,10 +70,6 @@ Route::get('/', fn () => auth()->check()
 Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'])
     ->middleware('throttle:30,1')
     ->name('shopify.oauth.callback');
-
-Route::get('/shopify/aftership/oauth/callback', [ShopifyAfterShipAppController::class, 'callback'])
-    ->middleware('throttle:30,1')
-    ->name('aftership.shopify.oauth.callback');
 
 Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
     ->middleware('throttle:600,1')
@@ -181,9 +173,6 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('throttle:6,1')
         ->name('verification.send');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
-    Route::get('/shopify/launch', ShopifyAppLaunchController::class)->name('shopify.app.launch');
-    Route::get('/shopify/aftership/launch', [ShopifyAfterShipAppController::class, 'launch'])
-        ->name('aftership.shopify.app.launch');
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
@@ -495,9 +484,6 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');
     Route::post('/stores', [StoreController::class, 'store'])->middleware('permission:store.create')->name('stores.store');
     Route::get('/stores/{store}', [StoreController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.show');
-    Route::get('/stores/{store}/marketing', StoreMarketingHomeController::class)->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.home');
-    Route::get('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.modules.show');
-    Route::put('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'update'])->middleware(['store.access', 'permission:apps.configure'])->name('stores.marketing.modules.update');
     Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:apps.install'])->name('stores.connect');
     Route::post('/stores/{store}/shopify/verify', ShopifyConnectionHealthController::class)->middleware(['store.access', 'permission:store.connect'])->name('stores.shopify.verify');
     Route::post('/stores/{store}/shopify/uninstall', ShopifyAppUninstallController::class)->middleware(['store.access', 'permission:apps.uninstall'])->name('stores.shopify.uninstall');

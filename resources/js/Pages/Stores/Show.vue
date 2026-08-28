@@ -164,10 +164,7 @@ const logSourceLabel = (source: string) => ({ audit: '操作记录', sync: '数�
                                 </div>
                                 <span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="app.status === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-slate-100 text-slate-600 ring-slate-200'">{{ app.status === 'active' ? '已安装' : '未安装' }}</span>
                             </div>
-                            <p class="mt-4 text-sm leading-6 text-slate-500">{{ app.description || '一个 Shopify App 集成个性化、邮件、短信、弹窗与表单、评论和页面构建器。' }}</p>
-                            <div class="mt-4 flex flex-wrap gap-2">
-                                <span v-for="feature in ['个性化', '邮件', '短信', '弹窗与表单', '评论', '页面构建器']" :key="feature" class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-100">{{ feature }}</span>
-                            </div>
+                            <p class="mt-4 text-sm leading-6 text-slate-500">{{ app.description || '当前店铺可用的 Shopify 应用。' }}</p>
                         </div>
                         <div class="flex shrink-0 flex-col items-stretch gap-2 sm:min-w-36">
                             <button v-if="app.installable && app.status !== 'active' && app.app_status === 'active' && canConnect" type="button" :disabled="form.processing" class="rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-50" @click="reconnect">{{ form.processing ? '正在跳转…' : '安装应用' }}</button>
