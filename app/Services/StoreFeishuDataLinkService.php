@@ -175,7 +175,7 @@ class StoreFeishuDataLinkService
                     'key' => $sectionKey,
                     'title' => $section['title'],
                     'description' => $section['description'],
-                    'configured' => collect($fields)->contains(fn (array $field): bool => $field['configured']),
+                    'configured' => collect($fields)->every(fn (array $field): bool => $field['configured']),
                     'fields' => $fields,
                 ];
             })
