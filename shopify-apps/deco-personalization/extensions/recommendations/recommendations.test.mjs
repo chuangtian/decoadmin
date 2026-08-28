@@ -34,6 +34,15 @@ test('recently viewed context is anonymous, bounded and contains no customer ide
   assert.match(stylesheet, /prefers-reduced-motion/);
 });
 
+test('recommendation block publishes only structured custom analytics events', () => {
+  assert.match(javascript, /Shopify\?\.analytics\?\.publish/);
+  assert.match(javascript, /deco_personalization:\$\{action\}/);
+  assert.match(javascript, /'impression'/);
+  assert.match(javascript, /'click'/);
+  assert.match(javascript, /'add_to_cart'/);
+  assert.match(javascript, /products\.slice\(0, 50\)/);
+});
+
 test('Smart Cart is an App Embed that remains governed by the app-data proxy path', () => {
   assert.match(smartCartLiquid, /"target": "body"/);
   assert.match(smartCartLiquid, /deco_personalization\.proxy_path/);
@@ -62,4 +71,11 @@ test('Smart Cart context stays anonymous and bounded', () => {
   assert.match(smartCartJavascript, /recently_viewed_product_ids/);
   assert.doesNotMatch(smartCartJavascript, /customer|email|phone|logged_in_customer_id/i);
   assert.match(smartCartStylesheet, /prefers-reduced-motion/);
+});
+
+test('Smart Cart publishes structured custom events only after the drawer is visible', () => {
+  assert.match(smartCartJavascript, /render\(cart, config, true\)/);
+  assert.match(smartCartJavascript, /Shopify\?\.analytics\?\.publish/);
+  assert.match(smartCartJavascript, /placement: 'smart_cart'/);
+  assert.match(smartCartJavascript, /deco_personalization:\$\{action\}/);
 });

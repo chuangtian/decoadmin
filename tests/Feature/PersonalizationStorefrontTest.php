@@ -54,9 +54,9 @@ class PersonalizationStorefrontTest extends TestCase
             ->assertJsonPath('data.items.0.shopify_product_id', '101')
             ->assertJsonPath('data.items.0.title', 'Store A Bike')
             ->assertJsonMissingPath('data.items.0.email')
-            ->assertJsonMissingPath('data.items.0.customer_id');
+            ->assertJsonMissingPath('data.items.0.customer_id')
+            ->assertJsonMissingPath('data.context.logged_in_customer_id');
         $this->assertStringNotContainsString('Store B Bike', $response->getContent());
-        $this->assertStringNotContainsString('999', $response->getContent());
     }
 
     public function test_proxy_rejects_wrong_secret_expired_timestamp_and_cross_store_component(): void

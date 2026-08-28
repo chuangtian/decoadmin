@@ -75,14 +75,15 @@
 
     const list = document.createElement('div');
     list.className = `deco-recommendations__list deco-recommendations__list--${style.layout === 'grid' ? 'grid' : 'carousel'}`;
-    items.forEach((product) => list.append(createProductCard(product, component, style)));
+    items.forEach((product) => list.append(createProductCard(element, product, component, data.strategy, style)));
 
     content.replaceChildren(heading, list);
     content.hidden = false;
     if (status instanceof HTMLElement) status.hidden = true;
+    publishRecommendationEvent(element, 'impression', component, data.strategy, items);
   }
 
-  function createProductCard(product, component, style) {
+  function createProductCard(element, product, component, strategy, style) {
     const card = document.createElement('article');
     card.className = 'deco-recommendations__card';
 
@@ -90,6 +91,9 @@
     link.className = 'deco-recommendations__link';
     link.href = safeProductPath(product?.storefront?.path);
     link.setAttribute('aria-label', String(product?.title || 'View product'));
+    link.addEventListener('click', () => {
+      publishRecommendationEvent(element, 'click', component, strategy, [product]);
+    });
 
     if (style.show_image !== false) {
       const media = document.createElement('div');
@@ -135,14 +139,21 @@
       button.type = 'button';
       button.className = 'deco-recommendations__button';
       button.textContent = String(component?.button_label || 'Add to cart');
-      button.addEventListener('click', () => void addToCart(button, variant.shopify_variant_id));
+      button.addEventListener('click', () => void addToCart(
+        element,
+        button,
+        variant.shopify_variant_id,
+        product,
+        component,
+        strategy,
+      ));
       card.append(button);
     }
 
     return card;
   }
 
-  async function addToCart(button, variantId) {
+  async function addToCart(element, button, variantId, product, component, strategy) {
     if (!(button instanceof HTMLButtonElement) || button.disabled) return;
     const id = numericId(variantId);
     if (!id) return;
@@ -158,6 +169,10 @@
       });
       if (!response.ok) throw new Error('Cart request failed');
       button.textContent = 'Added';
+      publishRecommendationEvent(element, 'add_to_cart', component, strategy, [{
+        ...product,
+        selected_variant_id: id,
+      }]);
       document.dispatchEvent(new CustomEvent('deco-personalization:cart-updated'));
     } catch {
       button.textContent = 'Try again';
@@ -176,6 +191,28 @@
       window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
     } catch {
       // Recommendations continue without persistent recently viewed context.
+    }
+  }
+
+  function publishRecommendationEvent(element, action, component, strategy, products) {
+    if (element?.dataset?.designMode === 'true') return;
+    const publish = window.Shopify?.analytics?.publish;
+    if (typeof publish !== 'function') return;
+    const payload = {
+      component_uuid: String(component?.uuid || ''),
+      strategy_uuid: String(strategy?.uuid || ''),
+      placement: String(component?.placement || ''),
+      products: Array.isArray(products) ? products.slice(0, 50).map((product, index) => ({
+        product_id: numericId(product?.shopify_product_id),
+        variant_id: numericId(product?.selected_variant_id),
+        rank: boundedNumber(product?.rank, 1, 100, index + 1),
+      })).filter((product) => product.product_id) : [],
+    };
+    try {
+      const result = publish.call(window.Shopify.analytics, `deco_personalization:${action}`, payload);
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+    } catch {
+      // Analytics never blocks recommendation rendering or cart actions.
     }
   }
 

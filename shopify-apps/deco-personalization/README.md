@@ -37,6 +37,12 @@ App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久�
 
 按 Shopify 当前官方要求，App Proxy 使用 P0 最小 scope `write_app_proxy`。Theme App Extension 不读取或写入主题文件，因此不申请 `read_themes` / `write_themes`。区块不会自动加入任何主题，必须由商家在指定测试主题中添加并保存。
 
+## Web Pixel
+
+`extensions/web-pixel` 使用 Shopify 严格沙箱收集推荐曝光、点击、加购和结账完成事件。按 Shopify 当前官方要求，它使用 `write_pixels` 与 `read_customer_events`；其中 Pixel 查询所需的读取能力由 `write_pixels` 覆盖，不额外申请主题、客户、商品或订单写权限。
+
+Pixel 只声明分析用途：`analytics = true`，营销、偏好和数据销售均关闭。DecoAdmin 只保存哈希后的 Shopify client/session 标识、已验证的组件/策略/商品引用及订单 ID；不保存 IP、邮箱、电话、姓名、原始 URL 或完整事件载荷。结账事件只能作为候选信号，后续收入归因必须与 Commerce Hub 已同步订单核对。
+
 ## 当前状态
 
 App Home 工程与离线测试已建立。Test Client ID 和实际 Shopify 配置将在发布阶段只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。

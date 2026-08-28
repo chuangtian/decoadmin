@@ -31,6 +31,7 @@ use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\PersonalizationController;
+use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
@@ -144,6 +145,16 @@ Route::get('/shopify-app/personalization', [ShopifyPersonalizationAppController:
 Route::post('/api/shopify-app/personalization/webhooks', ShopifyPersonalizationWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('personalization.shopify-app.webhooks');
+
+Route::post('/api/shopify-app/personalization/events/{source}', PersonalizationEventController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.events.receive');
+Route::options('/api/shopify-app/personalization/events/{source}', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.events.options');
 
 Route::prefix('/api/shopify-app/personalization')->group(function (): void {
     Route::get('/connection', [ShopifyPersonalizationAppController::class, 'connection'])

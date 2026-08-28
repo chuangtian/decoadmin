@@ -6,6 +6,7 @@ use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Organization;
+use App\Models\PersonalizationEventSource;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
@@ -35,8 +36,9 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             'personalization.active.client_secret' => 'personalization-test-secret',
             'personalization.active.name' => 'Deco 个性化推荐测试',
             'personalization.active.handle' => 'deco-personalization-test',
+            'personalization.active.app_url' => 'https://testadmin.decomkt.com',
             'personalization.active_proxy_path' => '/apps/deco-personalization-test',
-            'personalization.required_scopes' => ['read_products'],
+            'personalization.required_scopes' => ['write_app_proxy', 'write_pixels', 'read_customer_events'],
             'personalization.denied_shop_domains' => ['macfoxebike.myshopify.com'],
             'shopify.api_version' => '2026-07',
         ]);
@@ -94,11 +96,15 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                 'refresh_token' => 'personalization-refresh-token',
                 'expires_in' => 3600,
                 'refresh_token_expires_in' => 7776000,
-                'scope' => 'read_products',
+                'scope' => 'write_app_proxy,write_pixels,read_customer_events',
             ])
             ->push(['data' => ['currentAppInstallation' => [
                 'id' => 'gid://shopify/AppInstallation/123',
-                'accessScopes' => [['handle' => 'read_products']],
+                'accessScopes' => [
+                    ['handle' => 'write_app_proxy'],
+                    ['handle' => 'write_pixels'],
+                    ['handle' => 'read_customer_events'],
+                ],
             ]]])
             ->push(['data' => ['metafieldsSet' => [
                 'metafields' => [[
@@ -108,14 +114,23 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                     'value' => '/apps/deco-personalization-test',
                 ]],
                 'userErrors' => [],
+            ]]])
+            ->push(['data' => ['webPixel' => null]])
+            ->push(['data' => ['webPixelCreate' => [
+                'webPixel' => [
+                    'id' => 'gid://shopify/WebPixel/789',
+                    'settings' => ['endpoint' => 'configured-by-request'],
+                ],
+                'userErrors' => [],
             ]]]);
 
         $this->withToken($token)
             ->postJson(route('personalization.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
             ->assertOk()
             ->assertJsonPath('data.app_installation_id', 'gid://shopify/AppInstallation/123')
-            ->assertJsonPath('data.granted_scopes.0', 'read_products')
-            ->assertJsonPath('data.proxy_path', '/apps/deco-personalization-test');
+            ->assertJsonPath('data.granted_scopes.0', 'write_app_proxy')
+            ->assertJsonPath('data.proxy_path', '/apps/deco-personalization-test')
+            ->assertJsonPath('data.web_pixel_id', 'gid://shopify/WebPixel/789');
 
         Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
             && $request['subject_token'] === $token
@@ -129,9 +144,18 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             && data_get($request->data(), 'variables.metafields.0.namespace') === 'deco_personalization'
             && data_get($request->data(), 'variables.metafields.0.key') === 'proxy_path'
             && data_get($request->data(), 'variables.metafields.0.value') === '/apps/deco-personalization-test');
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
+            && str_contains((string) $request['query'], 'CurrentPersonalizationWebPixel'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
+            && str_contains((string) $request['query'], 'CreatePersonalizationWebPixel')
+            && str_starts_with(
+                (string) data_get($request->data(), 'variables.webPixel.settings.endpoint'),
+                'https://testadmin.decomkt.com/api/shopify-app/personalization/events/',
+            ));
 
         $app = App::query()->sole();
         $installation = AppInstallation::query()->whereBelongsTo($app)->whereBelongsTo($store)->sole();
+        $eventSource = PersonalizationEventSource::query()->whereBelongsTo($store)->sole();
         $this->assertSame('deco-personalization-test', $app->handle);
         $this->assertSame('personalization_config', data_get($app->settings, 'managed_by'));
         $this->assertSame($connection->id, $installation->shopify_connection_id);
@@ -139,6 +163,9 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->assertSame('personalization_bootstrap', data_get($installation->settings, 'source'));
         $this->assertSame('personalization-offline-token', $installation->access_token_encrypted);
         $this->assertSame('personalization-refresh-token', $installation->refresh_token_encrypted);
+        $this->assertSame('active', $eventSource->status);
+        $this->assertSame('gid://shopify/WebPixel/789', $eventSource->web_pixel_id);
+        $this->assertNotNull($eventSource->activated_at);
         $this->assertStringNotContainsString(
             'personalization-offline-token',
             (string) DB::table('app_installations')->whereKey($installation->id)->value('access_token_encrypted'),
@@ -176,6 +203,75 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             ->assertUnauthorized();
     }
 
+    public function test_bootstrap_updates_existing_web_pixel_without_rotating_store_event_key(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $this->connection($store);
+        $source = PersonalizationEventSource::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'web_pixel_id' => 'gid://shopify/WebPixel/789',
+            'status' => 'active',
+            'activated_at' => now()->subDay(),
+        ]);
+        $originalKey = $source->ingest_key;
+        $token = $this->shopifyIdToken(
+            $store->shopify_domain,
+            'personalization-test-client-id',
+            'personalization-test-secret',
+        );
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push([
+                'access_token' => 'rotated-offline-token',
+                'refresh_token' => 'rotated-refresh-token',
+                'expires_in' => 3600,
+                'refresh_token_expires_in' => 7776000,
+                'scope' => 'write_app_proxy,write_pixels,read_customer_events',
+            ])
+            ->push(['data' => ['currentAppInstallation' => [
+                'id' => 'gid://shopify/AppInstallation/456',
+                'accessScopes' => [
+                    ['handle' => 'write_app_proxy'],
+                    ['handle' => 'write_pixels'],
+                    ['handle' => 'read_customer_events'],
+                ],
+            ]]])
+            ->push(['data' => ['metafieldsSet' => [
+                'metafields' => [[
+                    'id' => 'gid://shopify/Metafield/654',
+                    'namespace' => 'deco_personalization',
+                    'key' => 'proxy_path',
+                    'value' => '/apps/deco-personalization-test',
+                ]],
+                'userErrors' => [],
+            ]]])
+            ->push(['data' => ['webPixel' => [
+                'id' => 'gid://shopify/WebPixel/789',
+                'settings' => ['endpoint' => 'old-endpoint'],
+            ]]])
+            ->push(['data' => ['webPixelUpdate' => [
+                'webPixel' => [
+                    'id' => 'gid://shopify/WebPixel/789',
+                    'settings' => ['endpoint' => 'configured-by-request'],
+                ],
+                'userErrors' => [],
+            ]]]);
+
+        $this->withToken($token)
+            ->postJson(route('personalization.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
+            ->assertOk()
+            ->assertJsonPath('data.web_pixel_id', 'gid://shopify/WebPixel/789');
+
+        $source->refresh();
+        $this->assertSame($originalKey, $source->ingest_key);
+        $this->assertSame('active', $source->status);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
+            && str_contains((string) data_get($request->data(), 'query'), 'UpdatePersonalizationWebPixel')
+            && data_get($request->data(), 'variables.id') === 'gid://shopify/WebPixel/789'
+            && data_get($request->data(), 'variables.webPixel.settings.endpoint')
+                === "https://testadmin.decomkt.com/api/shopify-app/personalization/events/{$originalKey}");
+    }
+
     public function test_denylisted_shop_is_blocked_before_connection_bootstrap_or_webhook_writes(): void
     {
         $deniedShop = 'macfoxebike.myshopify.com';
@@ -204,11 +300,45 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->assertDatabaseCount('audit_logs', 0);
     }
 
+    public function test_bootstrap_rejects_missing_web_pixel_scope_before_admin_graphql_writes(): void
+    {
+        [, , $store] = $this->context('store-admin');
+        $this->connection($store);
+        $token = $this->shopifyIdToken(
+            $store->shopify_domain,
+            'personalization-test-client-id',
+            'personalization-test-secret',
+        );
+        Http::fakeSequence("https://{$store->shopify_domain}/*")->push([
+            'access_token' => 'incomplete-offline-token',
+            'refresh_token' => 'incomplete-refresh-token',
+            'expires_in' => 3600,
+            'refresh_token_expires_in' => 7776000,
+            'scope' => 'write_app_proxy,write_pixels',
+        ]);
+
+        $this->withToken($token)
+            ->postJson(route('personalization.shopify-app.bootstrap', ['shop' => $store->shopify_domain]))
+            ->assertForbidden()
+            ->assertJsonPath('error.code', 'SHOPIFY_REQUIRED_SCOPES_MISSING');
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseCount('personalization_event_sources', 0);
+        $this->assertDatabaseCount('app_installations', 0);
+    }
+
     public function test_lifecycle_webhooks_are_idempotent_and_only_change_personalization_installation(): void
     {
         [, $organization, $store] = $this->context('store-admin');
         $connection = $this->connection($store);
         $this->activeInstallation($store, $connection);
+        $eventSource = PersonalizationEventSource::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'web_pixel_id' => 'gid://shopify/WebPixel/321',
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
         $webhookId = (string) Str::uuid();
         $payload = ['id' => 99, 'shop' => 'body-shop-is-ignored.myshopify.com'];
 
@@ -225,6 +355,8 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->assertSame('processed', $event->status);
         $this->assertSame('connected', $connection->fresh()->status);
         $this->assertSame('commerce-hub-token', $connection->fresh()->access_token_encrypted);
+        $this->assertSame('inactive', $eventSource->fresh()->status);
+        $this->assertNull($eventSource->fresh()->activated_at);
 
         $this->webhook('app/uninstalled', $store->shopify_domain, $payload, $webhookId)
             ->assertOk()

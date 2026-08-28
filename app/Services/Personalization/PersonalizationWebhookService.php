@@ -5,6 +5,7 @@ namespace App\Services\Personalization;
 use App\Exceptions\PersonalizationException;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
+use App\Models\PersonalizationEventSource;
 use App\Models\Store;
 use App\Models\WebhookEvent;
 use App\Services\Shopify\ShopifyWebhookHmacValidator;
@@ -104,6 +105,21 @@ class PersonalizationWebhookService
                 $scopes,
                 'personalization_webhook',
             );
+            $eventSource = PersonalizationEventSource::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->first();
+            if ($eventSource) {
+                $pixelScopesGranted = in_array('write_pixels', $scopes, true)
+                    && in_array('read_customer_events', $scopes, true);
+                $active = $topic === 'app/scopes_update'
+                    && $pixelScopesGranted
+                    && filled($eventSource->web_pixel_id);
+                $eventSource->forceFill([
+                    'status' => $active ? 'active' : 'inactive',
+                    'activated_at' => $active ? ($eventSource->activated_at ?? now()) : null,
+                ])->save();
+            }
             $app = $installation->app;
             $receivedAt = now();
             $event = WebhookEvent::query()->firstOrCreate(

@@ -28,6 +28,9 @@ class ShopifyPersonalizationProjectTest extends TestCase
             'extensions/recommendations/assets/recommendations.css',
             'extensions/recommendations/assets/smart-cart.js',
             'extensions/recommendations/assets/smart-cart.css',
+            'extensions/web-pixel/package.json',
+            'extensions/web-pixel/shopify.extension.toml',
+            'extensions/web-pixel/src/index.js',
         ];
 
         foreach ($required as $file) {

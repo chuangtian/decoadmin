@@ -1,0 +1,9 @@
+{
+  "name": "deco-personalization-web-pixel",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@shopify/web-pixels-extension": "^2.18.0"
+  }
+}

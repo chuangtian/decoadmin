@@ -9,7 +9,7 @@
   "scripts": {
     "check": "npm run check:project && npm run check:storefront && npm test && npm run typecheck:app-home",
     "check:project": "node scripts/validate-project.mjs",
-    "check:storefront": "node --check extensions/recommendations/assets/recommendations.js && node --check extensions/recommendations/assets/smart-cart.js",
+    "check:storefront": "node --check extensions/recommendations/assets/recommendations.js && node --check extensions/recommendations/assets/smart-cart.js && node --check extensions/web-pixel/src/index.js",
     "test": "node --test",
     "test:app-home": "node --test extensions/app-home/src/runtime.test.mjs",
     "typecheck:app-home": "tsc --project extensions/app-home/tsconfig.json"

@@ -5,6 +5,7 @@ namespace App\Services\Personalization;
 use App\Exceptions\PersonalizationException;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
+use App\Models\PersonalizationEventSource;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
@@ -26,6 +27,33 @@ class ShopifyPersonalizationAppService
         mutation SetPersonalizationProxyPath($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
             metafields { id namespace key value }
+            userErrors { field message code }
+          }
+        }
+        GRAPHQL;
+
+    private const WEB_PIXEL_QUERY = <<<'GRAPHQL'
+        query CurrentPersonalizationWebPixel {
+          webPixel {
+            id
+            settings
+          }
+        }
+        GRAPHQL;
+
+    private const CREATE_WEB_PIXEL_MUTATION = <<<'GRAPHQL'
+        mutation CreatePersonalizationWebPixel($webPixel: WebPixelInput!) {
+          webPixelCreate(webPixel: $webPixel) {
+            webPixel { id settings }
+            userErrors { field message code }
+          }
+        }
+        GRAPHQL;
+
+    private const UPDATE_WEB_PIXEL_MUTATION = <<<'GRAPHQL'
+        mutation UpdatePersonalizationWebPixel($id: ID!, $webPixel: WebPixelInput!) {
+          webPixelUpdate(id: $id, webPixel: $webPixel) {
+            webPixel { id settings }
             userErrors { field message code }
           }
         }
@@ -64,7 +92,7 @@ class ShopifyPersonalizationAppService
             ->first();
     }
 
-    /** @return array{app_installation_id: string, granted_scopes: list<string>, proxy_path: string} */
+    /** @return array{app_installation_id: string, granted_scopes: list<string>, proxy_path: string, web_pixel_id: string} */
     public function bootstrap(Store $store, string $idToken): array
     {
         $shop = $this->shopGuard->assertAllowed((string) $store->shopify_domain);
@@ -117,7 +145,10 @@ class ShopifyPersonalizationAppService
             );
         }
 
-        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $token): void {
+        $eventSource = $this->eventSource($store);
+        $webPixelId = $this->synchronizeWebPixel($shop, $token['access_token'], $eventSource);
+
+        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $webPixelId, $eventSource, $token): void {
             $installation = $this->registry->synchronizeInstallation(
                 $store,
                 $connection,
@@ -127,6 +158,11 @@ class ShopifyPersonalizationAppService
                 $installationId,
             );
             $this->storeOfflineToken($installation, $token);
+            $eventSource->forceFill([
+                'web_pixel_id' => $webPixelId,
+                'status' => 'active',
+                'activated_at' => now(),
+            ])->save();
 
             AuditLog::query()->create([
                 'organization_id' => $store->organization_id,
@@ -140,6 +176,7 @@ class ShopifyPersonalizationAppService
                     'app_installation_id' => $installationId,
                     'granted_scopes' => $installationScopes,
                     'proxy_path' => $proxyPath,
+                    'web_pixel_id' => $webPixelId,
                 ],
             ]);
         });
@@ -148,7 +185,76 @@ class ShopifyPersonalizationAppService
             'app_installation_id' => $installationId,
             'granted_scopes' => $installationScopes,
             'proxy_path' => $proxyPath,
+            'web_pixel_id' => $webPixelId,
         ];
+    }
+
+    private function eventSource(Store $store): PersonalizationEventSource
+    {
+        $source = PersonalizationEventSource::query()->firstOrCreate(
+            ['store_id' => $store->id],
+            ['organization_id' => $store->organization_id, 'status' => 'inactive'],
+        );
+        if ((int) $source->organization_id !== (int) $store->organization_id) {
+            throw new PersonalizationException(
+                'PERSONALIZATION_EVENT_SOURCE_CONFLICT',
+                '个性化推荐事件来源与店铺范围冲突。',
+                409,
+            );
+        }
+        // Fail closed while Shopify settings are being synchronized. If the
+        // external mutation or local transaction fails, ingestion stays off.
+        $source->forceFill(['status' => 'inactive'])->save();
+
+        return $source;
+    }
+
+    private function synchronizeWebPixel(
+        string $shop,
+        string $accessToken,
+        PersonalizationEventSource $source,
+    ): string {
+        $origin = rtrim((string) config('personalization.active.app_url'), '/');
+        $endpoint = $origin.route('personalization.events.receive', ['source' => $source->ingest_key], false);
+        $parts = parse_url($endpoint);
+        if (($parts['scheme'] ?? null) !== 'https'
+            || ! is_string($parts['host'] ?? null)
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) {
+            throw new PersonalizationException(
+                'PERSONALIZATION_EVENT_ENDPOINT_INVALID',
+                '个性化推荐事件接收地址无效。',
+                503,
+            );
+        }
+
+        $currentPayload = $this->graphql($shop, $accessToken, self::WEB_PIXEL_QUERY);
+        $currentId = data_get($currentPayload, 'data.webPixel.id');
+        $input = ['settings' => ['endpoint' => $endpoint]];
+        if (is_string($currentId) && $currentId !== '') {
+            $payload = $this->graphql($shop, $accessToken, self::UPDATE_WEB_PIXEL_MUTATION, [
+                'id' => $currentId,
+                'webPixel' => $input,
+            ]);
+            $result = data_get($payload, 'data.webPixelUpdate');
+        } else {
+            $payload = $this->graphql($shop, $accessToken, self::CREATE_WEB_PIXEL_MUTATION, [
+                'webPixel' => $input,
+            ]);
+            $result = data_get($payload, 'data.webPixelCreate');
+        }
+        $webPixelId = data_get($result, 'webPixel.id');
+        $errors = data_get($result, 'userErrors', []);
+        if (! is_array($result)
+            || ! is_array($errors) || $errors !== []
+            || ! is_string($webPixelId) || $webPixelId === '') {
+            throw new PersonalizationException(
+                'SHOPIFY_WEB_PIXEL_SYNC_FAILED',
+                'Shopify 未能启用个性化推荐 Web Pixel。',
+                502,
+            );
+        }
+
+        return $webPixelId;
     }
 
     /**

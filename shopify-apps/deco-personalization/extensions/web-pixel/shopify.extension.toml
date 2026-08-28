@@ -1,0 +1,20 @@
+type = "web_pixel_extension"
+name = "Deco personalization analytics"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = true
+marketing = false
+preferences = false
+sale_of_data = "disabled"
+
+[settings]
+type = "object"
+
+[settings.fields.endpoint]
+name = "Event endpoint"
+description = "Store-scoped DecoAdmin Test event endpoint"
+type = "single_line_text_field"
+validations = [
+  { name = "min", value = "1" }
+]

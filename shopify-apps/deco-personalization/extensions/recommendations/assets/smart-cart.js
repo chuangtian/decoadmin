@@ -40,7 +40,7 @@
       drawer = buildDrawer();
       document.body.append(drawer);
       bindThemeEvents();
-      await render(cart, config);
+      await render(cart, config, false);
     } catch {
       restoreThemeCart();
     }
@@ -126,7 +126,7 @@
         restoreThemeCart();
         return;
       }
-      await render(cart, config);
+      await render(cart, config, true);
       if (!drawer.open) drawer.showModal();
       document.documentElement.classList.add('deco-smart-cart-open');
       drawer.querySelector('.deco-smart-cart__close')?.focus();
@@ -143,7 +143,7 @@
     if (lastFocus instanceof HTMLElement) lastFocus.focus();
   }
 
-  async function render(cart, config) {
+  async function render(cart, config, publishImpression = false) {
     if (!(drawer instanceof HTMLDialogElement)) return;
     const lines = drawer.querySelector('[data-deco-cart-lines]');
     const recommendations = drawer.querySelector('[data-deco-cart-recommendations]');
@@ -168,8 +168,9 @@
       heading.textContent = String(config.heading || 'You may also like');
       const list = document.createElement('div');
       list.className = 'deco-smart-cart__recommendations';
-      recommendationItems.slice(0, 8).forEach((product) => list.append(createRecommendation(product)));
+      recommendationItems.slice(0, 8).forEach((product) => list.append(createRecommendation(product, config)));
       recommendations.append(heading, list);
+      if (publishImpression) publishRecommendationEvent('impression', config, recommendationItems.slice(0, 8));
     }
 
     footer.replaceChildren();
@@ -221,12 +222,13 @@
     return line;
   }
 
-  function createRecommendation(product) {
+  function createRecommendation(product, config) {
     const card = document.createElement('article');
     card.className = 'deco-smart-cart__recommendation';
     const title = document.createElement('a');
     title.href = safeProductPath(product?.storefront?.path);
     title.textContent = String(product?.title || 'Product');
+    title.addEventListener('click', () => publishRecommendationEvent('click', config, [product]));
     const variant = Array.isArray(product?.variants)
       ? product.variants.find((item) => item?.available_for_sale === true && numericId(item?.shopify_variant_id))
       : null;
@@ -235,7 +237,7 @@
       const add = document.createElement('button');
       add.type = 'button';
       add.textContent = 'Add';
-      add.addEventListener('click', () => void addRecommendation(add, variant.shopify_variant_id));
+      add.addEventListener('click', () => void addRecommendation(add, variant.shopify_variant_id, product, config));
       card.append(add);
     }
     return card;
@@ -258,14 +260,14 @@
         body: JSON.stringify({id: String(key || ''), quantity: Math.max(0, Number(quantity) || 0)}),
       });
       const config = await fetchConfig(cart);
-      await render(cart, config);
+      await render(cart, config, false);
     } catch {
       restoreThemeCart();
       window.location.assign('/cart');
     }
   }
 
-  async function addRecommendation(button, variantId) {
+  async function addRecommendation(button, variantId, product, config) {
     if (!(button instanceof HTMLButtonElement) || button.disabled) return;
     const id = numericId(variantId);
     if (!id) return;
@@ -276,8 +278,9 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({items: [{id: Number(id), quantity: 1}]}),
       });
+      publishRecommendationEvent('add_to_cart', config, [{...product, selected_variant_id: id}]);
       const cart = await requestShopifyJson('/cart.js');
-      await render(cart, await fetchConfig(cart));
+      await render(cart, await fetchConfig(cart), false);
     } catch {
       restoreThemeCart();
       window.location.assign('/cart');
@@ -299,6 +302,28 @@
     document.documentElement.classList.remove('deco-smart-cart-open');
     if (drawer instanceof HTMLDialogElement) drawer.remove();
     drawer = null;
+  }
+
+  function publishRecommendationEvent(action, config, products) {
+    if (root?.dataset?.designMode === 'true') return;
+    const publish = window.Shopify?.analytics?.publish;
+    if (typeof publish !== 'function') return;
+    const payload = {
+      component_uuid: '',
+      strategy_uuid: String(config?.recommendations?.strategy?.uuid || ''),
+      placement: 'smart_cart',
+      products: Array.isArray(products) ? products.slice(0, 50).map((product, index) => ({
+        product_id: numericId(product?.shopify_product_id),
+        variant_id: numericId(product?.selected_variant_id),
+        rank: boundedRank(product?.rank, index + 1),
+      })).filter((product) => product.product_id) : [],
+    };
+    try {
+      const result = publish.call(window.Shopify.analytics, `deco_personalization:${action}`, payload);
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+    } catch {
+      // Analytics never blocks Smart Cart behavior or native-cart fallback.
+    }
   }
 
   async function requestShopifyJson(url, options = {}) {
@@ -336,6 +361,11 @@
   function numericId(value) {
     const normalized = String(value || '').trim();
     return /^\d+$/.test(normalized) ? normalized : '';
+  }
+
+  function boundedRank(value, fallback) {
+    const rank = Number(value);
+    return Number.isInteger(rank) && rank >= 1 && rank <= 100 ? rank : fallback;
   }
 
   function normalizeProxyPath(value) {
