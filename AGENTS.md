@@ -7,7 +7,7 @@
 
 ## Environment URLs
 
-- Local development (temporary Cloudflare tunnel): `https://wendy-interim-classic-segment.trycloudflare.com`
+- Local development (temporary Cloudflare tunnel): `https://verified-lonely-fairfield-cached.trycloudflare.com`
 - Test environment: `https://testadmin.decomkt.com`
 - Production environment: `https://admin.decomkt.com`
 
@@ -16,15 +16,9 @@
 - Keep local, test, and production environments distinct; never treat their URLs, credentials, data, or deployment actions as interchangeable.
 - The Cloudflare URL is a temporary local-development tunnel and may change. Treat the URL above as the currently known local URL, not a permanent production endpoint.
 
-## Backend development ownership
-
-- Route all future `decoAdmin` backend code changes to the existing Codex task titled `开发 deco-afterShip`.
-- Other Codex tasks should clarify requirements, hand the implementation to that task, and review or verify its result instead of independently modifying the backend code.
-- Only change this ownership rule when the user explicitly instructs otherwise.
-
 ## Shopify App architecture
 
-- Store every Shopify App under `shopify-apps/<app-name>/`; do not place Shopify App dependencies, extensions, or configuration files in the DecoAdmin repository root.
+- Store all Shopify plugin and Shopify App files under `shopify-apps/<app-name>/`, including source code, dependencies, extensions, configuration, scripts, and documentation. Do not place these files in the DecoAdmin repository root or elsewhere in the repository.
 - Keep different business domains as separate Shopify Apps by default. Do not merge apps unless the user explicitly approves the combined scopes, lifecycle, and release coupling.
 - Each Shopify App must independently own its package dependencies, extensions, Shopify client IDs and secrets, environment configuration, validation commands, and release commands.
 - Local, test, and production must remain separate Shopify App environments. Never reuse or interchange their app IDs, secrets, URLs, data, or release actions.

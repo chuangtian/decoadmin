@@ -6,7 +6,7 @@ This is the configuration-only Shopify CLI project for DecoAdmin's primary Comme
 
 | Environment | Client ID | App URL |
 | --- | --- | --- |
-| local | `8060ab64cae19ff20a05814f1276d716` | `https://consistent-menu-herself-telephony.trycloudflare.com` |
+| local | `8060ab64cae19ff20a05814f1276d716` | `https://verified-lonely-fairfield-cached.trycloudflare.com` |
 | test | `c6921ca2233c5069033577d3cd1759ea` | `https://testadmin.decomkt.com` |
 | production | `52f415f03423fe1f1838dcfa7a0fca9a` | `https://admin.decomkt.com` |
 
