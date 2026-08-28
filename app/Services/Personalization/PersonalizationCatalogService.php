@@ -16,6 +16,7 @@ class PersonalizationCatalogService
      * @param  array{
      *   tags?: list<string>,
      *   collection_ids?: list<int|string>,
+     *   product_ids?: list<int|string>,
      *   exclude_product_ids?: list<int|string>,
      *   min_price?: int|float|string|null,
      *   max_price?: int|float|string|null,
@@ -29,6 +30,7 @@ class PersonalizationCatalogService
         $limit = min(100, max(1, (int) ($filters['limit'] ?? 24)));
         $tags = $this->strings($filters['tags'] ?? []);
         $collectionIds = $this->numericIds($filters['collection_ids'] ?? []);
+        $productIds = $this->numericIds($filters['product_ids'] ?? []);
         $excludedProductIds = $this->numericIds($filters['exclude_product_ids'] ?? []);
         $minPrice = $this->money($filters['min_price'] ?? null, 'min_price');
         $maxPrice = $this->money($filters['max_price'] ?? null, 'max_price');
@@ -50,6 +52,8 @@ class PersonalizationCatalogService
             ->forStore($store)
             ->where('status', 'active')
             ->whereNotNull('published_at_shopify')
+            ->when($productIds !== [], fn (Builder $query) => $query
+                ->whereIn('shopify_product_id', $productIds))
             ->when($excludedProductIds !== [], fn (Builder $query) => $query
                 ->whereNotIn('shopify_product_id', $excludedProductIds))
             ->when($collectionIds !== [], fn (Builder $query) => $query
