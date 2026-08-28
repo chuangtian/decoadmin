@@ -23,6 +23,8 @@ class SeoAnalyticsSyncService
         private GoogleSeoApiClient $google,
         private SeoAnalyticsConfigurationService $configuration,
         private CurrentYearSyncWindow $currentYear,
+        private GscDimensionRegistry $dimensions,
+        private SeoAnalyticsCacheVersionService $cacheVersion,
     ) {}
 
     public function syncRange(Store $store, string $from, string $to): int
@@ -43,8 +45,11 @@ class SeoAnalyticsSyncService
         }
         [$rangeFrom, $rangeTo] = $range;
 
-        return $this->syncGa4($store, $rangeFrom, $rangeTo)
+        $processed = $this->syncGa4($store, $rangeFrom, $rangeTo)
             + $this->syncGsc($store, $rangeFrom, $rangeTo);
+        $this->cacheVersion->bump((int) $store->getKey());
+
+        return $processed;
     }
 
     /** @return array{processed_rows: int, chunks: int} */
@@ -86,6 +91,7 @@ class SeoAnalyticsSyncService
                     'progress_percent' => min(99, (int) floor(((($index * 2) + 1) / (count($chunks) * 2)) * 100)),
                 ])->save();
                 $processed += $this->syncGsc($store, $chunkFrom, $chunkTo);
+                $this->cacheVersion->bump((int) $store->getKey());
                 $run->forceFill([
                     'processed_rows' => $processed,
                     'progress_percent' => min(99, (int) floor(((($index + 1) * 2) / (count($chunks) * 2)) * 100)),
@@ -218,7 +224,7 @@ class SeoAnalyticsSyncService
                 foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', 'query'], $filters) as $rows) {
                     $records = $this->gscDimensionRecords($rows, $scope, $segment, 'query', $now);
                     foreach (array_chunk($records, 1000) as $chunk) {
-                        SeoGscQueryDailyMetric::query()->insert($chunk);
+                        SeoGscQueryDailyMetric::query()->insert($this->dimensions->attachQueryIds($chunk));
                     }
                     $processed += count($records);
                 }
@@ -236,7 +242,7 @@ class SeoAnalyticsSyncService
             foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', 'page'], $filters) as $rows) {
                 $records = $this->gscDimensionRecords($rows, $scope, $segment, 'page', $now);
                 foreach (array_chunk($records, 1000) as $chunk) {
-                    SeoGscPageDailyMetric::query()->insert($chunk);
+                    SeoGscPageDailyMetric::query()->insert($this->dimensions->attachPageIds($chunk));
                 }
                 $processed += count($records);
             }
