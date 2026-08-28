@@ -53,8 +53,8 @@ class GscMetricQueryService
         array $hashes,
         bool $blogOnly,
     ): Builder {
-        $query = DB::table($definition['fact_table'].' as metric')
-            ->join($definition['dimension_table'].' as dimension', 'dimension.id', '=', 'metric.'.$definition['id_column'])
+        $facts = DB::table($definition['fact_table'].' as metric')
+            ->forceIndex($definition['covering_index'])
             ->where('metric.organization_id', $store->organization_id)
             ->where('metric.store_id', $store->getKey())
             ->whereIn('metric.segment', $segments)
@@ -63,21 +63,33 @@ class GscMetricQueryService
                 $to->endOfDay()->toDateTimeString(),
             ]);
 
-        if ($search !== '') {
-            $query->where('dimension.'.$definition['label_column'], 'like', '%'.$search.'%');
-        }
-        if ($hashes !== []) {
-            $query->whereIn('dimension.'.$definition['hash_column'], $hashes);
-        }
-        if ($blogOnly && $definition['dimension_table'] === 'seo_gsc_pages') {
-            $query->where('dimension.is_blog', true);
+        if ($search !== '' || $hashes !== [] || ($blogOnly && $definition['dimension_table'] === 'seo_gsc_pages')) {
+            $dimensions = DB::table($definition['dimension_table'])
+                ->select('id')
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->getKey());
+            if ($search !== '') {
+                $dimensions->where($definition['label_column'], 'like', '%'.$search.'%');
+            }
+            if ($hashes !== []) {
+                $dimensions->whereIn($definition['hash_column'], $hashes);
+            }
+            if ($blogOnly && $definition['dimension_table'] === 'seo_gsc_pages') {
+                $dimensions->where('is_blog', true);
+            }
+            $facts->whereIn('metric.'.$definition['id_column'], $dimensions);
         }
 
-        return $query
-            ->selectRaw('dimension.'.$definition['hash_column'].' hash, MAX(dimension.'.$definition['label_column'].') label, SUM(metric.clicks) clicks, SUM(metric.impressions) impressions')
+        $aggregated = $facts
+            ->selectRaw('metric.'.$definition['id_column'].' dimension_id, SUM(metric.clicks) clicks, SUM(metric.impressions) impressions')
             ->selectRaw('CASE WHEN SUM(metric.impressions) > 0 THEN SUM(metric.clicks) * 100.0 / SUM(metric.impressions) ELSE 0 END ctr')
             ->selectRaw('CASE WHEN SUM(metric.impressions) > 0 THEN SUM(metric.average_position * metric.impressions) / SUM(metric.impressions) ELSE 0 END position')
-            ->groupBy('metric.'.$definition['id_column'], 'dimension.'.$definition['hash_column']);
+            ->groupBy('metric.'.$definition['id_column']);
+
+        return DB::query()->fromSub($aggregated, 'aggregated')
+            ->join($definition['dimension_table'].' as dimension', 'dimension.id', '=', 'aggregated.dimension_id')
+            ->selectRaw('dimension.'.$definition['hash_column'].' hash, dimension.'.$definition['label_column'].' label')
+            ->addSelect('aggregated.clicks', 'aggregated.impressions', 'aggregated.ctr', 'aggregated.position');
     }
 
     /** @param array<string, string> $definition @param list<string> $segments @param list<string> $hashes */
@@ -117,7 +129,7 @@ class GscMetricQueryService
             ->groupBy('metric.'.$definition['hash_column']);
     }
 
-    /** @return array{fact_table: string, dimension_table: string, id_column: string, hash_column: string, label_column: string} */
+    /** @return array{fact_table: string, dimension_table: string, id_column: string, hash_column: string, label_column: string, covering_index: string} */
     private function definition(string $type): array
     {
         return match ($type) {
@@ -127,6 +139,7 @@ class GscMetricQueryService
                 'id_column' => 'page_id',
                 'hash_column' => 'page_hash',
                 'label_column' => 'page',
+                'covering_index' => 'seo_gsc_page_detail_covering_index',
             ],
             'queries' => [
                 'fact_table' => 'seo_gsc_query_daily_metrics',
@@ -134,6 +147,7 @@ class GscMetricQueryService
                 'id_column' => 'query_id',
                 'hash_column' => 'query_hash',
                 'label_column' => 'query',
+                'covering_index' => 'seo_gsc_query_detail_covering_index',
             ],
             default => throw new InvalidArgumentException("不支持的 GSC 维度类型：{$type}"),
         };
