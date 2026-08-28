@@ -212,11 +212,11 @@ const emailPreviewPreheader = computed(() => renderEmailPreview(currentEmailTemp
 const emailPreviewCode = computed(() => props.emailTemplates.variables.find(variable => variable.key === 'discount_code')?.sample ?? 'STUDENT-AB12CD34');
 const emailTemplateError = computed(() => Object.values(emailTemplateForm.errors)[0] ?? '');
 const configuredSocials = computed(() => [
-    ['Instagram', emailTemplateForm.branding.instagram_url],
-    ['Facebook', emailTemplateForm.branding.facebook_url],
-    ['TikTok', emailTemplateForm.branding.tiktok_url],
-    ['YouTube', emailTemplateForm.branding.youtube_url],
-].filter((item): item is [string, string] => Boolean(item[1])));
+    { label: 'Instagram', url: emailTemplateForm.branding.instagram_url, icon: '/images/email/social/instagram.png' },
+    { label: 'Facebook', url: emailTemplateForm.branding.facebook_url, icon: '/images/email/social/facebook.png' },
+    { label: 'TikTok', url: emailTemplateForm.branding.tiktok_url, icon: '/images/email/social/tiktok.png' },
+    { label: 'YouTube', url: emailTemplateForm.branding.youtube_url, icon: '/images/email/social/youtube.png' },
+].filter(social => Boolean(social.url)));
 const insertEmailVariable = (key: string) => {
     const token = emailVariableToken(key);
     currentEmailBody.value = `${currentEmailBody.value}${currentEmailBody.value.endsWith(' ') || currentEmailBody.value.endsWith('\n') ? '' : ' '}${token}`;
@@ -698,7 +698,7 @@ const recognitionFailureLabel = (code: string | null) => ({
                                 <div class="overflow-auto bg-slate-200 p-4"><div class="mx-auto bg-white shadow-sm transition-all" :class="emailPreviewMode === 'mobile' ? 'max-w-[320px]' : 'max-w-[560px]'">
                                     <div class="border-b border-slate-100 px-6 py-6 text-center"><img v-if="emailTemplateForm.branding.logo_url" :src="emailTemplateForm.branding.logo_url" :alt="store.name" class="mx-auto max-h-14 max-w-[180px] object-contain" /><p v-else class="text-xl font-extrabold" :style="{ color: emailTemplateForm.branding.primary_color }">{{ store.name }}</p></div>
                                     <div class="px-6 py-7"><h3 class="text-2xl font-extrabold leading-tight text-slate-950">{{ emailPreviewHeading }}</h3><p class="mt-4 whitespace-pre-line text-sm leading-6 text-slate-600">{{ emailPreviewBody }}</p><div v-if="selectedEmailTemplate === 'approval'" class="mt-5 break-all border-[3px] px-4 py-5 text-center font-mono text-xl font-extrabold tracking-wider" :style="{ borderColor: emailTemplateForm.branding.primary_color }">{{ emailPreviewCode }}</div><div v-if="emailTemplateForm.branding.shop_url && currentEmailTemplate.cta_label" class="mt-3 px-4 py-4 text-center text-sm font-extrabold text-white" :style="{ backgroundColor: emailTemplateForm.branding.primary_color }">{{ currentEmailTemplate.cta_label }}</div><p v-if="currentEmailTemplate.footer_note" class="mt-4 text-xs italic leading-5 text-slate-500">{{ currentEmailTemplate.footer_note }}</p></div>
-                                    <div v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email || configuredSocials.length" class="border-t border-slate-100 px-6 py-5 text-xs leading-5 text-slate-500"><template v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email"><strong class="text-slate-800">HELP</strong><br>Having trouble? <span class="font-semibold underline" :style="{ color: emailTemplateForm.branding.primary_color }">Contact our support team</span>.</template><div v-if="configuredSocials.length" class="mt-4 flex flex-wrap justify-center gap-3"><span v-for="social in configuredSocials" :key="social[0]" class="font-semibold" :style="{ color: emailTemplateForm.branding.primary_color }">{{ social[0] }}</span></div></div>
+                                    <div v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email || configuredSocials.length" class="border-t border-slate-100 px-6 py-5 text-xs leading-5 text-slate-500"><template v-if="emailTemplateForm.branding.support_url || emailTemplateForm.branding.support_email"><strong class="text-slate-800">HELP</strong><br>Having trouble? <span class="font-semibold underline" :style="{ color: emailTemplateForm.branding.primary_color }">Contact our support team</span>.</template><div v-if="configuredSocials.length" class="mt-4 flex flex-wrap items-center justify-center gap-4"><img v-for="social in configuredSocials" :key="social.label" :src="social.icon" :alt="social.label" :title="social.label" class="h-7 w-7 object-contain" /></div></div>
                                 </div></div>
                             </div>
                             <form v-if="permissions.manageEmailTemplates" class="rounded-2xl border border-blue-100 bg-blue-50 p-4" @submit.prevent="sendTestEmail">
