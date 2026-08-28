@@ -59,6 +59,7 @@ npm run deploy:test
 - App-specific Webhook：`app/uninstalled`、`app/scopes_update`。
 - 合规 Webhook：`customers/data_request`、`customers/redact`、`shop/redact`。
 - `embedded = true`、Shopify managed install、禁止 CLI 自动改写 URL。
+- 当前 Shopify CLI 强制随发布包含 App 配置；不保留已废弃的 `include_config_on_deploy` 字段。
 - Theme App Extension 不读取或写入主题文件，因此不申请 `read_themes` / `write_themes`。
 
 ## 后端与数据检查
