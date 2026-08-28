@@ -1,0 +1,19 @@
+client_id = "8060ab64cae19ff20a05814f1276d716"
+name = "DecoAdmin Development local"
+application_url = "https://consistent-menu-herself-telephony.trycloudflare.com"
+embedded = false
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+scopes = "read_customers,read_inventory,read_locations,read_orders,read_products,read_reports"
+optional_scopes = []
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = ["https://consistent-menu-herself-telephony.trycloudflare.com/shopify/oauth/callback"]

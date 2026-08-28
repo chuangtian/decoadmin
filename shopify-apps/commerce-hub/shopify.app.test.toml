@@ -1,0 +1,19 @@
+client_id = "c6921ca2233c5069033577d3cd1759ea"
+name = "decoadmin-development-test"
+application_url = "https://testadmin.decomkt.com"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+scopes = "read_customers,read_inventory,read_locations,read_orders,read_products,read_reports"
+optional_scopes = []
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = ["https://testadmin.decomkt.com/shopify/oauth/callback"]
