@@ -8,6 +8,7 @@ use App\Models\Store;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class MetaAdsOverviewService
@@ -256,10 +257,14 @@ class MetaAdsOverviewService
         $query = $usesExactPeriod
             ? $periodQuery
             : $dailyQuery;
+        $campaignNames = DB::table('meta_ad_insight_entities')
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->getKey())
+            ->where('level', 'campaign')
+            ->pluck('campaign_name', 'entity_id');
 
         return $query
             ->selectRaw('entity_id AS campaign_id')
-            ->selectRaw('MAX(campaign_name) AS campaign_name')
             ->selectRaw('COALESCE(SUM(spend), 0) AS spend')
             ->selectRaw('COALESCE(SUM(purchase_value), 0) AS purchase_value')
             ->selectRaw('COALESCE(SUM(purchases), 0) AS purchases')
@@ -273,7 +278,7 @@ class MetaAdsOverviewService
             ->groupBy('entity_id')
             ->orderByDesc('spend')
             ->get()
-            ->map(function (MetaAdInsight $row): array {
+            ->map(function (MetaAdInsight $row) use ($campaignNames): array {
                 $spend = (float) $row->spend;
                 $purchaseValue = (float) $row->purchase_value;
                 $impressions = (int) $row->impressions;
@@ -282,7 +287,7 @@ class MetaAdsOverviewService
 
                 return [
                     'id' => (string) $row->campaign_id,
-                    'name' => $row->campaign_name ?: $row->campaign_id,
+                    'name' => $campaignNames->get((string) $row->campaign_id) ?: $row->campaign_id,
                     'spend' => round($spend, 2),
                     'purchase_value' => round($purchaseValue, 2),
                     'roas' => $this->ratio($purchaseValue, $spend),

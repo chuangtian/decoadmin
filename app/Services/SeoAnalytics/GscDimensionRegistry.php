@@ -63,11 +63,13 @@ class GscDimensionRegistry
         $ids = DB::table($table)->where('organization_id', $organizationId)->where('store_id', $storeId)
             ->whereIn($hashColumn, array_column($dimensions, $hashColumn))->pluck('id', $hashColumn);
 
-        return collect($records)->map(function (array $record) use ($ids, $hashColumn, $idColumn): array {
+        return collect($records)->map(function (array $record) use ($ids, $hashColumn, $labelColumn, $idColumn): array {
             $id = $ids->get((string) $record[$hashColumn]);
             if ($id === null) {
                 throw new RuntimeException("无法解析 GSC 维度 ID：{$hashColumn}");
             }
+
+            unset($record[$hashColumn], $record[$labelColumn]);
 
             return [...$record, $idColumn => (int) $id];
         })->all();

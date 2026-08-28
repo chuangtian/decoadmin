@@ -755,20 +755,20 @@ class NaturalTrafficPagesTest extends TestCase
         ));
         $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
             'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'blog',
-            'page_hash' => hash('sha256', $legacyBlogPage),
+            'page_id' => SeoGscPage::query()->sole()->id,
         ]);
         $this->assertDatabaseHas('seo_gsc_page_daily_metrics', [
             'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'total',
-            'page_hash' => hash('sha256', $legacyBlogPage), 'page_id' => SeoGscPage::query()->sole()->id,
+            'page_id' => SeoGscPage::query()->sole()->id,
         ]);
         $this->assertDatabaseHas('seo_gsc_query_daily_metrics', [
             'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'brand',
-            'query_hash' => hash('sha256', 'macfox'), 'query_id' => SeoGscQuery::query()->sole()->id,
+            'query_id' => SeoGscQuery::query()->sole()->id,
         ]);
-        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
+        $this->assertDatabaseMissing('seo_gsc_pages', [
             'store_id' => $store->id, 'page_hash' => hash('sha256', 'https://example.com/low-value'),
         ]);
-        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', [
+        $this->assertDatabaseMissing('seo_gsc_queries', [
             'store_id' => $store->id, 'query_hash' => hash('sha256', 'low value query'),
         ]);
         $this->assertDatabaseMissing('seo_gsc_search_type_daily_metrics', [
@@ -812,10 +812,10 @@ class NaturalTrafficPagesTest extends TestCase
         $this->assertSame(1, $result['queries']['deleted_rows']);
         $this->assertSame(1, $result['pages']['orphan_dimensions_deleted']);
         $this->assertSame(1, $result['queries']['orphan_dimensions_deleted']);
-        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', ['page' => 'https://example.com/retained']);
-        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', ['page' => 'https://example.com/pruned']);
-        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', ['query' => 'retained click']);
-        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', ['query' => 'pruned query']);
+        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', ['page_id' => SeoGscPage::query()->sole()->id]);
+        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', ['query_id' => SeoGscQuery::query()->sole()->id]);
+        $this->assertDatabaseMissing('seo_gsc_pages', ['page_hash' => hash('sha256', 'https://example.com/pruned')]);
+        $this->assertDatabaseMissing('seo_gsc_queries', ['query_hash' => hash('sha256', 'pruned query')]);
         $this->assertSame(1, SeoGscDailyMetric::query()->count());
         $this->assertSame(0, SeoGscSearchTypeDailyMetric::query()->count());
         $this->assertSame(0, SeoGscBreakdownDailyMetric::query()->count());
@@ -904,18 +904,30 @@ class NaturalTrafficPagesTest extends TestCase
 
     private function gscQuery(Organization $organization, Store $store, string $date, string $segment, string $query, int $clicks, int $impressions, float $position): void
     {
+        $dimension = SeoGscQuery::query()->firstOrCreate(
+            ['store_id' => $store->id, 'query_hash' => hash('sha256', $query)],
+            ['organization_id' => $organization->id, 'query' => $query],
+        );
         SeoGscQueryDailyMetric::query()->create([
             'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => $date, 'segment' => $segment,
-            'query_hash' => hash('sha256', $query), 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions,
+            'query_id' => $dimension->id, 'clicks' => $clicks, 'impressions' => $impressions,
             'average_position' => $position, 'synced_at' => now(),
         ]);
     }
 
     private function gscPage(Organization $organization, Store $store, string $date, string $segment, string $page, int $clicks, int $impressions, float $position): void
     {
+        $dimension = SeoGscPage::query()->firstOrCreate(
+            ['store_id' => $store->id, 'page_hash' => hash('sha256', $page)],
+            [
+                'organization_id' => $organization->id,
+                'page' => $page,
+                'is_blog' => str_contains(strtolower($page), '/blogs/'),
+            ],
+        );
         SeoGscPageDailyMetric::query()->create([
             'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => $date, 'segment' => $segment,
-            'page_hash' => hash('sha256', $page), 'page' => $page, 'clicks' => $clicks, 'impressions' => $impressions,
+            'page_id' => $dimension->id, 'clicks' => $clicks, 'impressions' => $impressions,
             'average_position' => $position, 'synced_at' => now(),
         ]);
     }

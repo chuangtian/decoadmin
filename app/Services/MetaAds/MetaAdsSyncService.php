@@ -152,7 +152,6 @@ class MetaAdsSyncService
                     'campaign',
                     $fetched[(int) $account->getKey()] ?? [],
                     $syncedAt,
-                    false,
                     'period',
                 );
             }
@@ -712,7 +711,6 @@ class MetaAdsSyncService
                     $level,
                     $rows,
                     $syncedAt,
-                    false,
                 );
             },
             false,
@@ -920,7 +918,6 @@ class MetaAdsSyncService
         string $level,
         array $records,
         mixed $syncedAt,
-        bool $hourly = false,
         string $aggregateGranularity = 'day',
     ): int {
         if (! in_array($aggregateGranularity, ['day', 'period'], true)) {
@@ -928,6 +925,7 @@ class MetaAdsSyncService
         }
 
         $rows = [];
+        $entities = [];
 
         foreach ($records as $record) {
             $entityId = $this->insightEntityId($record, $level);
@@ -937,23 +935,29 @@ class MetaAdsSyncService
                 continue;
             }
 
-            $granularity = $hourly ? 'hour' : $aggregateGranularity;
-            $hourlyRange = $hourly
-                ? $this->text($record['hourly_stats_aggregated_by_advertiser_time_zone'] ?? null, 32)
-                : '';
-            $hourStartAt = ! $hourly || $hourlyRange === null
-                ? null
-                : $this->hourStart($dateStart, $hourlyRange, $account->timezone_name ?: ($store->timezone ?: 'UTC'));
-            if ($hourly && ($hourlyRange === null || $hourStartAt === null)) {
-                continue;
-            }
-
             $actions = is_array($record['actions'] ?? null) ? $record['actions'] : [];
             $values = is_array($record['action_values'] ?? null) ? $record['action_values'] : [];
-            $costs = is_array($record['cost_per_action_type'] ?? null) ? $record['cost_per_action_type'] : [];
-            $purchaseRoas = is_array($record['purchase_roas'] ?? null) ? $record['purchase_roas'] : [];
-            $websitePurchaseRoas = is_array($record['website_purchase_roas'] ?? null) ? $record['website_purchase_roas'] : [];
-            $key = implode('|', [$level, $entityId, $dateStart, $dateStop, $granularity, $hourlyRange]);
+            $granularity = $aggregateGranularity;
+            $metaCampaignId = $this->text($record['campaign_id'] ?? null, 64);
+            $metaAdSetId = $this->text($record['adset_id'] ?? null, 64);
+            $metaAdId = $this->text($record['ad_id'] ?? null, 64);
+            $key = implode('|', [$level, $entityId, $dateStart, $dateStop, $granularity]);
+            $entityKey = implode('|', [$level, $entityId]);
+            $entities[$entityKey] = [
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->getKey(),
+                'level' => $level,
+                'entity_id' => $entityId,
+                'account_name' => $this->text($record['account_name'] ?? $account->name, 255),
+                'meta_campaign_id' => $metaCampaignId,
+                'campaign_name' => $this->text($record['campaign_name'] ?? null, 500),
+                'meta_ad_set_id' => $metaAdSetId,
+                'ad_set_name' => $this->text($record['adset_name'] ?? null, 500),
+                'meta_ad_id' => $metaAdId,
+                'ad_name' => $this->text($record['ad_name'] ?? null, 500),
+                'created_at' => $syncedAt,
+                'updated_at' => $syncedAt,
+            ];
             $rows[$key] = [
                 ...$this->scope($store, $account),
                 'level' => $level,
@@ -961,53 +965,37 @@ class MetaAdsSyncService
                 // Meta insight payloads return a numeric account_id while the account
                 // endpoint returns act_{id}. Persist one canonical value for filtering.
                 'account_external_id' => $account->meta_account_id,
-                'account_name' => $this->text($record['account_name'] ?? null, 255),
-                'meta_campaign_id' => $this->text($record['campaign_id'] ?? null, 64),
-                'campaign_name' => $this->text($record['campaign_name'] ?? null, 500),
-                'meta_ad_set_id' => $this->text($record['adset_id'] ?? null, 64),
-                'ad_set_name' => $this->text($record['adset_name'] ?? null, 500),
-                'meta_ad_id' => $this->text($record['ad_id'] ?? null, 64),
-                'ad_name' => $this->text($record['ad_name'] ?? null, 500),
+                'meta_campaign_id' => $metaCampaignId,
+                'meta_ad_set_id' => $metaAdSetId,
+                'meta_ad_id' => $metaAdId,
                 'date_start' => $dateStart,
                 'date_stop' => $dateStop,
                 'granularity' => $granularity,
-                'hourly_range' => $hourlyRange,
-                'hour_start_at' => $hourStartAt,
-                'hour_end_at' => $hourStartAt?->addHour()->subSecond(),
                 'spend' => $this->number($record['spend'] ?? 0) ?? '0',
                 'impressions' => $this->unsignedInteger($record['impressions'] ?? 0) ?? 0,
                 'reach' => $this->unsignedInteger($record['reach'] ?? 0) ?? 0,
                 'clicks' => $this->unsignedInteger($record['clicks'] ?? 0) ?? 0,
-                'unique_clicks' => $this->unsignedInteger($record['unique_clicks'] ?? 0) ?? 0,
                 'inline_link_clicks' => $this->unsignedInteger($record['inline_link_clicks'] ?? 0) ?? 0,
-                'ctr' => $this->number($record['ctr'] ?? null),
-                'unique_ctr' => $this->number($record['unique_ctr'] ?? null),
-                'cpc' => $this->number($record['cpc'] ?? null),
-                'cpm' => $this->number($record['cpm'] ?? null),
-                'cpp' => $this->number($record['cpp'] ?? null),
                 'frequency' => $this->number($record['frequency'] ?? null),
                 'purchases' => $this->actionMetric($actions, $this->purchaseTypes()) ?? '0',
                 'purchase_value' => $this->actionMetric($values, $this->purchaseTypes()) ?? '0',
                 'add_to_cart' => $this->actionMetric($actions, ['omni_add_to_cart', 'add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart']) ?? '0',
                 'initiate_checkout' => $this->actionMetric($actions, ['omni_initiated_checkout', 'initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout']) ?? '0',
-                'leads' => $this->actionMetric($actions, ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead']) ?? '0',
-                'landing_page_views' => $this->actionMetric($actions, ['landing_page_view']) ?? '0',
-                'cost_per_purchase' => $this->actionMetric($costs, $this->purchaseTypes()),
-                'purchase_roas' => $this->actionMetric($websitePurchaseRoas, $this->purchaseTypes())
-                    ?? $this->actionMetric($purchaseRoas, $this->purchaseTypes())
-                    ?? $this->firstActionValue($websitePurchaseRoas)
-                    ?? $this->firstActionValue($purchaseRoas),
-                'outbound_clicks' => null,
-                'actions' => null,
-                'action_values' => null,
-                'cost_per_action_type' => null,
-                'purchase_roas_breakdown' => null,
-                'website_purchase_roas' => null,
-                'raw_payload' => '{}',
                 'synced_at' => $syncedAt,
                 'created_at' => $syncedAt,
                 'updated_at' => $syncedAt,
             ];
+        }
+
+        if ($entities !== []) {
+            DB::table('meta_ad_insight_entities')->upsert(
+                array_values($entities),
+                ['organization_id', 'store_id', 'level', 'entity_id'],
+                [
+                    'account_name', 'meta_campaign_id', 'campaign_name', 'meta_ad_set_id',
+                    'ad_set_name', 'meta_ad_id', 'ad_name', 'updated_at',
+                ],
+            );
         }
 
         $this->upsertRows(
@@ -1015,17 +1003,13 @@ class MetaAdsSyncService
             $rows,
             [
                 'organization_id', 'store_id', 'level', 'entity_id', 'date_start', 'date_stop',
-                'granularity', 'hourly_range',
+                'granularity',
             ],
             [
-                'meta_ad_account_id', 'account_external_id', 'account_name', 'meta_campaign_id',
-                'campaign_name', 'meta_ad_set_id', 'ad_set_name', 'meta_ad_id', 'ad_name',
-                'hour_start_at', 'hour_end_at',
-                'spend', 'impressions', 'reach', 'clicks', 'unique_clicks', 'inline_link_clicks',
-                'ctr', 'unique_ctr', 'cpc', 'cpm', 'cpp', 'frequency', 'purchases', 'purchase_value',
-                'add_to_cart', 'initiate_checkout', 'leads', 'landing_page_views', 'cost_per_purchase',
-                'purchase_roas', 'outbound_clicks', 'actions', 'action_values', 'cost_per_action_type',
-                'purchase_roas_breakdown', 'website_purchase_roas', 'raw_payload', 'synced_at', 'updated_at',
+                'meta_ad_account_id', 'account_external_id', 'meta_campaign_id', 'meta_ad_set_id',
+                'meta_ad_id', 'spend', 'impressions', 'reach', 'clicks', 'inline_link_clicks',
+                'frequency', 'purchases', 'purchase_value', 'add_to_cart', 'initiate_checkout',
+                'synced_at', 'updated_at',
             ],
         );
 
@@ -1059,7 +1043,6 @@ class MetaAdsSyncService
                 $level,
                 $rows,
                 $syncedAt,
-                false,
             );
         };
 
@@ -1981,58 +1964,6 @@ class MetaAdsSyncService
         }));
     }
 
-    /**
-     * @param  list<array<string, mixed>>  $records
-     * @return list<array<string, mixed>>
-     */
-    private function forPreviousAccountHour(
-        array $records,
-        MetaAdAccount $account,
-        Store $store,
-        CarbonImmutable $since,
-        CarbonImmutable $until,
-    ): array {
-        if (! $since->addHour()->equalTo($until)) {
-            return [];
-        }
-
-        $timezone = $account->timezone_name ?: ($store->timezone ?: 'UTC');
-
-        try {
-            $accountHour = $since->setTimezone($timezone);
-        } catch (Throwable) {
-            $accountHour = $since->utc();
-        }
-
-        $expectedDate = $accountHour->toDateString();
-        $hour = $accountHour->format('H');
-        $expectedRange = "{$hour}:00:00 - {$hour}:59:59";
-
-        return array_values(array_filter(
-            $records,
-            fn (array $record): bool => ($record['date_start'] ?? null) === $expectedDate
-                && ($record['date_stop'] ?? null) === $expectedDate
-                && ($record['hourly_stats_aggregated_by_advertiser_time_zone'] ?? null) === $expectedRange,
-        ));
-    }
-
-    private function hourStart(string $date, string $hourlyRange, string $timezone): ?CarbonImmutable
-    {
-        if (! preg_match('/^(\d{2}):00:00 - \d{2}:59:59$/', $hourlyRange, $matches)) {
-            return null;
-        }
-
-        try {
-            return CarbonImmutable::createFromFormat(
-                'Y-m-d H:i:s',
-                "{$date} {$matches[1]}:00:00",
-                $timezone,
-            )->utc();
-        } catch (Throwable) {
-            return null;
-        }
-    }
-
     private function pruneBefore(Store $store, CarbonImmutable $cutoff): void
     {
         $organizationId = (int) $store->organization_id;
@@ -2124,18 +2055,6 @@ class MetaAdsSyncService
                 if (is_array($action) && ($action['action_type'] ?? null) === $type) {
                     return $this->number($action['value'] ?? null);
                 }
-            }
-        }
-
-        return null;
-    }
-
-    /** @param list<array<string, mixed>> $actions */
-    private function firstActionValue(array $actions): ?string
-    {
-        foreach ($actions as $action) {
-            if (is_array($action) && ($value = $this->number($action['value'] ?? null)) !== null) {
-                return $value;
             }
         }
 
