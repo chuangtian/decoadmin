@@ -6,6 +6,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const requiredFiles = [
   'AGENTS.md',
   'README.md',
+  'TEST_RELEASE.md',
   'package.json',
   'shopify.app.toml',
   'shopify.app.local.toml',
@@ -25,6 +26,10 @@ const requiredFiles = [
   'extensions/web-pixel/package.json',
   'extensions/web-pixel/shopify.extension.toml',
   'extensions/web-pixel/src/index.js',
+  'scripts/test-config-contract.mjs',
+  'scripts/test-environment-guard.mjs',
+  'scripts/run-test-shopify-action.mjs',
+  'scripts/release-safety.test.mjs',
 ];
 const failures = [];
 
@@ -39,6 +44,9 @@ check(packageJson.private === true, 'package must remain private');
 check(typeof scripts.check === 'string', 'check script is required');
 check(typeof scripts['check:project'] === 'string', 'check:project script is required');
 check(typeof scripts.test === 'string', 'test script is required');
+check(typeof scripts['validate:test'] === 'string', 'validate:test script is required');
+check(typeof scripts['build:test'] === 'string', 'build:test script is required');
+check(typeof scripts['deploy:test'] === 'string', 'deploy:test script is required');
 
 for (const [name, command] of Object.entries(scripts)) {
   check(!/local/i.test(name), `Local script is forbidden: ${name}`);
@@ -59,15 +67,21 @@ for (const absolutePath of files) {
   if (relativePath === 'package-lock.json') continue;
   const contents = await readFile(absolutePath, 'utf8').catch(() => '');
   const isValidator = relativePath === 'scripts/validate-project.mjs';
+  const isReleaseSafety = [
+    'scripts/test-environment-guard.mjs',
+    'scripts/release-safety.test.mjs',
+  ].includes(relativePath);
 
   check(!/trycloudflare\.com/i.test(contents), `Temporary Cloudflare URL is forbidden: ${relativePath}`);
-  if (!['AGENTS.md', 'README.md', 'scripts/validate-project.mjs'].includes(relativePath)) {
+  if (!['AGENTS.md', 'README.md', 'TEST_RELEASE.md', 'scripts/validate-project.mjs'].includes(relativePath)) {
     if (relativePath === 'extensions/app-home/src/runtime.mjs') {
       check(/macfoxebike\.myshopify\.com/i.test(contents), 'App Home runtime must preserve the permanent denied shop guard');
-    } else if (relativePath !== 'extensions/app-home/src/runtime.test.mjs') {
+    } else if (relativePath !== 'extensions/app-home/src/runtime.test.mjs' && !isReleaseSafety) {
       check(!/macfoxebike/i.test(contents), `Denied shop may appear only in the dedicated safety guard: ${relativePath}`);
     }
-    check(!/macfox-test-app/i.test(contents), `Test shop must not be hardcoded in runtime files: ${relativePath}`);
+    if (!isReleaseSafety) {
+      check(!/macfox-test-app/i.test(contents), `Test shop must not be hardcoded in runtime files: ${relativePath}`);
+    }
   }
   if (!isValidator) {
     check(!/shopify-apps\/(student-discount|instagram-feed|commerce-hub)/i.test(contents), `Another Shopify App path is forbidden: ${relativePath}`);

@@ -12,6 +12,7 @@ class ShopifyPersonalizationProjectTest extends TestCase
         $required = [
             'AGENTS.md',
             'README.md',
+            'TEST_RELEASE.md',
             'package.json',
             'shopify.app.toml',
             'shopify.app.local.toml',
@@ -31,6 +32,10 @@ class ShopifyPersonalizationProjectTest extends TestCase
             'extensions/web-pixel/package.json',
             'extensions/web-pixel/shopify.extension.toml',
             'extensions/web-pixel/src/index.js',
+            'scripts/test-config-contract.mjs',
+            'scripts/test-environment-guard.mjs',
+            'scripts/run-test-shopify-action.mjs',
+            'scripts/release-safety.test.mjs',
         ];
 
         foreach ($required as $file) {
@@ -63,15 +68,21 @@ class ShopifyPersonalizationProjectTest extends TestCase
             if (! $file->isFile()
                 || str_starts_with($relative, 'node_modules/')
                 || str_starts_with($relative, '.shopify/')
-                || in_array($file->getFilename(), ['AGENTS.md', 'README.md', 'package-lock.json', 'validate-project.mjs'], true)) {
+                || in_array($file->getFilename(), ['AGENTS.md', 'README.md', 'TEST_RELEASE.md', 'package-lock.json', 'validate-project.mjs'], true)) {
                 continue;
             }
+            $releaseSafety = in_array($relative, [
+                'scripts/test-environment-guard.mjs',
+                'scripts/release-safety.test.mjs',
+            ], true);
 
             $contents = (string) file_get_contents($file->getPathname());
-            $this->assertStringNotContainsString('macfox-test-app', $contents, $relative);
+            if (! $releaseSafety) {
+                $this->assertStringNotContainsString('macfox-test-app', $contents, $relative);
+            }
             if ($relative === 'extensions/app-home/src/runtime.mjs') {
                 $this->assertStringContainsString('macfoxebike.myshopify.com', $contents, $relative);
-            } elseif ($relative !== 'extensions/app-home/src/runtime.test.mjs') {
+            } elseif ($relative !== 'extensions/app-home/src/runtime.test.mjs' && ! $releaseSafety) {
                 $this->assertStringNotContainsString('macfoxebike', $contents, $relative);
             }
             $this->assertStringNotContainsString('trycloudflare.com', $contents, $relative);
