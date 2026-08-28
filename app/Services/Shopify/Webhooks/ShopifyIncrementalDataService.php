@@ -13,6 +13,7 @@ use App\Models\WebhookEvent;
 use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\Customers\ShopifyCustomerDataService;
 use App\Services\Shopify\Orders\ShopifyOrderDataService;
+use App\Services\Shopify\Products\ShopifyCollectionDataService;
 use App\Services\Shopify\Products\ShopifyProductDataService;
 use Carbon\CarbonImmutable;
 
@@ -22,6 +23,7 @@ class ShopifyIncrementalDataService
         private ShopifyProductDataService $products,
         private ShopifyOrderDataService $orders,
         private ShopifyCustomerDataService $customers,
+        private ShopifyCollectionDataService $collections,
         private ?AnalyticsCacheVersionService $analyticsCache = null,
     ) {}
 
@@ -50,17 +52,46 @@ class ShopifyIncrementalDataService
 
     private function upsertProduct(Store $store, array $payload): void
     {
-        $currencyVariants = collect($payload['variants'] ?? [])->filter(fn ($variant) => is_array($variant))->map(fn (array $variant) => [
-            'id' => $this->gid('ProductVariant', $variant['id'] ?? null),
-            'title' => (string) ($variant['title'] ?? 'Default Title'),
-            'sku' => $variant['sku'] ?? null,
-            'price' => (string) ($variant['price'] ?? '0'),
-            'inventoryItem' => isset($variant['inventory_item_id'])
-                ? ['id' => $this->gid('InventoryItem', $variant['inventory_item_id'])]
-                : null,
-        ])->values()->all();
+        $images = collect($payload['images'] ?? [])
+            ->filter(fn ($image) => is_array($image) && isset($image['id']))
+            ->keyBy(fn (array $image): string => (string) $image['id']);
+        $optionNames = collect($payload['options'] ?? [])
+            ->filter(fn ($option) => is_array($option) && isset($option['position']) && is_string($option['name'] ?? null))
+            ->mapWithKeys(fn (array $option): array => [(int) $option['position'] => trim($option['name'])]);
+        $currencyVariants = collect($payload['variants'] ?? [])->filter(fn ($variant) => is_array($variant))->map(function (array $variant) use ($images, $optionNames): array {
+            $node = [
+                'id' => $this->gid('ProductVariant', $variant['id'] ?? null),
+                'title' => (string) ($variant['title'] ?? 'Default Title'),
+                'sku' => $variant['sku'] ?? null,
+                'price' => (string) ($variant['price'] ?? '0'),
+                'inventoryItem' => isset($variant['inventory_item_id'])
+                    ? ['id' => $this->gid('InventoryItem', $variant['inventory_item_id'])]
+                    : null,
+            ];
+            if (array_key_exists('compare_at_price', $variant)) {
+                $node['compareAtPrice'] = $variant['compare_at_price'];
+            }
+            if (array_key_exists('available', $variant)) {
+                $node['availableForSale'] = (bool) $variant['available'];
+            }
+            if ($optionNames->isNotEmpty()) {
+                $node['selectedOptions'] = $optionNames
+                    ->map(fn (string $name, int $position): ?array => isset($variant["option{$position}"])
+                        ? ['name' => $name, 'value' => (string) $variant["option{$position}"]]
+                        : null)
+                    ->filter()
+                    ->values()
+                    ->all();
+            }
+            if (array_key_exists('image_id', $variant)) {
+                $image = $variant['image_id'] !== null ? $images->get((string) $variant['image_id']) : null;
+                $node['media'] = ['nodes' => $image ? [$this->mediaImage($image)] : []];
+            }
 
-        $this->products->upsert($store, [
+            return $node;
+        })->values()->all();
+
+        $productNode = [
             'id' => $this->gid('Product', $payload['id'] ?? null),
             'title' => (string) ($payload['title'] ?? ''),
             'handle' => (string) ($payload['handle'] ?? ''),
@@ -68,7 +99,25 @@ class ShopifyIncrementalDataService
             'vendor' => $payload['vendor'] ?? null,
             'productType' => $payload['product_type'] ?? null,
             'description' => $payload['body_html'] ?? null,
-        ], $currencyVariants);
+        ];
+        if (array_key_exists('tags', $payload)) {
+            $productNode['tags'] = is_array($payload['tags'])
+                ? $payload['tags']
+                : array_values(array_filter(array_map('trim', explode(',', (string) $payload['tags']))));
+        }
+        if (array_key_exists('created_at', $payload)) {
+            $productNode['createdAt'] = $payload['created_at'];
+        }
+        if (array_key_exists('published_at', $payload)) {
+            $productNode['publishedAt'] = $payload['published_at'];
+        }
+        if (array_key_exists('image', $payload)) {
+            $productNode['featuredMedia'] = is_array($payload['image'])
+                ? $this->mediaImage($payload['image'])
+                : null;
+        }
+
+        $this->products->upsert($store, $productNode, $currencyVariants);
     }
 
     private function upsertOrder(Store $store, array $payload): void
@@ -165,7 +214,29 @@ class ShopifyIncrementalDataService
 
     private function deleteProduct(int $storeId, array $payload): void
     {
-        Product::query()->where('store_id', $storeId)->where('shopify_product_id', $this->numericId($payload['id'] ?? null))->delete();
+        $store = Store::query()->findOrFail($storeId);
+        $shopifyProductId = $this->numericId($payload['id'] ?? null);
+        $this->collections->deleteProductMemberships($store, $shopifyProductId);
+        Product::query()
+            ->forOrganization($store->organization_id)
+            ->forStore($store)
+            ->where('shopify_product_id', $shopifyProductId)
+            ->delete();
+    }
+
+    /** @param array<string, mixed> $image
+     * @return array{alt: mixed, image: array{url: mixed, width: mixed, height: mixed}}
+     */
+    private function mediaImage(array $image): array
+    {
+        return [
+            'alt' => $image['alt'] ?? null,
+            'image' => [
+                'url' => $image['url'] ?? $image['src'] ?? null,
+                'width' => $image['width'] ?? null,
+                'height' => $image['height'] ?? null,
+            ],
+        ];
     }
 
     private function deleteCustomer(int $storeId, array $payload): void

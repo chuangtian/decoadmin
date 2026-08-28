@@ -7,15 +7,12 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'organization_id', 'store_id', 'shopify_product_id', 'title', 'handle', 'status',
-    'vendor', 'product_type', 'description', 'tags', 'created_at_shopify', 'published_at_shopify',
-    'online_store_url', 'featured_image_url', 'featured_image_alt', 'featured_image_width',
-    'featured_image_height', 'synced_at',
+    'organization_id', 'store_id', 'shopify_collection_id', 'title', 'handle',
+    'sort_order', 'updated_at_shopify', 'sync_batch', 'synced_at',
 ])]
-class Product extends Model
+class ProductCollection extends Model
 {
     public function organization(): BelongsTo
     {
@@ -27,14 +24,9 @@ class Product extends Model
         return $this->belongsTo(Store::class);
     }
 
-    public function variants(): HasMany
+    public function products(): BelongsToMany
     {
-        return $this->hasMany(ProductVariant::class);
-    }
-
-    public function collections(): BelongsToMany
-    {
-        return $this->belongsToMany(ProductCollection::class, 'product_collection_memberships')
+        return $this->belongsToMany(Product::class, 'product_collection_memberships')
             ->withPivot(['organization_id', 'store_id', 'shopify_product_id'])
             ->withTimestamps();
     }
@@ -52,12 +44,8 @@ class Product extends Model
     protected function casts(): array
     {
         return [
-            'shopify_product_id' => 'string',
-            'tags' => 'array',
-            'created_at_shopify' => 'datetime',
-            'published_at_shopify' => 'datetime',
-            'featured_image_width' => 'integer',
-            'featured_image_height' => 'integer',
+            'shopify_collection_id' => 'string',
+            'updated_at_shopify' => 'datetime',
             'synced_at' => 'datetime',
         ];
     }
