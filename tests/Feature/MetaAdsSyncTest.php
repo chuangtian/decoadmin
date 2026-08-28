@@ -16,6 +16,7 @@ use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Services\MetaAds\MetaAdsApiClient;
+use App\Services\MetaAds\MetaAdsInsightOptimizationService;
 use App\Services\MetaAds\MetaAdsRateLimitService;
 use App\Services\MetaAds\MetaAdsSyncService;
 use App\Services\StoreBusinessCredentialService;
@@ -94,6 +95,8 @@ class MetaAdsSyncTest extends TestCase
         $this->assertSame('act_100', MetaAdInsight::query()->where('level', 'account')->value('account_external_id'));
         $this->assertEquals(3, MetaAdInsight::query()->where('level', 'account')->value('purchases'));
         $this->assertEquals(150, MetaAdInsight::query()->where('level', 'account')->value('purchase_value'));
+        $this->assertSame([], MetaAdInsight::query()->where('level', 'account')->sole()->raw_payload);
+        $this->assertNull(MetaAdInsight::query()->where('level', 'account')->value('actions'));
 
         $job = SyncJob::query()->sole();
         $this->assertSame('completed', $job->status);
@@ -119,20 +122,14 @@ class MetaAdsSyncTest extends TestCase
 
         $this->assertSame('incremental', $incremental['mode']);
         $this->assertDatabaseCount('meta_ad_campaigns', 2);
-        $this->assertDatabaseCount('meta_ad_insights', 8);
+        $this->assertDatabaseCount('meta_ad_insights', 4);
         $this->assertDatabaseCount('sync_jobs', 2);
-        $this->assertDatabaseHas('meta_ad_insights', [
-            'level' => 'account',
-            'granularity' => 'hour',
-            'hourly_range' => '04:00:00 - 04:59:59',
-            'hour_start_at' => '2026-08-22 11:00:00',
-            'hour_end_at' => '2026-08-22 11:59:59',
-        ]);
+        $this->assertDatabaseMissing('meta_ad_insights', ['granularity' => 'hour']);
         $incrementalJob = SyncJob::query()->latest('id')->firstOrFail();
         $this->assertSame('2026-08-22 11:00:00', $incrementalJob->since_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-22 12:00:00', $incrementalJob->until_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertNotNull(StoreSyncState::query()->sole()->last_incremental_sync_at);
-        $this->assertTrue(Http::recorded()->contains(function (array $entry): bool {
+        $this->assertFalse(Http::recorded()->contains(function (array $entry): bool {
             /** @var Request $request */
             $request = $entry[0];
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
@@ -438,7 +435,7 @@ class MetaAdsSyncTest extends TestCase
         }));
     }
 
-    public function test_priority_sync_makes_seven_days_ready_then_queues_backfill_and_hourly_run_reconciles_three_days(): void
+    public function test_priority_sync_makes_seven_days_ready_then_queues_backfill_and_daily_run_reconciles_three_days(): void
     {
         Queue::fake();
         config()->set('services.meta_ads.history_months', 6);
@@ -483,7 +480,7 @@ class MetaAdsSyncTest extends TestCase
             ->count());
         $this->assertTrue(MetaAdSyncShard::query()
             ->where('sync_job_id', $incrementalJob->id)
-            ->where('mode', 'incremental')
+            ->where('mode', 'incremental_day')
             ->where('kind', 'insights')
             ->get()
             ->every(fn (MetaAdSyncShard $shard): bool => $shard->since_at?->utc()->format('Y-m-d H:i:s') === '2026-08-22 11:00:00'));
@@ -505,7 +502,7 @@ class MetaAdsSyncTest extends TestCase
         );
     }
 
-    public function test_manual_incremental_sync_only_queues_the_previous_hour_without_reconciliation(): void
+    public function test_manual_incremental_sync_only_queues_the_current_day_without_reconciliation(): void
     {
         $store = $this->configuredStore(
             'Manual Hour Org',
@@ -553,9 +550,73 @@ class MetaAdsSyncTest extends TestCase
             ->count());
         $this->assertSame(4, MetaAdSyncShard::query()
             ->where('sync_job_id', $job->id)
-            ->where('mode', 'incremental')
+            ->where('mode', 'incremental_day')
             ->where('kind', 'insights')
             ->count());
+    }
+
+    public function test_meta_insight_optimizer_removes_hourly_rows_and_redundant_json(): void
+    {
+        $store = $this->configuredStore(
+            'Optimize Org',
+            'optimize-meta-org',
+            'Optimize Store',
+            'optimize-meta.myshopify.com',
+            'optimize-token',
+        );
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_optimize',
+            'name' => 'Optimize Account',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $base = [
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'meta_ad_account_id' => $account->id,
+            'level' => 'account',
+            'account_external_id' => 'act_optimize',
+            'account_name' => 'Optimize Account',
+            'date_start' => '2026-08-22',
+            'date_stop' => '2026-08-22',
+            'synced_at' => now(),
+        ];
+        MetaAdInsight::query()->create([
+            ...$base,
+            'entity_id' => 'act_optimize',
+            'granularity' => 'day',
+            'raw_payload' => ['actions' => [['action_type' => 'purchase', 'value' => '1']]],
+            'actions' => [['action_type' => 'purchase', 'value' => '1']],
+        ]);
+        MetaAdInsight::query()->create([
+            ...$base,
+            'entity_id' => 'act_optimize_hour',
+            'granularity' => 'hour',
+            'hourly_range' => '04:00:00 - 04:59:59',
+            'hour_start_at' => '2026-08-22 11:00:00',
+            'hour_end_at' => '2026-08-22 11:59:59',
+            'raw_payload' => ['hourly' => true],
+        ]);
+
+        $this->artisan('meta-ads:optimize-insights', [
+            '--store' => $store->id,
+            '--dry-run' => true,
+        ])->assertSuccessful();
+        $this->assertSame(2, MetaAdInsight::query()->count());
+
+        $result = app(MetaAdsInsightOptimizationService::class)->optimize($store->id, 1000);
+
+        $this->assertSame(1, $result['hourly_deleted']);
+        $this->assertSame(1, $result['json_sanitized']);
+        $this->assertSame(1, $result['remaining_rows']);
+        $retained = MetaAdInsight::query()->sole();
+        $this->assertSame('day', $retained->granularity);
+        $this->assertSame([], $retained->raw_payload);
+        $this->assertNull($retained->actions);
+        $this->assertSame(0, app(MetaAdsInsightOptimizationService::class)->estimate($store->id)['redundant_json_rows']);
     }
 
     public function test_queued_shard_before_current_year_completes_without_requesting_meta(): void
