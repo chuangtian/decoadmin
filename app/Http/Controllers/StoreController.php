@@ -117,7 +117,10 @@ class StoreController extends Controller
         $apps = ShopifyApp::query()
             ->where(function ($query) use ($store): void {
                 $query->where('organization_id', $store->organization_id)
-                    ->orWhere('handle', (string) config('shopify.app_handle'));
+                    ->orWhereIn('handle', array_values(array_unique([
+                        (string) config('shopify.app_handle'),
+                        (string) config('aftership.active.handle'),
+                    ])));
             })
             ->orderBy('name')
             ->get()

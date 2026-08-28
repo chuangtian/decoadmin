@@ -90,6 +90,337 @@ class ReputationMonitoringTest extends TestCase
                 ->missing('dashboard.ai'));
     }
 
+    public function test_reviews_records_support_all_sources_and_platform_filters_without_cross_store_or_sensitive_data(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'record-sources');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Reputation Source Store',
+            'shopify_domain' => 'other-reputation-source.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'trustpilot', 'current-review', ['content' => 'Current review']);
+        $this->mention($organization, $store, 'reddit', 'current-reddit', [
+            'content' => 'Current Reddit record',
+            'metrics' => ['views' => 100, 'comments' => 4, 'upvotes' => 10],
+            'source_payloads_encrypted' => ['source' => ['private_note' => 'must-not-leak']],
+        ]);
+        $this->mention($organization, $store, 'threads', 'current-threads', [
+            'content' => 'Current Threads record',
+            'metrics' => ['likes' => 10, 'replies' => 2, 'reposts' => 1, 'shares' => 1],
+        ]);
+        $this->mention($organization, $otherStore, 'reddit', 'other-store-reddit', ['content' => 'Must not leak']);
+
+        $filters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews'];
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', $filters))
+            ->assertOk()
+            ->assertDontSee('must-not-leak')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.schema', 'reputation-overview-v1')
+                ->where('dashboard.records.total', 3)
+                ->has('dashboard.records.data', 3)
+                ->missing('dashboard.analysis'));
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', [...$filters, 'source' => 'reddit']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.filters.tab', 'reviews')
+                ->where('dashboard.filters.source', 'reddit')
+                ->where('dashboard.records.total', 1)
+                ->has('dashboard.records.data', 1)
+                ->where('dashboard.records.data.0.source', 'reddit')
+                ->missing('dashboard.records.data.0.source_payloads')
+                ->missing('dashboard.records.data.0.source_payloads_encrypted'));
+
+        foreach (['reddit', 'threads'] as $tab) {
+            $this->actingAs($user)
+                ->withSession($this->contextSession($organization, $store))
+                ->get(route('reputation.overview', [...$filters, 'tab' => $tab, 'source' => null]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('dashboard.records.total', 1)
+                    ->where('dashboard.records.data.0.source', $tab));
+        }
+    }
+
+    public function test_review_model_stats_include_all_website_models_in_selected_period_and_store_scope(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'review-models');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Review Model Store',
+            'shopify_domain' => 'other-review-model.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'website', 'x1-first', [
+            'model_name' => 'macfox-x1',
+            'rating' => 5,
+            'published_at' => '2026-08-03 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'x1-case-insensitive', [
+            'model_name' => ' MACFOX-X1 ',
+            'rating' => 3,
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'trustpilot', 'trustpilot-model-excluded', [
+            'model_name' => 'trustpilot-model',
+            'rating' => 5,
+            'published_at' => '2026-08-04 13:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'x7', [
+            'model_name' => 'macfox-x7',
+            'rating' => 4,
+            'published_at' => '2026-08-05 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'x1s-x-bs-zay', [
+            'model_name' => 'x1s-x-bs-zay',
+            'rating' => 2,
+            'published_at' => '2026-08-06 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'x2', [
+            'model_name' => 'macfox-x2',
+            'rating' => 5,
+            'published_at' => '2026-08-07 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'm16', [
+            'model_name' => 'macfox-m16-ebike',
+            'rating' => 1,
+            'published_at' => '2026-08-08 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'excluded-product', [
+            'model_name' => 'shipping-protection',
+            'rating' => 5,
+            'published_at' => '2026-08-09 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'not-a-review', [
+            'model_name' => 'macfox-x2',
+            'rating' => null,
+            'published_at' => '2026-08-10 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'website', 'ai-payload-only', [
+            'model_name' => 'another-product',
+            'rating' => 5,
+            'source_payloads_encrypted' => [[
+                'AI标签' => 'macfox-x1',
+                '帖子类型' => 'must-never-classify-model',
+            ]],
+            'published_at' => '2026-08-11 12:00:00',
+        ]);
+        $this->mention($organization, $otherStore, 'website', 'other-store-x1', [
+            'model_name' => 'macfox-x1',
+            'rating' => 1,
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
+
+        $this->mention($organization, $store, 'website', 'previous-x1', [
+            'model_name' => 'macfox-x1',
+            'rating' => 4,
+            'published_at' => '2026-07-03 12:00:00',
+        ]);
+        foreach ([4, 2] as $index => $rating) {
+            $this->mention($organization, $store, 'website', "previous-x7-{$index}", [
+                'model_name' => 'macfox-x7',
+                'rating' => $rating,
+                'published_at' => '2026-07-0'.(4 + $index).' 12:00:00',
+            ]);
+        }
+        $this->mention($organization, $store, 'website', 'previous-x2', [
+            'model_name' => 'macfox-x2',
+            'rating' => 3,
+            'published_at' => '2026-07-06 12:00:00',
+        ]);
+        foreach ([2, 4] as $index => $rating) {
+            $this->mention($organization, $store, 'website', "custom-m16-{$index}", [
+                'model_name' => 'macfox-m16-ebike',
+                'rating' => $rating,
+                'published_at' => '2026-06-0'.(5 + $index).' 12:00:00',
+            ]);
+        }
+
+        $baseFilters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews'];
+        $withoutComparison = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'none']);
+        $this->assertNull($withoutComparison['comparison']);
+        $this->assertSame([
+            'macfox-x1',
+            'another-product',
+            'macfox-m16-ebike',
+            'macfox-x2',
+            'macfox-x7',
+            'shipping-protection',
+            'x1s-x-bs-zay',
+        ], collect($withoutComparison['models'])->pluck('key')->all());
+        $this->assertSame(8, collect($withoutComparison['models'])->sum('count'));
+        $this->assertSame([
+            'model' => 'macfox-x1',
+            'key' => 'macfox-x1',
+            'count' => 2,
+            'average_rating' => 4.0,
+        ], $withoutComparison['models'][0]);
+        $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => ! array_key_exists('change_percent', $model)
+            && ! array_key_exists('previous_count', $model)
+            && ! array_key_exists('difference', $model)));
+
+        $previous = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'previous']);
+        $this->assertSame($withoutComparison['models'], $previous['models']);
+        $this->assertStringNotContainsString(
+            'must-never-classify-model',
+            json_encode($previous['models'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        );
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', [...$baseFilters, 'comparison' => 'previous']))
+            ->assertOk()
+            ->assertDontSee('must-never-classify-model')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.models.0.key', 'macfox-x1')
+                ->where('dashboard.models.0.count', 2)
+                ->where('dashboard.models.6.key', 'x1s-x-bs-zay')
+                ->missing('dashboard.models.0.change_percent'));
+    }
+
+    public function test_reddit_topics_use_only_current_store_period_content_and_return_stable_weekly_aggregation(): void
+    {
+        [$user, $organization, $store] = $this->context('operator', 'reddit-topics');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Reddit Topic Store',
+            'shopify_domain' => 'other-reddit-topic.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+        $otherOrganization = Organization::query()->create([
+            'name' => 'Other Reddit Topic Organization',
+            'code' => 'other-reddit-topic-organization',
+        ]);
+        $otherOrganizationStore = $otherOrganization->stores()->create([
+            'name' => 'Other Organization Reddit Store',
+            'shopify_domain' => 'other-organization-reddit.myshopify.com',
+            'status' => 'active',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->mention($organization, $store, 'reddit', 'purchase-one', [
+            'title' => 'Should I buy X1 or X2?',
+            'content' => 'Looking for a comparison before purchase.',
+            'metrics' => ['views' => 100, 'comments' => 4, 'upvotes' => 10],
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'purchase-two', [
+            'title' => 'Which bike is worth buying?',
+            'metrics' => ['views' => 300, 'comments' => 6, 'upvotes' => 30],
+            'published_at' => '2026-08-05 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'technical', [
+            'title' => 'Battery motor fault, please help',
+            'metrics' => ['views' => 90, 'comments' => 5, 'upvotes' => 5],
+            'source_payloads_encrypted' => [[
+                '帖子类型' => '购买建议 / 对比',
+                '目标关键词' => 'must-never-drive-topic',
+            ]],
+            'published_at' => '2026-08-06 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'complaint', [
+            'content' => 'Terrible customer service complaint and refund experience.',
+            'metrics' => ['views' => 50, 'comments' => 8, 'upvotes' => 2],
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'community', [
+            'content' => 'Community question: anyone have tips?',
+            'metrics' => ['views' => 40, 'comments' => 3, 'upvotes' => 6],
+            'published_at' => '2026-08-13 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'lifestyle', [
+            'content' => 'Weekend trail ride photo showcase.',
+            'metrics' => ['views' => 70, 'comments' => 1, 'upvotes' => 12],
+            'published_at' => '2026-08-19 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'other', [
+            'content' => 'Quarterly update.',
+            'metrics' => ['views' => 10, 'comments' => 0, 'upvotes' => 0],
+            'published_at' => '2026-08-20 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'threads', 'threads-excluded', [
+            'content' => 'Should I buy this bike?',
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'previous-period', [
+            'content' => 'Should I buy this older bike?',
+            'published_at' => '2026-07-31 12:00:00',
+        ]);
+        $this->mention($organization, $store, 'reddit', 'inactive', [
+            'content' => 'Should I buy this inactive bike?',
+            'is_active' => false,
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($organization, $otherStore, 'reddit', 'other-store', [
+            'content' => 'Should I buy the other store bike?',
+            'metrics' => ['views' => 99999, 'comments' => 999, 'upvotes' => 999],
+            'published_at' => '2026-08-04 12:00:00',
+        ]);
+        $this->mention($otherOrganization, $otherOrganizationStore, 'reddit', 'other-organization', [
+            'content' => 'Terrible complaint from another organization.',
+            'published_at' => '2026-08-12 12:00:00',
+        ]);
+
+        $filters = ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reddit'];
+        $dashboard = app(ReputationDashboardService::class)->overview($store, $filters);
+        $averages = collect($dashboard['reddit_topics']['topic_averages'])->keyBy('topic');
+
+        $this->assertSame('keyword-rules-v1', $dashboard['reddit_topics']['method']);
+        $this->assertSame(['title', 'content'], $dashboard['reddit_topics']['source_fields']);
+        $this->assertSame([
+            '购买建议 / 对比',
+            '产品技术 / 故障',
+            '品牌声音 / 抱怨',
+            '社区互动 / 问答',
+            '骑行生活 / 展示',
+            '其他',
+        ], $averages->keys()->all());
+        $this->assertSame([
+            'topic' => '购买建议 / 对比',
+            'views' => 200.0,
+            'comments' => 5.0,
+            'upvotes' => 20.0,
+            'posts' => 2,
+        ], $averages->get('购买建议 / 对比'));
+        $this->assertSame(1, $averages->get('产品技术 / 故障')['posts']);
+        $this->assertSame(90.0, $averages->get('产品技术 / 故障')['views']);
+        $this->assertSame(1, $averages->get('品牌声音 / 抱怨')['posts']);
+        $this->assertSame(1, $averages->get('社区互动 / 问答')['posts']);
+        $this->assertSame(1, $averages->get('骑行生活 / 展示')['posts']);
+        $this->assertSame(1, $averages->get('其他')['posts']);
+
+        $week = collect($dashboard['reddit_topics']['weekly_trends'])->firstWhere('week', '2026-08-03');
+        $distribution = collect($week['topic_distribution'])->keyBy('topic');
+        $this->assertSame(3, $week['posts']);
+        $this->assertSame(2, $distribution->get('购买建议 / 对比')['count']);
+        $this->assertSame(66.67, $distribution->get('购买建议 / 对比')['percent']);
+        $this->assertSame(1, $distribution->get('产品技术 / 故障')['count']);
+        $this->assertSame(33.33, $distribution->get('产品技术 / 故障')['percent']);
+
+        $serialized = json_encode($dashboard['reddit_topics'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('帖子类型', $serialized);
+        $this->assertStringNotContainsString('目标关键词', $serialized);
+        $this->assertStringNotContainsString('must-never-drive-topic', $serialized);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('reputation.overview', $filters))
+            ->assertOk()
+            ->assertDontSee('must-never-drive-topic')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.reddit_topics.method', 'keyword-rules-v1')
+                ->has('dashboard.reddit_topics.topic_averages', 6)
+                ->where('dashboard.reddit_topics.topic_averages.0.posts', 2)
+                ->where('dashboard.summary.reddit.posts', 7));
+    }
+
     public function test_permissions_workflows_audit_and_cross_store_binding_are_enforced(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
@@ -171,7 +502,7 @@ class ReputationMonitoringTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'reputation_sync_requested', 'store_id' => $store->id]);
     }
 
-    public function test_manual_review_is_scoped_audited_masked_and_follow_up_can_be_updated(): void
+    public function test_manual_review_is_scoped_audited_and_full_order_reference_is_visible_to_authorized_viewers(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
         $session = $this->contextSession($organization, $store);
@@ -199,6 +530,21 @@ class ReputationMonitoringTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('dashboard.records.data.0.origin', 'manual')
+                ->where('dashboard.records.data.0.order_reference', 'ORDER-123456')
+                ->where('dashboard.records.data.0.order_reference_masked', '••••3456')
+                ->missing('dashboard.records.data.0.order_reference_encrypted'));
+
+        $viewer = User::factory()->create(['email_verified_at' => now()]);
+        $organization->users()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $store->members()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $viewerRole = Role::query()->whereBelongsTo($organization)->where('slug', 'viewer')->firstOrFail();
+        $viewer->roles()->attach($viewerRole, ['organization_id' => $organization->id, 'store_id' => null]);
+
+        $this->actingAs($viewer)->withSession($session)
+            ->get(route('reputation.overview', ['date_from' => '2026-08-01', 'date_to' => '2026-08-31', 'tab' => 'reviews']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.records.data.0.order_reference', 'ORDER-123456')
                 ->where('dashboard.records.data.0.order_reference_masked', '••••3456')
                 ->missing('dashboard.records.data.0.order_reference_encrypted'));
 

@@ -3,15 +3,18 @@
 namespace App\Services\StudentDiscount;
 
 use App\Exceptions\StudentDiscountException;
+use App\Jobs\DeleteSupersededStudentDiscountEvidence;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\StudentDiscountCampaign;
 use App\Models\StudentDiscountClaim;
 use App\Models\StudentDiscountCode;
+use App\Models\StudentDiscountEvidenceDeletion;
 use App\Models\User;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -23,19 +26,34 @@ class StudentDiscountClaimService
         private EducationEmailDomainService $domains,
         private GeminiStudentIdRecognitionService $gemini,
         private StudentDiscountCodeService $codes,
+        private StudentDiscountEvidenceCleanupService $evidenceCleanup,
         private SystemSettingsService $settings,
     ) {}
 
     /** @return array{claim: StudentDiscountClaim, code: StudentDiscountCode|null, claim_token: string} */
-    public function submit(Store $store, string $email, ?UploadedFile $evidence, string $idempotencyKey): array
-    {
+    public function submit(
+        Store $store,
+        ?string $name,
+        string $email,
+        ?UploadedFile $evidence,
+        string $idempotencyKey,
+        bool $privacyConsented,
+    ): array {
         $organization = $store->organization;
         $campaign = $this->campaigns->getOrCreate($organization, $store);
         if (! $campaign->enabled) {
             throw new StudentDiscountException('CAMPAIGN_DISABLED', '该店铺当前未开放学生优惠。', 409);
         }
 
+        $normalizedName = is_string($name) ? preg_replace('/\s+/u', ' ', trim($name)) : null;
+        $normalizedName = is_string($normalizedName) && $normalizedName !== '' ? $normalizedName : null;
         $normalizedEmail = strtolower(trim($email));
+        if ($evidence && $normalizedName === null) {
+            throw new StudentDiscountException('NAME_REQUIRED', '上传学生证时必须填写姓名。', 422);
+        }
+        if ($evidence && ! $privacyConsented) {
+            throw new StudentDiscountException('PRIVACY_CONSENT_REQUIRED', '上传学生证前必须同意隐私政策和服务条款。', 422);
+        }
         $evidenceHash = 'none';
         if ($evidence) {
             $realPath = $evidence->getRealPath();
@@ -45,10 +63,12 @@ class StudentDiscountClaimService
             }
         }
         $fingerprint = hash('sha256', implode('|', [
+            $normalizedName ?? 'none',
             $normalizedEmail,
             (string) ($evidence?->getSize() ?? 0),
             (string) ($evidence?->getMimeType() ?? 'none'),
             $evidenceHash,
+            $privacyConsented ? 'privacy-consent-v1' : 'privacy-consent-none',
         ]));
         $duplicateRequest = DB::table('student_discount_claim_idempotencies')
             ->where('store_id', $store->id)
@@ -64,7 +84,12 @@ class StudentDiscountClaimService
         }
 
         $domainFastPass = $this->domains->matches($normalizedEmail, $campaign->education_email_domains ?? []);
-        if ($domainFastPass && ($reusable = $this->codes->reusableForEmail($store, $normalizedEmail))) {
+        $hasPendingClaim = StudentDiscountClaim::query()
+            ->where('store_id', $store->id)
+            ->where('normalized_email', $normalizedEmail)
+            ->where('status', 'pending')
+            ->exists();
+        if ($domainFastPass && ! $hasPendingClaim && ($reusable = $this->codes->reusableForEmail($store, $normalizedEmail))) {
             return [
                 'claim' => $reusable->claim,
                 'code' => $reusable,
@@ -75,96 +100,148 @@ class StudentDiscountClaimService
             throw new StudentDiscountException('EVIDENCE_REQUIRED', '非教育邮箱需要上传学生证。');
         }
 
+        $claimUuid = (string) Str::uuid();
+        $evidenceDisk = null;
+        $evidencePath = null;
+        $evidenceMime = null;
+        $evidenceSize = null;
+        if ($evidence) {
+            try {
+                $storedPath = $evidence->storeAs(
+                    "student-discounts/{$organization->id}/{$store->id}/{$claimUuid}",
+                    'student-id.'.strtolower($evidence->extension()),
+                    'local',
+                );
+            } catch (\Throwable) {
+                throw new StudentDiscountException('EVIDENCE_STORE_FAILED', '学生证文件暂时无法安全保存，请稍后重试。', 500);
+            }
+            if (! is_string($storedPath) || blank($storedPath)) {
+                throw new StudentDiscountException('EVIDENCE_STORE_FAILED', '学生证文件暂时无法安全保存，请稍后重试。', 500);
+            }
+            $evidenceDisk = 'local';
+            $evidencePath = $storedPath;
+            $evidenceMime = $evidence->getMimeType();
+            $evidenceSize = $evidence->getSize();
+        }
+
         $claim = null;
         $token = '';
-        $oldEvidence = null;
-        $oldDisk = null;
         $wasDuplicate = false;
+        $evidenceDeletionIds = [];
 
-        DB::transaction(function () use (&$claim, &$token, &$oldEvidence, &$oldDisk, &$wasDuplicate, $campaign, $organization, $store, $normalizedEmail, $email, $domainFastPass, $idempotencyKey, $fingerprint): void {
-            StudentDiscountCampaign::query()->whereKey($campaign->id)->lockForUpdate()->firstOrFail();
-            $duplicateRequest = DB::table('student_discount_claim_idempotencies')
-                ->where('store_id', $store->id)
-                ->where('idempotency_key', $idempotencyKey)
-                ->first();
-            if ($duplicateRequest) {
-                if (! hash_equals((string) $duplicateRequest->request_fingerprint, $fingerprint)) {
-                    throw new StudentDiscountException('IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的申请内容。', 409);
+        try {
+            DB::transaction(function () use (&$claim, &$token, &$wasDuplicate, &$evidenceDeletionIds, $campaign, $organization, $store, $claimUuid, $normalizedName, $normalizedEmail, $email, $privacyConsented, $domainFastPass, $idempotencyKey, $fingerprint, $evidenceDisk, $evidencePath, $evidenceMime, $evidenceSize): void {
+                StudentDiscountCampaign::query()->whereKey($campaign->id)->lockForUpdate()->firstOrFail();
+                $duplicateRequest = DB::table('student_discount_claim_idempotencies')
+                    ->where('store_id', $store->id)
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->first();
+                if ($duplicateRequest) {
+                    if (! hash_equals((string) $duplicateRequest->request_fingerprint, $fingerprint)) {
+                        throw new StudentDiscountException('IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的申请内容。', 409);
+                    }
+                    $claim = StudentDiscountClaim::query()->findOrFail($duplicateRequest->claim_id);
+                    $token = $claim->claim_token_encrypted;
+                    $wasDuplicate = true;
+
+                    return;
                 }
-                $claim = StudentDiscountClaim::query()->findOrFail($duplicateRequest->claim_id);
-                $token = $claim->claim_token_encrypted;
-                $wasDuplicate = true;
 
-                return;
-            }
-
-            $claim = StudentDiscountClaim::query()
-                ->where('store_id', $store->id)
-                ->where('normalized_email', $normalizedEmail)
-                ->where('status', 'pending')
-                ->lockForUpdate()
-                ->first();
-            $token = $claim?->claim_token_encrypted ?: Str::random(64);
-            $oldEvidence = $claim?->evidence_path;
-            $oldDisk = $claim?->evidence_disk;
-            if ($claim) {
-                $claim->forceFill([
-                    'email' => trim($email),
-                    'source' => $domainFastPass ? 'education_email' : 'student_id',
-                    'review_method' => null,
-                    'recognition_result' => null,
-                    'confidence' => null,
-                    'model_name' => null,
-                    'recognized_at' => null,
-                    'idempotency_key' => $idempotencyKey,
-                    'request_fingerprint' => $fingerprint,
-                    'submission_count' => $claim->submission_count + 1,
-                ])->save();
-                $this->audit($claim, null, 'student_discount_claim_resubmitted', ['submission_count' => $claim->submission_count]);
-            } else {
+                $existingClaims = StudentDiscountClaim::query()
+                    ->where('store_id', $store->id)
+                    ->where('normalized_email', $normalizedEmail)
+                    ->lockForUpdate()
+                    ->get();
+                $pendingClaims = $existingClaims->where('status', 'pending')->values();
+                $submissionCount = max(1, ((int) $existingClaims->max('submission_count')) + 1);
+                $token = Str::random(64);
                 $claim = StudentDiscountClaim::query()->create([
+                    'uuid' => $claimUuid,
                     'organization_id' => $organization->id,
                     'store_id' => $store->id,
+                    'name' => $normalizedName,
                     'email' => trim($email),
                     'normalized_email' => $normalizedEmail,
+                    'privacy_consented_at' => $privacyConsented ? now() : null,
                     'source' => $domainFastPass ? 'education_email' : 'student_id',
                     'status' => 'pending',
+                    'evidence_disk' => $evidenceDisk,
+                    'evidence_path' => $evidencePath,
+                    'evidence_mime' => $evidenceMime,
+                    'evidence_size' => $evidenceSize,
                     'idempotency_key' => $idempotencyKey,
                     'request_fingerprint' => $fingerprint,
                     'claim_token_hash' => hash('sha256', $token),
                     'claim_token_encrypted' => $token,
+                    'submission_count' => $submissionCount,
                 ]);
-                $this->audit($claim, null, 'student_discount_claim_submitted');
+
+                DB::table('student_discount_claim_idempotencies')->insert([
+                    'store_id' => $store->id,
+                    'claim_id' => $claim->id,
+                    'idempotency_key' => $idempotencyKey,
+                    'request_fingerprint' => $fingerprint,
+                    'created_at' => now(),
+                ]);
+
+                foreach ($pendingClaims as $pendingClaim) {
+                    $hadEvidence = filled($pendingClaim->evidence_path);
+                    if ($hadEvidence) {
+                        $deletion = StudentDiscountEvidenceDeletion::query()->create([
+                            'organization_id' => $pendingClaim->organization_id,
+                            'store_id' => $pendingClaim->store_id,
+                            'claim_id' => $pendingClaim->id,
+                            'disk' => (string) $pendingClaim->evidence_disk,
+                            'path' => (string) $pendingClaim->evidence_path,
+                            'status' => 'pending',
+                        ]);
+                        $evidenceDeletionIds[] = $deletion->id;
+                    }
+                    $pendingClaim->forceFill([
+                        'status' => 'voided',
+                        'superseded_by_claim_id' => $claim->id,
+                        'superseded_at' => now(),
+                        'evidence_disk' => null,
+                        'evidence_path' => null,
+                        'evidence_mime' => null,
+                        'evidence_size' => null,
+                    ])->save();
+                    $this->audit($pendingClaim, null, 'student_discount_claim_voided', [
+                        'reason' => 'superseded',
+                        'superseded_by_claim_uuid' => $claim->uuid,
+                        'evidence_cleanup_status' => $hadEvidence ? 'pending' : 'not_required',
+                    ]);
+                }
+
+                $this->audit($claim, null, 'student_discount_claim_submitted', [
+                    'superseded_claim_uuids' => $pendingClaims->pluck('uuid')->values()->all(),
+                ]);
+            });
+        } catch (\Throwable $exception) {
+            if ($evidencePath !== null) {
+                $this->deleteEvidenceLocation($evidenceDisk, $evidencePath);
             }
 
-            DB::table('student_discount_claim_idempotencies')->insert([
-                'store_id' => $store->id,
-                'claim_id' => $claim->id,
-                'idempotency_key' => $idempotencyKey,
-                'request_fingerprint' => $fingerprint,
-                'created_at' => now(),
-            ]);
-        });
+            throw $exception;
+        }
 
         if ($wasDuplicate) {
+            if ($evidencePath !== null) {
+                $this->deleteEvidenceLocation($evidenceDisk, $evidencePath);
+            }
+
             return ['claim' => $claim, 'code' => $claim->discountCode, 'claim_token' => $token];
         }
 
-        if ($evidence) {
-            $path = $evidence->storeAs(
-                "student-discounts/{$organization->id}/{$store->id}/{$claim->uuid}",
-                'student-id.'.strtolower($evidence->extension()),
-                'local',
-            );
-            $claim->forceFill([
-                'evidence_disk' => 'local',
-                'evidence_path' => $path,
-                'evidence_mime' => $evidence->getMimeType(),
-                'evidence_size' => $evidence->getSize(),
-                'evidence_deleted_at' => null,
-            ])->save();
-            if ($oldEvidence && ($oldEvidence !== $path || $oldDisk !== 'local')) {
-                Storage::disk((string) $oldDisk)->delete((string) $oldEvidence);
+        foreach ($evidenceDeletionIds as $deletionId) {
+            try {
+                $this->evidenceCleanup->cleanup($deletionId);
+            } catch (\Throwable) {
+                try {
+                    DeleteSupersededStudentDiscountEvidence::dispatch($deletionId);
+                } catch (\Throwable) {
+                    // The encrypted cleanup record remains retryable without exposing its location.
+                }
             }
         }
 
@@ -179,11 +256,12 @@ class StudentDiscountClaimService
             'recognition_result' => $recognition['result'],
             'confidence' => $recognition['confidence'],
             'model_name' => $recognition['model'],
+            'recognition_failure_code' => $recognition['failure_code'],
             'recognized_at' => now(),
             'review_method' => 'ai',
         ])->save();
 
-        $threshold = $this->settings->studentAiForServer()['auto_approval_threshold'];
+        $threshold = max(80.0, $this->settings->studentAiForServer()['auto_approval_threshold']);
         $isStudentId = $recognition['ok'] && data_get($recognition, 'result.is_student_id') === true;
         if ($isStudentId && $recognition['confidence'] >= $threshold) {
             try {
@@ -213,6 +291,9 @@ class StudentDiscountClaimService
         ?StudentDiscountCampaign $campaign = null,
     ): StudentDiscountCode {
         $this->assertScope($organization, $store, $claim);
+        if ($claim->status === 'voided') {
+            throw new StudentDiscountException('CLAIM_VOIDED', '该申请已因重新提交而作废，不能继续审核。', 409);
+        }
         if ($claim->status === 'rejected') {
             throw new StudentDiscountException('CLAIM_ALREADY_REJECTED', '已拒绝的申请不能改为通过，请申请人重新提交。', 409);
         }
@@ -230,7 +311,7 @@ class StudentDiscountClaimService
             'rejection_reason' => null,
         ])->save();
         $this->audit($claim, $actor, 'student_discount_claim_approved', ['review_method' => $method, 'discount_code_uuid' => $code->uuid]);
-        $this->codes->sendDecisionEmail($claim, $code);
+        $this->codes->dispatchDecisionEmail($claim, $code);
 
         return $code;
     }
@@ -238,6 +319,9 @@ class StudentDiscountClaimService
     public function reject(Organization $organization, Store $store, StudentDiscountClaim $claim, User $actor, string $reason): StudentDiscountClaim
     {
         $this->assertScope($organization, $store, $claim);
+        if ($claim->status === 'voided') {
+            throw new StudentDiscountException('CLAIM_VOIDED', '该申请已因重新提交而作废，不能继续审核。', 409);
+        }
         if ($claim->status === 'approved') {
             throw new StudentDiscountException('CLAIM_ALREADY_APPROVED', '已通过并发码的申请不能拒绝。', 409);
         }
@@ -253,9 +337,66 @@ class StudentDiscountClaimService
             'rejection_reason' => trim($reason),
         ])->save();
         $this->audit($claim, $actor, 'student_discount_claim_rejected', ['reason_present' => true]);
-        $this->codes->sendDecisionEmail($claim, null);
+        $this->codes->dispatchDecisionEmail($claim, null);
 
         return $claim;
+    }
+
+    public function deleteClaim(Organization $organization, Store $store, string $claimUuid, User $actor): bool
+    {
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+
+        return Cache::lock("student-discount-claim-delete:{$store->id}:{$claimUuid}", 45)
+            ->block(10, function () use ($organization, $store, $claimUuid, $actor): bool {
+                $claim = StudentDiscountClaim::query()
+                    ->where('organization_id', $organization->id)
+                    ->where('store_id', $store->id)
+                    ->where('uuid', $claimUuid)
+                    ->first();
+                if (! $claim) {
+                    return false;
+                }
+
+                $discountCode = $claim->discountCode;
+                if ($discountCode) {
+                    $this->codes->delete($discountCode);
+                }
+
+                return DB::transaction(function () use ($organization, $store, $claimUuid, $actor): bool {
+                    $claim = StudentDiscountClaim::query()
+                        ->where('organization_id', $organization->id)
+                        ->where('store_id', $store->id)
+                        ->where('uuid', $claimUuid)
+                        ->lockForUpdate()
+                        ->first();
+                    if (! $claim) {
+                        return false;
+                    }
+
+                    $hadEvidence = $this->deleteEvidenceFile($claim);
+                    $discountCode = $claim->discountCode()->lockForUpdate()->first();
+
+                    $this->audit($claim, $actor, 'student_discount_claim_deleted', [
+                        'status' => $claim->status,
+                        'evidence_deleted' => $hadEvidence,
+                        'discount_code_deleted' => (bool) $discountCode,
+                    ]);
+                    DB::table('student_discount_claim_idempotencies')->where('claim_id', $claim->id)->delete();
+                    $discountCode?->delete();
+                    $claim->forceFill([
+                        'evidence_disk' => null,
+                        'evidence_path' => null,
+                        'evidence_mime' => null,
+                        'evidence_size' => null,
+                        'evidence_deleted_at' => $hadEvidence ? now() : $claim->evidence_deleted_at,
+                        'idempotency_key' => null,
+                        'request_fingerprint' => null,
+                    ])->save();
+                    $claim->delete();
+
+                    return true;
+                });
+            });
     }
 
     public function verifyClaimToken(StudentDiscountClaim $claim, string $token): bool
@@ -268,6 +409,34 @@ class StudentDiscountClaimService
         abort_unless($store->organization_id === $organization->id
             && $claim->organization_id === $organization->id
             && $claim->store_id === $store->id, 404);
+    }
+
+    private function deleteEvidenceFile(StudentDiscountClaim $claim): bool
+    {
+        if (! filled($claim->evidence_path)) {
+            return false;
+        }
+
+        $this->deleteEvidenceLocation($claim->evidence_disk, $claim->evidence_path);
+
+        return true;
+    }
+
+    private function deleteEvidenceLocation(?string $disk, ?string $path): void
+    {
+        $disk = trim((string) $disk);
+        $path = trim((string) $path);
+        if ($disk === '' || $path === '') {
+            throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+        }
+
+        $storage = Storage::disk($disk);
+        if ($storage->exists($path) && ! $storage->delete($path)) {
+            throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+        }
+        if ($storage->exists($path)) {
+            throw new StudentDiscountException('EVIDENCE_DELETE_FAILED', '证件文件无法安全删除，请稍后重试。', 500);
+        }
     }
 
     private function audit(StudentDiscountClaim $claim, ?User $actor, string $action, array $metadata = []): void

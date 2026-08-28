@@ -8,8 +8,8 @@ separate repository and does not contain a second Laravel application.
 | Concern | Location |
 | --- | --- |
 | Shopify App configuration and Extensions | `shopify-apps/decoAfterShip` |
-| App entry `/shopify/launch` | Root Laravel routes and `ShopifyAppLaunchController` |
-| OAuth callback `/shopify/oauth/callback` | Root Laravel routes and `ShopifyOAuthController` |
+| App entry `/shopify/aftership/launch` | Root Laravel routes and `ShopifyAfterShipAppController` |
+| OAuth callback `/shopify/aftership/oauth/callback` | Root Laravel routes and `ShopifyAfterShipAppController` |
 | Webhook receipt and registration | Root Laravel Shopify services/controllers |
 | Accounts, organizations, stores, permissions, and database | Root Laravel application |
 | Application Center and six marketing modules | Root Laravel controllers and Inertia pages |
@@ -31,6 +31,9 @@ decision after acceptance succeeds.
 
 - Never store Shopify Client Secrets or Access Tokens in TOML, source code, or
   documentation.
+- Configure only `AFTERSHIP_<ENV>_CLIENT_SECRET` in the matching untracked
+  backend environment. AfterShip OAuth stores its token on `AppInstallation`
+  and must never replace the shared `ShopifyConnection` token.
 - Keep `embedded = false`; users authenticate with their existing decoAdmin
   account after Shopify opens `/shopify/launch`.
 - Keep `use_legacy_install_flow = true` while Laravel owns the OAuth request and

@@ -22,13 +22,31 @@ class PublicStudentDiscountController extends Controller
     public function store(Request $request): JsonResponse
     {
         try {
+            $hasEvidence = $request->hasFile('evidence');
             $values = $request->validate([
+                'name' => $hasEvidence
+                    ? ['required', 'string', 'min:2', 'max:120', 'regex:/\A[\pL\pM][\pL\pM\pN .,\'’()\-]{1,119}\z/u']
+                    : ['sometimes', 'nullable', 'string', 'min:2', 'max:120', 'regex:/\A[\pL\pM][\pL\pM\pN .,\'’()\-]{1,119}\z/u'],
                 'email' => ['required', 'email:rfc', 'max:320'],
+                'privacy_consent' => $hasEvidence
+                    ? ['required', 'accepted']
+                    : ['sometimes', 'nullable', 'accepted'],
                 'idempotency_key' => ['required', 'string', 'min:8', 'max:120', 'regex:/^[A-Za-z0-9._:-]+$/'],
                 'evidence' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             ]);
             $store = $request->attributes->get('student_discount_store');
-            $result = $this->claims->submit($store, $values['email'], $request->file('evidence'), $values['idempotency_key']);
+            $submittedName = $values['name'] ?? null;
+            $name = is_string($submittedName)
+                ? preg_replace('/\s+/u', ' ', trim($submittedName))
+                : null;
+            $result = $this->claims->submit(
+                $store,
+                is_string($name) ? $name : null,
+                $values['email'],
+                $request->file('evidence'),
+                $values['idempotency_key'],
+                $request->boolean('privacy_consent'),
+            );
 
             return response()->json([
                 'data' => [

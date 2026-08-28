@@ -166,6 +166,58 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
         $this->assertTrue($snapshot->expires_at->isFuture());
     }
 
+    public function test_pending_analytics_overview_persists_missing_scope_error_and_stops_refreshing(): void
+    {
+        [$organization, $store] = $this->context();
+        Queue::fake();
+        Http::preventStrayRequests();
+        $reports = app(ShopifyAnalyticsReportService::class);
+
+        $pending = $reports->analyticsOverview($store, '2026-08-01', '2026-08-20');
+        $this->assertTrue($pending['storage']['pending']);
+        $snapshot = AnalyticsSnapshot::query()
+            ->where('organization_id', $organization->id)
+            ->where('store_id', $store->id)
+            ->where('report_key', 'analytics-overview')
+            ->sole();
+        $store->shopifyConnection()->update(['scopes' => []]);
+
+        (new RefreshShopifyAnalyticsSnapshot($snapshot->id))->handle($reports);
+
+        $result = $reports->analyticsOverview($store->fresh('shopifyConnection'), '2026-08-01', '2026-08-20');
+        $this->assertFalse($result['storage']['pending']);
+        $this->assertFalse($result['storage']['refreshing']);
+        $this->assertSame('缺少 read_reports，请重新授权店铺。', $result['behavior']['error']);
+        $this->assertSame('shopifyql', $snapshot->fresh()->source);
+        Http::assertNothingSent();
+    }
+
+    public function test_pending_analytics_overview_persists_shopify_failure_and_stops_refreshing(): void
+    {
+        [$organization, $store] = $this->context();
+        Queue::fake();
+        Http::preventStrayRequests();
+        $reports = app(ShopifyAnalyticsReportService::class);
+
+        $pending = $reports->analyticsOverview($store, '2026-08-01', '2026-08-20');
+        $this->assertTrue($pending['storage']['pending']);
+        $snapshot = AnalyticsSnapshot::query()
+            ->where('organization_id', $organization->id)
+            ->where('store_id', $store->id)
+            ->where('report_key', 'analytics-overview')
+            ->sole();
+        Http::fake(fn () => Http::response([], 500));
+
+        (new RefreshShopifyAnalyticsSnapshot($snapshot->id))->handle($reports);
+
+        $result = $reports->analyticsOverview($store->fresh('shopifyConnection'), '2026-08-01', '2026-08-20');
+        $this->assertFalse($result['storage']['pending']);
+        $this->assertFalse($result['storage']['refreshing']);
+        $this->assertSame('Shopify API 请求失败。', $result['behavior']['error']);
+        $this->assertSame('shopifyql', $snapshot->fresh()->source);
+        Http::assertSentCount(1);
+    }
+
     public function test_prune_command_deletes_only_snapshots_older_than_retention_period(): void
     {
         [$organization, $store] = $this->context();

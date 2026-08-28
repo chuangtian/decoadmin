@@ -14,6 +14,10 @@ use App\Policies\StorePolicy;
 use App\Policies\SyncJobPolicy;
 use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
+use App\Services\AppCenter\AppConfigurationCatalog;
+use App\Services\AppCenter\GenericAppConfigurationProvider;
+use App\Services\AppCenter\MarketingAppConfigurationProvider;
+use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
 use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
 use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
@@ -45,6 +49,14 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
+        $this->app->tag([
+            MarketingAppConfigurationProvider::class,
+            StudentDiscountAppConfigurationProvider::class,
+            GenericAppConfigurationProvider::class,
+        ], 'app-center.configuration-providers');
+        $this->app->singleton(AppConfigurationCatalog::class, fn ($app) => new AppConfigurationCatalog(
+            $app->tagged('app-center.configuration-providers'),
+        ));
         $this->app->singleton(WebhookHandlerRegistry::class, function ($app): WebhookHandlerRegistry {
             $data = $app->make(ShopifyIncrementalDataService::class);
             $topics = [
@@ -74,13 +86,28 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        RateLimiter::for('student-discount-public', function (Request $request): array {
-            $shop = strtolower((string) $request->query('shop', 'unknown'));
+        RateLimiter::for('student-discount-public', function (Request $request) {
+            $key = $this->studentDiscountRateLimitKey($request);
 
-            return [
-                Limit::perMinute(20)->by('student-discount-shop:'.$shop),
-                Limit::perMinute(8)->by('student-discount-ip:'.$request->ip()),
-            ];
+            return $key === null
+                ? Limit::none()
+                : Limit::perMinute(60)->by('student-discount-public:'.$key);
+        });
+        RateLimiter::for('student-discount-submissions', function (Request $request) {
+            $key = $this->studentDiscountRateLimitKey($request);
+            if ($key === null) {
+                return Limit::none();
+            }
+
+            return Limit::perHour(5)
+                ->by('student-discount-submission:'.$key)
+                ->response(function (Request $request, array $headers) {
+                    return response()->json(['error' => [
+                        'code' => 'STUDENT_DISCOUNT_RATE_LIMITED',
+                        'message' => '提交过于频繁，请稍后重试。',
+                        'retry_after' => (int) ($headers['Retry-After'] ?? 3600),
+                    ]], 429, $headers);
+                });
         });
 
         try {
@@ -106,5 +133,19 @@ class AppServiceProvider extends ServiceProvider
                 app(CurrentStore::class)->get(),
             );
         });
+    }
+
+    private function studentDiscountRateLimitKey(Request $request): ?string
+    {
+        $store = $request->attributes->get('student_discount_store');
+        if (! $store instanceof Store) {
+            return null;
+        }
+
+        return hash_hmac(
+            'sha256',
+            $store->id.'|'.(string) $request->ip(),
+            (string) config('app.key'),
+        );
     }
 }

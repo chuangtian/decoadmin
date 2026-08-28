@@ -21,6 +21,8 @@ interface QueueStatus {
     label: string;
     pending: number | null;
     failed: number | null;
+    failed_total: number | null;
+    failed_window_hours: number;
     status: HealthStatus;
 }
 
@@ -50,6 +52,7 @@ interface SystemStatusPayload {
 
 const props = defineProps<{ systemStatus: SystemStatusPayload }>();
 const refreshing = ref(false);
+const hasFailedQueues = computed(() => props.systemStatus.queues.some((queue) => (queue.failed ?? 0) > 0));
 
 const statusLabels: Record<HealthStatus | OverallStatus, string> = {
     healthy: '运行正常',
@@ -190,15 +193,18 @@ const refresh = () => {
                 <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div class="border-b border-slate-100 px-5 py-4 sm:px-6">
                         <h2 class="font-semibold text-slate-950">队列运行情况</h2>
-                        <p class="mt-1 text-sm text-slate-500">待处理数量为当前积压，失败数量来自失败任务记录。</p>
+                        <p class="mt-1 text-sm text-slate-500">待处理数量为当前积压；失败状态按最近 24 小时判断，同时保留累计失败数供排查。</p>
                     </div>
                     <div class="hidden overflow-x-auto sm:block">
                         <table class="w-full text-left text-sm">
-                            <thead class="bg-slate-50/80 text-xs font-semibold text-slate-500"><tr><th class="px-6 py-3.5">队列</th><th class="px-6 py-3.5">待处理</th><th class="px-6 py-3.5">失败</th><th class="px-6 py-3.5 text-right">状态</th></tr></thead>
-                            <tbody class="divide-y divide-slate-100"><tr v-for="queue in systemStatus.queues" :key="queue.name"><td class="px-6 py-4"><p class="font-semibold text-slate-900">{{ queue.label }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ queue.name }}</p></td><td class="px-6 py-4 font-semibold text-slate-700">{{ queue.pending ?? '—' }}</td><td class="px-6 py-4 font-semibold" :class="queue.failed ? 'text-rose-600' : 'text-slate-700'">{{ queue.failed ?? '—' }}</td><td class="px-6 py-4 text-right"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClasses[queue.status]">{{ statusLabels[queue.status] }}</span></td></tr></tbody>
+                            <thead class="bg-slate-50/80 text-xs font-semibold text-slate-500"><tr><th class="px-6 py-3.5">队列</th><th class="px-6 py-3.5">待处理</th><th class="px-6 py-3.5">近24小时失败</th><th class="px-6 py-3.5 text-right">状态</th></tr></thead>
+                            <tbody class="divide-y divide-slate-100"><tr v-for="queue in systemStatus.queues" :key="queue.name"><td class="px-6 py-4"><p class="font-semibold text-slate-900">{{ queue.label }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ queue.name }}</p></td><td class="px-6 py-4 font-semibold text-slate-700">{{ queue.pending ?? '—' }}</td><td class="px-6 py-4"><p class="font-semibold" :class="queue.failed ? 'text-rose-600' : 'text-slate-700'">{{ queue.failed ?? '—' }}</p><p v-if="queue.failed_total !== null" class="mt-1 text-xs text-slate-400">累计 {{ queue.failed_total }}</p></td><td class="px-6 py-4 text-right"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClasses[queue.status]">{{ statusLabels[queue.status] }}</span></td></tr></tbody>
                         </table>
                     </div>
-                    <div class="divide-y divide-slate-100 sm:hidden"><article v-for="queue in systemStatus.queues" :key="queue.name" class="p-5"><div class="flex items-start justify-between gap-3"><div><p class="font-semibold text-slate-900">{{ queue.label }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ queue.name }}</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClasses[queue.status]">{{ statusLabels[queue.status] }}</span></div><dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">待处理</dt><dd class="mt-1 font-semibold text-slate-800">{{ queue.pending ?? '—' }}</dd></div><div><dt class="text-xs text-slate-400">失败</dt><dd class="mt-1 font-semibold" :class="queue.failed ? 'text-rose-600' : 'text-slate-800'">{{ queue.failed ?? '—' }}</dd></div></dl></article></div>
+                    <div class="divide-y divide-slate-100 sm:hidden"><article v-for="queue in systemStatus.queues" :key="queue.name" class="p-5"><div class="flex items-start justify-between gap-3"><div><p class="font-semibold text-slate-900">{{ queue.label }}</p><p class="mt-1 font-mono text-xs text-slate-400">{{ queue.name }}</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="statusClasses[queue.status]">{{ statusLabels[queue.status] }}</span></div><dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><dt class="text-xs text-slate-400">待处理</dt><dd class="mt-1 font-semibold text-slate-800">{{ queue.pending ?? '—' }}</dd></div><div><dt class="text-xs text-slate-400">近24小时失败</dt><dd class="mt-1 font-semibold" :class="queue.failed ? 'text-rose-600' : 'text-slate-800'">{{ queue.failed ?? '—' }}</dd><p v-if="queue.failed_total !== null" class="mt-1 text-xs text-slate-400">累计 {{ queue.failed_total }}</p></div></dl></article></div>
+                    <div v-if="hasFailedQueues" class="border-t border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800 sm:px-6">
+                        失败任务不会在此页面自动重试，请先查看服务器队列日志并确认失败原因，再由管理员决定是否重新执行。
+                    </div>
                 </section>
 
                 <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -211,7 +217,7 @@ const refresh = () => {
                         <div class="flex items-center justify-between gap-4 py-3"><dt class="text-slate-500">Laravel</dt><dd class="font-mono text-xs text-slate-700">{{ systemStatus.runtime.laravel_version }}</dd></div>
                         <div class="flex items-center justify-between gap-4 py-3"><dt class="text-slate-500">PHP</dt><dd class="font-mono text-xs text-slate-700">{{ systemStatus.runtime.php_version }}</dd></div>
                         <div class="flex items-center justify-between gap-4 py-3"><dt class="text-slate-500">调试模式</dt><dd class="font-semibold" :class="systemStatus.runtime.debug_enabled ? 'text-amber-600' : 'text-emerald-700'">{{ systemStatus.runtime.debug_enabled ? '已开启' : '已关闭' }}</dd></div>
-                        <div class="flex items-center justify-between gap-4 pt-3"><dt class="text-slate-500">系统时区</dt><dd class="font-mono text-xs text-slate-700">{{ systemStatus.runtime.timezone }}</dd></div>
+                        <div class="flex items-center justify-between gap-4 pt-3"><dt class="text-slate-500">服务器时区</dt><dd class="font-mono text-xs text-slate-700">{{ systemStatus.runtime.timezone }}</dd></div>
                     </dl>
                 </section>
             </div>

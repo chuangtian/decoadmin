@@ -17,6 +17,36 @@ class ReputationDashboardService
 {
     public const GOAL_METRICS = ['satisfied_reviews', 'reddit_views', 'reddit_comments'];
 
+    private const REDDIT_TOPICS = [
+        '购买建议 / 对比' => [
+            'buy', 'buying', 'bought', 'purchase', 'recommend', 'recommendation', 'recommended',
+            'worth', 'versus', 'compare', 'compared', 'comparison', 'choose', 'choice',
+            'which bike', 'which model', 'should i', '购买', '选购', '推荐', '对比', '比较', '值得', '怎么选',
+        ],
+        '产品技术 / 故障' => [
+            'battery', 'motor', 'brake', 'controller', 'display', 'charger', 'charging', 'range',
+            'error', 'issue', 'problem', 'fault', 'broken', 'repair', 'fix', 'technical', 'spec',
+            'firmware', 'tire', 'chain', 'suspension', '电池', '电机', '刹车', '控制器', '充电',
+            '续航', '故障', '问题', '维修', '修理', '技术', '参数',
+        ],
+        '品牌声音 / 抱怨' => [
+            'scam', 'complaint', 'complain', 'complained', 'disappointed', 'terrible', 'awful',
+            'refund', 'warranty', 'customer service', 'support', 'brand', 'company', 'ripoff', 'avoid',
+            '投诉', '抱怨', '失望', '退款', '保修', '客服', '售后', '品牌', '避雷', '垃圾',
+        ],
+        '社区互动 / 问答' => [
+            'question', 'help', 'advice', 'anyone', 'thoughts', 'opinion', 'tips', 'how do',
+            'what do', 'where can', 'community', 'discuss', 'discussion', '请问', '求助', '建议',
+            '大家', '有人', '怎么', '如何', '讨论', '问答',
+        ],
+        '骑行生活 / 展示' => [
+            'ride', 'riding', 'commute', 'commuting', 'trail', 'adventure', 'trip', 'tour',
+            'photo', 'picture', 'setup', 'build', 'showcase', 'new bike', 'my bike', '骑行',
+            '通勤', '旅行', '越野', '晒车', '分享', '照片', '改装', '我的车',
+        ],
+        '其他' => [],
+    ];
+
     public function __construct(private StoreFeishuDataLinkService $dataLinks) {}
 
     /** @param array<string, mixed> $filters @return array<string, mixed> */
@@ -51,6 +81,7 @@ class ReputationDashboardService
             ],
             'summary' => [...$summary, 'reddit' => $social['reddit'], 'threads' => $social['threads']],
             'comparison' => $comparison,
+            'reddit_topics' => $this->redditTopics(clone $periodQuery, $dateFrom, $dateTo),
             'source_breakdown' => $this->sourceBreakdown(clone $periodQuery),
             'star_distribution' => $this->starDistribution(clone $periodQuery),
             'trends' => $this->trends(clone $periodQuery, $dateFrom, $dateTo),
@@ -356,6 +387,123 @@ class ReputationDashboardService
         return $result;
     }
 
+    /** @return array<string, mixed> */
+    private function redditTopics(Builder $query, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $topicTotals = collect(array_keys(self::REDDIT_TOPICS))->mapWithKeys(fn (string $topic): array => [
+            $topic => ['posts' => 0, 'views' => 0.0, 'comments' => 0.0, 'upvotes' => 0.0],
+        ])->all();
+        $weeks = [];
+
+        for ($cursor = $from->startOfWeek(); $cursor->lte($to); $cursor = $cursor->addWeek()) {
+            $week = $cursor->toDateString();
+            $weeks[$week] = [
+                'week' => $week,
+                'label' => $cursor->format('m/d').' - '.$cursor->addDays(6)->format('m/d'),
+                'posts' => 0,
+                'topics' => array_fill_keys(array_keys(self::REDDIT_TOPICS), 0),
+            ];
+        }
+
+        (clone $query)
+            ->where('source', 'reddit')
+            ->select(['id', 'title', 'content', 'metrics', 'published_at'])
+            ->lazyById(500)
+            ->each(function (ReputationMention $mention) use (&$topicTotals, &$weeks, $from): void {
+                $topic = $this->redditTopicFor($mention->title, $mention->content);
+                $metrics = is_array($mention->metrics) ? $mention->metrics : [];
+                $topicTotals[$topic]['posts']++;
+                foreach (['views', 'comments', 'upvotes'] as $metric) {
+                    $topicTotals[$topic][$metric] += $this->nonNegativeMetric($metrics[$metric] ?? null);
+                }
+
+                $week = $mention->published_at?->setTimezone($from->timezone)->startOfWeek()->toDateString();
+                if ($week !== null && isset($weeks[$week])) {
+                    $weeks[$week]['posts']++;
+                    $weeks[$week]['topics'][$topic]++;
+                }
+            });
+
+        return [
+            'method' => 'keyword-rules-v1',
+            'source_fields' => ['title', 'content'],
+            'topic_averages' => collect($topicTotals)->map(function (array $totals, string $topic): array {
+                $posts = (int) $totals['posts'];
+
+                return [
+                    'topic' => $topic,
+                    'views' => $posts > 0 ? round($totals['views'] / $posts, 2) : 0.0,
+                    'comments' => $posts > 0 ? round($totals['comments'] / $posts, 2) : 0.0,
+                    'upvotes' => $posts > 0 ? round($totals['upvotes'] / $posts, 2) : 0.0,
+                    'posts' => $posts,
+                ];
+            })->values()->all(),
+            'weekly_trends' => collect($weeks)->map(function (array $week): array {
+                $posts = (int) $week['posts'];
+
+                return [
+                    'week' => $week['week'],
+                    'label' => $week['label'],
+                    'posts' => $posts,
+                    'topic_distribution' => collect($week['topics'])->map(fn (int $count, string $topic): array => [
+                        'topic' => $topic,
+                        'count' => $count,
+                        'percent' => $posts > 0 ? round(($count / $posts) * 100, 2) : 0.0,
+                    ])->values()->all(),
+                ];
+            })->values()->all(),
+        ];
+    }
+
+    private function redditTopicFor(?string $title, ?string $content): string
+    {
+        $text = mb_strtolower(trim(implode(' ', array_filter([$title, $content], fn (?string $value): bool => filled($value)))));
+        $normalized = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $text));
+        $scores = [];
+
+        foreach (self::REDDIT_TOPICS as $topic => $keywords) {
+            if ($topic === '其他') {
+                continue;
+            }
+
+            $scores[$topic] = collect($keywords)->filter(
+                fn (string $keyword): bool => $this->containsKeyword($normalized, $keyword)
+            )->count();
+        }
+
+        $highestScore = max($scores ?: [0]);
+        if ($highestScore === 0) {
+            return '其他';
+        }
+
+        foreach (array_keys(self::REDDIT_TOPICS) as $topic) {
+            if (($scores[$topic] ?? 0) === $highestScore) {
+                return $topic;
+            }
+        }
+
+        return '其他';
+    }
+
+    private function containsKeyword(string $normalizedText, string $keyword): bool
+    {
+        $normalizedKeyword = mb_strtolower(trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $keyword)));
+        if ($normalizedKeyword === '') {
+            return false;
+        }
+
+        if (preg_match('/\p{Han}/u', $normalizedKeyword) === 1) {
+            return str_contains($normalizedText, $normalizedKeyword);
+        }
+
+        return str_contains(' '.$normalizedText.' ', ' '.$normalizedKeyword.' ');
+    }
+
+    private function nonNegativeMetric(mixed $value): float
+    {
+        return is_numeric($value) ? max(0.0, (float) $value) : 0.0;
+    }
+
     /** @return list<array<string, int|float|string|null>> */
     private function sourceBreakdown(Builder $query): array
     {
@@ -451,14 +599,22 @@ class ReputationDashboardService
         }, $days));
     }
 
-    /** @return list<array{model: string, count: int, average_rating: float}> */
+    /** @return list<array{model: string, key: string, count: int, average_rating: float}> */
     private function modelStats(Builder $query): array
     {
-        return (clone $query)->whereNotNull('model_name')->where('model_name', '!=', '')
-            ->selectRaw('model_name, COUNT(*) as total, AVG(rating) as average_rating')
-            ->groupBy('model_name')->orderByDesc('total')->limit(12)->get()
+        return (clone $query)
+            ->where('source', 'website')
+            ->whereNotNull('rating')
+            ->whereNotNull('model_name')
+            ->whereRaw("TRIM(model_name) <> ''")
+            ->selectRaw('LOWER(TRIM(model_name)) as model_key, COUNT(*) as total, AVG(rating) as average_rating')
+            ->groupByRaw('LOWER(TRIM(model_name))')
+            ->orderByDesc('total')
+            ->orderBy('model_key')
+            ->get()
             ->map(fn (ReputationMention $row): array => [
-                'model' => $row->model_name,
+                'model' => (string) $row->getAttribute('model_key'),
+                'key' => (string) $row->getAttribute('model_key'),
                 'count' => (int) $row->getAttribute('total'),
                 'average_rating' => round((float) ($row->getAttribute('average_rating') ?? 0), 2),
             ])->all();
@@ -521,7 +677,7 @@ class ReputationDashboardService
                 }
             });
 
-        $query->when($tab === 'reviews' || $tab === 'targets', fn (Builder $builder) => $builder->whereIn('source', ['trustpilot', 'website', 'facebook']))
+        $query->when($tab === 'targets', fn (Builder $builder) => $builder->whereIn('source', ['trustpilot', 'website', 'facebook']))
             ->when($tab === 'reddit', fn (Builder $builder) => $builder->where('source', 'reddit'))
             ->when($tab === 'threads', fn (Builder $builder) => $builder->where('source', 'threads'))
             ->when(filled($filters['source'] ?? null), fn (Builder $builder) => $builder->where('source', $filters['source']))
@@ -560,6 +716,7 @@ class ReputationDashboardService
                 ->values()
                 ->all(),
             'order_reference_masked' => $this->maskOrderReference($mention->order_reference_encrypted),
+            'order_reference' => $mention->order_reference_encrypted,
         ]);
     }
 

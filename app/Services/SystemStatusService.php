@@ -17,6 +17,8 @@ class SystemStatusService
 {
     private const SCHEDULER_HEARTBEAT_KEY = 'system_status:scheduler_heartbeat';
 
+    private const FAILURE_WINDOW_HOURS = 24;
+
     /** @var array<string, string> */
     private const QUEUES = [
         'shopify-webhook' => 'Webhook 处理',
@@ -165,7 +167,11 @@ class SystemStatusService
     {
         try {
             $pending = Queue::connection()->size($name);
-            $failed = DB::table('failed_jobs')->where('queue', $name)->count();
+            $failedJobs = DB::table('failed_jobs')->where('queue', $name);
+            $failedTotal = (clone $failedJobs)->count();
+            $failed = (clone $failedJobs)
+                ->where('failed_at', '>=', now()->subHours(self::FAILURE_WINDOW_HOURS))
+                ->count();
             $oldestQueuedAt = $this->oldestQueuedAt($name);
             $oldestAgeSeconds = $oldestQueuedAt
                 ? max(0, $oldestQueuedAt->diffInSeconds(now()))
@@ -179,6 +185,8 @@ class SystemStatusService
                 'label' => $label,
                 'pending' => $pending,
                 'failed' => $failed,
+                'failed_total' => $failedTotal,
+                'failed_window_hours' => self::FAILURE_WINDOW_HOURS,
                 'oldest_queued_at' => $oldestQueuedAt?->toIso8601String(),
                 'oldest_age_seconds' => $oldestAgeSeconds,
                 'status' => $warning ? 'warning' : 'healthy',
@@ -189,6 +197,8 @@ class SystemStatusService
                 'label' => $label,
                 'pending' => null,
                 'failed' => null,
+                'failed_total' => null,
+                'failed_window_hours' => self::FAILURE_WINDOW_HOURS,
                 'oldest_queued_at' => null,
                 'oldest_age_seconds' => null,
                 'status' => 'unknown',

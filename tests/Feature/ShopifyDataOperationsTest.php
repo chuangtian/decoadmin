@@ -16,12 +16,14 @@ use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\WebhookEvent;
+use App\Services\Shopify\ShopifyDataPrivacyService;
 use App\Services\Shopify\Webhooks\ShopifyIncrementalDataService;
 use App\Services\Shopify\Webhooks\ShopifyWebhookSubscriptionService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -45,6 +47,190 @@ class ShopifyDataOperationsTest extends TestCase
                 ->component('Products/Index')
                 ->where('products.data.0.title', 'Visible Product')
                 ->missing('products.data.1'));
+    }
+
+    public function test_inventory_index_renders_the_current_store_list_without_redirecting_to_an_item(): void
+    {
+        [$user, $organization, $store] = $this->adminContext();
+        $otherStore = $organization->stores()->create([
+            'name' => 'EU',
+            'shopify_domain' => 'inventory-eu.myshopify.com',
+            'status' => 'active',
+        ]);
+        $visible = InventoryItem::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_inventory_item_id' => '3101',
+            'sku' => 'VISIBLE-SKU',
+            'tracked' => true,
+            'synced_at' => now(),
+        ]);
+        $hidden = InventoryItem::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'shopify_inventory_item_id' => '3102',
+            'sku' => 'HIDDEN-SKU',
+            'tracked' => true,
+            'synced_at' => now(),
+        ]);
+        $session = ['current_organization_id' => $organization->id, 'current_store_id' => $store->id];
+
+        $this->assertSame(
+            'App\\Http\\Controllers\\InventoryController@index',
+            Route::getRoutes()->getByName('inventory.index')?->getActionName(),
+        );
+        $this->assertSame(
+            'App\\Http\\Controllers\\InventoryController@show',
+            Route::getRoutes()->getByName('inventory.show')?->getActionName(),
+        );
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('inventory.index', ['store_id' => $otherStore->id]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Inventory/Index')
+                ->has('inventory.data', 1)
+                ->where('inventory.data.0.id', $visible->id)
+                ->where('inventory.data.0.sku', 'VISIBLE-SKU'));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('inventory.show', $hidden))
+            ->assertNotFound();
+    }
+
+    public function test_inventory_index_requires_inventory_view_permission(): void
+    {
+        [$user, $organization, $store] = $this->adminContext('developer');
+
+        $this->actingAs($user)
+            ->withSession(['current_organization_id' => $organization->id, 'current_store_id' => $store->id])
+            ->get(route('inventory.index'))
+            ->assertForbidden();
+    }
+
+    public function test_order_and_customer_pages_mask_personal_data_without_changing_stored_values(): void
+    {
+        [$user, $organization, $store] = $this->adminContext();
+        $order = Order::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_order_id' => '4101',
+            'shopify_customer_id' => '6101',
+            'order_number' => '#4101',
+            'email' => 'buyer@example.com',
+            'pos_staff_id' => '7101',
+            'pos_staff_name' => 'Alice Agent',
+            'financial_status' => 'paid',
+            'currency' => 'USD',
+            'total_price' => '999.00',
+            'subtotal_price' => '999.00',
+            'total_tax' => '0.00',
+            'created_at_shopify' => now(),
+            'synced_at' => now(),
+        ]);
+        $customer = Customer::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_customer_id' => '6101',
+            'first_name' => 'Test',
+            'last_name' => 'Buyer',
+            'email' => 'buyer@example.com',
+            'phone' => '+1 (555) 123-4567',
+            'state' => 'enabled',
+            'verified_email' => true,
+            'orders_count' => 1,
+            'total_spent' => '999.00',
+            'created_at_shopify' => now(),
+            'updated_at_shopify' => now(),
+            'synced_at' => now(),
+        ]);
+        $session = ['current_organization_id' => $organization->id, 'current_store_id' => $store->id];
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('orders.index'))
+            ->assertOk()
+            ->assertDontSee('buyer@example.com')
+            ->assertDontSee('Alice Agent')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('orders.data.0.email', 'b***@example.com')
+                ->where('orders.data.0.pos_staff_name', 'A***')
+                ->missing('orders.data.0.shopify_customer_id')
+                ->missing('orders.data.0.pos_staff_id'));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('orders.show', $order))
+            ->assertOk()
+            ->assertDontSee('buyer@example.com')
+            ->assertDontSee('Alice Agent')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('order.email', 'b***@example.com')
+                ->where('order.pos_staff_name', 'A***')
+                ->missing('order.shopify_customer_id')
+                ->missing('order.pos_staff_id'));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('customers.index'))
+            ->assertOk()
+            ->assertDontSee('buyer@example.com')
+            ->assertDontSee('+1 (555) 123-4567')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('customers.data.0.first_name', 'T***')
+                ->where('customers.data.0.last_name', 'B***')
+                ->where('customers.data.0.email', 'b***@example.com')
+                ->where('customers.data.0.phone', '***4567')
+                ->missing('customers.data.0.shopify_customer_id'));
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertDontSee('buyer@example.com')
+            ->assertDontSee('+1 (555) 123-4567')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('customer.first_name', 'T***')
+                ->where('customer.last_name', 'B***')
+                ->where('customer.email', 'b***@example.com')
+                ->where('customer.phone', '***4567')
+                ->missing('customer.shopify_customer_id'));
+
+        $this->assertDatabaseHas('orders', ['id' => $order->id, 'email' => 'buyer@example.com']);
+        $this->assertDatabaseHas('customers', [
+            'id' => $customer->id,
+            'first_name' => 'Test',
+            'last_name' => 'Buyer',
+            'email' => 'buyer@example.com',
+            'phone' => '+1 (555) 123-4567',
+        ]);
+    }
+
+    public function test_personal_data_masking_is_not_applied_in_production(): void
+    {
+        $originalEnvironment = $this->app->environment();
+        $this->app->instance('env', 'production');
+
+        try {
+            $order = new Order(['email' => 'buyer@example.com', 'pos_staff_name' => 'Alice Agent']);
+            $customer = new Customer([
+                'first_name' => 'Test',
+                'last_name' => 'Buyer',
+                'email' => 'buyer@example.com',
+                'phone' => '+1 (555) 123-4567',
+            ]);
+            $privacy = app(ShopifyDataPrivacyService::class);
+
+            $this->assertSame('buyer@example.com', $privacy->maskOrder($order)->email);
+            $this->assertSame('Alice Agent', $order->pos_staff_name);
+            $this->assertSame('Test', $privacy->maskCustomer($customer)->first_name);
+            $this->assertSame('buyer@example.com', $customer->email);
+            $this->assertSame('+1 (555) 123-4567', $customer->phone);
+        } finally {
+            $this->app->instance('env', $originalEnvironment);
+        }
     }
 
     public function test_product_order_customer_and_inventory_webhooks_update_local_data(): void
@@ -114,7 +300,7 @@ class ShopifyDataOperationsTest extends TestCase
     }
 
     /** @return array{0: User, 1: Organization, 2: Store} */
-    private function adminContext(): array
+    private function adminContext(string $roleSlug = 'organization-admin'): array
     {
         $this->seed(PermissionSeeder::class);
         $user = User::factory()->create(['email_verified_at' => now()]);
@@ -123,7 +309,7 @@ class ShopifyDataOperationsTest extends TestCase
         $store = $organization->stores()->create(['name' => 'US', 'shopify_domain' => 'us.myshopify.com', 'status' => 'active']);
         $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
         $this->seed(RoleSeeder::class);
-        $role = Role::query()->whereBelongsTo($organization)->where('slug', 'organization-admin')->firstOrFail();
+        $role = Role::query()->whereBelongsTo($organization)->where('slug', $roleSlug)->firstOrFail();
         $user->roles()->attach($role, ['organization_id' => $organization->id, 'store_id' => null]);
 
         return [$user, $organization, $store];

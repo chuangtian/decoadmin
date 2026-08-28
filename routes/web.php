@@ -20,6 +20,7 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
+use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
 use App\Http\Controllers\NaturalTrafficController;
@@ -34,6 +35,7 @@ use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\ShopifyAfterShipAppController;
 use App\Http\Controllers\ShopifyAppLaunchController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
@@ -73,6 +75,10 @@ Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'
     ->middleware('throttle:30,1')
     ->name('shopify.oauth.callback');
 
+Route::get('/shopify/aftership/oauth/callback', [ShopifyAfterShipAppController::class, 'callback'])
+    ->middleware('throttle:30,1')
+    ->name('aftership.shopify.oauth.callback');
+
 Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('shopify.webhooks.receive');
@@ -104,12 +110,14 @@ Route::prefix('/api/shopify-app/student-discounts')->group(function (): void {
 });
 
 Route::prefix('/api/shopify-app/student-discounts/proxy')
-    ->middleware(['shopify.app-proxy', 'throttle:student-discount-public'])
+    ->middleware(['shopify.app-proxy', 'shopify.app-proxy-response', 'throttle:student-discount-public'])
     ->group(function (): void {
         Route::get('/', [PublicStudentDiscountController::class, 'info'])
             ->name('student-discounts.public.info');
-        Route::post('/', [PublicStudentDiscountController::class, 'store']);
+        Route::post('/', [PublicStudentDiscountController::class, 'store'])
+            ->middleware('throttle:student-discount-submissions');
         Route::post('/claims', [PublicStudentDiscountController::class, 'store'])
+            ->middleware('throttle:student-discount-submissions')
             ->name('student-discounts.public.claims.store');
         Route::get('/claims/{claim}', [PublicStudentDiscountController::class, 'show'])
             ->name('student-discounts.public.claims.show');
@@ -174,6 +182,8 @@ Route::middleware('auth')->group(function (): void {
         ->name('verification.send');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/shopify/launch', ShopifyAppLaunchController::class)->name('shopify.app.launch');
+    Route::get('/shopify/aftership/launch', [ShopifyAfterShipAppController::class, 'launch'])
+        ->name('aftership.shopify.app.launch');
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
@@ -422,7 +432,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
 
     Route::get('/app-center', [AppController::class, 'index'])->middleware('permission:apps.view')->name('app-center.index');
-    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.install')->name('app-installations.index');
+    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.view')->name('app-installations.index');
     Route::get('/app-configurations', [ApplicationCenterController::class, 'configurations'])->middleware('permission:apps.configure')->name('app-configurations.index');
     Route::get('/app-logs', [ApplicationCenterController::class, 'logs'])->middleware('permission:audit.view')->name('app-logs.index');
 
@@ -476,8 +486,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
     Route::get('/customers', [ShopifyDataController::class, 'customers'])->middleware('permission:customers.view')->name('customers.index');
     Route::get('/customers/{customer}', [ShopifyDataController::class, 'customer'])->whereNumber('customer')->middleware('permission:customers.view')->name('customers.show');
-    Route::get('/inventory', [ShopifyDataController::class, 'inventory'])->middleware('permission:inventory.view')->name('inventory.index');
-    Route::get('/inventory/{inventoryItem}', [ShopifyDataController::class, 'inventoryItem'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
+    Route::get('/inventory', [InventoryController::class, 'index'])->middleware('permission:inventory.view')->name('inventory.index');
+    Route::get('/inventory/{inventoryItem}', [InventoryController::class, 'show'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
     Route::get('/locations', [ShopifyDataController::class, 'locations'])->middleware('permission:inventory.view')->name('locations.index');
     Route::get('/locations/{location}', [ShopifyDataController::class, 'location'])->whereNumber('location')->middleware('permission:inventory.view')->name('locations.show');
 
@@ -506,12 +516,30 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::put('/campaign', [StudentDiscountController::class, 'updateCampaign'])
             ->middleware(['permission:student_discount.campaign.manage', 'throttle:30,1'])
             ->name('student-discounts.campaign.update');
+        Route::put('/email-templates', [StudentDiscountController::class, 'updateEmailTemplates'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:30,1'])
+            ->name('student-discounts.email-templates.update');
+        Route::post('/email-templates/test', [StudentDiscountController::class, 'testEmailTemplate'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:10,1'])
+            ->name('student-discounts.email-templates.test');
         Route::post('/claims/{claim}/approve', [StudentDiscountController::class, 'approve'])
             ->middleware(['permission:student_discount.approve', 'throttle:30,1'])
             ->name('student-discounts.claims.approve');
         Route::post('/claims/{claim}/reject', [StudentDiscountController::class, 'reject'])
             ->middleware(['permission:student_discount.reject', 'throttle:30,1'])
             ->name('student-discounts.claims.reject');
+        Route::post('/claims/bulk-approve', [StudentDiscountController::class, 'bulkApprove'])
+            ->middleware(['permission:student_discount.approve', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-approve');
+        Route::post('/claims/bulk-reject', [StudentDiscountController::class, 'bulkReject'])
+            ->middleware(['permission:student_discount.reject', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-reject');
+        Route::post('/claims/usage-sync', [StudentDiscountController::class, 'syncUsage'])
+            ->middleware(['permission:student_discount.claim.read', 'throttle:10,1'])
+            ->name('student-discounts.claims.usage-sync');
+        Route::delete('/claims/{claim}', [StudentDiscountController::class, 'destroy'])
+            ->middleware(['permission:student_discount.claim.delete', 'throttle:30,1'])
+            ->name('student-discounts.claims.destroy');
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');

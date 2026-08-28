@@ -75,7 +75,10 @@ export interface ShopifyApp {
     type: string;
     status: string;
     description: string | null;
-    installations_count: number;
+    current_store_installation?: {
+        status: 'active' | 'pending' | 'disabled' | 'uninstalled' | 'not_installed' | string;
+        is_installed: boolean;
+    };
     created_at: string | null;
 }
 

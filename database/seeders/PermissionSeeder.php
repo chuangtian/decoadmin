@@ -25,7 +25,9 @@ class PermissionSeeder extends Seeder
         'assign_role' => '分配角色', 'assign' => '分配', 'settings.view' => '查看设置',
         'settings.update' => '更新设置', 'health.view' => '查看运行状态', 'manage' => '管理',
         'claim.read' => '查看申请', 'view_evidence' => '查看证件', 'approve' => '审核通过',
-        'reject' => '拒绝申请', 'campaign.manage' => '管理活动', 'analytics.read' => '查看分析', 'audit.read' => '查看审计',
+        'claim.delete' => '删除申请',
+        'reject' => '拒绝申请', 'campaign.manage' => '管理活动', 'email_template.manage' => '管理邮件内容',
+        'analytics.read' => '查看分析', 'audit.read' => '查看审计',
         'gallery.manage' => '管理展示组', 'publish' => '发布前台',
     ];
 
@@ -93,10 +95,12 @@ class PermissionSeeder extends Seeder
         'system.settings.update',
         'system.health.view',
         'student_discount.claim.read',
+        'student_discount.claim.delete',
         'student_discount.view_evidence',
         'student_discount.approve',
         'student_discount.reject',
         'student_discount.campaign.manage',
+        'student_discount.email_template.manage',
         'student_discount.analytics.read',
         'student_discount.audit.read',
         'instagram_feed.view',

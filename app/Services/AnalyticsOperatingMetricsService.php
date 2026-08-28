@@ -66,7 +66,20 @@ class AnalyticsOperatingMetricsService
         $coverageNote = $advertising['available']
             ? sprintf('已同步 %d/%d 个广告渠道', $advertising['available_channels'], count(self::CHANNELS))
             : '未找到该周期的广告平台日级同步记录';
-        $behaviorNote = $behaviorAvailable ? 'ShopifyQL 整站会话口径' : '需要 read_reports 或已接收数据的 Web Pixel';
+        $behaviorError = trim((string) ($behavior['error'] ?? ''));
+        $behaviorNote = $behaviorAvailable
+            ? 'ShopifyQL 整站会话口径'
+            : ($behaviorError !== '' ? $behaviorError : 'ShopifyQL 报表暂不可用。');
+        $addToCartCostNote = ! $behaviorAvailable
+            ? $behaviorNote
+            : (! $advertising['available']
+                ? $coverageNote
+                : ($addToCart > 0 ? '广告花费 ÷ 加购会话数' : '当前周期没有可计算的加购会话'));
+        $checkoutCostNote = ! $behaviorAvailable
+            ? $behaviorNote
+            : (! $advertising['available']
+                ? $coverageNote
+                : ($checkout > 0 ? '广告花费 ÷ 到达结账会话数' : '当前周期没有可计算的结账会话'));
 
         return [
             'schema' => 'analytics-operating-metrics-v1',
@@ -89,7 +102,7 @@ class AnalyticsOperatingMetricsService
             'behavior' => [
                 'available' => $behaviorAvailable,
                 'source' => 'shopifyql',
-                'message' => $behaviorAvailable ? 'ShopifyQL 整站会话漏斗' : ($behavior['error'] ?? $behaviorNote),
+                'message' => $behaviorAvailable ? 'ShopifyQL 整站会话漏斗' : $behaviorNote,
             ],
             'metrics' => [
                 'ad_spend' => $this->metric(
@@ -138,7 +151,7 @@ class AnalyticsOperatingMetricsService
                     $behaviorAvailable,
                     $addToCart,
                     $previousAddToCart,
-                    '发生加购的 Shopify Session 数',
+                    $behaviorAvailable ? '发生加购的 Shopify Session 数' : $behaviorNote,
                     $this->trend($dates, fn (string $date): float => (float) data_get($behaviorTrend, "{$date}.add_to_cart", 0)),
                     $comparisonMode,
                     data_get($behaviorMetrics, 'add_to_cart.comparison'),
@@ -147,7 +160,7 @@ class AnalyticsOperatingMetricsService
                     $behaviorAvailable,
                     $checkout,
                     $previousCheckout,
-                    '到达结账的 Shopify Session 数',
+                    $behaviorAvailable ? '到达结账的 Shopify Session 数' : $behaviorNote,
                     $this->trend($dates, fn (string $date): float => (float) data_get($behaviorTrend, "{$date}.checkout", 0)),
                     $comparisonMode,
                     data_get($behaviorMetrics, 'checkout.comparison'),
@@ -158,7 +171,7 @@ class AnalyticsOperatingMetricsService
                     $previousAdvertising['available'] && $previousAddToCart !== null && $previousAddToCart > 0
                         ? round($previousSpend / $previousAddToCart, 2)
                         : null,
-                    $addToCart > 0 ? '广告花费 ÷ 加购会话数' : '当前周期没有可计算的加购会话',
+                    $addToCartCostNote,
                     $this->trend($dates, function (string $date) use ($adTrend, $behaviorTrend): float {
                         $count = (float) data_get($behaviorTrend, "{$date}.add_to_cart", 0);
 
@@ -172,7 +185,7 @@ class AnalyticsOperatingMetricsService
                     $previousAdvertising['available'] && $previousCheckout !== null && $previousCheckout > 0
                         ? round($previousSpend / $previousCheckout, 2)
                         : null,
-                    $checkout > 0 ? '广告花费 ÷ 到达结账会话数' : '当前周期没有可计算的结账会话',
+                    $checkoutCostNote,
                     $this->trend($dates, function (string $date) use ($adTrend, $behaviorTrend): float {
                         $count = (float) data_get($behaviorTrend, "{$date}.checkout", 0);
 
