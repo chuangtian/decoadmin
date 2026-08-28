@@ -1,10 +1,6 @@
-# Run `pnpm run config:link:test` to link this file to the existing test App.
-# Shopify Client IDs are public identifiers, but this template intentionally
-# leaves the value blank so repository clones cannot target an App by accident.
-
-name = "decoAfterShip Test"
-client_id = ""
-application_url = "https://testadmin.decomkt.com/shopify/launch"
+client_id = "9972cd2dc0e808aae74c83b9d28d664d"
+name = "Deco-AfterShip-test"
+application_url = "https://testadmin.decomkt.com/shopify/aftership/launch"
 embedded = false
 extension_directories = ["extensions/"]
 
@@ -14,7 +10,7 @@ use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [
-  "https://testadmin.decomkt.com/shopify/oauth/callback"
+  "https://testadmin.decomkt.com/shopify/aftership/oauth/callback"
 ]
 
 [webhooks]

@@ -123,6 +123,8 @@ class ShopifyAppLaunchTest extends TestCase
             'installed_by' => $user->id,
             'status' => 'active',
             'granted_scopes' => ['read_products'],
+            'access_token_encrypted' => 'aftership-test-token',
+            'token_type' => 'offline',
             'settings' => ['modules' => array_fill_keys(array_keys(config('shopify.marketing_modules')), true)],
             'installed_at' => now(),
         ]);

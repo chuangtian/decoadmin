@@ -146,7 +146,7 @@ class ShopifyOAuthTest extends TestCase
         Http::fake([
             'https://macfox-us.myshopify.com/admin/oauth/access_token' => Http::response([
                 'access_token' => 'first-token',
-                'scope' => 'read_products',
+                'scope' => 'read_products,read_orders',
             ]),
         ]);
         [$user, $organization] = $this->superAdminContext();

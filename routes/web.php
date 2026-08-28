@@ -35,6 +35,7 @@ use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\ShopifyAfterShipAppController;
 use App\Http\Controllers\ShopifyAppLaunchController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
@@ -73,6 +74,10 @@ Route::get('/', fn () => auth()->check()
 Route::get('/shopify/oauth/callback', [ShopifyOAuthController::class, 'callback'])
     ->middleware('throttle:30,1')
     ->name('shopify.oauth.callback');
+
+Route::get('/shopify/aftership/oauth/callback', [ShopifyAfterShipAppController::class, 'callback'])
+    ->middleware('throttle:30,1')
+    ->name('aftership.shopify.oauth.callback');
 
 Route::post('/shopify/webhooks/{app:handle}', ShopifyWebhookController::class)
     ->middleware('throttle:600,1')
@@ -177,6 +182,8 @@ Route::middleware('auth')->group(function (): void {
         ->name('verification.send');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/shopify/launch', ShopifyAppLaunchController::class)->name('shopify.app.launch');
+    Route::get('/shopify/aftership/launch', [ShopifyAfterShipAppController::class, 'launch'])
+        ->name('aftership.shopify.app.launch');
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {

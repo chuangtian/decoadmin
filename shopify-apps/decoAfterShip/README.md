@@ -9,20 +9,22 @@ the Laravel application and all hosted business behavior.
 Shopify opens the non-embedded App at:
 
 ```text
-/shopify/launch
+/shopify/aftership/launch
 ```
 
 Shopify OAuth returns to:
 
 ```text
-/shopify/oauth/callback
+/shopify/aftership/oauth/callback
 ```
 
 Both endpoints are implemented by the Laravel application at the repository
-root. The existing decoAdmin login, organization/store authorization, database,
-OAuth exchange, Webhooks, sync jobs, Application Center, and six marketing
-modules remain there. This directory intentionally contains no PHP application,
-database, authentication flow, or duplicated admin UI.
+root. AfterShip uses its own environment-specific Client ID and Secret and
+stores its offline Admin API token on the matching `AppInstallation`; it never
+replaces the store's shared Commerce Hub token. The existing decoAdmin login,
+organization/store authorization, database, Webhooks, Application Center, and
+six marketing modules remain there. This directory intentionally contains no
+PHP application, database, authentication flow, or duplicated admin UI.
 
 ## Environments
 

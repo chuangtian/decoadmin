@@ -17,7 +17,7 @@ class MarketingAppConfigurationProvider implements AppConfigurationProvider
 
     public function supports(AppInstallation $installation): bool
     {
-        return $installation->app?->handle === (string) config('shopify.app_handle');
+        return $installation->app?->handle === (string) config('aftership.active.handle');
     }
 
     public function present(AppInstallation $installation, User $user): array

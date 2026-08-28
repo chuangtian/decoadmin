@@ -4,7 +4,6 @@ namespace App\Services\Shopify\Webhooks;
 
 use App\Exceptions\ShopifyApiException;
 use App\Models\AppInstallation;
-use App\Models\ShopifyConnection;
 use App\Services\Shopify\ShopifyGraphQLClient;
 
 class ShopifyWebhookSubscriptionService
@@ -65,9 +64,10 @@ class ShopifyWebhookSubscriptionService
             throw new ShopifyApiException('应用安装记录没有可用的 Shopify 连接。');
         }
 
-        $endpoint = rtrim((string) config('shopify.app_url'), '/')
+        $appUrl = rtrim((string) data_get($app->settings, 'app_url', config('shopify.app_url')), '/');
+        $endpoint = $appUrl
             .route('shopify.webhooks.receive', ['app' => $app->handle], false);
-        $payload = $this->client->executeSyncQuery($connection, self::LIST_QUERY, ['first' => 250]);
+        $payload = $this->execute($installation, self::LIST_QUERY, ['first' => 250]);
         $registered = collect(data_get($payload, 'data.webhookSubscriptions.nodes', []))
             ->filter(fn ($node) => is_array($node) && is_string($node['topic'] ?? null))
             ->keyBy('topic');
@@ -79,7 +79,7 @@ class ShopifyWebhookSubscriptionService
             $existing = $registered->get($topic);
 
             if (! is_array($existing)) {
-                $this->mutate($connection, self::CREATE_MUTATION, [
+                $this->mutate($installation, self::CREATE_MUTATION, [
                     'topic' => $topic,
                     'webhookSubscription' => ['uri' => $endpoint],
                 ], 'webhookSubscriptionCreate');
@@ -100,7 +100,7 @@ class ShopifyWebhookSubscriptionService
                 throw new ShopifyApiException("Shopify Webhook [{$topic}] 缺少订阅 ID。");
             }
 
-            $this->mutate($connection, self::UPDATE_MUTATION, [
+            $this->mutate($installation, self::UPDATE_MUTATION, [
                 'id' => $id,
                 'webhookSubscription' => ['uri' => $endpoint],
             ], 'webhookSubscriptionUpdate');
@@ -113,9 +113,9 @@ class ShopifyWebhookSubscriptionService
     /**
      * @param  array<string, mixed>  $variables
      */
-    private function mutate(ShopifyConnection $connection, string $mutation, array $variables, string $field): void
+    private function mutate(AppInstallation $installation, string $mutation, array $variables, string $field): void
     {
-        $payload = $this->client->executeSyncQuery($connection, $mutation, $variables);
+        $payload = $this->execute($installation, $mutation, $variables);
         $errors = data_get($payload, "data.{$field}.userErrors", []);
 
         if (is_array($errors) && $errors !== []) {
@@ -126,5 +126,36 @@ class ShopifyWebhookSubscriptionService
         if (! is_array(data_get($payload, "data.{$field}.webhookSubscription"))) {
             throw new ShopifyApiException('Shopify Webhook 订阅未返回有效结果。');
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed>
+     */
+    private function execute(AppInstallation $installation, string $query, array $variables): array
+    {
+        $connection = $installation->shopifyConnection;
+        if (! $connection) {
+            throw new ShopifyApiException('应用安装记录没有可用的 Shopify 连接。');
+        }
+
+        $accessToken = $installation->access_token_encrypted;
+        if (! is_string($accessToken) || $accessToken === '') {
+            return $this->client->executeSyncQuery($connection, $query, $variables);
+        }
+
+        $payload = $this->client->queryWithAccessToken(
+            $connection->shop_domain,
+            $accessToken,
+            $query,
+            $variables,
+            30,
+            $installation->app?->webhook_api_version,
+        );
+
+        return [
+            'data' => is_array($payload['data'] ?? null) ? $payload['data'] : [],
+            'extensions' => is_array($payload['extensions'] ?? null) ? $payload['extensions'] : [],
+        ];
     }
 }

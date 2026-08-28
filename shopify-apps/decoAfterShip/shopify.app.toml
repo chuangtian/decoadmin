@@ -1,9 +1,9 @@
 # Shopify CLI requires this root configuration file to discover the project.
 # Operational commands use the named test/production configurations below.
 
-name = "decoAfterShip Test"
+name = "Deco-AfterShip-test"
 client_id = ""
-application_url = "https://testadmin.decomkt.com/shopify/launch"
+application_url = "https://testadmin.decomkt.com/shopify/aftership/launch"
 embedded = false
 extension_directories = ["extensions/"]
 
@@ -13,7 +13,7 @@ use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [
-  "https://testadmin.decomkt.com/shopify/oauth/callback"
+  "https://testadmin.decomkt.com/shopify/aftership/oauth/callback"
 ]
 
 [webhooks]
