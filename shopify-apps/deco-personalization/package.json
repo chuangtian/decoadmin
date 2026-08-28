@@ -1,0 +1,14 @@
+{
+  "name": "deco-personalization",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "check": "npm run check:project && npm test",
+    "check:project": "node scripts/validate-project.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "author": "tianchuang"
+}

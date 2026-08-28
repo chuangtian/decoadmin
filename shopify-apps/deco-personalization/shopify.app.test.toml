@@ -1,0 +1,8 @@
+# Test-first configuration placeholder for the existing Test App.
+# Merchant-facing name: Deco 个性化推荐测试
+# Technical handle: deco-personalization-test
+# Backend origin: https://testadmin.decomkt.com
+#
+# Client ID, scopes, URLs, webhooks, proxy, and extensions are added only after
+# the existing Test App and the corresponding backend routes are verified.
+# Client Secrets never belong in Shopify TOML files.
