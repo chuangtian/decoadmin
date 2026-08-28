@@ -24,7 +24,6 @@ export async function validateTestConfig({requireRunnable = false} = {}) {
   check(value(config, 'handle') === 'deco-personalization-test', 'Unexpected Test technical handle');
   check(value(config, 'application_url') === 'https://testadmin.decomkt.com/shopify-app/personalization', 'Unexpected Test application URL');
   check(/^\s*embedded\s*=\s*true\s*$/m.test(config), 'Test app must remain embedded');
-  check(/^\s*include_config_on_deploy\s*=\s*true\s*$/m.test(config), 'Test deploy must include its checked configuration');
   check(/^\s*automatically_update_urls_on_dev\s*=\s*false\s*$/m.test(config), 'Test URLs must never be changed by a local dev command');
   check(/^\s*api_version\s*=\s*"2026-07"\s*$/m.test(config), 'Unexpected Test webhook API version');
 

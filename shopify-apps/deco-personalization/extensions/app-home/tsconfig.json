@@ -10,5 +10,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "exclude": ["src/*.test.mjs"]
+  "exclude": ["src/*.test.mjs", "dist"]
 }

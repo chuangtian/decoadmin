@@ -113,7 +113,7 @@ async function read(relativePath) {
 async function walk(directory) {
   const entries = await readdir(directory, {withFileTypes: true});
   const nested = await Promise.all(entries.map(async (entry) => {
-    if (entry.name === 'node_modules' || entry.name === '.shopify') return [];
+    if (entry.name === 'node_modules' || entry.name === '.shopify' || entry.name === 'dist') return [];
     const absolutePath = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(absolutePath) : [absolutePath];
   }));
