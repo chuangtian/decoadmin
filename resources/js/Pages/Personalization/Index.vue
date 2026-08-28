@@ -66,7 +66,20 @@ const props = defineProps<{
     store: { id: number; name: string; shopify_domain: string; currency: string };
     strategies: Strategy[];
     components: Component[];
-    smartCart: { uuid: string; strategy_uuid: string | null; enabled: boolean; compatibility_status: string; fallback_mode: string; settings: Record<string, unknown> } | null;
+    smartCart: {
+        uuid: string;
+        strategy_uuid: string | null;
+        enabled: boolean;
+        compatibility_status: string;
+        compatibility_details: { checks?: Array<{ key: string; label: string; passed: boolean; details: string | null }> };
+        compatibility_checked_at: string | null;
+        theme_id: string | null;
+        theme_name: string | null;
+        preview_confirmed_at: string | null;
+        enabled_at: string | null;
+        fallback_mode: string;
+        settings: Record<string, unknown>;
+    } | null;
     products: ProductOption[];
     options: { algorithms: Array<{ value: Algorithm; label: string }>; placements: Array<{ value: Placement; label: string }> };
     permissions: { manage: boolean; manageSmartCart: boolean; viewAnalytics: boolean };
@@ -243,6 +256,33 @@ const smartCartForm = useForm({
     heading: String(props.smartCart?.settings?.heading ?? '购物车推荐'),
 });
 const saveSmartCartDraft = () => smartCartForm.put(`${baseUrl}/smart-cart`, { preserveScroll: true });
+const smartCartCompatibilityForm = useForm({
+    theme_id: props.smartCart?.theme_id ?? '',
+    theme_name: props.smartCart?.theme_name ?? '',
+    unpublished_copy: false,
+    app_embed_loaded: false,
+    browser_dialog: false,
+    cart_link: false,
+    cart_routes: false,
+    cart_behaviour_verified: false,
+});
+const recordSmartCartCompatibility = () => smartCartCompatibilityForm
+    .transform(data => ({
+        theme_id: data.theme_id,
+        theme_name: data.theme_name,
+        checks: [
+            { key: 'unpublished_copy', label: '使用未发布的测试主题副本', passed: data.unpublished_copy, details: null },
+            { key: 'app_embed_loaded', label: 'App Embed 已在测试主题预览中加载', passed: data.app_embed_loaded, details: null },
+            { key: 'browser_dialog', label: '浏览器支持安全购物车抽屉', passed: data.browser_dialog, details: null },
+            { key: 'cart_link', label: '测试主题可识别购物车入口', passed: data.cart_link, details: null },
+            { key: 'cart_routes', label: 'Shopify 购物车接口可用', passed: data.cart_routes, details: null },
+            { key: 'cart_behaviour_verified', label: '购物车打开、数量、删除与加购行为已验证', passed: data.cart_behaviour_verified, details: null },
+        ],
+    }))
+    .post(`${baseUrl}/smart-cart/compatibility`, { preserveScroll: true });
+const confirmSmartCartPreview = () => router.post(`${baseUrl}/smart-cart/preview-confirmation`, {}, { preserveScroll: true });
+const activateSmartCart = () => router.post(`${baseUrl}/smart-cart/activate`, {}, { preserveScroll: true });
+const restoreShopifyCart = () => router.post(`${baseUrl}/smart-cart/restore`, {}, { preserveScroll: true });
 const analyticsCards = computed(() => [
     ['曝光', props.analytics.impressions.toLocaleString()],
     ['点击', props.analytics.clicks.toLocaleString()],
@@ -423,13 +463,36 @@ const analyticsCards = computed(() => [
                 </div>
             </section>
 
-            <section v-else-if="activeTab === 'smart-cart'" class="grid gap-5 lg:grid-cols-[1fr_.8fr]">
-                <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveSmartCartDraft">
-                    <div class="flex items-center justify-between"><div><h2 class="text-lg font-semibold text-slate-900">Smart Cart 基础版</h2><p class="mt-1 text-sm text-slate-500">这里只保存草稿，不提供启用操作。</p></div><span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">默认关闭</span></div>
-                    <div class="mt-5 grid gap-4 md:grid-cols-2"><label class="text-sm font-medium text-slate-700">推荐策略<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">暂不选择</option><option v-for="strategy in strategies" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="text-sm font-medium text-slate-700">标题<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label></div>
-                    <button v-if="permissions.manageSmartCart" class="mt-5 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存关闭状态草稿</button><p v-else class="mt-5 text-sm text-slate-500">当前账号没有 Smart Cart 管理权限。</p>
-                </form>
-                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-6"><h2 class="font-semibold text-emerald-950">固定安全条件</h2><ul class="mt-4 space-y-3 text-sm leading-6 text-emerald-900"><li>✓ 必须先通过主题兼容性检查</li><li>✓ 必须完成桌面和移动预览</li><li>✓ 必须由人工显式启用</li><li>✓ 一键恢复 Shopify 默认购物车</li></ul><dl class="mt-5 grid grid-cols-2 gap-3 text-sm"><div class="rounded-lg bg-white p-3"><dt class="text-slate-500">兼容状态</dt><dd class="mt-1 font-semibold">{{ smartCart?.compatibility_status ?? 'unchecked' }}</dd></div><div class="rounded-lg bg-white p-3"><dt class="text-slate-500">回退方式</dt><dd class="mt-1 font-semibold">Shopify 默认购物车</dd></div></dl></div>
+            <section v-else-if="activeTab === 'smart-cart'" class="space-y-5">
+                <div class="flex flex-col gap-4 rounded-2xl border p-6 shadow-sm md:flex-row md:items-center md:justify-between" :class="smartCart?.enabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'">
+                    <div><p class="text-xs font-semibold uppercase tracking-wider" :class="smartCart?.enabled ? 'text-emerald-700' : 'text-amber-700'">Smart Cart 基础版</p><h2 class="mt-1 text-xl font-semibold text-slate-950">{{ smartCart?.enabled ? '已人工启用' : '默认关闭' }}</h2><p class="mt-2 text-sm text-slate-600">回退方式始终为 Shopify 默认购物车。</p></div>
+                    <button v-if="permissions.manageSmartCart && smartCart?.enabled" type="button" class="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200" @click="restoreShopifyCart">一键恢复 Shopify 默认购物车</button>
+                </div>
+
+                <div class="grid gap-5 xl:grid-cols-3">
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveSmartCartDraft">
+                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">1</div><h2 class="mt-4 font-semibold text-slate-900">保存关闭状态草稿</h2><p class="mt-1 text-sm text-slate-500">修改策略会清除旧兼容性与预览确认。</p>
+                        <label class="mt-4 block text-sm font-medium text-slate-700">推荐策略<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">暂不选择</option><option v-for="strategy in strategies" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
+                        <label class="mt-3 block text-sm font-medium text-slate-700">标题<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label>
+                        <button v-if="permissions.manageSmartCart" class="mt-5 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存草稿并保持关闭</button>
+                    </form>
+
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="recordSmartCartCompatibility">
+                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">2</div><h2 class="mt-4 font-semibold text-slate-900">记录测试主题兼容性</h2><p class="mt-1 text-sm text-slate-500">只接受未发布的测试主题，不得使用已发布主题。</p>
+                        <div class="mt-4 grid grid-cols-2 gap-3"><label class="text-sm font-medium text-slate-700">主题名称<input v-model="smartCartCompatibilityForm.theme_name" class="mt-1 w-full rounded-lg border-slate-300" required></label><label class="text-sm font-medium text-slate-700">Theme ID<input v-model="smartCartCompatibilityForm.theme_id" class="mt-1 w-full rounded-lg border-slate-300" required pattern="[0-9]+"></label></div>
+                        <div class="mt-4 space-y-2 text-sm text-slate-700"><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.unpublished_copy" type="checkbox" class="mt-1 rounded">这是未发布的测试主题副本</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.app_embed_loaded" type="checkbox" class="mt-1 rounded">App Embed 已在主题预览中加载</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.browser_dialog" type="checkbox" class="mt-1 rounded">浏览器支持安全购物车抽屉</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_link" type="checkbox" class="mt-1 rounded">测试主题可识别购物车入口</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_routes" type="checkbox" class="mt-1 rounded">Shopify 购物车接口可用</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_behaviour_verified" type="checkbox" class="mt-1 rounded">购物车打开、数量、删除和加购已验证</label></div>
+                        <button v-if="permissions.manageSmartCart" class="mt-5 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">记录检查并保持关闭</button>
+                    </form>
+
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">3</div><h2 class="mt-4 font-semibold text-slate-900">预览并人工启用</h2><dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">兼容状态</dt><dd class="font-semibold">{{ smartCart?.compatibility_status ?? 'unchecked' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">测试主题</dt><dd class="text-right font-semibold">{{ smartCart?.theme_name || '未记录' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">桌面/移动预览</dt><dd class="font-semibold">{{ smartCart?.preview_confirmed_at ? '已确认' : '待确认' }}</dd></div></dl>
+                        <button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && !smartCart?.preview_confirmed_at" type="button" class="mt-5 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800" @click="confirmSmartCartPreview">确认桌面和移动预览</button>
+                        <button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && smartCart?.preview_confirmed_at && !smartCart?.enabled" type="button" class="mt-3 w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" @click="activateSmartCart">人工启用 Smart Cart</button>
+                        <p v-if="!permissions.manageSmartCart" class="mt-5 text-sm text-slate-500">当前账号没有 Smart Cart 管理权限。</p>
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900"><strong>故障安全：</strong>App Embed 只有在后端返回 <code>enabled=true</code> 后才拦截购物车入口；任何请求失败、配置缺失或门禁失效都会保留主题原购物车。</div>
             </section>
 
             <section v-else class="space-y-5">

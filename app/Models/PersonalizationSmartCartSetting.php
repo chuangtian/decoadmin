@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-#[Fillable(['uuid', 'organization_id', 'store_id', 'strategy_id', 'enabled', 'compatibility_status', 'compatibility_details', 'compatibility_checked_at', 'fallback_mode', 'settings', 'updated_by'])]
+#[Fillable(['uuid', 'organization_id', 'store_id', 'strategy_id', 'enabled', 'compatibility_status', 'compatibility_details', 'compatibility_checked_at', 'theme_id', 'theme_name', 'preview_confirmed_at', 'enabled_at', 'disabled_at', 'fallback_mode', 'settings', 'updated_by'])]
 class PersonalizationSmartCartSetting extends Model
 {
     public function getRouteKeyName(): string
@@ -40,6 +40,9 @@ class PersonalizationSmartCartSetting extends Model
             'compatibility_status' => PersonalizationSmartCartCompatibilityStatus::class,
             'compatibility_details' => 'array',
             'compatibility_checked_at' => 'datetime',
+            'preview_confirmed_at' => 'datetime',
+            'enabled_at' => 'datetime',
+            'disabled_at' => 'datetime',
             'settings' => 'array',
         ];
     }

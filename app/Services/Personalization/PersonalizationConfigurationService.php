@@ -24,6 +24,16 @@ use Illuminate\Support\Facades\DB;
 
 class PersonalizationConfigurationService
 {
+    /** @var array<string, string> */
+    private const SMART_CART_REQUIRED_CHECKS = [
+        'unpublished_copy' => '使用未发布的测试主题副本',
+        'app_embed_loaded' => 'App Embed 已在测试主题预览中加载',
+        'browser_dialog' => '浏览器支持安全购物车抽屉',
+        'cart_link' => '测试主题可识别购物车入口',
+        'cart_routes' => 'Shopify 购物车接口可用',
+        'cart_behaviour_verified' => '购物车打开、数量、删除与加购行为已验证',
+    ];
+
     public function __construct(private PersonalizationShopGuard $shopGuard) {}
 
     /** @param array<string, mixed> $input */
@@ -430,6 +440,11 @@ class PersonalizationConfigurationService
                 'compatibility_status' => PersonalizationSmartCartCompatibilityStatus::Unchecked,
                 'compatibility_details' => null,
                 'compatibility_checked_at' => null,
+                'theme_id' => null,
+                'theme_name' => null,
+                'preview_confirmed_at' => null,
+                'enabled_at' => null,
+                'disabled_at' => now(),
                 'fallback_mode' => 'shopify_default',
                 'settings' => $settings ?: null,
                 'updated_by' => $actor->id,
@@ -443,6 +458,175 @@ class PersonalizationConfigurationService
         ]);
 
         return $setting;
+    }
+
+    /** @param list<array<string, mixed>> $checks */
+    public function recordSmartCartCompatibility(
+        Store $store,
+        User $actor,
+        string $themeId,
+        string $themeName,
+        array $checks,
+    ): PersonalizationSmartCartSetting {
+        $this->authorize($store, $actor, 'personalization.smart_cart.manage');
+        $themeId = trim($themeId);
+        $themeName = trim($themeName);
+        if (preg_match('/^\d{1,64}$/', $themeId) !== 1 || $themeName === '' || mb_strlen($themeName) > 120) {
+            throw new PersonalizationException('INVALID_SMART_CART_THEME', '测试主题名称或 Theme ID 无效。');
+        }
+        if ($checks === [] || count($checks) > 20) {
+            throw new PersonalizationException('INVALID_COMPATIBILITY_CHECKS', '兼容性检查结果无效。');
+        }
+
+        $normalized = [];
+        $seen = [];
+        foreach ($checks as $check) {
+            if (! is_array($check)) {
+                throw new PersonalizationException('INVALID_COMPATIBILITY_CHECKS', '兼容性检查结果无效。');
+            }
+            $key = trim((string) ($check['key'] ?? ''));
+            $label = trim((string) ($check['label'] ?? ''));
+            $details = trim((string) ($check['details'] ?? ''));
+            if (preg_match('/^[a-z][a-z0-9_]{0,63}$/', $key) !== 1
+                || ! isset(self::SMART_CART_REQUIRED_CHECKS[$key])
+                || isset($seen[$key])
+                || $label === '' || mb_strlen($label) > 120
+                || mb_strlen($details) > 240) {
+                throw new PersonalizationException('INVALID_COMPATIBILITY_CHECKS', '兼容性检查结果包含无效字段。');
+            }
+            $seen[$key] = true;
+            $normalized[] = [
+                'key' => $key,
+                'label' => self::SMART_CART_REQUIRED_CHECKS[$key],
+                'passed' => (bool) ($check['passed'] ?? false),
+                'details' => $details ?: null,
+            ];
+        }
+        if (array_diff_key(self::SMART_CART_REQUIRED_CHECKS, $seen) !== []) {
+            throw new PersonalizationException('INVALID_COMPATIBILITY_CHECKS', '兼容性检查缺少必填项目。');
+        }
+        $status = collect($normalized)->every(fn (array $check): bool => $check['passed'])
+            ? PersonalizationSmartCartCompatibilityStatus::Compatible
+            : PersonalizationSmartCartCompatibilityStatus::Incompatible;
+        $setting = PersonalizationSmartCartSetting::query()->firstOrNew(['store_id' => $store->id]);
+        $setting->fill([
+            'organization_id' => $store->organization_id,
+            'enabled' => false,
+            'compatibility_status' => $status,
+            'compatibility_details' => ['checks' => $normalized, 'source' => 'authenticated_admin'],
+            'compatibility_checked_at' => now(),
+            'theme_id' => $themeId,
+            'theme_name' => $themeName,
+            'preview_confirmed_at' => null,
+            'enabled_at' => null,
+            'disabled_at' => now(),
+            'fallback_mode' => 'shopify_default',
+            'updated_by' => $actor->id,
+        ])->save();
+        $this->audit($store, $actor, $setting, 'personalization_smart_cart_compatibility_recorded', [
+            'theme_id' => $themeId,
+            'status' => $status->value,
+            'checks' => count($normalized),
+        ]);
+
+        return $setting->refresh();
+    }
+
+    public function confirmSmartCartPreview(
+        Store $store,
+        User $actor,
+    ): PersonalizationSmartCartSetting {
+        $this->authorize($store, $actor, 'personalization.smart_cart.manage');
+        $setting = $this->smartCartSetting($store);
+        if ($setting->compatibility_status !== PersonalizationSmartCartCompatibilityStatus::Compatible
+            || ! $setting->compatibility_checked_at
+            || ! $setting->theme_id) {
+            throw new PersonalizationException(
+                'SMART_CART_COMPATIBILITY_REQUIRED',
+                '必须先完成指定测试主题的兼容性检查。',
+                409,
+            );
+        }
+        $setting->forceFill([
+            'enabled' => false,
+            'preview_confirmed_at' => now(),
+            'enabled_at' => null,
+            'disabled_at' => now(),
+            'fallback_mode' => 'shopify_default',
+            'updated_by' => $actor->id,
+        ])->save();
+        $this->audit($store, $actor, $setting, 'personalization_smart_cart_preview_confirmed', [
+            'theme_id' => $setting->theme_id,
+        ]);
+
+        return $setting->refresh();
+    }
+
+    public function activateSmartCart(Store $store, User $actor): PersonalizationSmartCartSetting
+    {
+        $this->authorize($store, $actor, 'personalization.smart_cart.manage');
+        $setting = $this->smartCartSetting($store);
+        if ($setting->compatibility_status !== PersonalizationSmartCartCompatibilityStatus::Compatible
+            || ! $setting->compatibility_checked_at
+            || $setting->compatibility_checked_at->lt(now()->subDays(7))) {
+            throw new PersonalizationException(
+                'SMART_CART_COMPATIBILITY_REQUIRED',
+                'Smart Cart 需要最近 7 天内通过兼容性检查。',
+                409,
+            );
+        }
+        if (! $setting->preview_confirmed_at
+            || $setting->preview_confirmed_at->lt($setting->compatibility_checked_at)) {
+            throw new PersonalizationException(
+                'SMART_CART_PREVIEW_REQUIRED',
+                '必须先确认桌面和移动端预览。',
+                409,
+            );
+        }
+        $strategy = $setting->strategy;
+        if (! $strategy || (int) $strategy->store_id !== (int) $store->id) {
+            throw new PersonalizationException('SMART_CART_STRATEGY_REQUIRED', 'Smart Cart 尚未选择有效推荐策略。', 409);
+        }
+        if ($strategy->algorithm === PersonalizationAlgorithm::Manual
+            && ! $strategy->productOverrides()->where('type', PersonalizationProductOverrideType::Manual->value)->exists()) {
+            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要一个商品。', 409);
+        }
+
+        DB::transaction(function () use ($setting, $strategy, $actor): void {
+            $strategy->forceFill(['enabled' => true, 'updated_by' => $actor->id])->save();
+            $setting->forceFill([
+                'enabled' => true,
+                'enabled_at' => now(),
+                'disabled_at' => null,
+                'fallback_mode' => 'shopify_default',
+                'updated_by' => $actor->id,
+            ])->save();
+        });
+        $this->audit($store, $actor, $setting, 'personalization_smart_cart_activated', [
+            'theme_id' => $setting->theme_id,
+            'strategy_uuid' => $strategy->uuid,
+        ]);
+
+        return $setting->refresh();
+    }
+
+    public function restoreShopifyCart(Store $store, User $actor): PersonalizationSmartCartSetting
+    {
+        $this->authorize($store, $actor, 'personalization.smart_cart.manage');
+        $setting = $this->smartCartSetting($store);
+        $setting->forceFill([
+            'enabled' => false,
+            'enabled_at' => null,
+            'disabled_at' => now(),
+            'fallback_mode' => 'shopify_default',
+            'updated_by' => $actor->id,
+        ])->save();
+        $this->audit($store, $actor, $setting, 'personalization_smart_cart_restored', [
+            'theme_id' => $setting->theme_id,
+            'fallback_mode' => 'shopify_default',
+        ]);
+
+        return $setting->refresh();
     }
 
     /** @return array{strategies: mixed, components: mixed, smart_cart: ?PersonalizationSmartCartSetting} */
@@ -504,6 +688,20 @@ class PersonalizationConfigurationService
             || (int) $component->store_id !== (int) $store->id) {
             throw new PersonalizationException('COMPONENT_NOT_FOUND', '找不到该推荐组件。', 404);
         }
+    }
+
+    private function smartCartSetting(Store $store): PersonalizationSmartCartSetting
+    {
+        $setting = PersonalizationSmartCartSetting::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->with(['strategy.productOverrides'])
+            ->first();
+        if (! $setting) {
+            throw new PersonalizationException('SMART_CART_DRAFT_REQUIRED', '请先保存 Smart Cart 草稿。', 409);
+        }
+
+        return $setting;
     }
 
     private function resetPublication(PersonalizationRecommendationStrategy $strategy): void

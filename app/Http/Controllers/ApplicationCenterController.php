@@ -134,6 +134,10 @@ class ApplicationCenterController extends Controller
             'personalization_component_activated' => '个性化推荐组件已启用',
             'personalization_component_disabled' => '个性化推荐组件已停用',
             'personalization_smart_cart_draft_saved' => 'Smart Cart 草稿已保存',
+            'personalization_smart_cart_compatibility_recorded' => 'Smart Cart 兼容性已检查',
+            'personalization_smart_cart_preview_confirmed' => 'Smart Cart 预览已确认',
+            'personalization_smart_cart_activated' => 'Smart Cart 已启用',
+            'personalization_smart_cart_restored' => '已恢复 Shopify 默认购物车',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }

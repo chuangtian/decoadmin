@@ -1,0 +1,33 @@
+{% liquid
+  assign configured_proxy_path = app.metafields.deco_personalization.proxy_path.value
+  assign proxy_path = block.settings.proxy_path_override | default: configured_proxy_path
+%}
+
+<div
+  data-deco-smart-cart-root
+  data-proxy-path="{{ proxy_path | escape }}"
+  data-design-mode="{{ request.design_mode }}"
+  hidden
+  {{ block.shopify_attributes }}
+></div>
+
+{% schema %}
+{
+  "name": "t:smart_cart.name",
+  "target": "body",
+  "stylesheet": "smart-cart.css",
+  "javascript": "smart-cart.js",
+  "settings": [
+    {
+      "type": "paragraph",
+      "content": "t:smart_cart.settings.safety_notice"
+    },
+    {
+      "type": "text",
+      "id": "proxy_path_override",
+      "label": "t:smart_cart.settings.proxy_path_override",
+      "info": "t:smart_cart.settings.proxy_path_override_info"
+    }
+  ]
+}
+{% endschema %}

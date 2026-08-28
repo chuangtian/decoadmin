@@ -17,8 +17,11 @@ const requiredFiles = [
   'extensions/app-home/src/runtime.mjs',
   'extensions/recommendations/shopify.extension.toml',
   'extensions/recommendations/blocks/recommendations.liquid',
+  'extensions/recommendations/blocks/smart_cart.liquid',
   'extensions/recommendations/assets/recommendations.js',
   'extensions/recommendations/assets/recommendations.css',
+  'extensions/recommendations/assets/smart-cart.js',
+  'extensions/recommendations/assets/smart-cart.css',
 ];
 const failures = [];
 
