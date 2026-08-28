@@ -3,7 +3,7 @@
 ## Directory layout
 
 - Each Shopify App must live in its own `shopify-apps/<app-name>/` directory.
-- Current apps are `student-discount/` and `decoAfterShip/`; keep them independent and do not merge their functionality or release lifecycle.
+- Current apps are `commerce-hub/`, `student-discount/`, and `instagram-feed/`; keep them independent and do not merge their functionality or release lifecycle.
 - New business domains should default to a new independent app when their Shopify scopes, installation needs, operational ownership, or release cadence differ from an existing app.
 
 ## App isolation
