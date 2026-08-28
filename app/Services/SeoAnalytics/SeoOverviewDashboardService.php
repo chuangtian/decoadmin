@@ -138,7 +138,10 @@ class SeoOverviewDashboardService
         $query = $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query();
         $hashColumn = $type === 'queries' ? 'query_hash' : 'page_hash';
         $labelColumn = $type === 'queries' ? 'query' : 'page';
-        $segments = $type === 'queries' && $segment === 'total' ? ['brand', 'industry'] : [$segment];
+        $segments = $type === 'queries' && $segment === 'total'
+            ? ['brand', 'industry']
+            : ($type === 'pages' && $segment === 'blog' ? ['total'] : [$segment]);
+        $requiredLabelContains = $type === 'pages' && $segment === 'blog' ? '/blogs/' : '';
         [$page, $perPage] = $this->pageFilters($filters, [12, 25, 50, 100], 50);
         $search = mb_substr(trim((string) ($filters['search'] ?? '')), 0, 200);
         $sort = in_array($filters['sort'] ?? null, ['clicks', 'impressions', 'ctr', 'position', 'label'], true)
@@ -148,7 +151,7 @@ class SeoOverviewDashboardService
         $base = $dimension !== ''
             ? $this->gscBreakdownAggregate($store, $from, $to, $searchType, $dimension, $search)
             : ($searchType === 'web'
-                ? $this->gscDimensionAggregate($query, $store, $hashColumn, $labelColumn, $segments, $from, $to, $search)
+                ? $this->gscDimensionAggregate($query, $store, $hashColumn, $labelColumn, $segments, $from, $to, $search, [], $requiredLabelContains)
                 : null);
         if ($base === null) {
             return [
@@ -163,7 +166,7 @@ class SeoOverviewDashboardService
             ? $this->gscBreakdownCount($store, $from, $to, $searchType, $dimension, $search)
             : $this->gscDimensionCount(
                 $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $from, $to, $search,
+                $store, $hashColumn, $labelColumn, $segments, $from, $to, $search, $requiredLabelContains,
             );
         $page = min($page, max(1, (int) ceil($total / $perPage)));
         $sortColumn = ['ctr' => 'ctr', 'position' => 'position', 'label' => 'label'][$sort] ?? $sort;
@@ -173,7 +176,7 @@ class SeoOverviewDashboardService
             ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
             : $this->gscDimensionAggregate(
                 $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $comparisonFrom, $comparisonTo, '', $hashes,
+                $store, $hashColumn, $labelColumn, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $requiredLabelContains,
             ))->get()->keyBy('hash');
 
         $summary = $searchType === 'web'
@@ -642,6 +645,7 @@ class SeoOverviewDashboardService
         CarbonImmutable $to,
         string $search = '',
         array $hashes = [],
+        string $requiredLabelContains = '',
     ): Builder {
         $query = $this->dateRange(
             $query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments),
@@ -650,6 +654,9 @@ class SeoOverviewDashboardService
         );
         if ($search !== '') {
             $query->where($labelColumn, 'like', '%'.$search.'%');
+        }
+        if ($requiredLabelContains !== '') {
+            $query->where($labelColumn, 'like', '%'.$requiredLabelContains.'%');
         }
         if ($hashes !== []) {
             $query->whereIn($hashColumn, $hashes);
@@ -702,6 +709,7 @@ class SeoOverviewDashboardService
         CarbonImmutable $from,
         CarbonImmutable $to,
         string $search = '',
+        string $requiredLabelContains = '',
     ): int {
         $query = $this->dateRange(
             $query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments),
@@ -710,6 +718,9 @@ class SeoOverviewDashboardService
         );
         if ($search !== '') {
             $query->where($labelColumn, 'like', '%'.$search.'%');
+        }
+        if ($requiredLabelContains !== '') {
+            $query->where($labelColumn, 'like', '%'.$requiredLabelContains.'%');
         }
 
         return (int) $query->distinct()->count($hashColumn);
