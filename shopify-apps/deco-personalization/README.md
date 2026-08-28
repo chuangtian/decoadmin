@@ -49,6 +49,14 @@ Pixel 只声明分析用途：`analytics = true`，营销、偏好和数据销�
 
 后台每五分钟运行一次店铺隔离的归因核对，并按店铺时区输出最近 30 天曝光、点击、加购、归因订单、净归因收入、AOV、每日趋势和展示位置表现。不同订单币种不混合汇总。
 
+## 数据保留与隐私生命周期
+
+- 匿名原始推荐事件与逐单归因明细保留 90 天；删除前先生成不含访客标识的日聚合。
+- 匿名日聚合保留 13 个月；Personalization 审计保留 365 天。
+- `app/uninstalled` 后 48 小时安排在线 Personalization 数据清理；有效 `shop/redact` 立即安排清理，小时任务执行，均早于 72 小时上限。
+- `customers/data_request` 与 `customers/redact` 返回“未持有客户数据”，不保留 Webhook 中的客户 ID、邮箱、电话或原始载荷；三个官方合规主题都由同一 HMAC 验证入口处理。
+- 备份属于基础设施策略，Test/Production 发布清单必须确认 Personalization 备份副本在 30 天内过期；应用代码不会把备份恢复到在线保留期之外。
+
 ## 当前状态
 
 App Home 工程与离线测试已建立。Test Client ID 和实际 Shopify 配置将在发布阶段只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。

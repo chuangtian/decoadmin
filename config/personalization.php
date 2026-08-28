@@ -40,6 +40,16 @@ return [
     'app_proxy_target' => '/api/shopify-app/personalization/proxy',
     'active_proxy_path' => '/apps/deco-personalization-test',
 
+    'retention' => [
+        'raw_event_days' => 90,
+        'attribution_days' => 90,
+        'aggregate_months' => 13,
+        'audit_days' => 365,
+        'uninstall_purge_hours' => 48,
+        // Infrastructure backups must independently expire within this window.
+        'backup_days' => 30,
+    ],
+
     // Permanent safety boundary. Runtime code must never infer an allow-list from
     // this value; installations remain dynamic across all non-denied stores.
     'denied_shop_domains' => array_values(array_filter(array_map(

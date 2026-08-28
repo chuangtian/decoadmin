@@ -39,6 +39,18 @@ Schedule::command('personalization:reconcile-attribution')
     ->onOneServer()
     ->withoutOverlapping(10);
 
+Schedule::command('personalization:prune-data --due-only')
+    ->name('personalization:purge-due-stores')
+    ->hourlyAt(35)
+    ->onOneServer()
+    ->withoutOverlapping(30);
+
+Schedule::command('personalization:prune-data')
+    ->name('personalization:retention-maintenance')
+    ->dailyAt('04:25')
+    ->onOneServer()
+    ->withoutOverlapping(120);
+
 Schedule::command('student-discounts:prune-evidence --days=30')
     ->name('student-discounts:prune-reviewed-evidence')
     ->dailyAt('04:35')

@@ -3,6 +3,7 @@
 namespace App\Services\Personalization;
 
 use App\Exceptions\PersonalizationException;
+use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\PersonalizationEventSource;
@@ -15,7 +16,15 @@ use JsonException;
 
 class PersonalizationWebhookService
 {
-    private const ALLOWED_TOPICS = ['app/uninstalled', 'app/scopes_update'];
+    private const ALLOWED_TOPICS = [
+        'app/uninstalled',
+        'app/scopes_update',
+        'customers/data_request',
+        'customers/redact',
+        'shop/redact',
+    ];
+
+    private const PRIVACY_TOPICS = ['customers/data_request', 'customers/redact', 'shop/redact'];
 
     public function __construct(
         private ShopifyWebhookHmacValidator $hmacValidator,
@@ -72,7 +81,7 @@ class PersonalizationWebhookService
         }
 
         $scopes = $topic === 'app/scopes_update' ? $this->validatedScopes($payload) : [];
-        $store = $this->storeForHeader($shopDomain);
+        $store = $this->storeForHeader($shopDomain, str_starts_with($topic, 'app/'));
         $connection = $store->shopifyConnection;
         $payloadHash = hash('sha256', $rawPayload);
 
@@ -98,36 +107,64 @@ class PersonalizationWebhookService
                 return ['event' => $existingEvent, 'created' => false];
             }
 
-            $installation = $this->registry->synchronizeInstallation(
-                $store,
-                $connection,
-                $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
-                $scopes,
-                'personalization_webhook',
-            );
+            if (str_starts_with($topic, 'app/')) {
+                if (! $connection) {
+                    throw new PersonalizationException('STORE_NOT_CONNECTED', 'Webhook 店铺尚未连接 DecoAdmin Commerce Hub。', 404);
+                }
+                $installation = $this->registry->synchronizeInstallation(
+                    $store,
+                    $connection,
+                    $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
+                    $scopes,
+                    'personalization_webhook',
+                );
+                $app = $installation->app;
+            } else {
+                $app = App::query()
+                    ->where('handle', (string) config('personalization.active.handle'))
+                    ->where('status', 'active')
+                    ->first();
+                if (! $app) {
+                    throw new PersonalizationException(
+                        'PERSONALIZATION_APP_NOT_CONFIGURED',
+                        '个性化推荐 App 的 Test 环境尚未配置。',
+                        503,
+                    );
+                }
+                $installation = AppInstallation::withTrashed()
+                    ->where('app_id', $app->id)
+                    ->where('store_id', $store->id)
+                    ->first();
+            }
             $eventSource = PersonalizationEventSource::query()
                 ->where('organization_id', $store->organization_id)
                 ->where('store_id', $store->id)
                 ->first();
-            if ($eventSource) {
+            if ($eventSource && ! in_array($topic, ['customers/data_request', 'customers/redact'], true)) {
                 $pixelScopesGranted = in_array('write_pixels', $scopes, true)
                     && in_array('read_customer_events', $scopes, true);
                 $active = $topic === 'app/scopes_update'
                     && $pixelScopesGranted
                     && filled($eventSource->web_pixel_id);
+                $purgeAfter = match ($topic) {
+                    'app/uninstalled' => now()->addHours((int) config('personalization.retention.uninstall_purge_hours', 48)),
+                    'shop/redact' => now(),
+                    default => $active ? null : $eventSource->purge_after,
+                };
                 $eventSource->forceFill([
                     'status' => $active ? 'active' : 'inactive',
                     'activated_at' => $active ? ($eventSource->activated_at ?? now()) : null,
+                    'purge_after' => $purgeAfter,
                 ])->save();
             }
-            $app = $installation->app;
             $receivedAt = now();
+            $privacyTopic = in_array($topic, self::PRIVACY_TOPICS, true);
             $event = WebhookEvent::query()->firstOrCreate(
                 ['webhook_id' => $webhookId],
                 [
                     'organization_id' => $store->organization_id,
                     'store_id' => $store->id,
-                    'shopify_connection_id' => $connection->id,
+                    'shopify_connection_id' => $connection?->id,
                     'app_id' => $app->id,
                     'topic' => $topic,
                     'api_version' => $apiVersion ?: null,
@@ -138,8 +175,8 @@ class PersonalizationWebhookService
                         'api_version' => $apiVersion ?: null,
                         'triggered_at' => mb_substr(trim((string) ($headers['triggered_at'] ?? '')), 0, 64) ?: null,
                     ], fn (mixed $value): bool => $value !== null && $value !== ''),
-                    'payload' => ['storage' => 'encrypted'],
-                    'payload_encrypted' => $rawPayload,
+                    'payload' => ['storage' => $privacyTopic ? 'redacted' : 'encrypted'],
+                    'payload_encrypted' => $privacyTopic ? null : $rawPayload,
                     'payload_sha256' => $payloadHash,
                     'status' => 'processing',
                     'attempts' => 1,
@@ -165,11 +202,15 @@ class PersonalizationWebhookService
             AuditLog::query()->create([
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->id,
-                'action' => $topic === 'app/uninstalled'
-                    ? 'personalization_shopify_app_uninstalled'
-                    : 'personalization_shopify_app_scopes_updated',
-                'subject_type' => AppInstallation::class,
-                'subject_id' => $installation->id,
+                'action' => match ($topic) {
+                    'app/uninstalled' => 'personalization_shopify_app_uninstalled',
+                    'app/scopes_update' => 'personalization_shopify_app_scopes_updated',
+                    'customers/data_request' => 'personalization_customer_data_request_received',
+                    'customers/redact' => 'personalization_customer_redact_received',
+                    default => 'personalization_shop_redact_received',
+                },
+                'subject_type' => $installation ? AppInstallation::class : Store::class,
+                'subject_id' => $installation?->id ?? $store->id,
                 'metadata' => [
                     'scope' => 'store',
                     'environment' => (string) config('personalization.environment'),
@@ -181,7 +222,11 @@ class PersonalizationWebhookService
 
             $event->forceFill([
                 'status' => 'processed',
-                'processing_result' => 'handled',
+                'processing_result' => match ($topic) {
+                    'customers/data_request', 'customers/redact' => 'no_customer_data',
+                    'app/uninstalled', 'shop/redact' => 'purge_scheduled',
+                    default => 'handled',
+                },
                 'handler' => self::class,
                 'processed_at' => now(),
                 'processing_duration_ms' => 0,
@@ -217,19 +262,22 @@ class PersonalizationWebhookService
         return array_values(array_unique($scopes));
     }
 
-    private function storeForHeader(string $shopDomain): Store
+    private function storeForHeader(string $shopDomain, bool $requireConnection): Store
     {
         $store = Store::query()
             ->where('shopify_domain', $shopDomain)
             ->where('status', 'active')
             ->whereHas('organization', fn ($query) => $query->where('status', 'active'))
-            ->whereHas('shopifyConnection', fn ($query) => $query->whereIn('status', ['connected', 'warning']))
+            ->when($requireConnection, fn ($query) => $query->whereHas(
+                'shopifyConnection',
+                fn ($connection) => $connection->whereIn('status', ['connected', 'warning']),
+            ))
             ->with([
                 'organization',
-                'shopifyConnection' => fn ($query) => $query->whereIn('status', ['connected', 'warning']),
+                'shopifyConnection',
             ])
             ->first();
-        if (! $store || ! $store->organization || ! $store->shopifyConnection) {
+        if (! $store || ! $store->organization || ($requireConnection && ! $store->shopifyConnection)) {
             throw new PersonalizationException(
                 'STORE_NOT_CONNECTED',
                 'Webhook 店铺尚未连接 DecoAdmin Commerce Hub。',

@@ -138,6 +138,10 @@ class ApplicationCenterController extends Controller
             'personalization_smart_cart_preview_confirmed' => 'Smart Cart 预览已确认',
             'personalization_smart_cart_activated' => 'Smart Cart 已启用',
             'personalization_smart_cart_restored' => '已恢复 Shopify 默认购物车',
+            'personalization_customer_data_request_received' => '已处理客户数据请求（无客户数据）',
+            'personalization_customer_redact_received' => '已处理客户清除请求（无客户数据）',
+            'personalization_shop_redact_received' => '已接收店铺清除请求',
+            'personalization_online_data_purged' => '个性化推荐在线数据已清理',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }

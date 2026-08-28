@@ -162,6 +162,7 @@ class ShopifyPersonalizationAppService
                 'web_pixel_id' => $webPixelId,
                 'status' => 'active',
                 'activated_at' => now(),
+                'purge_after' => null,
             ])->save();
 
             AuditLog::query()->create([

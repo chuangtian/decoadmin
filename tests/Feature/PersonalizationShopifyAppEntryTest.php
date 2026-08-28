@@ -357,6 +357,10 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->assertSame('commerce-hub-token', $connection->fresh()->access_token_encrypted);
         $this->assertSame('inactive', $eventSource->fresh()->status);
         $this->assertNull($eventSource->fresh()->activated_at);
+        $this->assertTrue($eventSource->fresh()->purge_after->between(
+            now()->addHours(47),
+            now()->addHours(49),
+        ));
 
         $this->webhook('app/uninstalled', $store->shopify_domain, $payload, $webhookId)
             ->assertOk()
@@ -379,6 +383,64 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->webhook('app/uninstalled', $store->shopify_domain, ['id' => 100], $webhookId)
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'WEBHOOK_ID_CONFLICT');
+    }
+
+    public function test_privacy_webhooks_never_retain_customer_payload_and_shop_redact_schedules_immediate_purge(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $connection = $this->connection($store);
+        $this->activeInstallation($store, $connection);
+        $source = PersonalizationEventSource::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'web_pixel_id' => 'gid://shopify/WebPixel/654',
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
+
+        $this->webhook('customers/data_request', $store->shopify_domain, [
+            'customer' => ['id' => 999, 'email' => 'private@example.com'],
+        ], (string) Str::uuid(), 'wrong-secret')
+            ->assertUnauthorized()
+            ->assertJsonPath('error.code', 'INVALID_WEBHOOK_HMAC');
+        $this->assertDatabaseCount('webhook_events', 0);
+
+        $this->webhook('customers/data_request', $store->shopify_domain, [
+            'shop_id' => 1,
+            'shop_domain' => $store->shopify_domain,
+            'customer' => ['id' => 999, 'email' => 'private@example.com'],
+            'orders_requested' => [123],
+        ], (string) Str::uuid())->assertAccepted();
+        $requestEvent = WebhookEvent::query()->where('topic', 'customers/data_request')->sole();
+        $this->assertNull($requestEvent->payload_encrypted);
+        $this->assertSame(['storage' => 'redacted'], $requestEvent->payload);
+        $this->assertTrue($requestEvent->payloadIntegrityIsValid());
+        $this->assertSame('no_customer_data', $requestEvent->processing_result);
+        $this->assertStringNotContainsString(
+            'private@example.com',
+            (string) DB::table('webhook_events')->whereKey($requestEvent->id)->value('payload'),
+        );
+        $this->assertSame('active', $source->fresh()->status);
+
+        $this->webhook('customers/redact', $store->shopify_domain, [
+            'shop_id' => 1,
+            'shop_domain' => $store->shopify_domain,
+            'customer' => ['id' => 999, 'email' => 'private@example.com'],
+            'orders_to_redact' => [123],
+        ], (string) Str::uuid())->assertAccepted();
+        $this->assertSame('active', $source->fresh()->status);
+
+        $this->webhook('shop/redact', $store->shopify_domain, [
+            'shop_id' => 1,
+            'shop_domain' => $store->shopify_domain,
+        ], (string) Str::uuid())->assertAccepted();
+        $source->refresh();
+        $this->assertSame('inactive', $source->status);
+        $this->assertTrue($source->purge_after->lessThanOrEqualTo(now()));
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'personalization_shop_redact_received',
+            'store_id' => $store->id,
+        ]);
     }
 
     public function test_app_center_uses_personalization_provider_and_rbac(): void
@@ -468,14 +530,19 @@ class PersonalizationShopifyAppEntryTest extends TestCase
     }
 
     /** @param array<string, mixed> $payload */
-    private function webhook(string $topic, string $shop, array $payload, string $webhookId): TestResponse
-    {
+    private function webhook(
+        string $topic,
+        string $shop,
+        array $payload,
+        string $webhookId,
+        string $secret = 'personalization-test-secret',
+    ): TestResponse {
         $rawPayload = json_encode($payload, JSON_THROW_ON_ERROR);
 
         return $this->call('POST', route('personalization.shopify-app.webhooks'), [], [], [], [
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json',
-            'HTTP_X_SHOPIFY_HMAC_SHA256' => base64_encode(hash_hmac('sha256', $rawPayload, 'personalization-test-secret', true)),
+            'HTTP_X_SHOPIFY_HMAC_SHA256' => base64_encode(hash_hmac('sha256', $rawPayload, $secret, true)),
             'HTTP_X_SHOPIFY_WEBHOOK_ID' => $webhookId,
             'HTTP_X_SHOPIFY_TOPIC' => $topic,
             'HTTP_X_SHOPIFY_SHOP_DOMAIN' => $shop,
