@@ -224,6 +224,13 @@ class SeoAnalyticsSyncService
                 }
             }
 
+            if ($segment === 'blog') {
+                SeoGscPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id)->where('segment', $segment)
+                    ->whereDate('metric_date', '>=', $from->toDateString())->whereDate('metric_date', '<=', $to->toDateString())->delete();
+
+                continue;
+            }
+
             SeoGscPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id)->where('segment', $segment)
                 ->whereDate('metric_date', '>=', $from->toDateString())->whereDate('metric_date', '<=', $to->toDateString())->delete();
             foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', 'page'], $filters) as $rows) {

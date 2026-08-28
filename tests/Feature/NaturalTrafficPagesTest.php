@@ -20,6 +20,7 @@ use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\User;
+use App\Services\SeoAnalytics\GoogleSeoApiClient;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncManager;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncService;
 use App\Services\SeoAnalytics\SeoOverviewDashboardService;
@@ -600,6 +601,78 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertJsonPath('pagination.total', 1)
             ->assertJsonPath('rows.0.page_type', 'product')
             ->assertJsonPath('totals.revenue', 250);
+    }
+
+    public function test_blog_page_details_are_derived_from_total_page_rows(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $blogPage = 'https://example.com/blogs/news/electric-bike-guide';
+
+        $this->gscPage($organization, $store, '2026-08-22', 'total', $blogPage, 15, 300, 4);
+        $this->gscPage($organization, $store, '2026-08-15', 'total', $blogPage, 10, 200, 5);
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/products/x1', 99, 999, 1);
+        $this->gscPage($organization, $store, '2026-08-22', 'blog', $blogPage, 500, 5000, 2);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->getJson(route('natural-traffic.seo-geo.source-details', [
+                'source' => 'gsc', 'date_from' => '2026-08-16', 'date_to' => '2026-08-22',
+                'segment' => 'blog', 'detail_type' => 'pages',
+            ]))->assertOk()
+            ->assertJsonPath('type', 'pages')
+            ->assertJsonPath('segment', 'blog')
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', $blogPage)
+            ->assertJsonPath('rows.0.clicks', 15)
+            ->assertJsonPath('rows.0.previous.clicks', 10)
+            ->assertJsonPath('rows.0.difference.clicks', 5);
+    }
+
+    public function test_gsc_sync_skips_blog_page_request_and_removes_legacy_rows(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        foreach ([
+            'gsc_client_id' => 'client', 'gsc_client_secret' => 'secret', 'gsc_refresh_token' => 'refresh',
+            'gsc_site_url' => 'https://example.com/', 'ga4_property_id' => '12345',
+            'ga4_service_account_json' => json_encode(['client_email' => 'seo@example.test', 'private_key' => 'private']),
+        ] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id, 'store_id' => $store->id, 'provider' => 'google_search_console_ga4',
+                'credential_key' => $key, 'credential_value' => $value, 'updated_by' => $user->id,
+            ]);
+        }
+
+        $legacyBlogPage = 'https://example.com/blogs/news/legacy';
+        $this->gscPage($organization, $store, '2026-08-22', 'blog', $legacyBlogPage, 5, 100, 3);
+
+        $pageRequests = [];
+        $google = \Mockery::mock(GoogleSeoApiClient::class);
+        $google->shouldReceive('ga4Rows')->twice()->andReturn([]);
+        $google->shouldReceive('gscRows')->andReturn([]);
+        $google->shouldReceive('gscRowPages')->andReturnUsing(
+            function (Store $candidate, string $from, string $to, array $dimensions, array $filters = []) use (&$pageRequests): \Generator {
+                if ($dimensions === ['date', 'page']) {
+                    $pageRequests[] = $filters;
+                }
+
+                yield from [];
+            },
+        );
+        $this->instance(GoogleSeoApiClient::class, $google);
+
+        app(SeoAnalyticsSyncService::class)->syncRange($store, '2026-08-22', '2026-08-22');
+
+        $this->assertCount(3, $pageRequests);
+        $this->assertFalse(collect($pageRequests)->contains(
+            fn (array $filters): bool => collect($filters)->contains(
+                fn (array $filter): bool => ($filter['dimension'] ?? null) === 'page'
+                    && ($filter['operator'] ?? null) === 'contains'
+                    && ($filter['expression'] ?? null) === '/blogs/',
+            ),
+        ));
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'blog',
+            'page_hash' => hash('sha256', $legacyBlogPage),
+        ]);
     }
 
     /** @return array<string, string> */
