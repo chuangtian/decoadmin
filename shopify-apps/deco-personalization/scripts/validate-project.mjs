@@ -12,6 +12,9 @@ const requiredFiles = [
   'shopify.app.test.toml',
   'shopify.app.production.toml',
   'extensions/README.md',
+  'extensions/app-home/shopify.extension.toml',
+  'extensions/app-home/src/AppHome.jsx',
+  'extensions/app-home/src/runtime.mjs',
 ];
 const failures = [];
 
@@ -49,7 +52,11 @@ for (const absolutePath of files) {
 
   check(!/trycloudflare\.com/i.test(contents), `Temporary Cloudflare URL is forbidden: ${relativePath}`);
   if (!['AGENTS.md', 'README.md', 'scripts/validate-project.mjs'].includes(relativePath)) {
-    check(!/macfoxebike/i.test(contents), `Denied shop is forbidden in runtime files: ${relativePath}`);
+    if (relativePath === 'extensions/app-home/src/runtime.mjs') {
+      check(/macfoxebike\.myshopify\.com/i.test(contents), 'App Home runtime must preserve the permanent denied shop guard');
+    } else if (relativePath !== 'extensions/app-home/src/runtime.test.mjs') {
+      check(!/macfoxebike/i.test(contents), `Denied shop may appear only in the dedicated safety guard: ${relativePath}`);
+    }
     check(!/macfox-test-app/i.test(contents), `Test shop must not be hardcoded in runtime files: ${relativePath}`);
   }
   if (!isValidator) {

@@ -3,12 +3,19 @@
   "version": "0.1.0",
   "license": "UNLICENSED",
   "private": true,
+  "workspaces": [
+    "extensions/*"
+  ],
   "scripts": {
-    "check": "npm run check:project && npm test",
+    "check": "npm run check:project && npm test && npm run typecheck:app-home",
     "check:project": "node scripts/validate-project.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:app-home": "node --test extensions/app-home/src/runtime.test.mjs",
+    "typecheck:app-home": "tsc --project extensions/app-home/tsconfig.json"
   },
   "dependencies": {},
-  "devDependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
   "author": "tianchuang"
 }

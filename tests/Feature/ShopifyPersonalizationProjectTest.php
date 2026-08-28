@@ -18,6 +18,9 @@ class ShopifyPersonalizationProjectTest extends TestCase
             'shopify.app.test.toml',
             'shopify.app.production.toml',
             'scripts/validate-project.mjs',
+            'extensions/app-home/shopify.extension.toml',
+            'extensions/app-home/src/AppHome.jsx',
+            'extensions/app-home/src/runtime.mjs',
         ];
 
         foreach ($required as $file) {
@@ -53,7 +56,11 @@ class ShopifyPersonalizationProjectTest extends TestCase
             $relative = str_replace($root.'/', '', $file->getPathname());
             $contents = (string) file_get_contents($file->getPathname());
             $this->assertStringNotContainsString('macfox-test-app', $contents, $relative);
-            $this->assertStringNotContainsString('macfoxebike', $contents, $relative);
+            if ($relative === 'extensions/app-home/src/runtime.mjs') {
+                $this->assertStringContainsString('macfoxebike.myshopify.com', $contents, $relative);
+            } elseif ($relative !== 'extensions/app-home/src/runtime.test.mjs') {
+                $this->assertStringNotContainsString('macfoxebike', $contents, $relative);
+            }
             $this->assertStringNotContainsString('trycloudflare.com', $contents, $relative);
             $this->assertDoesNotMatchRegularExpression('/read_discounts|write_discounts|student_discount|instagram_feed/i', $contents, $relative);
         }

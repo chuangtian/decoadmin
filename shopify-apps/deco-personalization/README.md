@@ -25,9 +25,15 @@ App Home / Theme App Extension / Web Pixel
 
 所有 shop、Organization 和 Store 都由后端从已验证身份动态解析，不在代码中写死商店。
 
+## App Home
+
+`extensions/app-home` 复用 Student Discount 的身份模式：从 Shopify 获取 ID token，动态解析 shop，固定请求 Test DecoAdmin 源站，再由后端校验签名、audience、Organization、Store 与 RBAC。前端解析不代替后端验签。
+
+App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久禁止店铺会在发出任何后端请求前被拒绝。
+
 ## 当前状态
 
-阶段 2 只建立安全的 Test-first 工程骨架。Test Client ID 和实际 Shopify 配置将在只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。
+App Home 工程与离线测试已建立。Test Client ID 和实际 Shopify 配置将在发布阶段只读定位现有 Test App 后补齐；Client Secret 只进入批准的 Secret/环境配置，不进入本目录。
 
 ## 离线校验
 
