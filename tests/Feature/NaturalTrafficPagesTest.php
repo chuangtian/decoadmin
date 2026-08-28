@@ -23,6 +23,7 @@ use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\User;
 use App\Services\SeoAnalytics\GoogleSeoApiClient;
+use App\Services\SeoAnalytics\GscDetailPruneService;
 use App\Services\SeoAnalytics\GscDimensionBackfillService;
 use App\Services\SeoAnalytics\GscMetricQueryService;
 use App\Services\SeoAnalytics\SeoAnalyticsCacheVersionService;
@@ -720,17 +721,19 @@ class NaturalTrafficPagesTest extends TestCase
                 }
 
                 if ($dimensions === ['date', 'page'] && $filters === []) {
-                    yield [[
-                        'keys' => ['2026-08-22', $legacyBlogPage], 'clicks' => 5, 'impressions' => 100, 'position' => 3,
-                    ]];
+                    yield [
+                        ['keys' => ['2026-08-22', $legacyBlogPage], 'clicks' => 5, 'impressions' => 100, 'position' => 3],
+                        ['keys' => ['2026-08-22', 'https://example.com/low-value'], 'clicks' => 0, 'impressions' => 4, 'position' => 80],
+                    ];
 
                     return;
                 }
 
                 if ($dimensions === ['date', 'query'] && ($filters[0]['operator'] ?? null) === 'includingRegex') {
-                    yield [[
-                        'keys' => ['2026-08-22', 'macfox'], 'clicks' => 3, 'impressions' => 50, 'position' => 2,
-                    ]];
+                    yield [
+                        ['keys' => ['2026-08-22', 'macfox'], 'clicks' => 3, 'impressions' => 50, 'position' => 2],
+                        ['keys' => ['2026-08-22', 'low value query'], 'clicks' => 0, 'impressions' => 4, 'position' => 90],
+                    ];
 
                     return;
                 }
@@ -762,6 +765,63 @@ class NaturalTrafficPagesTest extends TestCase
             'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'brand',
             'query_hash' => hash('sha256', 'macfox'), 'query_id' => SeoGscQuery::query()->sole()->id,
         ]);
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
+            'store_id' => $store->id, 'page_hash' => hash('sha256', 'https://example.com/low-value'),
+        ]);
+        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', [
+            'store_id' => $store->id, 'query_hash' => hash('sha256', 'low value query'),
+        ]);
+        $this->assertDatabaseMissing('seo_gsc_search_type_daily_metrics', [
+            'store_id' => $store->id, 'search_type' => 'web',
+        ]);
+    }
+
+    public function test_gsc_pruner_removes_only_no_click_low_impression_details_and_redundant_rows(): void
+    {
+        [, $organization, $store] = $this->context('organization-admin');
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/retained', 0, 5, 8);
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/pruned', 0, 4, 80);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'retained click', 1, 1, 9);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'pruned query', 0, 1, 90);
+        SeoGscDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'segment' => 'total', 'clicks' => 1, 'impressions' => 11, 'average_position' => 7, 'synced_at' => now(),
+        ]);
+        SeoGscSearchTypeDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'search_type' => 'web', 'clicks' => 1, 'impressions' => 11, 'average_position' => 7, 'synced_at' => now(),
+        ]);
+        SeoGscBreakdownDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'search_type' => 'web', 'dimension' => 'country', 'value_hash' => hash('sha256', 'empty'), 'value' => 'empty',
+            'clicks' => 0, 'impressions' => 0, 'average_position' => 0, 'synced_at' => now(),
+        ]);
+
+        app(GscDimensionBackfillService::class)->backfill($store->id, 1000);
+        $version = app(SeoAnalyticsCacheVersionService::class)->current($store->id);
+
+        $this->artisan('seo-analytics:prune-gsc-details', [
+            '--store' => $store->id, '--min-impressions' => 5, '--dry-run' => true,
+        ])->assertSuccessful();
+        $this->assertSame(2, SeoGscPageDailyMetric::query()->count());
+        $this->assertSame(2, SeoGscQueryDailyMetric::query()->count());
+
+        $result = app(GscDetailPruneService::class)->prune($store->id, 5, 1000);
+
+        $this->assertSame(1, $result['pages']['deleted_rows']);
+        $this->assertSame(1, $result['queries']['deleted_rows']);
+        $this->assertSame(1, $result['pages']['orphan_dimensions_deleted']);
+        $this->assertSame(1, $result['queries']['orphan_dimensions_deleted']);
+        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', ['page' => 'https://example.com/retained']);
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', ['page' => 'https://example.com/pruned']);
+        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', ['query' => 'retained click']);
+        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', ['query' => 'pruned query']);
+        $this->assertSame(1, SeoGscDailyMetric::query()->count());
+        $this->assertSame(0, SeoGscSearchTypeDailyMetric::query()->count());
+        $this->assertSame(0, SeoGscBreakdownDailyMetric::query()->count());
+        $this->assertSame(1, SeoGscPage::query()->count());
+        $this->assertSame(1, SeoGscQuery::query()->count());
+        $this->assertGreaterThan($version, app(SeoAnalyticsCacheVersionService::class)->current($store->id));
     }
 
     /** @return array<string, string> */
