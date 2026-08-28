@@ -163,11 +163,15 @@ class SeoOverviewDashboardService
         $sort = in_array($filters['sort'] ?? null, ['clicks', 'impressions', 'ctr', 'position', 'label'], true)
             ? (string) $filters['sort'] : 'clicks';
         $direction = ($filters['direction'] ?? null) === 'asc' ? 'asc' : 'desc';
+        $useFactPagination = $dimension === '' && $searchType === 'web' && $sort !== 'label'
+            && $this->gscMetrics->dimensionsReady($store, $type);
 
         $base = $dimension !== ''
             ? $this->gscBreakdownAggregate($store, $from, $to, $searchType, $dimension, $search)
             : ($searchType === 'web'
-                ? $this->gscMetrics->aggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly)
+                ? ($useFactPagination
+                    ? $this->gscMetrics->factAggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly)
+                    : $this->gscMetrics->aggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly))
                 : null);
         if ($base === null) {
             return [
@@ -188,11 +192,21 @@ class SeoOverviewDashboardService
             $page = min($page, max(1, (int) ceil($total / $perPage)));
             $rows = (clone $ranked)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
         }
+        if ($useFactPagination) {
+            $rows = $this->gscMetrics->hydrateDimensions($type, $rows);
+        }
         $hashes = $rows->pluck('hash')->map(fn ($value): string => (string) $value)->all();
-        $previous = $hashes === [] ? collect() : ($dimension !== ''
-            ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
-            : $this->gscMetrics->aggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $blogOnly))
-            ->get()->keyBy('hash');
+        if ($useFactPagination) {
+            $dimensionIds = $rows->pluck('dimension_id')->map(fn ($id): int => (int) $id)->all();
+            $previous = $dimensionIds === [] ? collect() : $this->gscMetrics
+                ->factAggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $dimensionIds, $blogOnly)
+                ->get()->keyBy('dimension_id');
+        } else {
+            $previous = $hashes === [] ? collect() : ($dimension !== ''
+                ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
+                : $this->gscMetrics->aggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $blogOnly))
+                ->get()->keyBy('hash');
+        }
 
         $summary = $searchType === 'web'
             ? $this->gscSummary($store, $segment, $from, $to)
@@ -204,7 +218,10 @@ class SeoOverviewDashboardService
         return [
             'schema' => 'seo-gsc-detail-page-v1', 'type' => $type, 'segment' => $segment,
             'search_type' => $searchType, 'dimension' => $dimension, 'summary' => $summary, 'trend' => $trend,
-            'rows' => $rows->map(fn ($row): array => $this->gscDetailRow($row, $previous->get((string) $row->hash)))->values()->all(),
+            'rows' => $rows->map(fn ($row): array => $this->gscDetailRow(
+                $row,
+                $useFactPagination ? $previous->get((int) $row->dimension_id) : $previous->get((string) $row->hash),
+            ))->values()->all(),
             'pagination' => $this->pagination($page, $perPage, $total),
         ];
     }
