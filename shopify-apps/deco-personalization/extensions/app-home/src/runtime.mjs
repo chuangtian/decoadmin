@@ -1,4 +1,5 @@
 const TEST_APP_ORIGIN = 'https://testadmin.decomkt.com';
+const TEST_CLIENT_ID = '2157d17bf0b595f9a52cc3bf18b5b616';
 const DENIED_SHOPS = new Set(['macfoxebike.myshopify.com']);
 
 /**
@@ -7,7 +8,7 @@ const DENIED_SHOPS = new Set(['macfoxebike.myshopify.com']);
  */
 export function runtimeFromIdToken(token) {
   const claims = decodeIdTokenClaims(token);
-  const clientId = audiences(claims.aud).find((audience) => /^[a-f0-9]{32}$/i.test(audience));
+  const clientId = audiences(claims.aud).find((audience) => audience === TEST_CLIENT_ID);
   const shopDomain = shopDomainFromDestination(claims.dest);
 
   if (!clientId) {

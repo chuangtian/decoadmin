@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {decodeIdTokenClaims, runtimeFromIdToken} from './runtime.mjs';
 
-const TEST_CLIENT_ID = '1234567890abcdef1234567890abcdef';
+const TEST_CLIENT_ID = '2157d17bf0b595f9a52cc3bf18b5b616';
 
 test('resolves a dynamic shop and client id only to the fixed Test backend', () => {
   const token = tokenFor({

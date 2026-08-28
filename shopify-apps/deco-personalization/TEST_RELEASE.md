@@ -7,7 +7,7 @@
 - Dev Dashboard 组织必须是 `E-LINK TECHNOLOGY CO LTD`。
 - 外部联调店必须解析为 `macfox-test-app.myshopify.com`。
 - `Macfox Bike` / `macfoxebike.myshopify.com` 是永久禁止目标；任何解析结果为该店或目标不确定时立即停止。
-- Test App 必须复用用户已创建的现有 App，不得重复创建。
+- Test App 必须复用组织中唯一的 `Deco 个性化推荐测试`；该 App 已于 2026-08-28 创建，不得重复创建。
 - Client Secret 只进入 Test 的未跟踪 Secret/环境配置，不进入命令参数、聊天、日志、Git 或本文档。
 - Production 配置仍是不可运行占位，不得加入 Client ID、URL、Webhook、权限或发布命令。
 

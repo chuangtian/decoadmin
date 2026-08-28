@@ -1,8 +1,39 @@
-# Test-first configuration placeholder for the existing Test App.
-# Merchant-facing name: Deco 个性化推荐测试
-# Technical handle: deco-personalization-test
-# Backend origin: https://testadmin.decomkt.com
-#
-# Client ID, scopes, URLs, webhooks, proxy, and extensions are added only after
-# the existing Test App and the corresponding backend routes are verified.
-# Client Secrets never belong in Shopify TOML files.
+# Test is the first and only runnable Shopify App environment in this project.
+# Client Secrets never belong in Shopify TOML files, logs, chat, or Git.
+
+client_id = "2157d17bf0b595f9a52cc3bf18b5b616"
+name = "Deco 个性化推荐测试"
+handle = "deco-personalization-test"
+application_url = "https://testadmin.decomkt.com/shopify-app/personalization"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[[webhooks.subscriptions]]
+compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+uri = "https://testadmin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[access_scopes]
+scopes = "write_app_proxy,write_pixels,read_customer_events"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://testadmin.decomkt.com/shopify-app/personalization" ]
+
+[app_proxy]
+url = "https://testadmin.decomkt.com/api/shopify-app/personalization/proxy"
+prefix = "apps"
+subpath = "deco-personalization-test"

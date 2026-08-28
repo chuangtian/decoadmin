@@ -1,6 +1,7 @@
 type = "web_pixel_extension"
 name = "Deco personalization analytics"
 runtime_context = "strict"
+uid = "988d1058-d26b-824e-05a7-2dbac5c1dab723223ec5"
 
 [customer_privacy]
 analytics = true

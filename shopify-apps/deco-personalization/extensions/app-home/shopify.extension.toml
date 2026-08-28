@@ -3,6 +3,7 @@ api_version = "2026-07"
 [[extensions]]
 name = "t:name"
 handle = "app-home"
+uid = "83247469-d4a8-2612-c903-5468f6914aaa918849e8"
 type = "ui_extension"
 
 [[extensions.targeting]]
