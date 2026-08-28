@@ -127,8 +127,12 @@ class ApplicationCenterController extends Controller
             'personalization_strategy_created' => '个性化推荐策略已创建',
             'personalization_strategy_rules_replaced' => '个性化推荐规则已更新',
             'personalization_strategy_products_replaced' => '个性化推荐商品已更新',
+            'personalization_strategy_updated' => '个性化推荐策略已更新',
             'personalization_component_created' => '个性化推荐组件已创建',
+            'personalization_component_updated' => '个性化推荐组件已更新',
             'personalization_component_style_updated' => '个性化推荐样式已更新',
+            'personalization_component_activated' => '个性化推荐组件已启用',
+            'personalization_component_disabled' => '个性化推荐组件已停用',
             'personalization_smart_cart_draft_saved' => 'Smart Cart 草稿已保存',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }

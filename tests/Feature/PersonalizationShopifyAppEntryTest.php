@@ -47,7 +47,7 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $url = route('personalization.shopify-app.management', ['shop' => $store->shopify_domain]);
 
         $this->get($url)->assertRedirect(route('login'));
-        $this->actingAs($operator)->get($url)->assertRedirect(route('app-center.index'));
+        $this->actingAs($operator)->get($url)->assertRedirect(route('personalization.index', [$organization, $store]));
 
         $otherStore = $organization->stores()->create([
             'name' => 'Unauthorized Store',

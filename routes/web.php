@@ -30,6 +30,7 @@ use App\Http\Controllers\PaidAdvertisingChannelController;
 use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
@@ -548,6 +549,47 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');
+    });
+
+Route::prefix('/organizations/{organization}/stores/{store}/personalization')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [PersonalizationController::class, 'index'])
+            ->middleware('permission:personalization.view')
+            ->name('personalization.index');
+        Route::post('/strategies', [PersonalizationController::class, 'storeStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.store');
+        Route::put('/strategies/{strategy}', [PersonalizationController::class, 'updateStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.update');
+        Route::put('/strategies/{strategy}/rules', [PersonalizationController::class, 'updateRules'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.rules.update');
+        Route::put('/strategies/{strategy}/products', [PersonalizationController::class, 'updateProducts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.products.update');
+        Route::post('/components', [PersonalizationController::class, 'storeComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.store');
+        Route::put('/components/{component}', [PersonalizationController::class, 'updateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.update');
+        Route::put('/components/{component}/style', [PersonalizationController::class, 'updateStyle'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.style.update');
+        Route::post('/components/{component}/activate', [PersonalizationController::class, 'activateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.activate');
+        Route::post('/components/{component}/disable', [PersonalizationController::class, 'disableComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.disable');
+        Route::get('/components/{component}/preview', [PersonalizationController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.components.preview');
+        Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCartDraft'])
+            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
+            ->name('personalization.smart-cart.update');
     });
 
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')

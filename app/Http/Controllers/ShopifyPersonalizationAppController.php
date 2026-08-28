@@ -13,14 +13,12 @@ class ShopifyPersonalizationAppController extends Controller
     public function management(Request $request, ShopifyPersonalizationAppService $app): RedirectResponse
     {
         try {
-            $app->managementStore($request->user(), (string) $request->query('shop'));
+            $store = $app->managementStore($request->user(), (string) $request->query('shop'));
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
         }
 
-        // The dedicated management UI is introduced in a later stage. Until then,
-        // a verified launch lands in the existing application center.
-        return redirect()->route('app-center.index');
+        return redirect()->route('personalization.index', [$store->organization_id, $store->id]);
     }
 
     public function connection(Request $request, ShopifyPersonalizationAppService $app): JsonResponse

@@ -56,6 +56,38 @@ class PersonalizationConfigurationService
         return $strategy;
     }
 
+    /** @param array<string, mixed> $input */
+    public function updateStrategy(
+        Store $store,
+        PersonalizationRecommendationStrategy $strategy,
+        User $actor,
+        array $input,
+    ): PersonalizationRecommendationStrategy {
+        $this->authorize($store, $actor, 'personalization.manage');
+        $this->assertStrategy($store, $strategy);
+        $algorithm = $this->algorithm($input['algorithm'] ?? $strategy->algorithm->value);
+        $name = $this->text($input['name'] ?? $strategy->name, 'STRATEGY_NAME_REQUIRED', 80);
+        $itemLimit = $this->integer($input['item_limit'] ?? $strategy->item_limit, 1, 50, 'INVALID_ITEM_LIMIT');
+
+        DB::transaction(function () use ($strategy, $actor, $algorithm, $name, $itemLimit): void {
+            $strategy->forceFill([
+                'name' => $name,
+                'algorithm' => $algorithm,
+                'item_limit' => $itemLimit,
+                'enabled' => false,
+                'updated_by' => $actor->id,
+            ])->save();
+            $this->resetPublication($strategy);
+        });
+        $this->audit($store, $actor, $strategy, 'personalization_strategy_updated', [
+            'algorithm' => $algorithm->value,
+            'item_limit' => $itemLimit,
+            'publication_reset' => true,
+        ]);
+
+        return $strategy->refresh();
+    }
+
     /** @param list<array<string, mixed>> $rules */
     public function replaceRules(
         Store $store,
@@ -98,6 +130,8 @@ class PersonalizationConfigurationService
                     ...$rule,
                 ]);
             }
+            $strategy->forceFill(['enabled' => false])->save();
+            $this->resetPublication($strategy);
         });
         $this->audit($store, $actor, $strategy, 'personalization_strategy_rules_replaced', [
             'rules' => count($normalized),
@@ -167,6 +201,8 @@ class PersonalizationConfigurationService
                     ...$override,
                 ]);
             }
+            $strategy->forceFill(['enabled' => false])->save();
+            $this->resetPublication($strategy);
         });
         $this->audit($store, $actor, $strategy, 'personalization_strategy_products_replaced', [
             'products' => count($normalized),
@@ -231,6 +267,100 @@ class PersonalizationConfigurationService
     }
 
     /** @param array<string, mixed> $input */
+    public function updateComponent(
+        Store $store,
+        PersonalizationRecommendationComponent $component,
+        PersonalizationRecommendationStrategy $strategy,
+        User $actor,
+        array $input,
+    ): PersonalizationRecommendationComponent {
+        $this->authorize($store, $actor, 'personalization.manage');
+        $this->assertComponent($store, $component);
+        $this->assertStrategy($store, $strategy);
+        $placement = PersonalizationPlacement::tryFrom((string) ($input['placement'] ?? $component->placement->value));
+        if (! $placement) {
+            throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', '推荐组件展示位置无效。');
+        }
+
+        $component->forceFill([
+            'strategy_id' => $strategy->id,
+            'name' => $this->text($input['name'] ?? $component->name, 'COMPONENT_NAME_REQUIRED', 80),
+            'placement' => $placement,
+            'heading' => $this->optionalText($input['heading'] ?? null, 120, 'INVALID_COMPONENT_HEADING'),
+            'button_label' => $this->optionalText($input['button_label'] ?? null, 60, 'INVALID_COMPONENT_BUTTON_LABEL'),
+            'status' => PersonalizationComponentStatus::Draft,
+            'published_at' => null,
+            'updated_by' => $actor->id,
+        ])->save();
+        $this->audit($store, $actor, $component, 'personalization_component_updated', [
+            'placement' => $placement->value,
+            'strategy_uuid' => $strategy->uuid,
+            'publication_reset' => true,
+        ]);
+
+        return $component->load(['strategy', 'style']);
+    }
+
+    public function activateComponent(
+        Store $store,
+        PersonalizationRecommendationComponent $component,
+        User $actor,
+    ): PersonalizationRecommendationComponent {
+        $this->authorize($store, $actor, 'personalization.manage');
+        $this->assertComponent($store, $component);
+        $component->loadMissing(['strategy.productOverrides', 'style']);
+        $strategy = $component->strategy;
+        if (! $strategy) {
+            throw new PersonalizationException('STRATEGY_NOT_FOUND', '推荐组件缺少有效策略。', 409);
+        }
+        if ($strategy->algorithm === PersonalizationAlgorithm::Manual
+            && ! $strategy->productOverrides->contains('type', PersonalizationProductOverrideType::Manual)) {
+            throw new PersonalizationException(
+                'MANUAL_PRODUCTS_REQUIRED',
+                '手动推荐策略至少需要选择一个手动推荐商品。',
+                409,
+            );
+        }
+        if (! $component->style) {
+            throw new PersonalizationException('COMPONENT_STYLE_REQUIRED', '推荐组件缺少样式配置。', 409);
+        }
+
+        DB::transaction(function () use ($strategy, $component, $actor): void {
+            $strategy->forceFill(['enabled' => true, 'updated_by' => $actor->id])->save();
+            $component->forceFill([
+                'status' => PersonalizationComponentStatus::Active,
+                'published_at' => now(),
+                'updated_by' => $actor->id,
+            ])->save();
+        });
+        $this->audit($store, $actor, $component, 'personalization_component_activated', [
+            'placement' => $component->placement->value,
+            'strategy_uuid' => $strategy->uuid,
+        ]);
+
+        return $component->refresh()->load(['strategy', 'style']);
+    }
+
+    public function disableComponent(
+        Store $store,
+        PersonalizationRecommendationComponent $component,
+        User $actor,
+    ): PersonalizationRecommendationComponent {
+        $this->authorize($store, $actor, 'personalization.manage');
+        $this->assertComponent($store, $component);
+        $component->forceFill([
+            'status' => PersonalizationComponentStatus::Disabled,
+            'published_at' => null,
+            'updated_by' => $actor->id,
+        ])->save();
+        $this->audit($store, $actor, $component, 'personalization_component_disabled', [
+            'placement' => $component->placement->value,
+        ]);
+
+        return $component->refresh();
+    }
+
+    /** @param array<string, mixed> $input */
     public function updateStyle(
         Store $store,
         PersonalizationRecommendationComponent $component,
@@ -260,6 +390,13 @@ class PersonalizationConfigurationService
             'show_add_to_cart' => (bool) ($input['show_add_to_cart'] ?? $style->show_add_to_cart),
             'tokens' => $tokens ?: null,
         ])->save();
+        if ($component->status === PersonalizationComponentStatus::Active) {
+            $component->forceFill([
+                'status' => PersonalizationComponentStatus::Draft,
+                'published_at' => null,
+                'updated_by' => $actor->id,
+            ])->save();
+        }
         $this->audit($store, $actor, $component, 'personalization_component_style_updated', [
             'layout' => $layout,
             'desktop_columns' => $style->desktop_columns,
@@ -367,6 +504,20 @@ class PersonalizationConfigurationService
             || (int) $component->store_id !== (int) $store->id) {
             throw new PersonalizationException('COMPONENT_NOT_FOUND', '找不到该推荐组件。', 404);
         }
+    }
+
+    private function resetPublication(PersonalizationRecommendationStrategy $strategy): void
+    {
+        PersonalizationRecommendationComponent::query()
+            ->where('organization_id', $strategy->organization_id)
+            ->where('store_id', $strategy->store_id)
+            ->where('strategy_id', $strategy->id)
+            ->where('status', PersonalizationComponentStatus::Active->value)
+            ->update([
+                'status' => PersonalizationComponentStatus::Draft->value,
+                'published_at' => null,
+                'updated_at' => now(),
+            ]);
     }
 
     private function algorithm(mixed $value): PersonalizationAlgorithm
