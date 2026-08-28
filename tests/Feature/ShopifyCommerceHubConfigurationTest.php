@@ -35,8 +35,8 @@ class ShopifyCommerceHubConfigurationTest extends TestCase
         );
 
         $configurations = [
-            'shopify.app.toml' => ['8060ab64cae19ff20a05814f1276d716', 'https://consistent-menu-herself-telephony.trycloudflare.com'],
-            'shopify.app.local.toml' => ['8060ab64cae19ff20a05814f1276d716', 'https://consistent-menu-herself-telephony.trycloudflare.com'],
+            'shopify.app.toml' => ['8060ab64cae19ff20a05814f1276d716', 'https://verified-lonely-fairfield-cached.trycloudflare.com'],
+            'shopify.app.local.toml' => ['8060ab64cae19ff20a05814f1276d716', 'https://verified-lonely-fairfield-cached.trycloudflare.com'],
             'shopify.app.test.toml' => ['c6921ca2233c5069033577d3cd1759ea', 'https://testadmin.decomkt.com'],
             'shopify.app.production.toml' => ['52f415f03423fe1f1838dcfa7a0fca9a', 'https://admin.decomkt.com'],
         ];

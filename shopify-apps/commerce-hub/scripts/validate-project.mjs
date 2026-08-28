@@ -18,12 +18,12 @@ const expectedSortedScopes = [...expectedScopes].sort();
 const configurations = new Map([
   ['shopify.app.toml', {
     clientId: '8060ab64cae19ff20a05814f1276d716',
-    origin: 'https://consistent-menu-herself-telephony.trycloudflare.com',
+    origin: 'https://verified-lonely-fairfield-cached.trycloudflare.com',
     embedded: false,
   }],
   ['shopify.app.local.toml', {
     clientId: '8060ab64cae19ff20a05814f1276d716',
-    origin: 'https://consistent-menu-herself-telephony.trycloudflare.com',
+    origin: 'https://verified-lonely-fairfield-cached.trycloudflare.com',
     embedded: false,
   }],
   ['shopify.app.test.toml', {
