@@ -436,7 +436,7 @@ class ShopifyConnectionLifecycleTest extends TestCase
     private function installation(ShopifyConnection $connection, User $user): AppInstallation
     {
         $app = App::query()->create([
-            'name' => 'Deco Marketing',
+            'name' => 'Shopify Commerce Hub',
             'handle' => 'test-shopify-app',
             'client_id' => 'test-client-id',
             'client_secret_encrypted' => 'test-client-secret',

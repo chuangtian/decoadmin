@@ -176,7 +176,7 @@ class ShopifyAppCenterTest extends TestCase
         $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
         App::query()->create([
             'organization_id' => null,
-            'name' => 'Deco Marketing',
+            'name' => 'Shopify Commerce Hub',
             'handle' => 'shopify-commerce-hub',
             'distribution' => 'custom',
             'status' => 'active',
@@ -192,7 +192,7 @@ class ShopifyAppCenterTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Stores/Show')
                 ->has('storeApps', 1)
-                ->where('storeApps.0.name', 'Deco Marketing')
+                ->where('storeApps.0.name', 'Shopify Commerce Hub')
                 ->where('storeApps.0.status', 'uninstalled'));
     }
 
