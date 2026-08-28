@@ -42,6 +42,10 @@ class WebhookEventController extends Controller
             ->when($topic !== '', fn ($query) => $query->where('topic', 'like', "%{$topic}%"))
             ->when($status !== '', fn ($query) => $query->where('status', $status))
             ->when($storeId > 0, fn ($query) => $query->where('store_id', $storeId))
+            ->select([
+                'id', 'webhook_id', 'organization_id', 'store_id', 'topic', 'status',
+                'processing_result', 'attempts', 'received_at', 'processed_at',
+            ])
             ->with('store:id,organization_id,name,shopify_domain')
             ->latest('received_at')
             ->paginate(25)

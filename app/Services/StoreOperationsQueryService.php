@@ -67,6 +67,10 @@ class StoreOperationsQueryService
         return WebhookEvent::query()
             ->where('organization_id', $organization->getKey())
             ->where('store_id', $store->getKey())
+            ->select([
+                'id', 'webhook_id', 'organization_id', 'store_id', 'topic', 'status',
+                'processing_result', 'attempts', 'received_at', 'processed_at',
+            ])
             ->latest('received_at')
             ->limit(20)
             ->get();
