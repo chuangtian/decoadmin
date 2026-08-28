@@ -1,0 +1,25 @@
+{
+  "name": "commerce-hub",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "check": "node scripts/validate-project.mjs",
+    "check:config": "shopify app config validate --config local --json",
+    "check:config:test": "shopify app config validate --config test --json",
+    "check:config:production": "shopify app config validate --config production --json",
+    "build:local": "shopify app build --config local",
+    "build:test": "shopify app build --config test",
+    "build:production": "shopify app build --config production",
+    "dev": "shopify app dev --config local",
+    "config:pull:local": "shopify app config pull --config local",
+    "config:pull:test": "shopify app config pull --config test",
+    "config:pull:production": "shopify app config pull --config production",
+    "deploy:local": "shopify app deploy --config local",
+    "deploy:test": "shopify app deploy --config test",
+    "deploy:production": "shopify app deploy --config production"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "author": "tianchuang"
+}

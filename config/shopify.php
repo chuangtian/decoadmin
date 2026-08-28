@@ -6,7 +6,7 @@ return [
     'api_version' => env('SHOPIFY_API_VERSION', '2026-07'),
     'requested_scopes' => array_values(array_filter(array_map(
         'trim',
-        explode(',', (string) env('SHOPIFY_REQUESTED_SCOPES', 'read_products,read_inventory,read_orders,read_customers,read_locations,read_reports,read_discounts,write_discounts')),
+        explode(',', (string) env('SHOPIFY_REQUESTED_SCOPES', 'read_products,read_inventory,read_orders,read_customers,read_locations,read_reports')),
     ))),
     'app_name' => env('SHOPIFY_APP_NAME', 'DecoAdmin Shopify 应用'),
     'app_handle' => env('SHOPIFY_APP_HANDLE', 'shopify-commerce-hub'),
