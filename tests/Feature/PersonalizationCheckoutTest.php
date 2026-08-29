@@ -130,6 +130,28 @@ class PersonalizationCheckoutTest extends TestCase
             ->assertJsonMissingPath('data.organization_id')
             ->assertJsonMissingPath('data.customer');
 
+        $recommendations = $this->withToken($this->checkoutToken($store->shopify_domain))
+            ->postJson(route('personalization.checkout.recommendations'), [
+                'cart_lines' => [],
+                'market' => 'us',
+                'currency' => 'USD',
+                'language' => 'en',
+            ]);
+        $recommendations->assertOk()
+            ->assertJsonPath('data.enabled', true)
+            ->assertJsonPath('data.context.surface', 'checkout')
+            ->assertJsonPath('data.items.0.shopify_product_id', '301')
+            ->assertJsonPath('data.items.0.minimum_purchase_quantity', 1)
+            ->assertJsonMissingPath('data.customer');
+        $this->withToken($this->checkoutToken($store->shopify_domain))
+            ->postJson(route('personalization.checkout.recommendations'), [
+                'cart_lines' => [[
+                    'product_id' => '301',
+                    'variant_id' => '3010',
+                    'quantity' => 1,
+                ]],
+            ])->assertOk()->assertJsonCount(0, 'data.items');
+
         $this->withToken($this->checkoutToken($store->shopify_domain, 'wrong-secret'))
             ->getJson(route('personalization.checkout.configuration'))
             ->assertUnauthorized()

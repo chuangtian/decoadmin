@@ -1,4 +1,5 @@
 const CONFIGURATION_PATH = '/api/shopify-app/personalization/checkout/configuration';
+const RECOMMENDATIONS_PATH = '/api/shopify-app/personalization/checkout/recommendations';
 const MAX_EVENT_PRODUCTS = 50;
 
 export const EVENTS = {
@@ -42,6 +43,25 @@ export async function fetchConfiguration(api, entries = api?.appMetafields?.valu
   return normalizeConfiguration(payload?.data);
 }
 
+export async function fetchRecommendations(api, configuration, lines, context = {}) {
+  const endpoint = safeEndpoint(configuration?.recommendations_url, RECOMMENDATIONS_PATH);
+  if (!endpoint) return [];
+  const token = await api.sessionToken.get();
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      cart_lines: cartLines(lines),
+      market: string(context.market, 80),
+      currency: string(context.currency, 3),
+      language: string(context.language, 20),
+    }),
+  });
+  if (!response.ok) return [];
+  const payload = await response.json();
+  return normalizeServiceRecommendations(payload?.data);
+}
+
 export function normalizeConfiguration(value) {
   const component = value?.component;
   const pageSize = Number(value?.sequence?.page_size);
@@ -56,7 +76,8 @@ export function normalizeConfiguration(value) {
     || value?.sequence?.order !== 'collection_default'
     || value?.sequence?.variant_fallback !== 'first_available'
     || value?.sequence?.mode !== 'sequential'
-    || value?.sequence?.exhaustion !== 'collection') return null;
+    || value?.sequence?.exhaustion !== 'collection'
+    || !safeEndpoint(value?.recommendations_url, RECOMMENDATIONS_PATH)) return null;
   return {
     component: {
       uuid: component.uuid,
@@ -65,10 +86,48 @@ export function normalizeConfiguration(value) {
       heading: string(component.heading, 120) || 'Great Value Bundles for You',
       button_label: string(component.button_label, 60) || 'Add',
     },
+    strategy_version_uuid: uuid(value?.strategy?.version_uuid) ? value.strategy.version_uuid : '',
+    recommendations_url: safeEndpoint(value.recommendations_url, RECOMMENDATIONS_PATH),
     collection_id: value.collection.id,
     page_size: pageSize,
     maximum_recommendations: maximum,
   };
+}
+
+export function normalizeServiceRecommendations(value) {
+  if (!value || value.enabled !== true || !Array.isArray(value.items)) return [];
+  const strategyVersionUuid = uuid(value?.strategy?.version_uuid) ? value.strategy.version_uuid : '';
+  return value.items.slice(0, 24).map((product, index) => {
+    const productId = gid(product?.product_gid || `gid://shopify/Product/${numericId(product?.shopify_product_id, 'Product')}`, 'Product');
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    const selectedGid = gid(product?.selected_variant_gid, 'ProductVariant');
+    const selectedId = numericId(selectedGid, 'ProductVariant');
+    const variant = variants.find((candidate) => String(candidate?.shopify_variant_id ?? '') === selectedId && candidate?.available_for_sale === true)
+      ?? variants.find((candidate) => candidate?.available_for_sale === true);
+    if (!productId || !variant) return null;
+    const variantId = gid(`gid://shopify/ProductVariant/${numericId(variant.shopify_variant_id, 'ProductVariant')}`, 'ProductVariant');
+    if (!variantId) return null;
+    return {
+      product_id: productId,
+      variant_id: variantId,
+      rank: Number.isInteger(Number(product?.rank)) ? Number(product.rank) : index + 1,
+      title: string(product?.title, 200),
+      variant_title: string(variant?.title, 200),
+      available: true,
+      image_url: safeImage(variant?.image?.url || product?.storefront?.image?.url),
+      image_alt: string(variant?.image?.alt || product?.storefront?.image?.alt, 200) || string(product?.title, 200),
+      amount: money(variant?.price),
+      currency: /^[A-Z]{3}$/.test(String(product?.price?.currency ?? '')) ? product.price.currency : '',
+      minimum_purchase_quantity: boundedInteger(product?.minimum_purchase_quantity, 1, 999, 1),
+      rule_id: uuid(product?.rule_id) ? product.rule_id : '',
+      strategy_version_uuid: strategyVersionUuid,
+      discount: value?.discount && typeof value.discount === 'object' ? {
+        title: string(value.discount.title, 80),
+        summary: string(value.discount.summary, 160),
+        code: string(value.discount.code, 80),
+      } : null,
+    };
+  }).filter(Boolean);
 }
 
 export function normalizeCollectionProducts(collection, rankOffset = 0) {
@@ -109,11 +168,13 @@ export function eventPayload(configuration, products) {
   return {
     component_uuid: configuration.component.uuid,
     strategy_uuid: configuration.component.strategy_uuid,
+    strategy_version_uuid: configuration.strategy_version_uuid,
     placement: 'checkout',
     products: products.slice(0, MAX_EVENT_PRODUCTS).map((product) => ({
       product_id: numericId(product.product_id, 'Product'),
       variant_id: numericId(product.variant_id, 'ProductVariant'),
       rank: product.rank,
+      rule_id: uuid(product.rule_id) ? product.rule_id : '',
     })),
   };
 }
@@ -124,7 +185,9 @@ function gid(value, resource) {
 }
 
 function numericId(value, resource) {
-  return gid(value, resource).split('/').pop() ?? '';
+  const normalized = String(value ?? '').trim();
+  if (/^\d+$/.test(normalized)) return normalized;
+  return gid(normalized, resource).split('/').pop() ?? '';
 }
 
 function uuid(value) {
@@ -147,4 +210,30 @@ function safeImage(value) {
   } catch {
     return '';
   }
+}
+
+function safeEndpoint(value, path) {
+  try {
+    const endpoint = new URL(String(value ?? ''));
+    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.hash || endpoint.search || endpoint.pathname !== path) return '';
+    return endpoint.toString();
+  } catch {
+    return '';
+  }
+}
+
+function cartLines(lines) {
+  if (!Array.isArray(lines)) return [];
+  return lines.slice(0, 50).map((line) => {
+    const merchandise = line?.merchandise;
+    const productId = numericId(merchandise?.product?.id, 'Product');
+    const variantId = numericId(merchandise?.id, 'ProductVariant');
+    if (!productId || !variantId) return null;
+    return {product_id: productId, variant_id: variantId, quantity: boundedInteger(line?.quantity, 1, 999, 1)};
+  }).filter(Boolean);
+}
+
+function boundedInteger(value, minimum, maximum, fallback) {
+  const normalized = Number(value);
+  return Number.isInteger(normalized) && normalized >= minimum && normalized <= maximum ? normalized : fallback;
 }

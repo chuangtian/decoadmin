@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['event_id', 'product_id', 'shopify_product_id', 'shopify_variant_id', 'rank'])]
+#[Fillable(['event_id', 'product_id', 'shopify_product_id', 'shopify_variant_id', 'rank', 'rule_id'])]
 class PersonalizationEventProduct extends Model
 {
     public function event(): BelongsTo

@@ -28,6 +28,10 @@ class PersonalizationEventIngestionService
 
     public const ADD_TO_CART = 'deco_personalization:add_to_cart';
 
+    public const ADD_SUCCESS = 'deco_personalization:add_success';
+
+    public const ADD_FAILED = 'deco_personalization:add_failed';
+
     public const CHECKOUT_RECOMMENDATION_IMPRESSION = 'deco_personalization:checkout_recommendation_impression';
 
     public const CHECKOUT_RECOMMENDATION_CLICK = 'deco_personalization:checkout_recommendation_click';
@@ -44,6 +48,8 @@ class PersonalizationEventIngestionService
         self::IMPRESSION,
         self::CLICK,
         self::ADD_TO_CART,
+        self::ADD_SUCCESS,
+        self::ADD_FAILED,
         self::CHECKOUT_RECOMMENDATION_IMPRESSION,
         self::CHECKOUT_RECOMMENDATION_CLICK,
         self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
@@ -166,6 +172,8 @@ class PersonalizationEventIngestionService
         $componentId = null;
         $strategyId = null;
         $strategyVersionId = null;
+        $setting = null;
+        $component = null;
         if ($placement === PersonalizationPlacement::SmartCart && $componentUuid === '') {
             $setting = PersonalizationSmartCartSetting::query()
                 ->where('organization_id', $store->organization_id)
@@ -173,7 +181,7 @@ class PersonalizationEventIngestionService
                 ->where('enabled', true)
                 ->where('compatibility_status', PersonalizationSmartCartCompatibilityStatus::Compatible->value)
                 ->whereHas('strategy', fn ($query) => $query->where('uuid', $strategyUuid)->where('enabled', true))
-                ->with('strategy')
+                ->with('strategy.publishedVersion')
                 ->first();
             if (! $setting || ! $setting->strategy) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_CONTEXT', 'Smart Cart 推荐上下文未启用。', 409);
@@ -191,7 +199,7 @@ class PersonalizationEventIngestionService
                 ->where('status', PersonalizationComponentStatus::Active->value)
                 ->where('placement', $placement->value)
                 ->whereHas('strategy', fn ($query) => $query->where('uuid', $strategyUuid)->where('enabled', true))
-                ->with('strategy')
+                ->with(['strategy.publishedVersion', 'strategyVersion'])
                 ->first();
             if (! $component || ! $component->strategy) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_CONTEXT', '推荐组件上下文未启用。', 409);
@@ -199,6 +207,14 @@ class PersonalizationEventIngestionService
             $componentId = $component->id;
             $strategyId = $component->strategy->id;
             $strategyVersionId = $component->strategy_version_id ?: $component->strategy->published_version_id;
+        }
+        $reportedVersionUuid = trim((string) ($payload['strategy_version_uuid'] ?? ''));
+        $resolvedVersion = $placement === PersonalizationPlacement::SmartCart
+            ? $setting?->strategy?->publishedVersion
+            : ($component?->strategyVersion ?: $component?->strategy?->publishedVersion);
+        if ($reportedVersionUuid !== ''
+            && (! Str::isUuid($reportedVersionUuid) || $reportedVersionUuid !== $resolvedVersion?->uuid)) {
+            throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_CONTEXT', '推荐事件策略版本与当前组件不一致。', 409);
         }
 
         return [
@@ -241,6 +257,8 @@ class PersonalizationEventIngestionService
         if (in_array($eventName, [
             self::CLICK,
             self::ADD_TO_CART,
+            self::ADD_SUCCESS,
+            self::ADD_FAILED,
             self::CHECKOUT_RECOMMENDATION_IMPRESSION,
             self::CHECKOUT_RECOMMENDATION_CLICK,
             self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
@@ -256,12 +274,16 @@ class PersonalizationEventIngestionService
             }
             $productId = $this->numericShopifyId($item['product_id'] ?? null, 'Product');
             $variantId = $this->numericShopifyId($item['variant_id'] ?? null, 'ProductVariant', true);
+            $ruleId = trim((string) ($item['rule_id'] ?? ''));
             $rank = filter_var($item['rank'] ?? ($position + 1), FILTER_VALIDATE_INT);
-            if ($productId === null || isset($seen[$productId]) || $rank === false || $rank < 1 || $rank > 65535) {
+            if ($productId === null || isset($seen[$productId]) || $rank === false || $rank < 1 || $rank > 65535
+                || ($ruleId !== '' && ! Str::isUuid($ruleId))) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '推荐事件商品字段无效。');
             }
             if (in_array($eventName, [
                 self::ADD_TO_CART,
+                self::ADD_SUCCESS,
+                self::ADD_FAILED,
                 self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
                 self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
             ], true) && $variantId === null) {
@@ -272,6 +294,7 @@ class PersonalizationEventIngestionService
                 'shopify_product_id' => $productId,
                 'shopify_variant_id' => $variantId,
                 'rank' => (int) $rank,
+                'rule_id' => $ruleId ?: null,
             ];
         }
 

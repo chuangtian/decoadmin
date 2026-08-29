@@ -22,6 +22,11 @@
     const cartProductIds = numericIds(String(element.dataset.cartProductIds || '').split(','), 20);
     const designMode = element.dataset.designMode === 'true';
 
+    if (content instanceof HTMLElement) {
+      content.hidden = true;
+      content.replaceChildren();
+    }
+
     rememberProduct(productId);
     if (!UUID_PATTERN.test(componentUuid) || !proxyPath) {
       showStatus(status, designMode ? 'Choose a component and confirm the App Proxy path in the block settings.' : '');
@@ -75,7 +80,7 @@
 
     const list = document.createElement('div');
     list.className = `deco-recommendations__list deco-recommendations__list--${style.layout === 'grid' ? 'grid' : 'carousel'}`;
-    items.forEach((product) => list.append(createProductCard(element, product, component, data.strategy, style)));
+    items.forEach((product) => list.append(createProductCard(element, product, component, data.strategy, style, data.discount)));
 
     content.replaceChildren(heading, list);
     content.hidden = false;
@@ -83,7 +88,7 @@
     publishRecommendationEvent(element, 'impression', component, data.strategy, items);
   }
 
-  function createProductCard(element, product, component, strategy, style) {
+  function createProductCard(element, product, component, strategy, style, discount) {
     const card = document.createElement('article');
     card.className = 'deco-recommendations__card';
 
@@ -128,6 +133,12 @@
       price.className = 'deco-recommendations__price';
       price.textContent = money(product?.price?.minimum, product?.price?.currency);
       link.append(price);
+    }
+    if (discount?.code && discount?.summary) {
+      const offer = document.createElement('p');
+      offer.className = 'deco-recommendations__discount';
+      offer.textContent = `${String(discount.summary)} · ${String(discount.code)}`;
+      link.append(offer);
     }
     card.append(link);
 
@@ -176,9 +187,17 @@
         ...product,
         selected_variant_id: id,
       }]);
+      publishRecommendationEvent(element, 'add_success', component, strategy, [{
+        ...product,
+        selected_variant_id: id,
+      }]);
       document.dispatchEvent(new CustomEvent('deco-personalization:cart-updated'));
     } catch {
       button.textContent = 'Try again';
+      publishRecommendationEvent(element, 'add_failed', component, strategy, [{
+        ...product,
+        selected_variant_id: id,
+      }]);
     } finally {
       window.setTimeout(() => {
         button.disabled = false;
@@ -204,11 +223,13 @@
     const payload = {
       component_uuid: String(component?.uuid || ''),
       strategy_uuid: String(strategy?.uuid || ''),
+      strategy_version_uuid: String(strategy?.version_uuid || ''),
       placement: String(component?.placement || ''),
       products: Array.isArray(products) ? products.slice(0, 50).map((product, index) => ({
         product_id: numericId(product?.shopify_product_id),
         variant_id: numericId(product?.selected_variant_id),
         rank: boundedNumber(product?.rank, 1, 100, index + 1),
+        rule_id: String(product?.rule_id || ''),
       })).filter((product) => product.product_id) : [],
     };
     try {
@@ -286,6 +307,29 @@
     status.hidden = message === '';
   }
 
+  async function refreshAllRecommendations() {
+    let cartProductIds = [];
+    let cartLoaded = false;
+    try {
+      const response = await fetch('/cart.js', {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+      if (response.ok) {
+        const cart = await response.json();
+        cartProductIds = numericIds((Array.isArray(cart?.items) ? cart.items : []).map((item) => item?.product_id), 50);
+        cartLoaded = true;
+      }
+    } catch {
+      // Keep the previous context when the cart endpoint is temporarily unavailable.
+    }
+    document.querySelectorAll(ROOT_SELECTOR).forEach((element) => {
+      if (!(element instanceof HTMLElement)) return;
+      if (cartLoaded) element.dataset.cartProductIds = cartProductIds.join(',');
+      void loadRecommendations(element);
+    });
+  }
+
   initialize();
   document.addEventListener('shopify:section:load', (event) => initialize(event.target));
+  document.addEventListener('deco-personalization:cart-updated', () => void refreshAllRecommendations());
+  document.addEventListener('cart:updated', () => void refreshAllRecommendations());
+  document.addEventListener('cart:change', () => void refreshAllRecommendations());
 })();

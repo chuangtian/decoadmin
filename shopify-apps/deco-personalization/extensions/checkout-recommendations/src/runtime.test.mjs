@@ -7,6 +7,7 @@ import {
   eventPayload,
   normalizeCollectionProducts,
   normalizeConfiguration,
+  normalizeServiceRecommendations,
   selectNextCandidate,
 } from './runtime.mjs';
 
@@ -20,6 +21,7 @@ const configuration = normalizeConfiguration({
     button_label: 'Add',
   },
   collection: {id: 'gid://shopify/Collection/99'},
+  recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
   sequence: {
     mode: 'sequential',
     order: 'collection_default',
@@ -37,6 +39,7 @@ test('configuration uses a Collection and supports an optional merchant maximum 
     enabled: true,
     component: configuration.component,
     collection: {id: 'gid://shopify/Collection/99'},
+    recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
     sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 25, maximum_recommendations: 7, exhaustion: 'collection'},
   });
   assert.equal(bounded.maximum_recommendations, 7);
@@ -45,6 +48,7 @@ test('configuration uses a Collection and supports an optional merchant maximum 
     enabled: true,
     component: configuration.component,
     collection: {id: 'gid://shopify/Collection/99'},
+    recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
     sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 251, exhaustion: 'collection'},
   }), null);
   assert.equal(normalizeConfiguration({
@@ -93,13 +97,36 @@ test('sequential selection continues beyond three products until every eligible 
   assert.equal(selectNextCandidate(candidates, [], dismissed), null);
 });
 
-test('candidate row remounts and fetches another Collection page when the sequence advances', async () => {
+test('candidate row remounts and refreshes the shared strategy service after cart changes', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /<s-grid key=\{current\.variant_id\}/);
-  assert.match(source, /products\(first: \$productsFirst, after: \$after\)/);
-  assert.match(source, /pageInfo \{ hasNextPage endCursor \}/);
-  assert.match(source, /!current && !maximumReached && nextCursor/);
-  assert.match(source, /dismissed\.size >= configuration\.maximum_recommendations/);
+  assert.match(source, /fetchRecommendations\(shopify/);
+  assert.match(source, /quantity: current\.minimum_purchase_quantity/);
+  assert.match(source, /shopify\.lines\.value/);
+});
+
+test('shared strategy results preserve order, minimum quantity, rule and version traceability', () => {
+  const ruleId = 'bb4e3f45-cd54-4f83-8a12-00492ea7d4e1';
+  const versionId = '95d37e9d-0de2-43df-b50c-d9664d2d77bc';
+  const rows = normalizeServiceRecommendations({
+    enabled: true,
+    strategy: {version_uuid: versionId},
+    items: [{
+      shopify_product_id: '91',
+      selected_variant_gid: 'gid://shopify/ProductVariant/911',
+      title: 'Mirror',
+      rank: 1,
+      minimum_purchase_quantity: 3,
+      rule_id: ruleId,
+      price: {currency: 'USD'},
+      storefront: {image: {url: 'https://cdn.example/mirror.jpg', alt: 'Mirror'}},
+      variants: [{shopify_variant_id: '911', title: 'Default', available_for_sale: true, price: '19.00', image: {url: null, alt: null}}],
+    }],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].minimum_purchase_quantity, 3);
+  assert.equal(rows[0].rule_id, ruleId);
+  assert.equal(rows[0].strategy_version_uuid, versionId);
 });
 
 test('analytics payload is anonymous and uses the five checkout event names', () => {

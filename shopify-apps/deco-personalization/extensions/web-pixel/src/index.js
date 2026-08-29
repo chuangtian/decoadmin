@@ -3,6 +3,8 @@ import {register} from '@shopify/web-pixels-extension';
 const IMPRESSION = 'deco_personalization:impression';
 const CLICK = 'deco_personalization:click';
 const ADD_TO_CART = 'deco_personalization:add_to_cart';
+const ADD_SUCCESS = 'deco_personalization:add_success';
+const ADD_FAILED = 'deco_personalization:add_failed';
 const CHECKOUT_RECOMMENDATION_IMPRESSION = 'deco_personalization:checkout_recommendation_impression';
 const CHECKOUT_RECOMMENDATION_CLICK = 'deco_personalization:checkout_recommendation_click';
 const CHECKOUT_RECOMMENDATION_ADD_SUCCESS = 'deco_personalization:checkout_recommendation_add_success';
@@ -19,6 +21,8 @@ register(async ({analytics, browser, settings}) => {
     IMPRESSION,
     CLICK,
     ADD_TO_CART,
+    ADD_SUCCESS,
+    ADD_FAILED,
     CHECKOUT_RECOMMENDATION_IMPRESSION,
     CHECKOUT_RECOMMENDATION_CLICK,
     CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
@@ -36,6 +40,7 @@ register(async ({analytics, browser, settings}) => {
         occurred_at: string(event?.timestamp, 64),
         component_uuid: string(customData.component_uuid, 64),
         strategy_uuid: string(customData.strategy_uuid, 64),
+        strategy_version_uuid: string(customData.strategy_version_uuid, 64),
         placement: string(customData.placement, 24),
         products: products(customData.products),
       });
@@ -83,6 +88,7 @@ function products(value) {
       product_id: numericId(item?.product_id),
       variant_id: numericId(item?.variant_id),
       rank: boundedRank(item?.rank, index + 1),
+      rule_id: uuid(item?.rule_id),
     })).filter((item) => item.product_id)
     : [];
 }
@@ -95,6 +101,11 @@ function numericId(value) {
 function boundedRank(value, fallback) {
   const rank = Number(value);
   return Number.isInteger(rank) && rank >= 1 && rank <= 100 ? rank : fallback;
+}
+
+function uuid(value) {
+  const normalized = string(value, 64);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized) ? normalized : '';
 }
 
 function string(value, maximum) {

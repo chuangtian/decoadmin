@@ -41,7 +41,11 @@ class PersonalizationSmartCartService
             'enabled' => true,
             'fallback_mode' => 'shopify_default',
             'heading' => trim((string) data_get($setting->settings, 'heading', '购物车推荐')),
-            'recommendations' => $this->recommendations->recommend($store, $setting->strategy, $context),
+            'recommendations' => $this->recommendations->recommend($store, $setting->strategy, [
+                ...$context,
+                'surface' => 'smart_cart',
+                'placement' => 'smart_cart',
+            ]),
         ];
     }
 }

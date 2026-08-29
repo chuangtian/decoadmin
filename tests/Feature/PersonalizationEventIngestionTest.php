@@ -41,6 +41,7 @@ class PersonalizationEventIngestionTest extends TestCase
         $product = $this->product($organization, $store, 801, 'Tracked Bike');
         $component = $this->activeComponent($store, $admin, $product);
         $source = $this->source($organization, $store);
+        $ruleId = (string) Str::uuid();
         $payload = [
             'event_id' => 'pixel-event-801',
             'event_name' => PersonalizationEventIngestionService::IMPRESSION,
@@ -54,6 +55,7 @@ class PersonalizationEventIngestionTest extends TestCase
                 'product_id' => 'gid://shopify/Product/801',
                 'variant_id' => null,
                 'rank' => 1,
+                'rule_id' => $ruleId,
             ]],
             'email' => 'must-not-be-stored@example.com',
             'raw_context' => ['customer' => ['phone' => '555-0100']],
@@ -75,6 +77,7 @@ class PersonalizationEventIngestionTest extends TestCase
         $this->assertSame(hash_hmac('sha256', 'browser-session-raw', (string) config('app.key')), $event->session_id_hash);
         $this->assertSame($product->id, $event->products->sole()->product_id);
         $this->assertSame('801', $event->products->sole()->shopify_product_id);
+        $this->assertSame($ruleId, $event->products->sole()->rule_id);
         $this->assertStringNotContainsString('shopify-client-raw', json_encode($event->toArray(), JSON_THROW_ON_ERROR));
         $this->assertStringNotContainsString('must-not-be-stored', json_encode($event->toArray(), JSON_THROW_ON_ERROR));
         foreach (['ip', 'email', 'phone', 'customer_id', 'payload', 'raw_context', 'url', 'user_agent'] as $column) {

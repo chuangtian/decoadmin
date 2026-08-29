@@ -103,7 +103,7 @@ class PersonalizationRecommendationTest extends TestCase
     public function test_rules_pins_exclusions_and_inventory_are_applied_after_ranking(): void
     {
         [$actor, $organization, $store] = $this->context();
-        $pinned = $this->product($organization, $store, 201, 'Pinned', 'Bike', 'Deco', ['Bike'], 100, now()->subMonth());
+        $pinned = $this->product($organization, $store, 201, 'Pinned', 'Bike', 'Deco', ['Bike', 'Clearance'], 100, now()->subMonth());
         $excluded = $this->product($organization, $store, 202, 'Excluded', 'Bike', 'Deco', ['Bike'], 100, now());
         $lowInventory = $this->product($organization, $store, 203, 'Low Inventory', 'Bike', 'Deco', ['Bike'], 100, now()->subDay());
         $excludedTag = $this->product($organization, $store, 204, 'Clearance', 'Bike', 'Deco', ['Bike', 'Clearance'], 100, now()->subDays(2));
@@ -139,7 +139,10 @@ class PersonalizationRecommendationTest extends TestCase
         $this->assertSame('pinned', $result['items'][0]['reason_code']);
         $this->assertNull($result['items'][0]['score']);
         $this->assertStringNotContainsString('Excluded', json_encode($result, JSON_THROW_ON_ERROR));
-        $this->assertStringNotContainsString('Clearance', json_encode($result, JSON_THROW_ON_ERROR));
+        $this->assertNotContains('204', $this->ids($result));
+
+        $pinned->variants()->update(['available_for_sale' => false]);
+        $this->assertSame([], $this->ids(app(PersonalizationRecommendationService::class)->recommend($store, $strategy->fresh())));
     }
 
     public function test_component_requires_activation_but_preview_uses_the_same_result_contract(): void

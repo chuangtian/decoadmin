@@ -23,11 +23,11 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 
 - The extension renders only Shopify Polaris Checkout web components. It does not access the Checkout DOM, render arbitrary HTML, override component CSS, or depend on page selectors.
 - Cart lines are read through the reactive Cart Lines API.
-- An offer is added with `applyCartLinesChange({type: 'addCartLine', merchandiseId, quantity: 1})` only when `instructions.lines.canAddCartLine` is true.
+- An offer is added with `applyCartLinesChange({type: 'addCartLine', merchandiseId, quantity: minimum_purchase_quantity})` only when `instructions.lines.canAddCartLine` is true.
 - Accelerated checkout or another Shopify instruction can reject cart changes. The extension must hide or disable the offer and must never block checkout.
-- The candidate source is one merchant-selected Shopify Collection. Products retain Shopify's Collection order, and each product falls back to its first variant that is available in the buyer's active Market.
-- The recommendation area renders exactly one offer at a time. After that offer is added successfully, the same area obtains and renders the next eligible Collection product; it does not render multiple cards or hide between already-loaded candidates.
-- The merchant can optionally configure a maximum recommendation count; leaving it empty continues through the selected Collection until no eligible product remains. This is a sequence limit, not a set of fixed product slots. Existing cart products, unavailable variants, and candidates rejected by Shopify are skipped; displayed products are never repeated or looped. The recommendation area hides only when the configured maximum is reached or the Collection is exhausted.
+- Checkout sends its reactive cart lines, Market, currency, and language to the same backend Recommendation Strategy Service used by other surfaces. The extension does not evaluate strategy rules or choose products from a Collection itself.
+- The recommendation area renders exactly one service-ranked offer at a time. After a successful add it requests a fresh result and renders the next eligible product. A failed add leaves the current offer available for retry.
+- Existing cart products, unavailable variants, excluded products, and duplicates are removed by the service. The area hides when the service returns no candidate. It never loops or renders a broken empty frame.
 
 Official references:
 
@@ -37,7 +37,7 @@ Official references:
 ## Backend identity and network access
 
 - Dynamic recommendations use the Checkout UI Extension `network_access` capability.
-- The recommendation block uses `api_access` and `shopify.query()` to resolve each configured variant against the buyer's active Market, publication and currency context before rendering or adding it.
+- The recommendation block uses `network_access` with a fresh Session Token for the bounded strategy request. The backend resolves the signed shop, trusted Organization/Store, active strategy version, products, variants, exclusions, and traceability fields. `api_access` remains available for Shopify-supported extension data but is not used to duplicate recommendation logic.
 - The configuration endpoint is read from the declarative Shop app-owned metafield `$app:deco_personalization.checkout_configuration_url`; Checkout UI extensions cannot read AppInstallation-owned app-data metafields. Its definition is deployed from the environment-specific Shopify App TOML with Storefront read access, while the value is written during App Home bootstrap. The extension does not hardcode a Test or Production origin.
 - Both blocks subscribe through Shopify's `useAppMetafields` API. They remain hidden while the Shop metafield is unavailable and reload configuration automatically when Shopify supplies or updates it; they do not poll or fall back to a hardcoded origin.
 - Every backend call obtains a fresh Shopify Session Token and sends it as a bearer token.
@@ -61,6 +61,8 @@ The extension publishes privacy-gated custom analytics events to the existing We
 - `checkout_recommendation_sequence_completed`
 
 No event can block rendering or checkout. Network, parsing, configuration, or cart-mutation failure hides the affected offer or shows a non-blocking retry state. Attribution continues to use the existing seven-day, last-recommendation-click, click-only model with refund and cancellation reversal.
+
+Recommendation events include the server-resolved strategy, strategy version, rule ID, placement, product, variant, and rank. Customer identity and raw checkout context are never added to event payloads.
 
 Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/target-apis/platform-apis/analytics-api>
 

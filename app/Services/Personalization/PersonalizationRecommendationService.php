@@ -42,7 +42,7 @@ class PersonalizationRecommendationService
             || (int) $component->store_id !== (int) $store->id) {
             throw new PersonalizationException('COMPONENT_NOT_FOUND', '找不到该推荐组件。', 404);
         }
-        $component->loadMissing(['strategy.rules', 'strategy.productOverrides', 'style']);
+        $component->loadMissing(['strategy.rules', 'strategy.productOverrides', 'strategy.publishedVersion', 'strategyVersion', 'style']);
         $strategy = $component->strategy;
         if (! $strategy) {
             throw new PersonalizationException('STRATEGY_NOT_FOUND', '推荐组件缺少有效策略。', 409);
@@ -51,6 +51,16 @@ class PersonalizationRecommendationService
             && ($component->status !== PersonalizationComponentStatus::Active || ! $strategy->enabled)) {
             throw new PersonalizationException('COMPONENT_NOT_ACTIVE', '推荐组件当前未启用。', 409);
         }
+
+        $placement = $component->placement->value;
+        $version = $component->strategyVersion ?: $strategy->publishedVersion;
+        $result = $this->recommend($store, $strategy, [
+            ...$context,
+            'surface' => $placement,
+            'placement' => $placement,
+        ]);
+        $result['strategy']['version_uuid'] = $version?->uuid;
+        $result['strategy']['version_number'] = $version?->version_number;
 
         return [
             'component' => [
@@ -61,7 +71,7 @@ class PersonalizationRecommendationService
                 'button_label' => $component->button_label,
                 'style' => $this->stylePayload($component),
             ],
-            ...$this->recommend($store, $strategy, $context),
+            ...$result,
         ];
     }
 
@@ -84,9 +94,10 @@ class PersonalizationRecommendationService
             || (int) $strategy->store_id !== (int) $store->id) {
             throw new PersonalizationException('STRATEGY_NOT_FOUND', '找不到该推荐策略。', 404);
         }
-        $strategy->loadMissing(['rules', 'productOverrides']);
+        $strategy->loadMissing(['rules', 'productOverrides', 'publishedVersion']);
         $normalizedContext = $this->context($context);
-        $ranked = $this->algorithmProductIds($store, $strategy, $normalizedContext);
+        $selection = $this->ruleProductSelection($store, $strategy, $normalizedContext);
+        $ranked = $selection['scores'];
         $pinned = $strategy->productOverrides
             ->where('type', PersonalizationProductOverrideType::Pinned)
             ->sortBy('position')
@@ -94,7 +105,7 @@ class PersonalizationRecommendationService
             ->map(fn ($id): string => (string) $id)
             ->values()
             ->all();
-        $excluded = $strategy->productOverrides
+        $ordinaryExcluded = $strategy->productOverrides
             ->where('type', PersonalizationProductOverrideType::Excluded)
             ->pluck('shopify_product_id')
             ->map(fn ($id): string => (string) $id)
@@ -107,26 +118,42 @@ class PersonalizationRecommendationService
             ->map(fn (Collection $overrides): int => max(1, (int) ($overrides->firstWhere('type', PersonalizationProductOverrideType::Pinned)?->minimum_quantity
                 ?? $overrides->first()?->minimum_quantity
                 ?? 1)));
+        foreach ($selection['minimum_quantities'] as $productId => $minimumQuantity) {
+            $minimumQuantities->put((string) $productId, max(1, (int) $minimumQuantity));
+        }
+        foreach ($strategy->productOverrides
+            ->where('type', PersonalizationProductOverrideType::Pinned) as $override) {
+            $minimumQuantities->put((string) $override->shopify_product_id, max(1, (int) $override->minimum_quantity));
+        }
         $excludeCart = $this->booleanRule($strategy, PersonalizationRuleType::ExcludeCartProducts, true);
         $excludePurchased = $this->booleanRule($strategy, PersonalizationRuleType::ExcludePurchasedProducts, true);
-        $excluded = array_values(array_unique([
-            ...$excluded,
+        $contextExcluded = array_values(array_unique([
             ...($excludeCart ? $normalizedContext['cart_product_ids'] : []),
             ...($excludePurchased ? $normalizedContext['purchased_product_ids'] : []),
             ...($normalizedContext['seed_product_id'] === null ? [] : [$normalizedContext['seed_product_id']]),
         ]));
 
-        $orderedIds = array_values(array_unique([
-            ...$pinned,
-            ...array_keys($ranked),
+        $debugOrderedIds = array_values(array_unique([...$pinned, ...array_keys($ranked)]));
+        $pinnedIds = array_values(array_diff(array_unique($pinned), $contextExcluded));
+        $normalIds = array_values(array_diff(array_keys($ranked), [
+            ...$contextExcluded,
+            ...$ordinaryExcluded,
+            ...$pinnedIds,
         ]));
-        $orderedIds = array_values(array_diff($orderedIds, $excluded));
-        $filters = $this->catalogFilters($strategy, $orderedIds, $excluded);
-        $candidates = $orderedIds === []
-            ? collect()
-            : $this->catalog->candidates($store, $filters);
-        $candidates = $this->applyPostFilters($store, $strategy, $candidates);
+        $pinnedCandidates = $pinnedIds === [] ? collect() : $this->catalog->candidates($store, [
+            'product_ids' => $pinnedIds,
+            'exclude_product_ids' => $contextExcluded,
+            'in_stock_only' => true,
+            'limit' => 100,
+        ]);
+        $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates(
+            $store,
+            $this->catalogFilters($strategy, $normalIds, [...$contextExcluded, ...$ordinaryExcluded]),
+        );
+        $normalCandidates = $this->applyPostFilters($store, $strategy, $normalCandidates);
+        $candidates = $pinnedCandidates->concat($normalCandidates)->unique('shopify_product_id')->values();
         $byId = $candidates->keyBy(fn (array $product): string => $product['shopify_product_id']);
+        $orderedIds = array_values(array_unique([...$pinnedIds, ...$normalIds]));
 
         $items = [];
         foreach ($orderedIds as $shopifyProductId) {
@@ -135,12 +162,34 @@ class PersonalizationRecommendationService
                 continue;
             }
             $isPinned = in_array($shopifyProductId, $pinned, true);
+            $preferredVariantGid = $selection['variant_gids'][$shopifyProductId]
+                ?? $strategy->productOverrides
+                    ->first(fn ($override): bool => (string) $override->shopify_product_id === $shopifyProductId
+                        && filled($override->shopify_variant_gid))?->shopify_variant_gid;
+            $preferredVariantId = is_string($preferredVariantGid)
+                && preg_match('#^gid://shopify/ProductVariant/(\d+)$#', $preferredVariantGid, $matches) === 1
+                ? $matches[1]
+                : null;
+            $selectedVariant = collect($product['variants'] ?? [])->first(
+                fn (array $variant): bool => $preferredVariantId !== null
+                    && (string) ($variant['shopify_variant_id'] ?? '') === $preferredVariantId
+                    && ($variant['available_for_sale'] ?? false) === true,
+            ) ?? collect($product['variants'] ?? [])->first(
+                fn (array $variant): bool => ($variant['available_for_sale'] ?? false) === true,
+            );
             $items[] = [
                 ...$product,
                 'rank' => count($items) + 1,
-                'reason_code' => $isPinned ? 'pinned' : $strategy->algorithm->value,
+                'reason_code' => $isPinned
+                    ? 'pinned'
+                    : ($selection['reason_codes'][$shopifyProductId] ?? $strategy->algorithm->value),
                 'score' => $isPinned ? null : ($ranked[$shopifyProductId] ?? null),
                 'minimum_purchase_quantity' => $minimumQuantities->get($shopifyProductId, 1),
+                'selected_variant_gid' => is_array($selectedVariant)
+                    ? 'gid://shopify/ProductVariant/'.($selectedVariant['shopify_variant_id'] ?? '')
+                    : null,
+                'status' => 'available',
+                'rule_id' => $selection['rule_ids'][$shopifyProductId] ?? null,
             ];
             if (count($items) >= $strategy->item_limit) {
                 break;
@@ -152,14 +201,381 @@ class PersonalizationRecommendationService
                 'uuid' => $strategy->uuid,
                 'name' => $strategy->name,
                 'algorithm' => $strategy->algorithm->value,
+                'mode' => data_get($strategy->settings, 'recommendation_rule.mode', 'preset'),
+                'version_uuid' => $strategy->publishedVersion?->uuid,
+                'version_number' => $strategy->publishedVersion?->version_number,
             ],
             'context' => [
                 'seed_product_id' => $normalizedContext['seed_product_id'],
                 'cart_product_count' => count($normalizedContext['cart_product_ids']),
                 'recently_viewed_product_count' => count($normalizedContext['recently_viewed_product_ids']),
+                'surface' => $normalizedContext['surface'],
+                'placement' => $normalizedContext['placement'],
+                'market' => $normalizedContext['market'],
+                'currency' => $normalizedContext['currency'],
+                'language' => $normalizedContext['language'],
             ],
             'items' => $items,
+            'discount' => $this->discountPayload($strategy),
+            'debug' => [
+                'diagnostics' => $selection['diagnostics'],
+                'excluded' => $this->excludedDiagnostics(
+                    $debugOrderedIds,
+                    $items,
+                    $contextExcluded,
+                    $ordinaryExcluded,
+                ),
+            ],
         ];
+    }
+
+    /**
+     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
+     * @return array{scores: array<string, int|float>, minimum_quantities: array<string, int>, reason_codes: array<string, string>, variant_gids: array<string, string>, rule_ids: array<string, string>, diagnostics: list<array<string, mixed>>}
+     */
+    private function ruleProductSelection(
+        Store $store,
+        PersonalizationRecommendationStrategy $strategy,
+        array $context,
+    ): array {
+        $settings = is_array($strategy->settings) ? $strategy->settings : [];
+        $recommendationRule = is_array($settings['recommendation_rule'] ?? null)
+            ? $settings['recommendation_rule']
+            : null;
+        if (($recommendationRule['mode'] ?? null) !== 'custom') {
+            return [
+                'scores' => $this->algorithmProductIds($store, $strategy, $context),
+                'minimum_quantities' => [],
+                'reason_codes' => [],
+                'variant_gids' => [],
+                'rule_ids' => [],
+                'diagnostics' => [],
+            ];
+        }
+
+        return $this->customRuleProductSelection($store, $strategy, $context, $recommendationRule['custom'] ?? []);
+    }
+
+    /**
+     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
+     * @param  array<string, mixed>  $custom
+     * @return array{scores: array<string, int>, minimum_quantities: array<string, int>, reason_codes: array<string, string>, variant_gids: array<string, string>, rule_ids: array<string, string>, diagnostics: list<array<string, mixed>>}
+     */
+    private function customRuleProductSelection(
+        Store $store,
+        PersonalizationRecommendationStrategy $strategy,
+        array $context,
+        array $custom,
+    ): array {
+        $cartProducts = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', $context['cart_product_ids'])
+            ->with('collections:id,shopify_collection_id')
+            ->get();
+        $cartFacts = [
+            'cart_product_ids' => $context['cart_product_ids'],
+            'cart_collection_ids' => $cartProducts->flatMap(fn (Product $product) => $product->collections)
+                ->pluck('shopify_collection_id')->map(fn ($id): string => (string) $id)->unique()->values()->all(),
+            'cart_tags' => $cartProducts->flatMap(fn (Product $product): array => array_values($product->tags ?? []))
+                ->map(fn ($tag): string => (string) $tag)->unique()->values()->all(),
+            'cart_vendors' => $cartProducts->pluck('vendor')->filter()->map(fn ($vendor): string => (string) $vendor)
+                ->unique()->values()->all(),
+        ];
+        $actions = collect($custom['rules'] ?? [])->pluck('action')
+            ->push($custom['fallback']['action'] ?? [])
+            ->filter(fn ($action): bool => is_array($action));
+        $actionProductIds = $actions
+            ->flatMap(fn (array $action): array => array_column($action['products'] ?? [], 'shopify_product_id'))
+            ->map(fn ($id): string => (string) $id)->unique()->values()->all();
+        $actionProducts = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', $actionProductIds)
+            ->with('collections:id,shopify_collection_id')
+            ->get()->keyBy(fn (Product $product): string => (string) $product->shopify_product_id);
+
+        $ordered = [];
+        $minimumQuantities = [];
+        $variantGids = [];
+        $reasonCodes = [];
+        $ruleIds = [];
+        $diagnostics = [];
+        $rules = collect($custom['rules'] ?? [])->sortBy('priority')->values();
+        foreach ($rules as $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+            $referenceErrors = $this->customRuleReferenceErrors($store, $rule);
+            if ($referenceErrors !== []) {
+                $diagnostics[] = [
+                    'code' => 'custom_rule_configuration_error',
+                    'rule_id' => $rule['id'] ?? null,
+                    'details' => $referenceErrors,
+                ];
+
+                continue;
+            }
+            if (! $context['cart_context_available']
+                && collect($rule['conditions'] ?? [])->contains(
+                    fn ($condition): bool => is_array($condition) && str_starts_with((string) ($condition['field'] ?? ''), 'cart_'),
+                )) {
+                $diagnostics[] = [
+                    'code' => 'missing_context',
+                    'rule_id' => $rule['id'] ?? null,
+                    'surface' => $context['surface'],
+                    'details' => ['cart'],
+                ];
+
+                continue;
+            }
+            if (! $this->customRuleMatches($rule, $cartFacts)) {
+                continue;
+            }
+            $this->appendCustomAction(
+                $rule['action'] ?? [],
+                $actionProducts,
+                $ordered,
+                $minimumQuantities,
+                $variantGids,
+                $reasonCodes,
+                $ruleIds,
+                'custom_rule',
+                (string) ($rule['id'] ?? ''),
+            );
+            if ((bool) ($rule['exit_on_match'] ?? false)) {
+                break;
+            }
+        }
+        if ((bool) ($custom['fallback']['enabled'] ?? false) && count($ordered) < $strategy->item_limit) {
+            $fallbackAction = $custom['fallback']['action'] ?? [];
+            $fallbackErrors = $this->customRuleReferenceErrors($store, ['conditions' => [], 'action' => $fallbackAction]);
+            if ($fallbackErrors !== []) {
+                $diagnostics[] = ['code' => 'custom_fallback_configuration_error', 'rule_id' => null, 'details' => $fallbackErrors];
+            } else {
+                $this->appendCustomAction(
+                    $fallbackAction,
+                    $actionProducts,
+                    $ordered,
+                    $minimumQuantities,
+                    $variantGids,
+                    $reasonCodes,
+                    $ruleIds,
+                    'custom_fallback',
+                    '',
+                );
+            }
+        }
+        $ordered = array_slice($ordered, 0, $strategy->item_limit);
+        $scores = [];
+        foreach ($ordered as $position => $productId) {
+            $scores[$productId] = 1_000_000 - $position;
+        }
+
+        return [
+            'scores' => $scores,
+            'minimum_quantities' => array_intersect_key($minimumQuantities, $scores),
+            'reason_codes' => array_intersect_key($reasonCodes, $scores),
+            'variant_gids' => array_intersect_key($variantGids, $scores),
+            'rule_ids' => array_intersect_key($ruleIds, $scores),
+            'diagnostics' => $diagnostics,
+        ];
+    }
+
+    /** @param array<string, list<string>> $facts */
+    private function customRuleMatches(array $rule, array $facts): bool
+    {
+        $conditions = is_array($rule['conditions'] ?? null) ? $rule['conditions'] : [];
+        if ($conditions === []) {
+            return false;
+        }
+        $matches = array_map(function ($condition) use ($facts): bool {
+            if (! is_array($condition)) {
+                return false;
+            }
+            $field = (string) ($condition['field'] ?? '');
+            $values = array_values(array_map('strval', is_array($condition['values'] ?? null) ? $condition['values'] : []));
+            if ($values === [] || ! isset($facts[$field])) {
+                return false;
+            }
+
+            return $this->setMatches($facts[$field], (string) ($condition['operator'] ?? ''), $values);
+        }, $conditions);
+
+        return ($rule['match'] ?? 'all') === 'any'
+            ? in_array(true, $matches, true)
+            : ! in_array(false, $matches, true);
+    }
+
+    /**
+     * @param  Collection<string, Product>  $products
+     * @param  list<string>  $ordered
+     * @param  array<string, int>  $minimumQuantities
+     * @param  array<string, string>  $variantGids
+     * @param  array<string, string>  $reasonCodes
+     * @param  array<string, string>  $ruleIds
+     */
+    private function appendCustomAction(
+        mixed $action,
+        Collection $products,
+        array &$ordered,
+        array &$minimumQuantities,
+        array &$variantGids,
+        array &$reasonCodes,
+        array &$ruleIds,
+        string $reasonCode,
+        string $ruleId,
+    ): void {
+        if (! is_array($action)) {
+            return;
+        }
+        $filters = is_array($action['filters'] ?? null) ? $action['filters'] : [];
+        foreach ($action['products'] ?? [] as $selection) {
+            if (! is_array($selection)) {
+                continue;
+            }
+            $productId = (string) ($selection['shopify_product_id'] ?? '');
+            $product = $products->get($productId);
+            if (! $product instanceof Product || ! $this->customActionFiltersMatch($product, $filters)) {
+                continue;
+            }
+            if (! in_array($productId, $ordered, true)) {
+                $ordered[] = $productId;
+                $minimumQuantities[$productId] = max(1, (int) ($selection['minimum_quantity'] ?? 1));
+                $variantGids[$productId] = (string) ($selection['variant_gid'] ?? '');
+                $reasonCodes[$productId] = $reasonCode;
+                if ($ruleId !== '') {
+                    $ruleIds[$productId] = $ruleId;
+                }
+            }
+        }
+    }
+
+    /** @param list<array<string, mixed>> $filters */
+    private function customActionFiltersMatch(Product $product, array $filters): bool
+    {
+        foreach ($filters as $filter) {
+            if (! is_array($filter)) {
+                return false;
+            }
+            $values = array_values(array_map('strval', is_array($filter['values'] ?? null) ? $filter['values'] : []));
+            if ($values === []) {
+                return false;
+            }
+            $facts = match ($filter['field'] ?? '') {
+                'product_tags' => array_values(array_map('strval', $product->tags ?? [])),
+                'product_collections' => $product->collections->pluck('shopify_collection_id')
+                    ->map(fn ($id): string => (string) $id)->values()->all(),
+                'product_vendors' => filled($product->vendor) ? [(string) $product->vendor] : [],
+                default => [],
+            };
+            if (! $this->setMatches($facts, (string) ($filter['operator'] ?? ''), $values)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @param list<string> $facts @param list<string> $values */
+    private function setMatches(array $facts, string $operator, array $values): bool
+    {
+        $facts = array_values(array_unique(array_map('strval', $facts)));
+        $values = array_values(array_unique(array_map('strval', $values)));
+
+        return match ($operator) {
+            'contains_any' => array_intersect($facts, $values) !== [],
+            'contains_all' => array_diff($values, $facts) === [],
+            'contains_none' => array_intersect($facts, $values) === [],
+            default => false,
+        };
+    }
+
+    /** @return list<string> */
+    private function customRuleReferenceErrors(Store $store, array $rule): array
+    {
+        $productIds = collect($rule['conditions'] ?? [])
+            ->filter(fn ($condition): bool => is_array($condition) && ($condition['field'] ?? null) === 'cart_product_ids')
+            ->flatMap(fn (array $condition): array => $condition['values'] ?? [])
+            ->merge(array_column($rule['action']['products'] ?? [], 'shopify_product_id'))
+            ->map(fn ($id): string => (string) $id)->filter()->unique()->values();
+        $collectionIds = collect($rule['conditions'] ?? [])
+            ->filter(fn ($condition): bool => is_array($condition) && ($condition['field'] ?? null) === 'cart_collection_ids')
+            ->flatMap(fn (array $condition): array => $condition['values'] ?? [])
+            ->merge(collect($rule['action']['filters'] ?? [])
+                ->filter(fn ($filter): bool => is_array($filter) && ($filter['field'] ?? null) === 'product_collections')
+                ->flatMap(fn (array $filter): array => $filter['values'] ?? []))
+            ->map(fn ($id): string => (string) $id)->filter()->unique()->values();
+        $errors = [];
+        if ($productIds->isNotEmpty() && Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', $productIds->all())
+            ->count() !== $productIds->count()) {
+            $errors[] = 'invalid_product_reference';
+        }
+        if ($collectionIds->isNotEmpty() && DB::table('product_collections')
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_collection_id', $collectionIds->all())
+            ->count() !== $collectionIds->count()) {
+            $errors[] = 'invalid_collection_reference';
+        }
+
+        return $errors;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function discountPayload(PersonalizationRecommendationStrategy $strategy): ?array
+    {
+        $discount = is_array($strategy->settings) ? ($strategy->settings['discount'] ?? null) : null;
+        if (! is_array($discount)
+            || ($discount['enabled'] ?? false) !== true
+            || ($discount['status'] ?? null) !== 'active'
+            || ! filled($discount['reference'] ?? null)
+            || ! filled($discount['validated_at'] ?? null)) {
+            return null;
+        }
+        try {
+            if (now()->diffInMinutes($discount['validated_at'], absolute: true) > 15) {
+                return null;
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return [
+            'reference' => (string) $discount['reference'],
+            'title' => (string) ($discount['title'] ?? ''),
+            'summary' => (string) ($discount['summary'] ?? ''),
+            'code' => (string) ($discount['code'] ?? ''),
+            'minimum_purchase_quantity_enforced' => true,
+        ];
+    }
+
+    /**
+     * @param  list<string>  $orderedIds
+     * @param  list<array<string, mixed>>  $items
+     * @param  list<string>  $contextExcluded
+     * @param  list<string>  $ordinaryExcluded
+     * @return list<array{shopify_product_id: string, reason: string}>
+     */
+    private function excludedDiagnostics(
+        array $orderedIds,
+        array $items,
+        array $contextExcluded,
+        array $ordinaryExcluded,
+    ): array {
+        $visible = array_column($items, 'shopify_product_id');
+
+        return collect($orderedIds)
+            ->reject(fn (string $id): bool => in_array($id, $visible, true))
+            ->map(fn (string $id): array => [
+                'shopify_product_id' => $id,
+                'reason' => in_array($id, $contextExcluded, true)
+                    ? 'context_excluded'
+                    : (in_array($id, $ordinaryExcluded, true) ? 'excluded_by_strategy' : 'unavailable_or_filtered'),
+            ])->values()->all();
     }
 
     /**
@@ -490,23 +906,101 @@ class PersonalizationRecommendationService
 
     /**
      * @param  array<string, mixed>  $context
-     * @return array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}
+     * @return array<string, mixed>
      */
     private function context(array $context): array
     {
-        $allowed = ['seed_product_id', 'cart_product_ids', 'purchased_product_ids', 'recently_viewed_product_ids'];
+        $allowed = [
+            'seed_product_id', 'current_product_id', 'cart_product_ids', 'cart_lines',
+            'purchased_product_ids', 'order_product_ids', 'recently_viewed_product_ids',
+            'surface', 'placement', 'market', 'currency', 'language',
+        ];
         if (array_diff(array_keys($context), $allowed) !== []) {
             throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '推荐上下文包含不支持的字段。');
         }
 
-        return [
-            'seed_product_id' => ($context['seed_product_id'] ?? null) === null
-                ? null
-                : $this->numericProductId($context['seed_product_id']),
-            'cart_product_ids' => $this->productIds($context['cart_product_ids'] ?? [], 20),
-            'purchased_product_ids' => $this->productIds($context['purchased_product_ids'] ?? [], 50),
-            'recently_viewed_product_ids' => $this->productIds($context['recently_viewed_product_ids'] ?? [], 50),
+        $cartLines = $this->cartLines($context['cart_lines'] ?? []);
+        $cartProductIds = $this->productIds($context['cart_product_ids'] ?? [], 50);
+        $cartProductIds = array_values(array_unique([
+            ...$cartProductIds,
+            ...array_column($cartLines, 'product_id'),
+        ]));
+        $purchasedProductIds = array_values(array_unique([
+            ...$this->productIds($context['purchased_product_ids'] ?? [], 100),
+            ...$this->productIds($context['order_product_ids'] ?? [], 100),
+        ]));
+        $surface = trim((string) ($context['surface'] ?? $context['placement'] ?? 'unknown'));
+        $placement = trim((string) ($context['placement'] ?? $surface));
+        $allowedSurfaces = [
+            'homepage', 'product_page', 'cart_page', 'smart_cart', 'checkout',
+            'thank_you', 'order_status', 'post_purchase', 'email', 'unknown',
         ];
+        if (! in_array($surface, $allowedSurfaces, true) || ! in_array($placement, $allowedSurfaces, true)) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_SURFACE', '推荐展示场景无效。');
+        }
+
+        return [
+            'seed_product_id' => ($context['seed_product_id'] ?? $context['current_product_id'] ?? null) === null
+                ? null
+                : $this->numericProductId($context['seed_product_id'] ?? $context['current_product_id']),
+            'cart_product_ids' => $cartProductIds,
+            'cart_lines' => $cartLines,
+            'cart_context_available' => array_key_exists('cart_product_ids', $context) || array_key_exists('cart_lines', $context),
+            'purchased_product_ids' => $purchasedProductIds,
+            'order_context_available' => array_key_exists('purchased_product_ids', $context) || array_key_exists('order_product_ids', $context),
+            'recently_viewed_product_ids' => $this->productIds($context['recently_viewed_product_ids'] ?? [], 50),
+            'surface' => $surface,
+            'placement' => $placement,
+            'market' => $this->contextText($context['market'] ?? '', 80),
+            'currency' => strtoupper($this->contextText($context['currency'] ?? '', 3)),
+            'language' => $this->contextText($context['language'] ?? '', 20),
+        ];
+    }
+
+    /** @return list<array{product_id: string, variant_id: ?string, quantity: int}> */
+    private function cartLines(mixed $lines): array
+    {
+        if (! is_array($lines) || count($lines) > 50) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '购物车商品行格式无效。');
+        }
+        $result = [];
+        foreach ($lines as $line) {
+            if (! is_array($line) || array_is_list($line)
+                || array_diff(array_keys($line), ['product_id', 'variant_id', 'quantity']) !== []) {
+                throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '购物车商品行格式无效。');
+            }
+            $result[] = [
+                'product_id' => $this->numericProductId($line['product_id'] ?? null),
+                'variant_id' => filled($line['variant_id'] ?? null)
+                    ? $this->numericVariantId($line['variant_id']) : null,
+                'quantity' => max(1, min(999, (int) ($line['quantity'] ?? 1))),
+            ];
+        }
+
+        return $result;
+    }
+
+    private function numericVariantId(mixed $value): string
+    {
+        $value = is_int($value) || is_string($value) ? trim((string) $value) : '';
+        if (preg_match('#^gid://shopify/ProductVariant/(\d+)$#', $value, $matches) === 1) {
+            return $matches[1];
+        }
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', 'Shopify 变体 ID 格式无效。');
+        }
+
+        return $value;
+    }
+
+    private function contextText(mixed $value, int $maximum): string
+    {
+        $value = is_scalar($value) ? trim((string) $value) : '';
+        if (mb_strlen($value) > $maximum) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '推荐上下文字段过长。');
+        }
+
+        return $value;
     }
 
     private function booleanRule(

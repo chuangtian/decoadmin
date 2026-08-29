@@ -176,6 +176,15 @@ Route::options('/api/shopify-app/personalization/checkout/configuration', fn () 
     'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
     'Cache-Control' => 'no-store',
 ]))->name('personalization.checkout.configuration.options');
+Route::post('/api/shopify-app/personalization/checkout/recommendations', [PersonalizationCheckoutExtensionController::class, 'recommendations'])
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.recommendations');
+Route::options('/api/shopify-app/personalization/checkout/recommendations', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.recommendations.options');
 
 Route::prefix('/api/shopify-app/personalization/proxy')
     ->middleware(['shopify.app-proxy:personalization,personalization_store', 'throttle:personalization-public'])

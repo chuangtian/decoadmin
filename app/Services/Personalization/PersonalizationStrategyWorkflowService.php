@@ -21,6 +21,7 @@ use App\Models\Product;
 use App\Models\ProductCollection;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -193,9 +194,10 @@ class PersonalizationStrategyWorkflowService
                 ->exists();
             $settings = is_array($lockedStrategy->settings) ? $lockedStrategy->settings : [];
             $settings['discount'] = $normalized['configuration']['discount'];
+            $settings['recommendation_rule'] = $normalized['configuration']['recommendation_rule'];
             $lockedStrategy->forceFill([
                 'name' => $normalized['name'],
-                'algorithm' => PersonalizationAlgorithm::Manual,
+                'algorithm' => $normalized['algorithm'],
                 'item_limit' => 24,
                 'enabled' => $hasLiveComponent,
                 'status' => $hasLiveComponent
@@ -545,6 +547,13 @@ class PersonalizationStrategyWorkflowService
                 ? PersonalizationStrategyStatus::ConfigurationError->value
                 : $strategy->status->value);
         $draft = $strategy->versions->first(fn (PersonalizationStrategyVersion $version): bool => $version->status === PersonalizationStrategyVersionStatus::Draft);
+        $recommendationRule = data_get($draft?->configuration, 'recommendation_rule')
+            ?? data_get($strategy->settings, 'recommendation_rule')
+            ?? [
+                'mode' => 'preset',
+                'preset' => ($draft?->algorithm ?? $strategy->algorithm)->value,
+                'custom' => ['rules' => []],
+            ];
 
         return [
             'uuid' => $strategy->uuid,
@@ -552,6 +561,8 @@ class PersonalizationStrategyWorkflowService
             'technical_id' => $strategy->uuid,
             'status' => $status,
             'algorithm' => ($draft?->algorithm ?? $strategy->algorithm)->value,
+            'recommendation_mode' => $recommendationRule['mode'] ?? 'preset',
+            'custom_rule_count' => count($recommendationRule['custom']['rules'] ?? []),
             'item_limit' => $draft?->item_limit ?? $strategy->item_limit,
             'used_in' => $usages,
             'created_at' => $strategy->created_at?->toIso8601String(),
@@ -586,6 +597,17 @@ class PersonalizationStrategyWorkflowService
     private function defaultConfiguration(): array
     {
         return [
+            'recommendation_rule' => [
+                'mode' => 'preset',
+                'preset' => PersonalizationAlgorithm::Manual->value,
+                'custom' => [
+                    'rules' => [],
+                    'fallback' => [
+                        'enabled' => false,
+                        'action' => ['type' => 'manual', 'products' => [], 'filters' => []],
+                    ],
+                ],
+            ],
             'rules' => [
                 'include_tags' => [],
                 'exclude_tags' => [],
@@ -612,6 +634,15 @@ class PersonalizationStrategyWorkflowService
     {
         $strategy->loadMissing(['rules', 'productOverrides', 'components.style']);
         $configuration = $this->defaultConfiguration();
+        $storedRecommendationRule = is_array($strategy->settings)
+            ? ($strategy->settings['recommendation_rule'] ?? null)
+            : null;
+        $configuration['recommendation_rule'] = is_array($storedRecommendationRule)
+            ? $storedRecommendationRule
+            : [
+                ...$configuration['recommendation_rule'],
+                'preset' => $strategy->algorithm->value,
+            ];
         foreach ($strategy->rules as $rule) {
             $configuration['rules'][$rule->type->value] = match ($rule->type) {
                 PersonalizationRuleType::IncludeTags, PersonalizationRuleType::ExcludeTags => $rule->value['tags'] ?? [],
@@ -632,7 +663,14 @@ class PersonalizationStrategyWorkflowService
                 ? $overrides->pluck('shopify_product_id')->map(fn ($id): string => (string) $id)->values()->all()
                 : $overrides->map(fn (PersonalizationStrategyProductOverride $override): array => [
                     'shopify_product_id' => (string) $override->shopify_product_id,
+                    'product_gid' => $override->shopify_product_gid
+                        ?: 'gid://shopify/Product/'.$override->shopify_product_id,
+                    'variant_gid' => $override->shopify_variant_gid ?: '',
                     'minimum_quantity' => max(1, (int) $override->minimum_quantity),
+                    'selected_at' => $override->selected_at?->toIso8601String()
+                        ?? $override->created_at?->toIso8601String()
+                        ?? now()->toIso8601String(),
+                    'position' => max(1, (int) $override->position),
                 ])->all();
         }
         $configuration['placements'] = $strategy->components->map(fn (PersonalizationRecommendationComponent $component): array => [
@@ -669,13 +707,29 @@ class PersonalizationStrategyWorkflowService
             throw new PersonalizationException('INVALID_STRATEGY_DRAFT', '策略草稿包含不支持的字段。');
         }
         $name = $this->text($draft['name'] ?? null, 80, 'STRATEGY_NAME_REQUIRED');
-        // The compact editor deliberately exposes one deterministic mode only.
-        $algorithm = PersonalizationAlgorithm::Manual;
         $itemLimit = 24;
         $configuration = $draft['configuration'] ?? null;
         if (! is_array($configuration) || array_is_list($configuration)
-            || array_diff(array_keys($configuration), ['rules', 'products', 'discount', 'placements', 'checkout']) !== []) {
+            || array_diff(array_keys($configuration), ['recommendation_rule', 'rules', 'products', 'discount', 'placements', 'checkout']) !== []) {
             throw new PersonalizationException('INVALID_STRATEGY_CONFIGURATION', '策略配置格式无效。');
+        }
+        $recommendationRule = $this->normalizeRecommendationRule(
+            $store,
+            $configuration['recommendation_rule'] ?? $this->defaultConfiguration()['recommendation_rule'],
+        );
+        $algorithm = $recommendationRule['mode'] === 'preset'
+            ? PersonalizationAlgorithm::from($recommendationRule['preset'])
+            : PersonalizationAlgorithm::Manual;
+        $products = $this->normalizeProducts($store, $configuration['products'] ?? []);
+        if ($recommendationRule['mode'] === 'custom') {
+            $candidateIds = collect($recommendationRule['custom']['rules'])
+                ->flatMap(fn (array $rule): array => array_column($rule['action']['products'], 'shopify_product_id'))
+                ->merge(array_column($recommendationRule['custom']['fallback']['action']['products'], 'shopify_product_id'))
+                ->merge(array_column($products['pinned'], 'shopify_product_id'))
+                ->unique();
+            if ($candidateIds->count() > 24) {
+                throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', '自定义规则与置顶产品合计最多 24 种。');
+            }
         }
 
         return [
@@ -683,13 +737,212 @@ class PersonalizationStrategyWorkflowService
             'algorithm' => $algorithm->value,
             'item_limit' => $itemLimit,
             'configuration' => [
+                'recommendation_rule' => $recommendationRule,
                 'rules' => $this->normalizeRules($configuration['rules'] ?? []),
-                'products' => $this->normalizeProducts($store, $configuration['products'] ?? []),
+                'products' => $products,
                 'discount' => $this->normalizeDiscount($configuration['discount'] ?? []),
                 'placements' => $this->normalizePlacements($configuration['placements'] ?? []),
                 'checkout' => $this->normalizeCheckout($configuration['checkout'] ?? []),
             ],
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function normalizeRecommendationRule(Store $store, mixed $recommendationRule): array
+    {
+        if (! is_array($recommendationRule) || array_is_list($recommendationRule)
+            || array_diff(array_keys($recommendationRule), ['mode', 'preset', 'custom']) !== []) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_SET', '推荐规则集格式无效。');
+        }
+        $mode = (string) ($recommendationRule['mode'] ?? 'preset');
+        if (! in_array($mode, ['preset', 'custom'], true)) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_MODE', '推荐规则模式无效。');
+        }
+        $preset = PersonalizationAlgorithm::tryFrom((string) ($recommendationRule['preset'] ?? 'manual'));
+        if (! $preset) {
+            throw new PersonalizationException('INVALID_PRESET_RECOMMENDATION_RULE', '预设推荐规则无效。');
+        }
+        $custom = $recommendationRule['custom'] ?? [];
+        if ($custom === []) {
+            $custom = $this->defaultConfiguration()['recommendation_rule']['custom'];
+        }
+        if (! is_array($custom) || array_is_list($custom)
+            || array_diff(array_keys($custom), ['rules', 'fallback']) !== []) {
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', '自定义规则集格式无效。');
+        }
+        $rules = $custom['rules'] ?? [];
+        if (! is_array($rules) || count($rules) > 20) {
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', '自定义规则最多可以添加 20 条。');
+        }
+        $normalizedRules = [];
+        $seenRuleIds = [];
+        foreach (array_values($rules) as $position => $rule) {
+            if (! is_array($rule) || array_is_list($rule)
+                || array_diff(array_keys($rule), ['id', 'name', 'priority', 'match', 'conditions', 'exit_on_match', 'action']) !== []) {
+                throw new PersonalizationException('INVALID_CUSTOM_RULE', '自定义规则格式无效。');
+            }
+            $id = $this->uuid($rule['id'] ?? null, 'INVALID_CUSTOM_RULE_ID');
+            if (isset($seenRuleIds[$id])) {
+                throw new PersonalizationException('DUPLICATE_CUSTOM_RULE_ID', '自定义规则 ID 不能重复。');
+            }
+            $seenRuleIds[$id] = true;
+            $match = (string) ($rule['match'] ?? 'all');
+            if (! in_array($match, ['all', 'any'], true)) {
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_MATCH', '条件组合只能选择“和”或“或”。');
+            }
+            $normalizedRules[] = [
+                'id' => $id,
+                'name' => $this->text($rule['name'] ?? null, 50, 'CUSTOM_RULE_NAME_REQUIRED'),
+                'priority' => $position + 1,
+                'match' => $match,
+                'conditions' => $this->normalizeCustomConditions($store, $rule['conditions'] ?? []),
+                'exit_on_match' => (bool) ($rule['exit_on_match'] ?? false),
+                'action' => $this->normalizeCustomAction($store, $rule['action'] ?? []),
+            ];
+        }
+        $fallback = $custom['fallback'] ?? [];
+        if ($fallback === []) {
+            $fallback = $this->defaultConfiguration()['recommendation_rule']['custom']['fallback'];
+        }
+        if (! is_array($fallback) || array_is_list($fallback)
+            || array_diff(array_keys($fallback), ['enabled', 'action']) !== []) {
+            throw new PersonalizationException('INVALID_CUSTOM_FALLBACK', '备用规则格式无效。');
+        }
+        $normalizedFallbackAction = $this->normalizeCustomAction($store, $fallback['action'] ?? []);
+        $candidateIds = collect($normalizedRules)
+            ->flatMap(fn (array $rule): array => array_column($rule['action']['products'], 'shopify_product_id'))
+            ->merge(array_column($normalizedFallbackAction['products'], 'shopify_product_id'))
+            ->unique()->values();
+        if ($candidateIds->count() > 24) {
+            throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', '一份自定义策略最多可以配置 24 种推荐商品。');
+        }
+
+        return [
+            'mode' => $mode,
+            'preset' => $preset->value,
+            'custom' => [
+                'rules' => $normalizedRules,
+                'fallback' => [
+                    'enabled' => (bool) ($fallback['enabled'] ?? false),
+                    'action' => $normalizedFallbackAction,
+                ],
+            ],
+        ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function normalizeCustomConditions(Store $store, mixed $conditions): array
+    {
+        if (! is_array($conditions) || count($conditions) > 10) {
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITIONS', '每条规则最多可以添加 10 个条件。');
+        }
+        $allowedFields = ['cart_product_ids', 'cart_collection_ids', 'cart_tags', 'cart_vendors'];
+        $result = [];
+        $seen = [];
+        foreach (array_values($conditions) as $condition) {
+            if (! is_array($condition) || array_is_list($condition)
+                || array_diff(array_keys($condition), ['id', 'field', 'operator', 'values']) !== []) {
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', '自定义规则条件格式无效。');
+            }
+            $id = $this->uuid($condition['id'] ?? null, 'INVALID_CUSTOM_CONDITION_ID');
+            if (isset($seen[$id])) {
+                throw new PersonalizationException('DUPLICATE_CUSTOM_CONDITION_ID', '条件 ID 不能重复。');
+            }
+            $seen[$id] = true;
+            $field = (string) ($condition['field'] ?? 'cart_product_ids');
+            $operator = (string) ($condition['operator'] ?? 'contains_any');
+            if (! in_array($field, $allowedFields, true)
+                || ! in_array($operator, ['contains_any', 'contains_all', 'contains_none'], true)) {
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', '自定义规则字段或运算符无效。');
+            }
+            $values = match ($field) {
+                'cart_product_ids' => $this->numericIds($condition['values'] ?? [], 24, 'INVALID_CUSTOM_CONDITION_PRODUCTS'),
+                'cart_collection_ids' => $this->numericIds($condition['values'] ?? [], 100, 'INVALID_CUSTOM_CONDITION_COLLECTIONS'),
+                default => $this->strings($condition['values'] ?? [], 100, 120, 'INVALID_CUSTOM_CONDITION_VALUES'),
+            };
+            $this->assertCustomValuesOwned($store, $field, $values);
+            $result[] = ['id' => $id, 'field' => $field, 'operator' => $operator, 'values' => $values];
+        }
+
+        return $result;
+    }
+
+    /** @return array{type: string, products: list<array{shopify_product_id: string, minimum_quantity: int}>, filters: list<array<string, mixed>>} */
+    private function normalizeCustomAction(Store $store, mixed $action): array
+    {
+        if ($action === []) {
+            $action = ['type' => 'manual', 'products' => [], 'filters' => []];
+        }
+        if (! is_array($action) || array_is_list($action)
+            || array_diff(array_keys($action), ['type', 'products', 'filters']) !== []) {
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', '自定义规则行动格式无效。');
+        }
+        if (($action['type'] ?? 'manual') !== 'manual') {
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', '当前仅支持手动选择行动。');
+        }
+        $products = $this->productSelections($store, $action['products'] ?? [], 24);
+        $filters = $action['filters'] ?? [];
+        if (! is_array($filters) || count($filters) > 10) {
+            throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTERS', '每个行动最多可以添加 10 个筛选条件。');
+        }
+        $normalizedFilters = [];
+        foreach (array_values($filters) as $filter) {
+            if (! is_array($filter) || array_is_list($filter)
+                || array_diff(array_keys($filter), ['id', 'field', 'operator', 'values']) !== []) {
+                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', '行动筛选条件格式无效。');
+            }
+            $field = (string) ($filter['field'] ?? 'product_tags');
+            $operator = (string) ($filter['operator'] ?? 'contains_any');
+            if (! in_array($field, ['product_tags', 'product_collections', 'product_vendors'], true)
+                || ! in_array($operator, ['contains_any', 'contains_all', 'contains_none'], true)) {
+                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', '行动筛选字段或运算符无效。');
+            }
+            $values = $field === 'product_collections'
+                ? $this->numericIds($filter['values'] ?? [], 100, 'INVALID_CUSTOM_ACTION_FILTER')
+                : $this->strings($filter['values'] ?? [], 100, 120, 'INVALID_CUSTOM_ACTION_FILTER');
+            if ($field === 'product_collections') {
+                $this->assertCustomValuesOwned($store, 'cart_collection_ids', $values);
+            }
+            $normalizedFilters[] = [
+                'id' => $this->uuid($filter['id'] ?? null, 'INVALID_CUSTOM_FILTER_ID'),
+                'field' => $field,
+                'operator' => $operator,
+                'values' => $values,
+            ];
+        }
+
+        return ['type' => 'manual', 'products' => $products, 'filters' => $normalizedFilters];
+    }
+
+    /** @param list<string> $values */
+    private function assertCustomValuesOwned(Store $store, string $field, array $values): void
+    {
+        if ($values === []) {
+            return;
+        }
+        if ($field === 'cart_product_ids') {
+            $this->assertProductIdsOwned($store, $values);
+        }
+        if ($field === 'cart_collection_ids' && ProductCollection::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_collection_id', $values)
+            ->count() !== count(array_unique($values))) {
+            throw new PersonalizationException('CUSTOM_COLLECTION_NOT_FOUND', '部分自定义规则集合不属于当前店铺或尚未同步。', 404);
+        }
+    }
+
+    /** @param list<string> $productIds */
+    private function assertProductIdsOwned(Store $store, array $productIds): void
+    {
+        $productIds = array_values(array_unique($productIds));
+        if ($productIds !== [] && Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', $productIds)
+            ->count() !== count($productIds)) {
+            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', '部分自定义规则商品不属于当前店铺或尚未同步。', 404);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -733,8 +986,8 @@ class PersonalizationStrategyWorkflowService
             || array_diff(array_keys($products), ['manual', 'pinned', 'excluded']) !== []) {
             throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置格式无效。');
         }
-        $manual = $this->productSelections($products['manual'] ?? [], 24);
-        $pinned = $this->productSelections($products['pinned'] ?? [], 24);
+        $manual = $this->productSelections($store, $products['manual'] ?? [], 24);
+        $pinned = $this->productSelections($store, $products['pinned'] ?? [], 24);
         $excluded = $this->numericIds($products['excluded'] ?? [], 100, 'INVALID_PRODUCT_OVERRIDE');
 
         // A pinned product is also a candidate. Add missing pinned products to
@@ -762,22 +1015,33 @@ class PersonalizationStrategyWorkflowService
             }
         }
 
+        foreach ($manual as $position => &$selection) {
+            $selection['position'] = $position + 1;
+        }
+        unset($selection);
+        foreach ($pinned as $position => &$selection) {
+            $selection['position'] = $position + 1;
+        }
+        unset($selection);
+
         return ['manual' => $manual, 'pinned' => $pinned, 'excluded' => $excluded];
     }
 
-    /** @return list<array{shopify_product_id: string, minimum_quantity: int}> */
-    private function productSelections(mixed $values, int $maximum): array
+    /** @return list<array{shopify_product_id: string, product_gid: string, variant_gid: string, minimum_quantity: int, selected_at: string, position: int}> */
+    private function productSelections(Store $store, mixed $values, int $maximum): array
     {
         if (! is_array($values) || count($values) > $maximum) {
             throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', "手动推荐商品最多可以选择 {$maximum} 种。");
         }
-        $result = [];
+        $rows = [];
         $seen = [];
         foreach ($values as $value) {
             $row = is_array($value) && ! array_is_list($value)
                 ? $value
                 : ['shopify_product_id' => $value, 'minimum_quantity' => 1];
-            if (array_diff(array_keys($row), ['shopify_product_id', 'minimum_quantity']) !== []) {
+            if (array_diff(array_keys($row), [
+                'shopify_product_id', 'product_gid', 'variant_gid', 'minimum_quantity', 'selected_at', 'position',
+            ]) !== []) {
                 throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置包含不支持的字段。');
             }
             $productId = $this->numericProductId($row['shopify_product_id'] ?? null);
@@ -785,20 +1049,62 @@ class PersonalizationStrategyWorkflowService
                 continue;
             }
             $seen[$productId] = true;
+            $rows[] = [...$row, 'shopify_product_id' => $productId];
+        }
+
+        $products = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', array_keys($seen))
+            ->with(['variants' => fn ($query) => $query->orderByDesc('available_for_sale')->orderBy('id')])
+            ->get()->keyBy(fn (Product $product): string => (string) $product->shopify_product_id);
+        if ($products->count() !== count($seen)) {
+            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', '部分推荐商品不属于当前店铺或尚未同步。', 404);
+        }
+
+        $result = [];
+        foreach ($rows as $position => $row) {
+            $productId = (string) $row['shopify_product_id'];
+            $product = $products->get($productId);
+            if (! $product instanceof Product || $product->variants->isEmpty()) {
+                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', '推荐商品缺少可用的 Shopify 变体。', 409);
+            }
+            $variantGid = trim((string) ($row['variant_gid'] ?? ''));
+            $variantId = preg_match('#^gid://shopify/ProductVariant/(\d+)$#', $variantGid, $matches) === 1
+                ? $matches[1]
+                : '';
+            $variant = $variantId !== ''
+                ? $product->variants->firstWhere('shopify_variant_id', $variantId)
+                : $product->variants->first();
+            if (! $variant) {
+                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', '所选变体不属于当前店铺商品。', 404);
+            }
+            $selectedAt = trim((string) ($row['selected_at'] ?? ''));
+            try {
+                $selectedAt = $selectedAt === ''
+                    ? now()->toIso8601String()
+                    : CarbonImmutable::parse($selectedAt)->utc()->toIso8601String();
+            } catch (\Throwable) {
+                throw new PersonalizationException('INVALID_PRODUCT_SELECTED_AT', '商品选择时间格式无效。');
+            }
             $result[] = [
                 'shopify_product_id' => $productId,
+                'product_gid' => 'gid://shopify/Product/'.$productId,
+                'variant_gid' => 'gid://shopify/ProductVariant/'.$variant->shopify_variant_id,
                 'minimum_quantity' => $this->integer($row['minimum_quantity'] ?? 1, 1, 999, 'INVALID_MINIMUM_PURCHASE_QUANTITY'),
+                'selected_at' => $selectedAt,
+                'position' => $position + 1,
             ];
         }
 
         return $result;
     }
 
-    /** @return array{enabled: bool, reference: ?string} */
+    /** @return array<string, mixed> */
     private function normalizeDiscount(mixed $discount): array
     {
         if (! is_array($discount) || array_is_list($discount)
-            || array_diff(array_keys($discount), ['enabled', 'reference']) !== []) {
+            || array_diff(array_keys($discount), ['enabled', 'reference', 'title', 'summary', 'code', 'status', 'validated_at']) !== []) {
             throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '优惠关联配置无效。');
         }
         $enabled = (bool) ($discount['enabled'] ?? false);
@@ -806,8 +1112,26 @@ class PersonalizationStrategyWorkflowService
         if (mb_strlen($reference) > 255 || ($enabled && $reference === '')) {
             throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '启用优惠时必须选择或填写已有折扣引用。');
         }
+        $status = strtolower(trim((string) ($discount['status'] ?? 'unknown')));
+        if (! in_array($status, ['active', 'scheduled', 'expired', 'unknown'], true)) {
+            $status = 'unknown';
+        }
+        $validatedAt = trim((string) ($discount['validated_at'] ?? ''));
+        try {
+            $validatedAt = $validatedAt === '' ? null : CarbonImmutable::parse($validatedAt)->utc()->toIso8601String();
+        } catch (\Throwable) {
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '折扣校验时间格式无效。');
+        }
 
-        return ['enabled' => $enabled, 'reference' => $reference ?: null];
+        return [
+            'enabled' => $enabled,
+            'reference' => $reference ?: null,
+            'title' => $this->optionalText($discount['title'] ?? null, 80),
+            'summary' => $this->optionalText($discount['summary'] ?? null, 160),
+            'code' => $this->optionalText($discount['code'] ?? null, 80),
+            'status' => $status,
+            'validated_at' => $validatedAt,
+        ];
     }
 
     /** @return list<array<string, mixed>> */
@@ -873,7 +1197,16 @@ class PersonalizationStrategyWorkflowService
     private function validatePublishable(Store $store, PersonalizationStrategyVersion $version): void
     {
         $configuration = $version->configuration;
-        if ($version->algorithm === PersonalizationAlgorithm::Manual
+        $recommendationRule = $configuration['recommendation_rule'] ?? $this->defaultConfiguration()['recommendation_rule'];
+        $customProducts = collect($recommendationRule['custom']['rules'] ?? [])
+            ->flatMap(fn (array $rule): array => $rule['action']['products'] ?? [])
+            ->merge($recommendationRule['custom']['fallback']['action']['products'] ?? [])
+            ->filter(fn ($selection): bool => is_array($selection) && filled($selection['shopify_product_id'] ?? null));
+        if (($recommendationRule['mode'] ?? 'preset') === 'custom' && $customProducts->isEmpty()) {
+            throw new PersonalizationException('CUSTOM_RULE_PRODUCTS_REQUIRED', '自定义规则至少需要一个行动商品或备用商品。', 409);
+        }
+        if (($recommendationRule['mode'] ?? 'preset') === 'preset'
+            && $version->algorithm === PersonalizationAlgorithm::Manual
             && ($configuration['products']['manual'] ?? []) === []
             && ($configuration['rules']['include_collection_ids'] ?? []) === []) {
             throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要选择一个商品或集合。', 409);
@@ -954,12 +1287,22 @@ class PersonalizationStrategyWorkflowService
                     'strategy_id' => $strategy->id,
                     'product_id' => $owned->get($productId),
                     'shopify_product_id' => $productId,
+                    'shopify_product_gid' => is_array($selection)
+                        ? ($selection['product_gid'] ?? 'gid://shopify/Product/'.$productId)
+                        : 'gid://shopify/Product/'.$productId,
+                    'shopify_variant_gid' => is_array($selection) ? ($selection['variant_gid'] ?? null) : null,
                     'type' => $type,
                     'position' => $position + 1,
                     'minimum_quantity' => is_array($selection) ? max(1, (int) ($selection['minimum_quantity'] ?? 1)) : 1,
+                    'selected_at' => is_array($selection) ? ($selection['selected_at'] ?? now()) : now(),
                 ]);
             }
         }
+        $settings = is_array($strategy->settings) ? $strategy->settings : [];
+        $settings['recommendation_rule'] = $configuration['recommendation_rule']
+            ?? $this->defaultConfiguration()['recommendation_rule'];
+        $settings['discount'] = $configuration['discount'] ?? ['enabled' => false, 'reference' => null];
+        $strategy->forceFill(['settings' => $settings])->save();
 
         $configuredPlacements = [];
         foreach ($configuration['placements'] ?? [] as $placement) {
@@ -1070,6 +1413,10 @@ class PersonalizationStrategyWorkflowService
             'name' => $version->name,
             'algorithm' => $version->algorithm,
             'item_limit' => $version->item_limit,
+            'settings' => [
+                'recommendation_rule' => $version->configuration['recommendation_rule']
+                    ?? $this->defaultConfiguration()['recommendation_rule'],
+            ],
             'enabled' => true,
             'status' => PersonalizationStrategyStatus::Draft,
         ]);
@@ -1093,9 +1440,14 @@ class PersonalizationStrategyWorkflowService
                 $override = new PersonalizationStrategyProductOverride([
                     'strategy_id' => $strategy->id,
                     'shopify_product_id' => $productId,
+                    'shopify_product_gid' => is_array($selection)
+                        ? ($selection['product_gid'] ?? 'gid://shopify/Product/'.$productId)
+                        : 'gid://shopify/Product/'.$productId,
+                    'shopify_variant_gid' => is_array($selection) ? ($selection['variant_gid'] ?? null) : null,
                     'type' => $type,
                     'position' => $position + 1,
                     'minimum_quantity' => is_array($selection) ? max(1, (int) ($selection['minimum_quantity'] ?? 1)) : 1,
+                    'selected_at' => is_array($selection) ? ($selection['selected_at'] ?? now()) : now(),
                 ]);
                 $override->exists = true;
                 $overrides->push($override);

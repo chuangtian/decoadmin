@@ -25,7 +25,10 @@ class PersonalizationCheckoutService
         'store', 'truck', 'star', 'check-circle', 'lock', 'savings', 'delivered', 'return', 'info',
     ];
 
-    public function __construct(private PersonalizationShopGuard $shopGuard) {}
+    public function __construct(
+        private PersonalizationShopGuard $shopGuard,
+        private PersonalizationRecommendationService $recommendations,
+    ) {}
 
     public function configuration(Store $store, User $actor): ?PersonalizationCheckoutSetting
     {
@@ -122,26 +125,9 @@ class PersonalizationCheckoutService
     /** @return array<string, mixed> */
     public function storefront(Store $store): array
     {
-        $this->assertStore($store);
-        $setting = PersonalizationCheckoutSetting::query()
-            ->where('organization_id', $store->organization_id)
-            ->where('store_id', $store->id)
-            ->where('enabled', true)
-            ->with([
-                'component.strategy',
-                'collection',
-            ])
-            ->first();
+        $setting = $this->activeSetting($store);
         $component = $setting?->component;
-        if (! $setting
-            || ! $component
-            || ! $setting->collection
-            || (int) $setting->collection->organization_id !== (int) $store->organization_id
-            || (int) $setting->collection->store_id !== (int) $store->id
-            || (string) $setting->collection->shopify_collection_id !== (string) $setting->shopify_collection_id
-            || $component->placement !== PersonalizationPlacement::Checkout
-            || $component->status !== PersonalizationComponentStatus::Active
-            || ! $component->strategy?->enabled) {
+        if (! $setting || ! $component) {
             return $this->disabledPayload();
         }
 
@@ -154,6 +140,11 @@ class PersonalizationCheckoutService
                 'heading' => $component->heading ?: 'Great Value Bundles for You',
                 'button_label' => $component->button_label ?: 'Add',
             ],
+            'strategy' => [
+                'version_uuid' => $component->strategyVersion?->uuid
+                    ?? $component->strategy->publishedVersion?->uuid,
+            ],
+            'recommendations_url' => url('/api/shopify-app/personalization/checkout/recommendations'),
             'trust_items' => collect($setting->trust_items ?? [])
                 ->filter(fn (mixed $item): bool => is_array($item) && ($item['enabled'] ?? false) === true)
                 ->sortBy(fn (array $item): int => (int) ($item['position'] ?? 0))
@@ -176,6 +167,52 @@ class PersonalizationCheckoutService
                 'maximum_recommendations' => data_get($setting->settings, 'maximum_recommendations'),
             ],
         ];
+    }
+
+    /** @param array<string, mixed> $context @return array<string, mixed> */
+    public function recommendations(Store $store, array $context): array
+    {
+        $setting = $this->activeSetting($store);
+        if (! $setting?->component) {
+            return ['enabled' => false, 'items' => [], 'debug' => ['diagnostics' => [['code' => 'checkout_not_enabled']]]];
+        }
+
+        return [
+            'enabled' => true,
+            ...$this->recommendations->forComponent($store, $setting->component, [
+                ...$context,
+                'surface' => PersonalizationPlacement::Checkout->value,
+                'placement' => PersonalizationPlacement::Checkout->value,
+            ]),
+        ];
+    }
+
+    private function activeSetting(Store $store): ?PersonalizationCheckoutSetting
+    {
+        $this->assertStore($store);
+        $setting = PersonalizationCheckoutSetting::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('enabled', true)
+            ->with([
+                'component.strategy.publishedVersion',
+                'component.strategyVersion',
+                'collection',
+            ])->first();
+        $component = $setting?->component;
+        if (! $setting
+            || ! $component
+            || ! $setting->collection
+            || (int) $setting->collection->organization_id !== (int) $store->organization_id
+            || (int) $setting->collection->store_id !== (int) $store->id
+            || (string) $setting->collection->shopify_collection_id !== (string) $setting->shopify_collection_id
+            || $component->placement !== PersonalizationPlacement::Checkout
+            || $component->status !== PersonalizationComponentStatus::Active
+            || ! $component->strategy?->enabled) {
+            return null;
+        }
+
+        return $setting;
     }
 
     /** @return list<array{key: string, icon: string, title: string, description: string, position: int, enabled: bool}> */

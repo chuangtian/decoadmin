@@ -32,7 +32,11 @@ class PublicPersonalizationController extends Controller
         $context = [
             'seed_product_id' => $request->query('seed_product_id'),
             'cart_product_ids' => $this->ids($request->query('cart_product_ids', [])),
+            'purchased_product_ids' => $this->ids($request->query('purchased_product_ids', [])),
             'recently_viewed_product_ids' => $this->ids($request->query('recently_viewed_product_ids', [])),
+            'market' => $request->query('market', ''),
+            'currency' => $request->query('currency', ''),
+            'language' => $request->query('language', ''),
         ];
         try {
             $result = $this->recommendations->forComponent($store, $component, $context);

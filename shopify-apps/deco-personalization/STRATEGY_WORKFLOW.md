@@ -16,14 +16,25 @@ The full-screen editor contains only five merchant-visible sections:
 4. 除外条款
 5. 优惠促销
 
-The recommendation rule is always deterministic manual selection. There is no algorithm selector, maximum-result field, custom rule builder, AI label, placement step, preview step, publish action, or version-restore action.
+The recommendation card exposes two deterministic modes: **预设规则** and **自定义规则（N）**. Presets are limited to the six already approved non-AI algorithms. Manual selection remains the default. There is no AI label or behavior, merchant-facing maximum-result field, placement step, preview step, publish action, or version-restore action.
 
 - A strategy has a stable UUID and is autosaved with optimistic locking and UUID idempotency keys.
-- The picker supports search, selection-time ordering, at most 24 products, and a minimum purchase quantity from 1 to 999 per selected product.
+- The picker supports search, selection-time ordering, drag reordering, at most 24 unique candidate products per strategy, and a minimum purchase quantity from 1 to 999 per selected product.
+- Each selected product stores its canonical product GID, selected variant GID, selection time, persisted position, and minimum purchase quantity. Storefront and Checkout add the same minimum quantity that the merchant configured.
 - Canceling the picker discards its temporary state. Confirming applies the selection to the strategy draft.
 - Pinned products are ordered before normal products and are automatically added to the candidate list if needed.
 - Draft, archived, unpublished, out-of-stock, and unavailable products remain visible in the merchant picker with their real state. Storefront recommendation always skips unsafe products.
 - Exclusions cover cart/order history, explicit products, tags, Collections, vendors, and purchase-option values. No arbitrary expression builder is exposed.
+
+## Deterministic custom rule engine
+
+Custom rules are stored inside the versioned strategy snapshot with stable UUIDs. Each rule contains a name, persisted priority, AND/OR condition group, deterministic conditions, ordered manual action products, simple action filters, and `exit_on_match`. Conditions cover cart product, Collection, tag, and vendor facts. Missing surface context or a stale product/Collection reference makes only that rule non-matching and produces a diagnostic; it never interrupts lower-priority rules or checkout.
+
+Rules execute from top to bottom. A match appends action products in saved order. Products returned by several rules keep their first position, minimum quantity, and highest-priority rule ID. `exit_on_match` stops lower-priority rules. An enabled fallback appends eligible products only after the normal rule pass and never reintroduces a duplicate, excluded, or unavailable product.
+
+Every surface consumes `PersonalizationRecommendationService`; extensions do not reimplement rule evaluation. The service accepts the trusted Store and strategy plus surface, current product, cart/order product context, Market, currency, and language. It returns final ordered products, the selected variant, minimum quantity, strategy version, rule ID, optional validated discount, and bounded diagnostics.
+
+Final processing order is: rule candidates and de-duplication; hard storefront/variant availability; context and merchant exclusions; then available pinned products at the front. Pinned products can bypass ordinary tag/Collection/vendor filters, but never hard availability, the current product, or cart/order duplicate protection.
 
 Autosave applies the strategy's name, deterministic rules, ordered products, minimum quantities, and discount reference. It does not create a placement or enable a component. Existing components remain the only source of storefront visibility and safely hide when no eligible product remains.
 
