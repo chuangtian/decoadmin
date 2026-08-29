@@ -42,12 +42,13 @@ class PersonalizationAttributionTest extends TestCase
         [$admin, $organization, $store] = $this->context('Attribution');
         $product = $this->product($organization, $store, 1101, 'Attributed Bike');
         [$firstComponent, $lastComponent] = $this->components($store, $admin);
+        $lastComponent->forceFill(['placement' => 'checkout'])->save();
         $source = $this->source($organization, $store);
         $clientHash = hash('sha256', 'anonymous-client-a');
         $this->event($source, PersonalizationEventIngestionService::IMPRESSION, 'impression-a', $clientHash, now()->subDays(2), $firstComponent, $product);
         $this->event($source, PersonalizationEventIngestionService::CLICK, 'click-old', $clientHash, now()->subDay(), $firstComponent, $product);
-        $this->event($source, PersonalizationEventIngestionService::CLICK, 'click-last', $clientHash, now()->subHour(), $lastComponent, $product);
-        $this->event($source, PersonalizationEventIngestionService::ADD_TO_CART, 'add-a', $clientHash, now()->subMinutes(30), $lastComponent, $product, 11010);
+        $this->event($source, PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK, 'click-last', $clientHash, now()->subHour(), $lastComponent, $product, 11010);
+        $this->event($source, PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS, 'add-a', $clientHash, now()->subMinutes(30), $lastComponent, $product, 11010);
         $order = $this->order($organization, $store, 7001, 200, 25);
         $checkout = $this->checkout($source, 'checkout-a', $clientHash, now(), $order->shopify_order_id);
 
@@ -59,7 +60,7 @@ class PersonalizationAttributionTest extends TestCase
         $this->assertSame('click-last', $attribution->clickEvent->event_id);
         $this->assertSame($lastComponent->id, $attribution->component_id);
         $this->assertSame($lastComponent->strategy_id, $attribution->strategy_id);
-        $this->assertSame('cart_page', $attribution->placement);
+        $this->assertSame('checkout', $attribution->placement);
         $this->assertSame('last_recommendation_click', $attribution->model);
         $this->assertSame(7, $attribution->window_days);
         $this->assertSame('partially_refunded', $attribution->status);
@@ -76,7 +77,7 @@ class PersonalizationAttributionTest extends TestCase
         $this->assertSame('175.00', $analytics['aov']);
         $this->assertSame(7, $analytics['attribution']['window_days']);
         $this->assertTrue($analytics['attribution']['click_only']);
-        $this->assertSame('175.00', collect($analytics['placements'])->firstWhere('placement', 'cart_page')['attributed_revenue']);
+        $this->assertSame('175.00', collect($analytics['placements'])->firstWhere('placement', 'checkout')['attributed_revenue']);
 
         $order->forceFill(['refund_total' => 200, 'financial_status' => 'refunded'])->save();
         $updated = app(PersonalizationAttributionService::class)->reconcileStore($store);

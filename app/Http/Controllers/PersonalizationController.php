@@ -11,6 +11,7 @@ use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\Store;
 use App\Services\Personalization\PersonalizationAnalyticsService;
 use App\Services\Personalization\PersonalizationCatalogService;
+use App\Services\Personalization\PersonalizationCheckoutService;
 use App\Services\Personalization\PersonalizationConfigurationService;
 use App\Services\Personalization\PersonalizationRecommendationService;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,7 @@ class PersonalizationController extends Controller
         private PersonalizationRecommendationService $recommendations,
         private PersonalizationCatalogService $catalog,
         private PersonalizationAnalyticsService $analytics,
+        private PersonalizationCheckoutService $checkout,
     ) {}
 
     public function index(Request $request, Organization $organization, Store $store): Response
@@ -38,11 +40,17 @@ class PersonalizationController extends Controller
             abort($exception->statusCode, $exception->getMessage());
         }
         $products = $this->catalog->candidates($store, ['in_stock_only' => false, 'limit' => 100]);
+        $collections = $this->catalog->collections($store);
         $canViewAnalytics = $request->user()->hasPermission('personalization.analytics.read', $organization, $store);
         try {
             $analytics = $canViewAnalytics
                 ? $this->analytics->dashboard($store, $request->user())
                 : $this->emptyAnalytics($store);
+        } catch (PersonalizationException $exception) {
+            abort($exception->statusCode, $exception->getMessage());
+        }
+        try {
+            $checkout = $this->checkout->configuration($store, $request->user());
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
         }
@@ -117,7 +125,41 @@ class PersonalizationController extends Controller
                 'price' => data_get($product, 'price.minimum'),
                 'currency' => data_get($product, 'price.currency'),
                 'tags' => $product['tags'],
+                'collection_ids' => collect($product['collections'] ?? [])->pluck('shopify_collection_id')->values(),
+                'variants' => collect($product['variants'] ?? [])->map(fn (array $variant): array => [
+                    'shopify_variant_id' => $variant['shopify_variant_id'],
+                    'shopify_gid' => 'gid://shopify/ProductVariant/'.$variant['shopify_variant_id'],
+                    'title' => $variant['title'],
+                    'sku' => $variant['sku'],
+                    'price' => $variant['price'],
+                    'available_for_sale' => $variant['available_for_sale'],
+                    'selected_options' => $variant['selected_options'],
+                ])->values(),
             ])->values(),
+            'collections' => $collections,
+            'checkout' => [
+                'uuid' => $checkout?->uuid,
+                'enabled' => $checkout?->enabled ?? false,
+                'component_uuid' => $checkout?->component?->uuid,
+                'trust_items' => $checkout?->trust_items ?? $this->checkout->defaultTrustItems(),
+                'shopify_collection_id' => $checkout?->shopify_collection_id,
+                'maximum_recommendations' => $checkout?->maximum_recommendations
+                    ?? PersonalizationCheckoutService::DEFAULT_MAXIMUM_RECOMMENDATIONS,
+                'settings' => $checkout?->settings ?? [
+                    'candidate_source' => 'collection',
+                    'candidate_order' => 'collection_default',
+                    'variant_fallback' => 'first_available',
+                    'candidate_scan_limit' => 20,
+                    'sequence_mode' => 'sequential',
+                    'hide_when_exhausted' => true,
+                    'trust_placement' => 'WALLETS1',
+                    'recommendation_placement' => 'ORDER_SUMMARY2',
+                ],
+                'icon_options' => array_map(fn (string $icon): array => [
+                    'value' => $icon,
+                    'label' => $this->checkoutIconLabel($icon),
+                ], PersonalizationCheckoutService::ICONS),
+            ],
             'options' => [
                 'algorithms' => array_map(fn (PersonalizationAlgorithm $algorithm): array => [
                     'value' => $algorithm->value,
@@ -323,6 +365,28 @@ class PersonalizationController extends Controller
         ]), 'Smart Cart 草稿已保存，仍保持关闭。');
     }
 
+    public function saveCheckout(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'component_uuid' => ['nullable', 'uuid'],
+            'shopify_collection_id' => ['nullable', 'string', 'regex:/^(?:gid:\/\/shopify\/Collection\/)?\d+$/'],
+            'maximum_recommendations' => ['required', 'integer', 'between:1,'.PersonalizationCheckoutService::MAXIMUM_RECOMMENDATIONS],
+            'trust_items' => ['array', 'max:'.PersonalizationCheckoutService::MAX_TRUST_ITEMS],
+            'trust_items.*.key' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
+            'trust_items.*.icon' => ['required', Rule::in(PersonalizationCheckoutService::ICONS)],
+            'trust_items.*.title' => ['nullable', 'string', 'max:80'],
+            'trust_items.*.description' => ['nullable', 'string', 'max:120'],
+            'trust_items.*.enabled' => ['required', 'boolean'],
+        ]);
+
+        return $this->run(
+            fn () => $this->checkout->save($store, $request->user(), $values),
+            'Checkout 配置已保存。扩展仍需在 Shopify Checkout Editor 中添加并启用。',
+        );
+    }
+
     public function recordSmartCartCompatibility(
         Request $request,
         Organization $organization,
@@ -476,6 +540,22 @@ class PersonalizationController extends Controller
             PersonalizationPlacement::ProductPage => '商品页',
             PersonalizationPlacement::CartPage => '购物车页面',
             PersonalizationPlacement::SmartCart => 'Smart Cart',
+            PersonalizationPlacement::Checkout => 'Checkout',
+        };
+    }
+
+    private function checkoutIconLabel(string $icon): string
+    {
+        return match ($icon) {
+            'store' => '可信店铺',
+            'truck' => '配送',
+            'star' => '保障',
+            'check-circle' => '已验证',
+            'lock' => '安全',
+            'savings' => '优惠',
+            'delivered' => '已送达',
+            'return' => '退换',
+            default => '信息',
         };
     }
 }

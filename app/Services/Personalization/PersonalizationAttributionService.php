@@ -91,7 +91,10 @@ class PersonalizationAttributionService
         $click = PersonalizationEvent::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
-            ->where('event_name', PersonalizationEventIngestionService::CLICK)
+            ->whereIn('event_name', [
+                PersonalizationEventIngestionService::CLICK,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK,
+            ])
             ->where('client_id_hash', $checkout->client_id_hash)
             ->whereBetween('occurred_at', [
                 $checkout->occurred_at->copy()->subDays(self::WINDOW_DAYS),

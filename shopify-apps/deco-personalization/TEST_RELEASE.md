@@ -22,7 +22,7 @@
 7. 运行官方 `shopify app config validate --config test --json`，随后执行 Test 构建。
 8. 发布 Test App 新版本；不得发布 Production 或另一个 App。
 9. 只在 `macfox-test-app` 安装或更新，打开 App Home 完成 bootstrap。
-10. 只在未发布测试主题副本添加推荐 App Block、启用 Smart Cart App Embed，并完成 Web Pixel 与端到端验收。
+10. 只在未发布测试主题副本添加推荐 App Block、启用 Smart Cart App Embed；在 Shopify Checkout Editor 添加信任信息和递进推荐两个 Checkout App Block，并完成 Web Pixel 与端到端验收。
 
 ## 本机与 Shopify 配置校验
 
@@ -61,6 +61,7 @@ npm run deploy:test
 - `embedded = true`、Shopify managed install、禁止 CLI 自动改写 URL。
 - 当前 Shopify CLI 强制随发布包含 App 配置；不保留已废弃的 `include_config_on_deploy` 字段。
 - Theme App Extension 不读取或写入主题文件，因此不申请 `read_themes` / `write_themes`。
+- Checkout UI Extension 使用 `api_access` 与 `network_access` capability，不新增 Admin API scope；需要 Shopify Plus Checkout Editor 才能在结账信息/配送/支付页面显示。
 
 ## 后端与数据检查
 
@@ -68,12 +69,15 @@ npm run deploy:test
 - `personalization:reconcile-attribution`、`personalization:prune-data --due-only`、`personalization:prune-data` 出现在 Scheduler。
 - 原始匿名事件/归因 90 天、聚合 13 个月、审计 365 天、在线清理不超过 72 小时、备份不超过 30 天。
 - App Proxy 未签名返回 401；Webhook 错误 HMAC 返回 401；事件入口无效 source 返回 404。
+- Checkout 配置入口无效或过期 Session Token 返回 401；只从签名 `dest` 解析店铺，不接受前端 Organization/Store 参数。
+- 后台选择一个已同步 Shopify Collection，并配置最多推荐数；Test Checkout 按集合默认顺序验证已在购物车、Market 不可售、首个可售变体、连续加购、失败重试、移动端与候选耗尽隐藏。
 - Test Client ID/Secret、App Proxy Secret、Token 和 Cookie 不出现在日志与构建产物。
 
 ## 回滚
 
 - Smart Cart 异常：先在 DecoAdmin 一键恢复 Shopify 默认购物车，再关闭测试主题 App Embed。
 - 推荐区块异常：从测试主题移除 App Block 或回退到测试主题修改前副本；不得修改已发布主题。
+- Checkout 异常：先关闭 DecoAdmin Checkout 总开关，再从 Checkout Editor 移除两个 App Block；扩展失败不得阻塞原生结账。
 - Web Pixel 异常：在 Test App 版本回退/断开 Pixel，事件入口保持 fail-closed；不得删除其他 App 客户事件。
 - App 版本异常：在 Dev Dashboard 只回退 `deco-personalization-test` 的上一个 Test 版本。
 - DecoAdmin 异常：恢复上一组 Test App/Nginx 镜像；迁移均为新增表/列，除非已确认无数据，否则不执行破坏性 down migration，优先前向修复。

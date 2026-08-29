@@ -66,7 +66,7 @@ class PersonalizationManagementTest extends TestCase
                 ->where('permissions.manageSmartCart', false)
                 ->where('analytics.impressions', 0)
                 ->has('options.algorithms', 6)
-                ->has('options.placements', 4));
+                ->has('options.placements', 5));
 
         $preview = $this->actingAs($operator)
             ->getJson(route('personalization.components.preview', [$organization, $store, $component], false));

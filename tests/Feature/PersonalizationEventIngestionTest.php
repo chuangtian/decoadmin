@@ -199,6 +199,44 @@ class PersonalizationEventIngestionTest extends TestCase
         $this->assertSame($product->id, $event->products()->sole()->product_id);
     }
 
+    public function test_checkout_sequence_events_are_distinct_bounded_and_store_scoped(): void
+    {
+        [$admin, $organization, $store] = $this->context('Checkout Events');
+        $product = $this->product($organization, $store, 1101, 'Checkout Tracked Bike');
+        $component = $this->activeComponent($store, $admin, $product, 'checkout');
+        $source = $this->source($organization, $store);
+        $events = [
+            PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION,
+            PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK,
+            PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
+            PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_FAILED,
+            PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED,
+        ];
+
+        foreach ($events as $index => $eventName) {
+            $this->event($source, [
+                'event_id' => 'checkout-sequence-'.$index,
+                'event_name' => $eventName,
+                'client_id' => 'checkout-client',
+                'session_id' => 'checkout-session',
+                'occurred_at' => now()->addSeconds($index)->toIso8601String(),
+                'component_uuid' => $component->uuid,
+                'strategy_uuid' => $component->strategy->uuid,
+                'placement' => 'checkout',
+                'products' => [[
+                    'product_id' => '1101',
+                    'variant_id' => '11010',
+                    'rank' => 1,
+                ]],
+            ])->assertAccepted();
+        }
+
+        $this->assertDatabaseCount('personalization_events', 5);
+        $this->assertSame($events, PersonalizationEvent::query()->orderBy('id')->pluck('event_name')->all());
+        $this->assertSame(['checkout'], PersonalizationEvent::query()->distinct()->pluck('placement')->all());
+        $this->assertDatabaseCount('personalization_event_products', 5);
+    }
+
     private function source(Organization $organization, Store $store): PersonalizationEventSource
     {
         return PersonalizationEventSource::query()->create([
@@ -209,8 +247,12 @@ class PersonalizationEventIngestionTest extends TestCase
         ]);
     }
 
-    private function activeComponent(Store $store, User $admin, Product $product): PersonalizationRecommendationComponent
-    {
+    private function activeComponent(
+        Store $store,
+        User $admin,
+        Product $product,
+        string $placement = 'homepage',
+    ): PersonalizationRecommendationComponent {
         $service = app(PersonalizationConfigurationService::class);
         $strategy = $service->createStrategy($store, $admin, ['name' => 'Tracked manual', 'algorithm' => 'manual']);
         $service->replaceProductOverrides($store, $strategy, $admin, [[
@@ -219,7 +261,7 @@ class PersonalizationEventIngestionTest extends TestCase
         ]]);
         $component = $service->createComponent($store, $strategy, $admin, [
             'name' => 'Tracked homepage',
-            'placement' => 'homepage',
+            'placement' => $placement,
         ]);
 
         return $service->activateComponent($store, $component, $admin);

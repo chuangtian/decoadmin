@@ -3,6 +3,11 @@ import {register} from '@shopify/web-pixels-extension';
 const IMPRESSION = 'deco_personalization:impression';
 const CLICK = 'deco_personalization:click';
 const ADD_TO_CART = 'deco_personalization:add_to_cart';
+const CHECKOUT_RECOMMENDATION_IMPRESSION = 'deco_personalization:checkout_recommendation_impression';
+const CHECKOUT_RECOMMENDATION_CLICK = 'deco_personalization:checkout_recommendation_click';
+const CHECKOUT_RECOMMENDATION_ADD_SUCCESS = 'deco_personalization:checkout_recommendation_add_success';
+const CHECKOUT_RECOMMENDATION_ADD_FAILED = 'deco_personalization:checkout_recommendation_add_failed';
+const CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED = 'deco_personalization:checkout_recommendation_sequence_completed';
 const CHECKOUT_COMPLETED = 'checkout_completed';
 
 register(async ({analytics, browser, settings}) => {
@@ -10,7 +15,16 @@ register(async ({analytics, browser, settings}) => {
   if (!endpoint) return;
   const sessionId = await session(browser);
 
-  [IMPRESSION, CLICK, ADD_TO_CART].forEach((eventName) => {
+  [
+    IMPRESSION,
+    CLICK,
+    ADD_TO_CART,
+    CHECKOUT_RECOMMENDATION_IMPRESSION,
+    CHECKOUT_RECOMMENDATION_CLICK,
+    CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
+    CHECKOUT_RECOMMENDATION_ADD_FAILED,
+    CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED,
+  ].forEach((eventName) => {
     analytics.subscribe(eventName, (event) => {
       const customData = event?.customData;
       if (!customData || typeof customData !== 'object' || Array.isArray(customData)) return;

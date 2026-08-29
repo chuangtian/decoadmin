@@ -92,7 +92,7 @@ class ShopifyPersonalizationAppService
             ->first();
     }
 
-    /** @return array{app_installation_id: string, granted_scopes: list<string>, proxy_path: string, web_pixel_id: string} */
+    /** @return array{app_installation_id: string, granted_scopes: list<string>, proxy_path: string, checkout_configuration_url: string, web_pixel_id: string} */
     public function bootstrap(Store $store, string $idToken): array
     {
         $shop = $this->shopGuard->assertAllowed((string) $store->shopify_domain);
@@ -123,24 +123,40 @@ class ShopifyPersonalizationAppService
         $this->assertRequiredScopes($installationScopes);
 
         $proxyPath = (string) config('personalization.active_proxy_path');
+        $checkoutConfigurationUrl = $this->checkoutConfigurationUrl();
         $proxyPayload = $this->graphql($shop, $token['access_token'], self::SET_PROXY_PATH_MUTATION, [
-            'metafields' => [[
-                'ownerId' => $installationId,
-                'namespace' => 'deco_personalization',
-                'key' => 'proxy_path',
-                'type' => 'single_line_text_field',
-                'value' => $proxyPath,
-            ]],
+            'metafields' => [
+                [
+                    'ownerId' => $installationId,
+                    'namespace' => 'deco_personalization',
+                    'key' => 'proxy_path',
+                    'type' => 'single_line_text_field',
+                    'value' => $proxyPath,
+                ],
+                [
+                    'ownerId' => $installationId,
+                    'namespace' => 'deco_personalization',
+                    'key' => 'checkout_configuration_url',
+                    'type' => 'single_line_text_field',
+                    'value' => $checkoutConfigurationUrl,
+                ],
+            ],
         ]);
         $proxyErrors = data_get($proxyPayload, 'data.metafieldsSet.userErrors', []);
-        $savedProxyPath = data_get($proxyPayload, 'data.metafieldsSet.metafields.0.value');
+        $savedMetafields = collect(data_get($proxyPayload, 'data.metafieldsSet.metafields', []))
+            ->filter(fn (mixed $metafield): bool => is_array($metafield))
+            ->keyBy(fn (array $metafield): string => (string) ($metafield['key'] ?? ''));
+        $savedProxyPath = data_get($savedMetafields->get('proxy_path'), 'value');
+        $savedCheckoutConfigurationUrl = data_get($savedMetafields->get('checkout_configuration_url'), 'value');
         if ($proxyPath === ''
             || (is_array($proxyErrors) && $proxyErrors !== [])
             || ! is_string($savedProxyPath)
-            || ! hash_equals($proxyPath, $savedProxyPath)) {
+            || ! hash_equals($proxyPath, $savedProxyPath)
+            || ! is_string($savedCheckoutConfigurationUrl)
+            || ! hash_equals($checkoutConfigurationUrl, $savedCheckoutConfigurationUrl)) {
             throw new PersonalizationException(
-                'SHOPIFY_PROXY_PATH_WRITE_FAILED',
-                'Shopify 未能保存个性化推荐 App Proxy 路径。',
+                'SHOPIFY_APP_METAFIELDS_WRITE_FAILED',
+                'Shopify 未能保存个性化推荐 App 运行配置。',
                 502,
             );
         }
@@ -148,7 +164,7 @@ class ShopifyPersonalizationAppService
         $eventSource = $this->eventSource($store);
         $webPixelId = $this->synchronizeWebPixel($shop, $token['access_token'], $eventSource);
 
-        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $webPixelId, $eventSource, $token): void {
+        DB::transaction(function () use ($store, $connection, $installationId, $installationScopes, $proxyPath, $checkoutConfigurationUrl, $webPixelId, $eventSource, $token): void {
             $installation = $this->registry->synchronizeInstallation(
                 $store,
                 $connection,
@@ -177,6 +193,7 @@ class ShopifyPersonalizationAppService
                     'app_installation_id' => $installationId,
                     'granted_scopes' => $installationScopes,
                     'proxy_path' => $proxyPath,
+                    'checkout_configuration_url' => $checkoutConfigurationUrl,
                     'web_pixel_id' => $webPixelId,
                 ],
             ]);
@@ -186,8 +203,27 @@ class ShopifyPersonalizationAppService
             'app_installation_id' => $installationId,
             'granted_scopes' => $installationScopes,
             'proxy_path' => $proxyPath,
+            'checkout_configuration_url' => $checkoutConfigurationUrl,
             'web_pixel_id' => $webPixelId,
         ];
+    }
+
+    private function checkoutConfigurationUrl(): string
+    {
+        $origin = rtrim((string) config('personalization.active.app_url'), '/');
+        $endpoint = $origin.route('personalization.checkout.configuration', [], false);
+        $parts = parse_url($endpoint);
+        if (($parts['scheme'] ?? null) !== 'https'
+            || ! is_string($parts['host'] ?? null)
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) {
+            throw new PersonalizationException(
+                'PERSONALIZATION_CHECKOUT_ENDPOINT_INVALID',
+                '个性化推荐 Checkout 配置地址无效。',
+                503,
+            );
+        }
+
+        return $endpoint;
     }
 
     private function eventSource(Store $store): PersonalizationEventSource
@@ -375,8 +411,7 @@ class ShopifyPersonalizationAppService
         string $query,
         array $variables = [],
         array $allowedErrorCodes = [],
-    ): array
-    {
+    ): array {
         try {
             $response = $this->http
                 ->acceptJson()

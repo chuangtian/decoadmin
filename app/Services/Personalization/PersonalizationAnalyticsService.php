@@ -59,12 +59,17 @@ class PersonalizationAnalyticsService
                 PersonalizationEventIngestionService::IMPRESSION,
                 PersonalizationEventIngestionService::CLICK,
                 PersonalizationEventIngestionService::ADD_TO_CART,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
             ])
             ->orderBy('id')
             ->cursor(['event_name', 'placement', 'occurred_at']) as $event) {
             $metric = match ($event->event_name) {
-                PersonalizationEventIngestionService::IMPRESSION => 'impressions',
-                PersonalizationEventIngestionService::CLICK => 'clicks',
+                PersonalizationEventIngestionService::IMPRESSION,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION => 'impressions',
+                PersonalizationEventIngestionService::CLICK,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK => 'clicks',
                 default => 'add_to_carts',
             };
             $date = $event->occurred_at->setTimezone($timezone)->toDateString();

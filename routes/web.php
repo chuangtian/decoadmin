@@ -30,6 +30,7 @@ use App\Http\Controllers\PaidAdvertisingChannelController;
 use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\ProfileController;
@@ -164,6 +165,16 @@ Route::prefix('/api/shopify-app/personalization')->group(function (): void {
         ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
         ->name('personalization.shopify-app.bootstrap');
 });
+
+Route::get('/api/shopify-app/personalization/checkout/configuration', PersonalizationCheckoutExtensionController::class)
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.configuration');
+Route::options('/api/shopify-app/personalization/checkout/configuration', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.configuration.options');
 
 Route::prefix('/api/shopify-app/personalization/proxy')
     ->middleware(['shopify.app-proxy:personalization,personalization_store', 'throttle:personalization-public'])
@@ -608,6 +619,9 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::get('/components/{component}/preview', [PersonalizationController::class, 'preview'])
             ->middleware(['permission:personalization.view', 'throttle:60,1'])
             ->name('personalization.components.preview');
+        Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.checkout.update');
         Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCartDraft'])
             ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
             ->name('personalization.smart-cart.update');

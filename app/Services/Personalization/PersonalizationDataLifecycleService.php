@@ -6,6 +6,7 @@ use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\PersonalizationAttribution;
+use App\Models\PersonalizationCheckoutSetting;
 use App\Models\PersonalizationDailyMetric;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventSource;
@@ -158,6 +159,7 @@ class PersonalizationDataLifecycleService
             PersonalizationDailyMetric::query()->where('store_id', $store->id)->delete();
             PersonalizationEvent::query()->where('store_id', $store->id)->delete();
             PersonalizationEventSource::query()->where('store_id', $store->id)->delete();
+            PersonalizationCheckoutSetting::query()->where('store_id', $store->id)->delete();
             PersonalizationSmartCartSetting::query()->where('store_id', $store->id)->delete();
             PersonalizationRecommendationComponent::withTrashed()->where('store_id', $store->id)->forceDelete();
             PersonalizationRecommendationStrategy::withTrashed()->where('store_id', $store->id)->forceDelete();

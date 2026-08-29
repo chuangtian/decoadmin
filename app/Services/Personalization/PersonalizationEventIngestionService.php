@@ -28,12 +28,27 @@ class PersonalizationEventIngestionService
 
     public const ADD_TO_CART = 'deco_personalization:add_to_cart';
 
+    public const CHECKOUT_RECOMMENDATION_IMPRESSION = 'deco_personalization:checkout_recommendation_impression';
+
+    public const CHECKOUT_RECOMMENDATION_CLICK = 'deco_personalization:checkout_recommendation_click';
+
+    public const CHECKOUT_RECOMMENDATION_ADD_SUCCESS = 'deco_personalization:checkout_recommendation_add_success';
+
+    public const CHECKOUT_RECOMMENDATION_ADD_FAILED = 'deco_personalization:checkout_recommendation_add_failed';
+
+    public const CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED = 'deco_personalization:checkout_recommendation_sequence_completed';
+
     public const CHECKOUT_COMPLETED = 'checkout_completed';
 
     private const EVENTS = [
         self::IMPRESSION,
         self::CLICK,
         self::ADD_TO_CART,
+        self::CHECKOUT_RECOMMENDATION_IMPRESSION,
+        self::CHECKOUT_RECOMMENDATION_CLICK,
+        self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
+        self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
+        self::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED,
         self::CHECKOUT_COMPLETED,
     ];
 
@@ -211,11 +226,28 @@ class PersonalizationEventIngestionService
     /** @return list<array{product_id: int, shopify_product_id: string, shopify_variant_id: ?string, rank: ?int}> */
     private function products(Store $store, string $eventName, mixed $value): array
     {
-        if (! is_array($value) || ! array_is_list($value) || $value === [] || count($value) > 50) {
+        if (! is_array($value)
+            || ! array_is_list($value)
+            || ($value === [] && $eventName !== self::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED)
+            || count($value) > 50) {
             throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '推荐事件商品列表无效。');
         }
-        if (in_array($eventName, [self::CLICK, self::ADD_TO_CART], true) && count($value) !== 1) {
+        if (in_array($eventName, [
+            self::CLICK,
+            self::ADD_TO_CART,
+            self::CHECKOUT_RECOMMENDATION_IMPRESSION,
+            self::CHECKOUT_RECOMMENDATION_CLICK,
+            self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
+            self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
+        ], true) && count($value) !== 1) {
             throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '点击或加购事件必须只包含一个商品。');
+        }
+        if ($eventName === self::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED
+            && count($value) > PersonalizationCheckoutService::MAXIMUM_RECOMMENDATIONS) {
+            throw new PersonalizationException(
+                'INVALID_PERSONALIZATION_EVENT_PRODUCTS',
+                'Checkout 推荐完成事件商品数超过允许上限。',
+            );
         }
 
         $normalized = [];
@@ -230,7 +262,11 @@ class PersonalizationEventIngestionService
             if ($productId === null || isset($seen[$productId]) || $rank === false || $rank < 1 || $rank > 100) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '推荐事件商品字段无效。');
             }
-            if ($eventName === self::ADD_TO_CART && $variantId === null) {
+            if (in_array($eventName, [
+                self::ADD_TO_CART,
+                self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
+                self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
+            ], true) && $variantId === null) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '推荐加购事件缺少变体标识。');
             }
             $seen[$productId] = true;

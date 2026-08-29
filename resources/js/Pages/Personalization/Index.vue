@@ -4,9 +4,9 @@ import { computed, onMounted, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 type Algorithm = 'manual' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'recently_viewed' | 'similar_products';
-type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart';
+type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart' | 'checkout';
 type ComponentStatus = 'draft' | 'active' | 'disabled';
-type Tab = 'overview' | 'strategies' | 'components' | 'smart-cart' | 'analytics';
+type Tab = 'overview' | 'strategies' | 'components' | 'checkout' | 'smart-cart' | 'analytics';
 
 interface Rule { type: string; value: Record<string, unknown>; enabled: boolean }
 interface ProductOverride { shopify_product_id: string; type: 'manual' | 'pinned' | 'excluded'; position: number }
@@ -51,7 +51,18 @@ interface ProductOption {
     price: string | null;
     currency: string;
     tags: string[];
+    collection_ids: string[];
+    variants: Array<{
+        shopify_variant_id: string;
+        shopify_gid: string;
+        title: string;
+        sku: string | null;
+        price: string;
+        available_for_sale: boolean;
+        selected_options: Array<{ name: string; value: string }>;
+    }>;
 }
+interface CheckoutTrustItem { key: string; icon: string; title: string; description: string; position: number; enabled: boolean }
 interface PreviewProduct {
     shopify_product_id: string;
     title: string;
@@ -81,6 +92,26 @@ const props = defineProps<{
         settings: Record<string, unknown>;
     } | null;
     products: ProductOption[];
+    collections: Array<{ shopify_collection_id: string; title: string; handle: string; sort_order: string | null; product_count: number }>;
+    checkout: {
+        uuid: string | null;
+        enabled: boolean;
+        component_uuid: string | null;
+        trust_items: CheckoutTrustItem[];
+        shopify_collection_id: string | null;
+        maximum_recommendations: number;
+        settings: {
+            candidate_source: string;
+            candidate_order: string;
+            variant_fallback: string;
+            candidate_scan_limit: number;
+            sequence_mode: string;
+            hide_when_exhausted: boolean;
+            trust_placement: string;
+            recommendation_placement: string;
+        };
+        icon_options: Array<{ value: string; label: string }>;
+    };
     options: { algorithms: Array<{ value: Algorithm; label: string }>; placements: Array<{ value: Placement; label: string }> };
     permissions: { manage: boolean; manageSmartCart: boolean; viewAnalytics: boolean };
     analytics: {
@@ -108,6 +139,7 @@ const tabs: Array<{ value: Tab; label: string; description: string }> = [
     { value: 'overview', label: '概览', description: '查看配置进度' },
     { value: 'strategies', label: '推荐策略', description: '算法、规则与商品' },
     { value: 'components', label: '推荐组件', description: '位置、样式与预览' },
+    { value: 'checkout', label: 'Checkout', description: '信任信息与递进推荐' },
     { value: 'smart-cart', label: 'Smart Cart', description: '安全草稿与兼容性' },
     { value: 'analytics', label: '分析', description: '曝光与归因结果' },
 ];
@@ -227,6 +259,7 @@ const hydrateComponentForms = () => {
     void loadPreview();
 };
 watch(selectedComponentUuid, hydrateComponentForms);
+onMounted(hydrateComponentForms);
 const updateComponent = () => selectedComponent.value && componentForm.put(`${baseUrl}/components/${selectedComponent.value.uuid}`, { preserveScroll: true });
 const updateStyle = () => selectedComponent.value && styleForm.put(`${baseUrl}/components/${selectedComponent.value.uuid}/style`, {
     preserveScroll: true,
@@ -267,6 +300,64 @@ async function loadPreview() {
 onMounted(() => void loadPreview());
 const previewColumns = computed(() => previewMode.value === 'desktop' ? styleForm.desktop_columns : styleForm.mobile_columns);
 const money = (value: string | null, currency: string) => value === null ? '—' : new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(Number(value));
+
+const checkoutComponents = computed(() => props.components.filter(component => component.placement === 'checkout'));
+const checkoutForm = useForm({
+    enabled: props.checkout.enabled,
+    component_uuid: props.checkout.component_uuid ?? '',
+    shopify_collection_id: props.checkout.shopify_collection_id ?? '',
+    maximum_recommendations: props.checkout.maximum_recommendations,
+    trust_items: props.checkout.trust_items.map(item => ({ ...item })),
+});
+const hydrateCheckoutForm = () => {
+    checkoutForm.enabled = props.checkout.enabled;
+    checkoutForm.component_uuid = props.checkout.component_uuid ?? '';
+    checkoutForm.shopify_collection_id = props.checkout.shopify_collection_id ?? '';
+    checkoutForm.maximum_recommendations = props.checkout.maximum_recommendations;
+    checkoutForm.trust_items = props.checkout.trust_items.map(item => ({ ...item }));
+    checkoutForm.clearErrors();
+};
+watch(() => props.checkout, hydrateCheckoutForm, { deep: true });
+const addTrustItem = () => {
+    if (checkoutForm.trust_items.length >= 6) return;
+    checkoutForm.trust_items.push({
+        key: `custom_${Date.now()}`,
+        icon: 'check-circle',
+        title: '',
+        description: '',
+        position: checkoutForm.trust_items.length + 1,
+        enabled: true,
+    });
+};
+const removeTrustItem = (index: number) => checkoutForm.trust_items.splice(index, 1);
+const moveTrustItem = (index: number, offset: number) => {
+    const destination = index + offset;
+    if (destination < 0 || destination >= checkoutForm.trust_items.length) return;
+    const [item] = checkoutForm.trust_items.splice(index, 1);
+    checkoutForm.trust_items.splice(destination, 0, item);
+};
+const selectedCheckoutComponent = computed(() => checkoutComponents.value.find(component => component.uuid === checkoutForm.component_uuid) ?? null);
+const checkoutPreviewMode = ref<'desktop' | 'mobile'>('desktop');
+const checkoutPreviewCandidate = computed(() => {
+    const product = props.products.find(item => item.collection_ids.includes(checkoutForm.shopify_collection_id)) ?? null;
+    const variant = product?.variants.find(item => item.available_for_sale) ?? product?.variants[0] ?? null;
+    return product && variant ? {
+        product_title: product.title,
+        variant_title: variant.title,
+        image_url: product.image_url,
+        price: variant.price,
+        currency: product.currency,
+    } : null;
+});
+const saveCheckout = () => checkoutForm
+    .transform(data => ({
+        enabled: data.enabled,
+        component_uuid: data.component_uuid || null,
+        shopify_collection_id: data.shopify_collection_id || null,
+        maximum_recommendations: data.maximum_recommendations,
+        trust_items: data.trust_items.map((item, index) => ({ ...item, position: index + 1 })),
+    }))
+    .put(`${baseUrl}/checkout`, { preserveScroll: true });
 
 const smartCartForm = useForm({
     strategy_uuid: props.smartCart?.strategy_uuid ?? '',
@@ -329,7 +420,7 @@ const analyticsCards = computed(() => [
                 </div>
             </header>
 
-            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-5" aria-label="个性化推荐页面">
+            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-3 xl:grid-cols-6" aria-label="个性化推荐页面">
                 <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-4 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value">
                     <span class="block text-sm font-semibold">{{ tab.label }}</span>
                     <span class="mt-1 block text-xs" :class="activeTab === tab.value ? 'text-slate-300' : 'text-slate-400'">{{ tab.description }}</span>
@@ -478,6 +569,96 @@ const analyticsCards = computed(() => [
                         </div>
                     </div>
                 </div>
+            </section>
+
+            <section v-else-if="activeTab === 'checkout'" class="space-y-5">
+                <div class="flex flex-col gap-4 rounded-2xl border p-6 shadow-sm md:flex-row md:items-center md:justify-between" :class="checkoutForm.enabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wider" :class="checkoutForm.enabled ? 'text-emerald-700' : 'text-amber-700'">Shopify Checkout UI Extension</p>
+                        <h2 class="mt-1 text-xl font-semibold text-slate-950">{{ checkoutForm.enabled ? '后端配置已开启' : '默认关闭' }}</h2>
+                        <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">即使后台开启，商家仍需在 Shopify Checkout Editor 中分别添加信任信息和递进推荐区块。扩展加载失败时不会阻止结账。</p>
+                    </div>
+                    <label class="flex shrink-0 items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200">
+                        <input v-model="checkoutForm.enabled" type="checkbox" class="rounded" :disabled="!permissions.manage">
+                        Checkout 总开关
+                    </label>
+                </div>
+
+                <form class="grid gap-5 xl:grid-cols-2" @submit.prevent="saveCheckout">
+                    <div class="space-y-5">
+                        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                            <div class="flex items-start justify-between gap-4">
+                                <div><h2 class="text-lg font-semibold text-slate-900">订单摘要递进推荐</h2><p class="mt-1 text-sm leading-6 text-slate-500">从一个 Shopify 商品集合按集合默认顺序动态取候选；已在购物车、不可售或已添加的商品会自动跳过。</p></div>
+                                <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">ORDER_SUMMARY2</span>
+                            </div>
+                            <label class="mt-5 block text-sm font-medium text-slate-700">Checkout 推荐组件
+                                <select v-model="checkoutForm.component_uuid" class="mt-1 w-full rounded-lg border-slate-300">
+                                    <option value="">请选择 Checkout 组件</option>
+                                    <option v-for="component in checkoutComponents" :key="component.uuid" :value="component.uuid">{{ component.name }} · {{ statusLabel(component.status) }}</option>
+                                </select>
+                            </label>
+                            <p v-if="checkoutComponents.length === 0" class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">请先在“推荐组件”创建 placement 为 Checkout 的组件，配置标题/按钮文案并启用后端配置。</p>
+                            <div class="mt-5 grid gap-4 md:grid-cols-[1fr_220px]">
+                                <label class="text-sm font-medium text-slate-700">候选 Shopify Collection
+                                    <select v-model="checkoutForm.shopify_collection_id" class="mt-1 w-full rounded-lg border-slate-300" :required="checkoutForm.enabled">
+                                        <option value="">请选择已同步集合</option>
+                                        <option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }} · {{ collection.product_count }} 个商品</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm font-medium text-slate-700">最多依次推荐数量
+                                    <input v-model.number="checkoutForm.maximum_recommendations" type="number" min="1" max="20" class="mt-1 w-full rounded-lg border-slate-300" required>
+                                </label>
+                            </div>
+                            <div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>候选规则：</strong>沿用 Shopify Collection 默认顺序；每个商品选择当前 Market 下第一个可售变体。达到商家设置的最多推荐数量或集合中没有合格候选时隐藏，不循环、不补回已展示商品。</div>
+                            <p v-if="collections.length === 0" class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Commerce Hub 尚未同步可选 Collection；后台保持关闭，直到集合数据可用。</p>
+                        </div>
+
+                        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                            <div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-900">左侧信任信息</h2><p class="mt-1 text-sm leading-6 text-slate-500">图标、标题、说明、顺序和启停均可配置；最多 6 项。</p></div><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">WALLETS1</span></div>
+                            <div class="mt-5 space-y-3">
+                                <div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4">
+                                    <div class="flex flex-wrap items-center justify-between gap-3"><label class="flex items-center gap-2 text-sm font-semibold text-slate-700"><input v-model="item.enabled" type="checkbox" class="rounded">第 {{ index + 1 }} 项</label><div class="flex gap-1"><button type="button" class="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100" :disabled="index === 0" @click="moveTrustItem(index, -1)">上移</button><button type="button" class="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100" :disabled="index === checkoutForm.trust_items.length - 1" @click="moveTrustItem(index, 1)">下移</button><button type="button" class="rounded-md px-2 py-1 text-xs text-rose-600 hover:bg-rose-50" @click="removeTrustItem(index)">移除</button></div></div>
+                                    <div class="mt-3 grid gap-3 md:grid-cols-[150px_1fr]">
+                                        <label class="text-xs font-medium text-slate-600">图标<select v-model="item.icon" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></label>
+                                        <label class="text-xs font-medium text-slate-600">标题<input v-model="item.title" class="mt-1 w-full rounded-lg border-slate-300 text-sm" maxlength="80" :required="item.enabled"></label>
+                                        <label class="text-xs font-medium text-slate-600 md:col-start-2">说明<input v-model="item.description" class="mt-1 w-full rounded-lg border-slate-300 text-sm" maxlength="120"></label>
+                                    </div>
+                                </div>
+                            </div>
+                            <button v-if="checkoutForm.trust_items.length < 6" type="button" class="mt-4 rounded-lg border border-dashed border-indigo-300 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50" @click="addTrustItem">+ 添加信任信息</button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-5">
+                        <div class="rounded-2xl border border-slate-200 bg-slate-100 p-5 shadow-sm xl:sticky xl:top-5">
+                            <div class="mb-4 flex items-center justify-between gap-3"><div><h2 class="font-semibold text-slate-900">Checkout 配置预览</h2><p class="mt-1 text-xs text-slate-500">示意布局；最终位置、间距和移动端折叠由 Shopify 控制。</p></div><div class="flex rounded-lg bg-white p-1 text-xs"><button type="button" class="rounded-md px-3 py-1.5" :class="checkoutPreviewMode === 'desktop' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="checkoutPreviewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-3 py-1.5" :class="checkoutPreviewMode === 'mobile' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="checkoutPreviewMode = 'mobile'">移动</button></div></div>
+                            <div class="mx-auto overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all" :class="checkoutPreviewMode === 'mobile' ? 'max-w-[390px]' : 'max-w-full'">
+                                <div class="border-b border-slate-200 px-5 py-4 text-center font-semibold">{{ store.name }}</div>
+                                <div class="grid min-h-96" :class="checkoutPreviewMode === 'desktop' ? 'md:grid-cols-[1fr_.9fr]' : 'grid-cols-1'">
+                                    <div class="p-5">
+                                        <div class="grid gap-4" :class="checkoutPreviewMode === 'desktop' ? 'grid-cols-3' : 'grid-cols-1'">
+                                            <div v-for="item in checkoutForm.trust_items.filter(trustItem => trustItem.enabled)" :key="item.key" class="text-center">
+                                                <div class="mx-auto flex size-9 items-center justify-center rounded-full bg-slate-100 text-sm">✓</div><p class="mt-2 text-xs font-semibold text-slate-900">{{ item.title || '信任信息标题' }}</p><p v-if="item.description" class="mt-1 text-[11px] text-slate-500">{{ item.description }}</p>
+                                            </div>
+                                        </div>
+                                        <div class="mt-8 rounded-xl bg-slate-50 p-5 text-sm text-slate-400">Express checkout 与联系/配送表单由 Shopify 原生渲染</div>
+                                    </div>
+                                    <div class="border-slate-200 bg-slate-50 p-5" :class="checkoutPreviewMode === 'desktop' ? 'border-l' : 'border-t'">
+                                        <div class="rounded-xl bg-white p-4 shadow-sm"><p class="text-xs text-slate-500">购物车商品摘要</p><div class="mt-3 h-12 rounded-lg bg-slate-100"></div></div>
+                                        <div v-if="checkoutPreviewCandidate" class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                                            <h3 class="text-center text-sm font-semibold text-slate-950">{{ selectedCheckoutComponent?.heading || 'Great Value Bundles for You' }}</h3>
+                                            <div class="mt-4 flex items-center gap-3"><div class="size-14 shrink-0 overflow-hidden rounded-lg bg-slate-100"><img v-if="checkoutPreviewCandidate.image_url" :src="checkoutPreviewCandidate.image_url" :alt="checkoutPreviewCandidate.product_title" class="size-full object-cover"></div><div class="min-w-0 flex-1"><p class="truncate text-sm font-medium">{{ checkoutPreviewCandidate.product_title }}</p><p class="truncate text-xs text-slate-500">{{ checkoutPreviewCandidate.variant_title }}</p><p class="mt-1 text-sm">{{ money(checkoutPreviewCandidate.price, checkoutPreviewCandidate.currency) }}</p></div><button type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white">{{ selectedCheckoutComponent?.button_label || 'Add' }}</button></div>
+                                            <p class="mt-3 text-[11px] leading-5 text-slate-500">成功加入后自动展示下一个；候选耗尽时整个区块隐藏。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>平台边界：</strong>仅使用 Shopify 官方 Checkout UI Extension 组件，不修改 Checkout DOM、不注入自定义 HTML/CSS。实际可用位置受 Shopify Plus 与 Checkout Editor 限制。</div>
+                        </div>
+                    </div>
+
+                    <div class="xl:col-span-2 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"><p class="text-sm text-slate-600">保存后仍需在 Checkout Editor 添加两个区块；关闭总开关会让两个扩展安全地不渲染。</p><button v-if="permissions.manage" class="shrink-0 rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="checkoutForm.processing">{{ checkoutForm.processing ? '保存中…' : '保存 Checkout 配置' }}</button></div>
+                </form>
             </section>
 
             <section v-else-if="activeTab === 'smart-cart'" class="space-y-5">

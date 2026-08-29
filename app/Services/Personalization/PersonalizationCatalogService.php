@@ -3,6 +3,7 @@
 namespace App\Services\Personalization;
 
 use App\Models\Product;
+use App\Models\ProductCollection;
 use App\Models\Store;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -10,6 +11,28 @@ use InvalidArgumentException;
 
 class PersonalizationCatalogService
 {
+    /** @return Collection<int, array{shopify_collection_id: string, title: string, handle: string, sort_order: ?string, product_count: int}> */
+    public function collections(Store $store, int $limit = 200): Collection
+    {
+        $limit = min(500, max(1, $limit));
+
+        return ProductCollection::query()
+            ->forOrganization($store->organization_id)
+            ->forStore($store)
+            ->withCount('products')
+            ->orderBy('title')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ProductCollection $collection): array => [
+                'shopify_collection_id' => (string) $collection->shopify_collection_id,
+                'title' => $collection->title,
+                'handle' => $collection->handle,
+                'sort_order' => $collection->sort_order,
+                'product_count' => (int) $collection->products_count,
+            ]);
+    }
+
     /**
      * Return a bounded, storefront-safe product projection for recommendation algorithms.
      *

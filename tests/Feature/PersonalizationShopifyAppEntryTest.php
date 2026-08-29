@@ -107,12 +107,20 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                 ],
             ]]])
             ->push(['data' => ['metafieldsSet' => [
-                'metafields' => [[
-                    'id' => 'gid://shopify/Metafield/456',
-                    'namespace' => 'deco_personalization',
-                    'key' => 'proxy_path',
-                    'value' => '/apps/deco-personalization-test',
-                ]],
+                'metafields' => [
+                    [
+                        'id' => 'gid://shopify/Metafield/456',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'proxy_path',
+                        'value' => '/apps/deco-personalization-test',
+                    ],
+                    [
+                        'id' => 'gid://shopify/Metafield/457',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'checkout_configuration_url',
+                        'value' => 'https://testadmin.decomkt.com/api/shopify-app/personalization/checkout/configuration',
+                    ],
+                ],
                 'userErrors' => [],
             ]]])
             ->push(['errors' => [[
@@ -133,6 +141,7 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             ->assertJsonPath('data.app_installation_id', 'gid://shopify/AppInstallation/123')
             ->assertJsonPath('data.granted_scopes.0', 'write_app_proxy')
             ->assertJsonPath('data.proxy_path', '/apps/deco-personalization-test')
+            ->assertJsonPath('data.checkout_configuration_url', 'https://testadmin.decomkt.com/api/shopify-app/personalization/checkout/configuration')
             ->assertJsonPath('data.web_pixel_id', 'gid://shopify/WebPixel/789');
 
         Http::assertSent(fn ($request): bool => $request->url() === "https://{$store->shopify_domain}/admin/oauth/access_token"
@@ -146,7 +155,9 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             && data_get($request->data(), 'variables.metafields.0.ownerId') === 'gid://shopify/AppInstallation/123'
             && data_get($request->data(), 'variables.metafields.0.namespace') === 'deco_personalization'
             && data_get($request->data(), 'variables.metafields.0.key') === 'proxy_path'
-            && data_get($request->data(), 'variables.metafields.0.value') === '/apps/deco-personalization-test');
+            && data_get($request->data(), 'variables.metafields.0.value') === '/apps/deco-personalization-test'
+            && data_get($request->data(), 'variables.metafields.1.key') === 'checkout_configuration_url'
+            && data_get($request->data(), 'variables.metafields.1.value') === 'https://testadmin.decomkt.com/api/shopify-app/personalization/checkout/configuration');
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
             && str_contains((string) $request['query'], 'CurrentPersonalizationWebPixel'));
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/admin/api/2026-07/graphql.json')
@@ -240,12 +251,20 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                 ],
             ]]])
             ->push(['data' => ['metafieldsSet' => [
-                'metafields' => [[
-                    'id' => 'gid://shopify/Metafield/654',
-                    'namespace' => 'deco_personalization',
-                    'key' => 'proxy_path',
-                    'value' => '/apps/deco-personalization-test',
-                ]],
+                'metafields' => [
+                    [
+                        'id' => 'gid://shopify/Metafield/654',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'proxy_path',
+                        'value' => '/apps/deco-personalization-test',
+                    ],
+                    [
+                        'id' => 'gid://shopify/Metafield/655',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'checkout_configuration_url',
+                        'value' => 'https://testadmin.decomkt.com/api/shopify-app/personalization/checkout/configuration',
+                    ],
+                ],
                 'userErrors' => [],
             ]]])
             ->push(['data' => ['webPixel' => [
@@ -301,12 +320,20 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                 ],
             ]]])
             ->push(['data' => ['metafieldsSet' => [
-                'metafields' => [[
-                    'id' => 'gid://shopify/Metafield/456',
-                    'namespace' => 'deco_personalization',
-                    'key' => 'proxy_path',
-                    'value' => '/apps/deco-personalization-test',
-                ]],
+                'metafields' => [
+                    [
+                        'id' => 'gid://shopify/Metafield/456',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'proxy_path',
+                        'value' => '/apps/deco-personalization-test',
+                    ],
+                    [
+                        'id' => 'gid://shopify/Metafield/457',
+                        'namespace' => 'deco_personalization',
+                        'key' => 'checkout_configuration_url',
+                        'value' => 'https://testadmin.decomkt.com/api/shopify-app/personalization/checkout/configuration',
+                    ],
+                ],
                 'userErrors' => [],
             ]]])
             ->push(['errors' => [[

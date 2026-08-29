@@ -1,0 +1,20 @@
+api_version = "2026-07"
+
+[[extensions]]
+name = "Deco Checkout 递进推荐"
+handle = "checkout-recommendations"
+uid = "e26ea523-312e-4afb-b33c-af65143ee7910fa04c32"
+type = "ui_extension"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
+
+[[extensions.metafields]]
+namespace = "deco_personalization"
+key = "checkout_configuration_url"
+
+[[extensions.targeting]]
+target = "purchase.checkout.block.render"
+module = "./src/Recommendations.jsx"
+default_placement = "ORDER_SUMMARY2"

@@ -69,6 +69,7 @@ class ShopifyPersonalizationAppController extends Controller
             'app_installation_id' => $result['app_installation_id'],
             'granted_scopes' => $result['granted_scopes'],
             'proxy_path' => $result['proxy_path'],
+            'checkout_configuration_url' => $result['checkout_configuration_url'],
             'web_pixel_id' => $result['web_pixel_id'],
         ]]);
     }

@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\Organization;
 use App\Models\PersonalizationAttribution;
+use App\Models\PersonalizationCheckoutSetting;
 use App\Models\PersonalizationDailyMetric;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventSource;
@@ -153,6 +154,13 @@ class PersonalizationDataLifecycleTest extends TestCase
             'status' => 'active',
             'position' => 1,
         ]);
+        PersonalizationCheckoutSetting::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'component_id' => $component->id,
+            'maximum_recommendations' => 3,
+            'enabled' => false,
+        ]);
         PersonalizationSmartCartSetting::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -225,6 +233,7 @@ class PersonalizationDataLifecycleTest extends TestCase
         $this->assertDatabaseCount('personalization_daily_metrics', 0);
         $this->assertDatabaseCount('personalization_recommendation_components', 0);
         $this->assertDatabaseCount('personalization_recommendation_strategies', 0);
+        $this->assertDatabaseCount('personalization_checkout_settings', 0);
         $this->assertDatabaseCount('personalization_smart_cart_settings', 0);
         $this->assertDatabaseHas('products', ['id' => $product->id]);
         $this->assertDatabaseHas('orders', ['id' => $order->id]);

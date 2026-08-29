@@ -38,6 +38,9 @@ class PersonalizationDailyMetricsService
                 PersonalizationEventIngestionService::IMPRESSION,
                 PersonalizationEventIngestionService::CLICK,
                 PersonalizationEventIngestionService::ADD_TO_CART,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
             ])
             ->orderBy('id')
             ->cursor(['event_name', 'component_id', 'strategy_id', 'placement']) as $event) {
@@ -46,8 +49,10 @@ class PersonalizationDailyMetricsService
             $key = $this->dimensionKey($event->placement ?: 'unknown', $componentKey, $strategyKey, $defaultCurrency);
             $metrics[$key] ??= $this->row($store, $localDate, $event->placement ?: 'unknown', $componentKey, $strategyKey, $defaultCurrency);
             $column = match ($event->event_name) {
-                PersonalizationEventIngestionService::IMPRESSION => 'impressions',
-                PersonalizationEventIngestionService::CLICK => 'clicks',
+                PersonalizationEventIngestionService::IMPRESSION,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION => 'impressions',
+                PersonalizationEventIngestionService::CLICK,
+                PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK => 'clicks',
                 default => 'add_to_carts',
             };
             $metrics[$key][$column]++;

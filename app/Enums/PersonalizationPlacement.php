@@ -8,4 +8,5 @@ enum PersonalizationPlacement: string
     case ProductPage = 'product_page';
     case CartPage = 'cart_page';
     case SmartCart = 'smart_cart';
+    case Checkout = 'checkout';
 }
