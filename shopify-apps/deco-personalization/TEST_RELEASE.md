@@ -87,10 +87,12 @@ npm run deploy:test
 
 ## 2026-08-29 Checkout Test 验收记录
 
-- `deco-personalization-test-6` 已发布；两个 Checkout App Block 已保存到 `macfox-test-app` 的活跃 Checkout 配置。
+- `deco-personalization-test-7` 已发布并替代第 6 版；两个 Checkout App Block 继续保存在 `macfox-test-app` 的活跃 Checkout 配置。
 - 左侧信任信息在真实 Test Checkout 中成功读取后台配置并显示 `Trusted seller`、`Free US Shipping over $100`、`2-year warranty`；桌面与 375px 移动模拟均不阻塞原生结账。
 - Session Token 使用官方文档定义的签名、`aud`、`dest` 与生命周期字段完成验证；Shopify 附加但未记录在 Checkout Token 契约中的 `iss` 不作为授权输入。
-- 递进推荐的 Collection、最大数量 `3`、顺序、购物车去重、可售变体选择、快速重复点击保护、五类分析事件和耗尽隐藏已通过 App 自动化测试；Test 后端签名接口返回启用配置、3 个信任项与 Collection GID。
-- 远程第 6 版状态为 active，递进推荐扩展的 `api_access=true` 已生效；真实 Checkout 中配置接口与 Storefront GraphQL 均返回 `200`。早期出现的 private token `401` 不是当前推荐请求的阻塞原因。
-- 外部递进加购 E2E 暂未完成的真实原因是测试数据：所选 `Product Recomendations` Collection 的 7 个商品当前没有任何 `availableForSale=true` 变体，其中 3 个商品还是草稿。扩展按既定规则全部跳过并隐藏，原生结账继续可用。
-- 不得为绕过候选校验修改 Checkout DOM、硬编码候选或显示不准确的 Market 价格。获得明确的 Test 库存写入授权后，只在 `macfox-test-app` 临时补齐 3 个正式候选的测试库存，重跑“显示候选 → 连续加购 → 第 3 项后隐藏”，随后恢复原测试库存。
+- 递进推荐的 Collection、最大数量 `3`、顺序、购物车去重、可售变体选择、快速重复点击保护、五类分析事件和耗尽隐藏已通过 29 项 App 自动化测试；Test 后端签名接口返回启用配置、3 个信任项与 Collection GID。
+- 真实 Test Checkout 的配置接口与 Storefront GraphQL 请求正常；Test Nginx 最近事件请求均返回 `202`，事件 source UUID 已在检查输出中脱敏。
+- 经用户明确授权，`Macfox E-bike Storage Bag`、`Macfox E-bike Mobile Phone Holder`、`Macfox E-bike Rearview Mirror Kit` 在 `macfox-test-app` 的 `Shop location` 可用库存均设为 `10`，验收后保持 `10`，不恢复为 `0`。
+- 真实 E2E 从仅含 `Macfox X7` 的 Checkout 开始，按 Collection 默认顺序成功加入 Rearview Mirror Kit、Storage Bag、Mobile Phone Holder；每次加入后实际购物车与金额立即更新，第三项后推荐标题和按钮完全隐藏，未循环、未重复。
+- 第 6 版复测发现候选切换时图片已更新但标题/价格残留上一项；提交 `fe7b0f4` 通过以 `variant_id` 为 key 重建候选行修复。第 7 版已确认第 2、3 项图片、标题、价格和实际加入商品一致，最终测试总额为 `USD $1,826.00`。
+- 不使用 Checkout DOM 修改、任意 HTML/CSS 注入、固定商品槽位或不准确的 Market 价格；Checkout 扩展加载失败或候选耗尽时仍保持原生结账可用。
