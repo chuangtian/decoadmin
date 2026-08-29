@@ -84,3 +84,12 @@ npm run deploy:test
 - 数据库：迁移前备份；恢复动作必须明确选择 Test 数据库，备份副本在 30 天内过期。
 
 完成以上检查才可进入测试店安装、主题联调和端到端验收。任何范围偏差、权限增加、目标不确定或不可安全回滚异常都必须停止。
+
+## 2026-08-29 Checkout Test 验收记录
+
+- `deco-personalization-test-6` 已发布；两个 Checkout App Block 已保存到 `macfox-test-app` 的活跃 Checkout 配置。
+- 左侧信任信息在真实 Test Checkout 中成功读取后台配置并显示 `Trusted seller`、`Free US Shipping over $100`、`2-year warranty`；桌面与 375px 移动模拟均不阻塞原生结账。
+- Session Token 使用官方文档定义的签名、`aud`、`dest` 与生命周期字段完成验证；Shopify 附加但未记录在 Checkout Token 契约中的 `iss` 不作为授权输入。
+- 递进推荐的 Collection、最大数量 `3`、顺序、购物车去重、可售变体选择、快速重复点击保护、五类分析事件和耗尽隐藏已通过 App 自动化测试；Test 后端签名接口返回启用配置、3 个信任项与 Collection GID。
+- 外部递进加购 E2E 暂未完成：该开发店的 Online Store channel 被平台锁定，Storefront API 返回 `Online Store channel is locked`，Checkout 的预取 Storefront private token 请求返回 `401`。扩展按既定失败降级保持隐藏，原生结账继续可用。
+- 不得为绕过此限制修改 Checkout DOM、硬编码候选、改用不准确的默认 Market 价格，或擅自转移商店/选择付费方案。后续仅在 Shopify Storefront API 可用的获准 Test 环境重跑“显示候选 → 连续加购 → 第 3 项后隐藏”验收。
