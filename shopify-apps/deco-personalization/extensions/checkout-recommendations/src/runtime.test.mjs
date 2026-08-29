@@ -72,7 +72,7 @@ test('analytics payload is anonymous and uses the five checkout event names', ()
 });
 
 test('configuration endpoint refuses non-HTTPS and arbitrary paths', () => {
-  const entry = (value) => [{metafield: {namespace: 'deco_personalization', key: 'checkout_configuration_url', value}}];
+  const entry = (value) => [{metafield: {namespace: '$app:deco_personalization', key: 'checkout_configuration_url', value}}];
   assert.equal(configurationEndpoint(entry('https://test.example/api/shopify-app/personalization/checkout/configuration')), 'https://test.example/api/shopify-app/personalization/checkout/configuration');
   assert.equal(configurationEndpoint(entry('http://test.example/api/shopify-app/personalization/checkout/configuration')), '');
   assert.equal(configurationEndpoint(entry('https://test.example/admin')), '');

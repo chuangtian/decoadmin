@@ -10,7 +10,7 @@ type = "ui_extension"
 network_access = true
 
 [[extensions.metafields]]
-namespace = "deco_personalization"
+namespace = "$app:deco_personalization"
 key = "checkout_configuration_url"
 
 [[extensions.targeting]]

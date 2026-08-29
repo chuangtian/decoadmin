@@ -4,7 +4,7 @@ import {configurationEndpoint, normalizeConfiguration} from './runtime.mjs';
 
 test('trust configuration endpoint accepts only the signed backend path over HTTPS', () => {
   const entries = [{metafield: {
-    namespace: 'deco_personalization',
+    namespace: '$app:deco_personalization',
     key: 'checkout_configuration_url',
     value: 'https://test.example/api/shopify-app/personalization/checkout/configuration',
   }}];

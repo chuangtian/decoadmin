@@ -20,6 +20,7 @@ class ShopifyPersonalizationAppService
             id
             accessScopes { handle }
           }
+          shop { id }
         }
         GRAPHQL;
 
@@ -115,6 +116,14 @@ class ShopifyPersonalizationAppService
                 409,
             );
         }
+        $shopId = data_get($installationPayload, 'data.shop.id');
+        if (! is_string($shopId) || ! preg_match('/^gid:\/\/shopify\/Shop\/\d+$/', $shopId)) {
+            throw new PersonalizationException(
+                'SHOPIFY_SHOP_NOT_FOUND',
+                '未找到当前 Shopify 店铺资源。',
+                409,
+            );
+        }
         $installationScopes = collect(data_get($installationPayload, 'data.currentAppInstallation.accessScopes', []))
             ->pluck('handle')
             ->filter(fn (mixed $scope): bool => is_string($scope) && $scope !== '')
@@ -134,8 +143,8 @@ class ShopifyPersonalizationAppService
                     'value' => $proxyPath,
                 ],
                 [
-                    'ownerId' => $installationId,
-                    'namespace' => 'deco_personalization',
+                    'ownerId' => $shopId,
+                    'namespace' => '$app:deco_personalization',
                     'key' => 'checkout_configuration_url',
                     'type' => 'single_line_text_field',
                     'value' => $checkoutConfigurationUrl,

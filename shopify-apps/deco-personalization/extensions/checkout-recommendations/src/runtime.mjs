@@ -12,7 +12,7 @@ export function configurationEndpoint(entries) {
   if (!Array.isArray(entries)) return '';
   const entry = entries.find((candidate) => {
     const metafield = candidate?.metafield ?? candidate;
-    return ['deco_personalization', '$app:deco_personalization'].includes(metafield?.namespace)
+    return metafield?.namespace === '$app:deco_personalization'
       && metafield?.key === 'checkout_configuration_url';
   });
   const metafield = entry?.metafield ?? entry;
