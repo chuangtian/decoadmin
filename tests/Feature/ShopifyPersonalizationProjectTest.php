@@ -87,7 +87,7 @@ class ShopifyPersonalizationProjectTest extends TestCase
                 $this->assertStringNotContainsString('macfoxebike', $contents, $relative);
             }
             $this->assertStringNotContainsString('trycloudflare.com', $contents, $relative);
-            $this->assertDoesNotMatchRegularExpression('/read_discounts|write_discounts|student_discount|instagram_feed/i', $contents, $relative);
+            $this->assertDoesNotMatchRegularExpression('/student_discount|instagram_feed/i', $contents, $relative);
         }
     }
 }

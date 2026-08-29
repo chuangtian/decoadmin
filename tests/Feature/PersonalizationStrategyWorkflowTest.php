@@ -37,7 +37,7 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         ]);
     }
 
-    public function test_draft_autosave_is_idempotent_and_never_changes_published_configuration(): void
+    public function test_compact_editor_autosave_is_idempotent_and_updates_strategy_without_creating_bindings(): void
     {
         [$actor, $organization, $store] = $this->context();
         $this->product($organization, $store, 101, 'Helmet');
@@ -86,8 +86,9 @@ class PersonalizationStrategyWorkflowTest extends TestCase
             'lock_version' => $editor['draft']['lock_version'],
             'draft' => $editor['draft'],
         ]);
-        $this->assertSame('Published name', $strategy->fresh()->name);
+        $this->assertSame('Unpublished edit', $strategy->fresh()->name);
         $this->assertSame('Unpublished edit', PersonalizationStrategyVersion::query()->where('status', 'draft')->sole()->name);
+        $this->assertSame('active', $strategy->components()->sole()->fresh()->status->value);
     }
 
     public function test_publish_requires_explicit_replacement_and_restore_creates_new_version(): void
@@ -123,22 +124,35 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         $this->assertNotSame($published['published_version']['uuid'], $restored['published_version']['uuid']);
     }
 
-    public function test_recycle_bin_blocks_live_strategy_and_restores_unused_draft(): void
+    public function test_permanent_delete_detaches_live_components_is_audited_and_idempotent(): void
     {
         [$actor, $organization, $store] = $this->context();
         $this->product($organization, $store, 301, 'Basket');
         $service = app(PersonalizationStrategyWorkflowService::class);
         $live = $this->publishedStrategy($service, $store, $actor, 'Live', '301', 'cart_page');
-        $this->assertExceptionCode('STRATEGY_IN_USE', fn () => $service->recycle($store, $live, $actor));
+        $componentId = $live->components()->sole()->id;
+        $key = (string) Str::uuid();
 
-        $draft = $service->createDraft($store, $actor, (string) Str::uuid());
-        $strategy = PersonalizationRecommendationStrategy::query()->where('uuid', $draft['strategy']['uuid'])->sole();
-        $service->recycle($store, $strategy, $actor);
-        $this->assertSoftDeleted('personalization_recommendation_strategies', ['id' => $strategy->id]);
-        $this->assertNotNull($strategy->fresh()->purge_after);
-        $restored = $service->restore($store, $strategy->uuid, $actor);
-        $this->assertSame('draft', $restored['status']);
-        $this->assertNull($strategy->fresh()->deleted_at);
+        $deleted = $service->deleteStrategy($store, $live->uuid, $actor, $key);
+        $this->assertTrue($deleted['deleted']);
+        $this->assertFalse($deleted['already_deleted']);
+        $this->assertSame(1, $deleted['detached_component_count']);
+        $this->assertDatabaseMissing('personalization_recommendation_strategies', ['id' => $live->id]);
+        $this->assertDatabaseMissing('personalization_recommendation_components', ['id' => $componentId]);
+        $this->assertDatabaseHas('personalization_strategy_deletions', [
+            'store_id' => $store->id,
+            'strategy_uuid' => $live->uuid,
+            'strategy_name' => 'Live',
+            'idempotency_key' => $key,
+        ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'store_id' => $store->id,
+            'action' => 'personalization_strategy_deleted',
+        ]);
+
+        $again = $service->deleteStrategy($store, $live->uuid, $actor, $key);
+        $this->assertTrue($again['already_deleted']);
+        $this->assertSame(1, $again['detached_component_count']);
     }
 
     public function test_preview_reports_cart_purchased_and_explicit_exclusion_reasons(): void
@@ -152,7 +166,15 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         $strategy = PersonalizationRecommendationStrategy::query()->sole();
         $draft = $created['draft'];
         $draft['name'] = 'Preview';
-        $draft['configuration']['products'] = ['manual' => ['401', '402', '403'], 'pinned' => [], 'excluded' => ['404']];
+        $draft['configuration']['products'] = [
+            'manual' => [
+                ['shopify_product_id' => '401', 'minimum_quantity' => 2],
+                ['shopify_product_id' => '402', 'minimum_quantity' => 1],
+                ['shopify_product_id' => '403', 'minimum_quantity' => 3],
+            ],
+            'pinned' => [['shopify_product_id' => '403', 'minimum_quantity' => 3]],
+            'excluded' => ['404'],
+        ];
         $draft['configuration']['rules']['exclude_purchased_products'] = true;
         $service->autosave($store, $strategy, $actor, [
             'idempotency_key' => (string) Str::uuid(), 'lock_version' => 1, 'draft' => $draft,
@@ -163,11 +185,29 @@ class PersonalizationStrategyWorkflowTest extends TestCase
             'purchased_product_ids' => ['402'],
         ]);
         $this->assertSame('403', $preview['items'][0]['shopify_product_id']);
+        $this->assertSame(3, $preview['items'][0]['minimum_purchase_quantity']);
+        $this->assertSame('pinned', $preview['items'][0]['reason_code']);
         $this->assertSame([
             '401' => 'already_in_cart',
             '402' => 'already_purchased',
             '404' => 'excluded_by_strategy',
         ], collect($preview['skipped'])->pluck('reason', 'shopify_product_id')->all());
+    }
+
+    public function test_delete_endpoint_requires_store_scope_and_accepts_an_idempotency_key(): void
+    {
+        [$actor, $organization, $store] = $this->context();
+        $created = app(PersonalizationStrategyWorkflowService::class)
+            ->createDraft($store, $actor, (string) Str::uuid());
+
+        $this->actingAs($actor)->deleteJson(route('personalization.strategy-workflow.destroy', [
+            'organization' => $organization,
+            'store' => $store,
+            'strategyUuid' => $created['strategy']['uuid'],
+        ]), ['idempotency_key' => (string) Str::uuid()])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', true)
+            ->assertJsonPath('data.already_deleted', false);
     }
 
     public function test_analytics_keeps_strategy_version_component_and_placement_dimensions(): void

@@ -612,13 +612,10 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::post('/strategy-workflow/{strategy}/disable', [PersonalizationStrategyWorkflowController::class, 'disable'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.strategy-workflow.disable');
-        Route::delete('/strategy-workflow/{strategy}', [PersonalizationStrategyWorkflowController::class, 'recycle'])
-            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
-            ->name('personalization.strategy-workflow.recycle');
-        Route::post('/strategy-workflow/recycle-bin/{strategyUuid}/restore', [PersonalizationStrategyWorkflowController::class, 'restore'])
+        Route::delete('/strategy-workflow/{strategyUuid}', [PersonalizationStrategyWorkflowController::class, 'destroy'])
             ->whereUuid('strategyUuid')
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
-            ->name('personalization.strategy-workflow.restore');
+            ->name('personalization.strategy-workflow.destroy');
         Route::post('/strategy-workflow/{strategy}/versions/{version}/restore', [PersonalizationStrategyWorkflowController::class, 'restoreVersion'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.strategy-workflow.versions.restore');
@@ -628,6 +625,15 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::put('/global-settings', [PersonalizationStrategyWorkflowController::class, 'saveGlobalSettings'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.global-settings.update');
+        Route::get('/discounts', [PersonalizationStrategyWorkflowController::class, 'discounts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.discounts.index');
+        Route::post('/discounts', [PersonalizationStrategyWorkflowController::class, 'createDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.store');
+        Route::patch('/discounts', [PersonalizationStrategyWorkflowController::class, 'updateDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.update');
         Route::put('/strategies/{strategy}', [PersonalizationController::class, 'updateStrategy'])
             ->middleware(['permission:personalization.manage', 'throttle:30,1'])
             ->name('personalization.strategies.update');

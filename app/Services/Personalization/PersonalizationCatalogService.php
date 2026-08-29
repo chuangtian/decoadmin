@@ -11,6 +11,57 @@ use InvalidArgumentException;
 
 class PersonalizationCatalogService
 {
+    /**
+     * Merchant picker projection. Unlike storefront candidates this includes
+     * draft, archived, unpublished, and unavailable products so the editor can
+     * show their real state instead of silently hiding a previous selection.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function pickerProducts(Store $store, int $limit = 250): Collection
+    {
+        $limit = min(250, max(1, $limit));
+
+        return Product::query()
+            ->forOrganization($store->organization_id)
+            ->forStore($store)
+            ->with([
+                'collections' => fn ($query) => $query
+                    ->select(['product_collections.id', 'shopify_collection_id', 'title', 'handle'])
+                    ->orderBy('title'),
+                'variants' => fn ($query) => $query
+                    ->select([
+                        'id', 'product_id', 'shopify_variant_id', 'title', 'sku', 'price',
+                        'compare_at_price', 'available_for_sale', 'selected_options', 'image_url',
+                        'image_alt', 'image_width', 'image_height',
+                    ])
+                    ->orderBy('id'),
+            ])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get()
+            ->map(function (Product $product) use ($store): array {
+                $payload = $this->productPayload($product, $store);
+                $available = $product->status === 'active'
+                    && $product->published_at_shopify !== null
+                    && $product->variants->contains(fn ($variant): bool => (bool) $variant->available_for_sale);
+
+                return [
+                    ...$payload,
+                    'status' => (string) $product->status,
+                    'available_for_sale' => $available,
+                    'availability_label' => match (true) {
+                        $product->status === 'archived' => '已归档',
+                        $product->status !== 'active' => '草稿',
+                        $product->published_at_shopify === null => '未发布',
+                        ! $available => '缺货或当前不可售',
+                        default => '已启用',
+                    },
+                ];
+            });
+    }
+
     /** @return Collection<int, array{shopify_collection_id: string, title: string, handle: string, sort_order: ?string, product_count: int}> */
     public function collections(Store $store, int $limit = 200): Collection
     {

@@ -25,6 +25,8 @@ test('storefront runtime uses only same-origin signed App Proxy and cart routes'
   assert.match(javascript, /shopify:section:load/);
   assert.doesNotMatch(javascript, /https?:\/\//);
   assert.doesNotMatch(javascript, /innerHTML|eval\(|new Function/);
+  assert.match(javascript, /minimum_purchase_quantity/);
+  assert.match(javascript, /quantity: boundedNumber/);
 });
 
 test('recently viewed context is anonymous, bounded and contains no customer identity', () => {

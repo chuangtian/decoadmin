@@ -43,6 +43,10 @@ App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久�
 
 Pixel 只声明分析用途：`analytics = true`，营销、偏好和数据销售均关闭。DecoAdmin 只保存哈希后的 Shopify client/session 标识、已验证的组件/策略/商品引用及订单 ID；不保存 IP、邮箱、电话、姓名、原始 URL 或完整事件载荷。结账事件只能作为候选信号，后续收入归因必须与 Commerce Hub 已同步订单核对。
 
+## 推荐优惠
+
+策略后台可以读取现有 Shopify 基础折扣码，并为已选推荐商品创建或编辑百分比折扣。该能力最小新增 `read_discounts` 与 `write_discounts`，只通过 Personalization App 自有安装令牌访问当前 Store；不复用 Student Discount 的表、代码或发布生命周期。折扣失效或授权缺失不会阻止基础推荐展示。
+
 ## Checkout UI Extension
 
 `extensions/checkout-trust-badges` 与 `extensions/checkout-recommendations` 使用 API `2026-07` 的官方 `purchase.checkout.block.render` target。信任信息建议放在 `WALLETS1`，递进推荐建议放在订单摘要 `ORDER_SUMMARY2`；实际位置由商家在 Checkout Editor 添加和调整，不能保证与参考图像素级一致。
@@ -80,5 +84,5 @@ npm run check
 ## 发布文档
 
 - Test 发布与回滚：[`TEST_RELEASE.md`](./TEST_RELEASE.md)
-- 策略草稿、版本、预览与回收站：[`STRATEGY_WORKFLOW.md`](./STRATEGY_WORKFLOW.md)
+- 极简策略编辑、商品选择与永久删除：[`STRATEGY_WORKFLOW.md`](./STRATEGY_WORKFLOW.md)
 - Production 规划与未来授权闸门：[`PRODUCTION_RELEASE.md`](./PRODUCTION_RELEASE.md)

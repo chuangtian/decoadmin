@@ -165,7 +165,10 @@
         method: 'POST',
         credentials: 'same-origin',
         headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-        body: JSON.stringify({items: [{id: Number(id), quantity: 1}]}),
+        body: JSON.stringify({items: [{
+          id: Number(id),
+          quantity: boundedNumber(product?.minimum_purchase_quantity, 1, 999, 1),
+        }]}),
       });
       if (!response.ok) throw new Error('Cart request failed');
       button.textContent = 'Added';

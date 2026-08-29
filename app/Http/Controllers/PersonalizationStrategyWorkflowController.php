@@ -7,6 +7,7 @@ use App\Models\Organization;
 use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\PersonalizationStrategyVersion;
 use App\Models\Store;
+use App\Services\Personalization\PersonalizationDiscountService;
 use App\Services\Personalization\PersonalizationGlobalSettingsService;
 use App\Services\Personalization\PersonalizationStrategyWorkflowService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class PersonalizationStrategyWorkflowController extends Controller
     public function __construct(
         private PersonalizationStrategyWorkflowService $workflow,
         private PersonalizationGlobalSettingsService $globalSettings,
+        private PersonalizationDiscountService $discounts,
     ) {}
 
     public function createDraft(Request $request, Organization $organization, Store $store): JsonResponse
@@ -93,26 +95,21 @@ class PersonalizationStrategyWorkflowController extends Controller
         return $this->run(fn () => $this->workflow->disable($store, $strategy, $request->user()));
     }
 
-    public function recycle(
+    public function destroy(
         Request $request,
         Organization $organization,
         Store $store,
-        PersonalizationRecommendationStrategy $strategy,
+        string $strategyUuid,
     ): JsonResponse {
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate(['idempotency_key' => ['required', 'uuid']]);
 
-        return $this->run(function () use ($store, $strategy, $request): array {
-            $this->workflow->recycle($store, $strategy, $request->user());
-
-            return ['recycled' => true, 'retention_days' => PersonalizationStrategyWorkflowService::RECYCLE_DAYS];
-        });
-    }
-
-    public function restore(Request $request, Organization $organization, Store $store, string $strategyUuid): JsonResponse
-    {
-        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
-
-        return $this->run(fn () => $this->workflow->restore($store, $strategyUuid, $request->user()));
+        return $this->run(fn () => $this->workflow->deleteStrategy(
+            $store,
+            $strategyUuid,
+            $request->user(),
+            $values['idempotency_key'],
+        ));
     }
 
     public function restoreVersion(
@@ -168,6 +165,44 @@ class PersonalizationStrategyWorkflowController extends Controller
         ]);
 
         return $this->run(fn () => $this->globalSettings->save($store, $request->user(), $values));
+    }
+
+    public function discounts(Request $request, Organization $organization, Store $store): JsonResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+
+        return $this->run(fn () => $this->discounts->listing($store, $request->user()));
+    }
+
+    public function createDiscount(Request $request, Organization $organization, Store $store): JsonResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate($this->discountRules());
+
+        return $this->run(fn () => $this->discounts->create($store, $request->user(), $values), 201);
+    }
+
+    public function updateDiscount(Request $request, Organization $organization, Store $store): JsonResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'id' => ['required', 'string', 'regex:/^gid:\/\/shopify\/DiscountCodeNode\/\d+$/'],
+            ...$this->discountRules(),
+        ]);
+
+        return $this->run(fn () => $this->discounts->update($store, $request->user(), $values));
+    }
+
+    /** @return array<string, array<int, mixed>> */
+    private function discountRules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:80', 'regex:/\S/u'],
+            'code' => ['required', 'string', 'min:3', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'percentage' => ['required', 'integer', 'between:1,99'],
+            'product_ids' => ['required', 'array', 'min:1', 'max:24'],
+            'product_ids.*' => ['required', 'string', 'distinct', 'regex:/^\d+$/'],
+        ];
     }
 
     private function assertUserScope(Request $request, Organization $organization, Store $store, string $permission): void

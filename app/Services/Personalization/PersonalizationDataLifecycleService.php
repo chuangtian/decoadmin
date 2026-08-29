@@ -40,6 +40,7 @@ class PersonalizationDataLifecycleService
             'attributions_deleted' => 0,
             'aggregates_deleted' => 0,
             'audits_deleted' => 0,
+            'deletion_snapshots_deleted' => 0,
             'strategies_purged' => 0,
         ];
 
@@ -72,6 +73,9 @@ class PersonalizationDataLifecycleService
         $result['audits_deleted'] = AuditLog::query()
             ->where('action', 'like', 'personalization_%')
             ->where('created_at', '<', now()->subDays($auditDays))
+            ->delete();
+        $result['deletion_snapshots_deleted'] = DB::table('personalization_strategy_deletions')
+            ->where('deleted_at', '<', now()->subDays($auditDays))
             ->delete();
         PersonalizationRecommendationStrategy::onlyTrashed()
             ->where('status', 'archived')
@@ -180,6 +184,7 @@ class PersonalizationDataLifecycleService
             PersonalizationGlobalSetting::query()->where('store_id', $store->id)->delete();
             PersonalizationRecommendationComponent::withTrashed()->where('store_id', $store->id)->forceDelete();
             PersonalizationRecommendationStrategy::withTrashed()->where('store_id', $store->id)->forceDelete();
+            DB::table('personalization_strategy_deletions')->where('store_id', $store->id)->delete();
 
             AuditLog::query()->create([
                 'organization_id' => $store->organization_id,

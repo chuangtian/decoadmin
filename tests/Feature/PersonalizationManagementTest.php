@@ -62,6 +62,8 @@ class PersonalizationManagementTest extends TestCase
                 ->where('components.0.uuid', $component->uuid)
                 ->where('components.0.status', 'draft')
                 ->where('products.0.shopify_product_id', (string) $product->shopify_product_id)
+                ->where('products.0.availability_label', '已启用')
+                ->where('products.0.available_for_sale', true)
                 ->where('permissions.manage', true)
                 ->where('permissions.manageSmartCart', false)
                 ->where('analytics.impressions', 0)

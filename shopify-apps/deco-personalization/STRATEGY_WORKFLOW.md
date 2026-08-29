@@ -1,63 +1,50 @@
-# Personalization strategy workflow
+# Personalization strategy management
 
-This document describes the merchant-facing strategy workflow implemented in DecoAdmin. It does not authorize a Production release.
+This document describes the merchant-facing strategy management implemented in DecoAdmin. It does not authorize a Production release.
 
 ## Information architecture
 
-The Personalization management page has exactly three top-level entries:
+The management page has exactly three top-level entries: **概览**, **策略**, and **分析**. Checkout, Smart Cart, trust items, default copy, and attribution remain under 概览. Page and component bindings are managed at their own configuration surfaces, not inside the strategy editor.
 
-1. **概览** — setup progress, launch checks, alerts, and global settings.
-2. **策略** — strategy search, draft creation, editing, duplication, publication, disabling, recycling, and version restoration.
-3. **分析** — impressions, clicks, add-to-carts, orders, attributed revenue, and breakdowns by strategy, strategy version, placement, and component.
+## Compact editor
 
-Checkout, Smart Cart, trust items, default copy, and attribution settings remain available under 概览. Component placement and display settings live inside the strategy editor; none of the existing storefront capabilities were removed.
+The full-screen editor contains only five merchant-visible sections:
 
-## Draft and publication contract
+1. 策略名称
+2. 推荐规则
+3. 置顶产品
+4. 除外条款
+5. 优惠促销
 
-- `personalization_recommendation_strategies.uuid` is the stable strategy identity.
-- Every editable snapshot is a `personalization_strategy_versions` row with an immutable version number and a stable UUID.
-- Creating a strategy immediately creates version 1 as a draft named `未命名策略`.
-- Autosave updates only a draft, uses an optimistic `lock_version`, and requires a UUID idempotency key. A stale lock returns `DRAFT_VERSION_CONFLICT`; the UI reports failure and provides a retry action.
-- Opening an enabled strategy creates or reuses a new draft copied from the published version. The live strategy, rules, products, and components remain unchanged until explicit publication.
-- Publication validates the draft, snapshots deterministic rules and product choices, writes the live configuration in one transaction, supersedes the previous published version, and records the new version on every active component.
-- Restoring an old version copies it into a new version and publishes that copy. Historical rows are not rewritten or destroyed.
-- One active strategy is allowed per store and placement in this first version. Publication reports the currently bound component and requires explicit replacement confirmation.
+The recommendation rule is always deterministic manual selection. There is no algorithm selector, maximum-result field, custom rule builder, AI label, placement step, preview step, publish action, or version-restore action.
 
-## Editor behavior
+- A strategy has a stable UUID and is autosaved with optimistic locking and UUID idempotency keys.
+- The picker supports search, selection-time ordering, at most 24 products, and a minimum purchase quantity from 1 to 999 per selected product.
+- Canceling the picker discards its temporary state. Confirming applies the selection to the strategy draft.
+- Pinned products are ordered before normal products and are automatically added to the candidate list if needed.
+- Draft, archived, unpublished, out-of-stock, and unavailable products remain visible in the merchant picker with their real state. Storefront recommendation always skips unsafe products.
+- Exclusions cover cart/order history, explicit products, tags, Collections, vendors, and purchase-option values. No arbitrary expression builder is exposed.
 
-The editor is a full-screen application surface with six steps: basic information, recommendation rules, pinned/excluded products, discount association, usage scenes, and preview/publication.
+Autosave applies the strategy's name, deterministic rules, ordered products, minimum quantities, and discount reference. It does not create a placement or enable a component. Existing components remain the only source of storefront visibility and safely hide when no eligible product remains.
 
-- It closes only through the fixed close action. Escape triggers the same guarded close flow; the backdrop never closes the editor.
-- Pending edits are saved before a normal close. Failed saves are never presented as successful, and the user can retry or explicitly close while retaining the last server-side draft.
-- Only the six approved deterministic algorithms are available. There is no arbitrary rule builder or generative recommendation surface.
-- Discount configuration only associates an existing discount reference. It never creates or changes a Shopify discount and requires no additional Shopify scope.
-- Removing a placement from the draft and publishing soft-deletes the old component binding. A strategy with any remaining component binding cannot be recycled.
+## Discounts
 
-## Preview and failure safety
+The editor defaults to disabled. Enabling requires a selected Shopify discount. The discount dialog can list existing basic code discounts and create or edit a percentage discount for the currently selected recommendation products. The provided default is **九折优惠** (`10% off`).
 
-Preview uses Commerce Hub data for the current Organization and Store. It accepts a real seed product plus simulated cart and purchased-product lists, then returns ordered recommendations and structured skip reasons:
+Listing requires `read_discounts`; creation and editing require `write_discounts`. Both scopes belong only to the independent Personalization App and must be granted through the Test installation before discount management is available. A missing, inactive, or failed discount never breaks the underlying recommendation response.
 
-- `already_in_cart`
-- `already_purchased`
-- `excluded_by_strategy`
-- `out_of_stock_or_market_unavailable`
+## Permanent deletion
 
-Checkout preview remains one card at a time. A merchant may optionally set a sequence maximum from 1 to 1000; leaving it empty traverses the selected Collection until exhaustion. The value is not a collection of fixed product slots. Empty results hide the storefront component safely.
+There is no merchant-visible recycle bin, archive action, restore route, retention badge, or recovery workflow.
 
-## Recycling and retention
+- The strategy row exposes a single **删除** action.
+- A standard destructive modal names the strategy, states that deletion cannot be recovered, and warns when component locations will stop recommending.
+- Confirmation is authenticated, Store/Organization scoped, RBAC protected, audited, idempotent, and transactionally removes component bindings before permanently deleting strategy configuration.
+- Event and attribution foreign keys are nulled by the database; anonymous aggregates and a minimal strategy UUID/name deletion snapshot can remain for analytics and audit. No deleted strategy configuration can be reconstructed from that snapshot.
+- Storefront and Checkout callers receive no active component after deletion and hide without rendering a broken empty frame.
 
-Only a strategy without page or component bindings can be moved to the recycle bin. Recycling uses Laravel soft deletion, records `archived_at`, and sets `purge_after` to 30 days. Restoration clears those fields and returns the strategy as a draft or disabled published strategy. The existing retention job permanently removes expired recycled strategies and their already-unlinked components.
+## Security and rollback
 
-## Security and analytics
+Every Business Service validates the authenticated user, Organization, Store, RBAC permission, active tenant state, and permanent shop denylist. Tokens, customer PII, and raw authorization data are never stored in strategy configuration or audit metadata.
 
-- Every workflow entry point validates authenticated user access, Organization, Store, RBAC permission, active tenant state, and the permanent shop denylist in the backend Business Service.
-- Writes are idempotent, audited, bounded, and transactionally applied. Browser-provided Organization or Store identifiers are never trusted by the Business Service.
-- Events and attributions now retain `strategy_version_id`; daily metrics retain `strategy_version_key`. Analytics therefore preserves historical version and placement boundaries.
-- No customer name, email, phone, address, payment data, Shopify token, Session Token, Client Secret, or raw authorization header is stored in strategy snapshots or returned by preview.
-
-## Rollback
-
-- UI rollback: revert the Personalization page while leaving strategy/version tables intact.
-- Publication rollback: restore the preceding published version, which creates a new auditable version.
-- Placement rollback: publish a draft with the unwanted placement removed or explicitly restore the previous placement version.
-- Checkout and Smart Cart retain their existing independent off switches and Shopify-default-cart recovery path.
+Code rollback can restore a previous application build, but intentionally cannot restore strategies that merchants permanently deleted. Checkout and Smart Cart retain their independent off switches and Shopify-default-cart recovery path.

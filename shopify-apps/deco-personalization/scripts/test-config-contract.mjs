@@ -5,7 +5,7 @@ import path from 'node:path';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.join(appRoot, 'shopify.app.test.toml');
 const runtimePath = path.join(appRoot, 'extensions/app-home/src/runtime.mjs');
-const EXPECTED_SCOPES = ['read_customer_events', 'write_app_proxy', 'write_pixels'];
+const EXPECTED_SCOPES = ['read_customer_events', 'read_discounts', 'write_app_proxy', 'write_discounts', 'write_pixels'];
 
 export async function validateTestConfig({requireRunnable = false} = {}) {
   const config = await readFile(configPath, 'utf8');

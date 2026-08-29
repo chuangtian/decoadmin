@@ -27,12 +27,10 @@ use Illuminate\Support\Str;
 
 class PersonalizationStrategyWorkflowService
 {
-    public const RECYCLE_DAYS = 30;
-
     public function __construct(private PersonalizationShopGuard $shopGuard) {}
 
     /** @return list<array<string, mixed>> */
-    public function listing(Store $store, User $actor, ?string $search = null, bool $recycled = false): array
+    public function listing(Store $store, User $actor, ?string $search = null): array
     {
         $this->authorize($store, $actor, 'personalization.view');
         $search = trim((string) $search);
@@ -40,7 +38,7 @@ class PersonalizationStrategyWorkflowService
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
             ->with(['publishedVersion', 'versions' => fn ($query) => $query->limit(2), 'components'])
-            ->when($recycled, fn ($query) => $query->onlyTrashed(), fn ($query) => $query->withoutTrashed())
+            ->withoutTrashed()
             ->when($search !== '', fn ($query) => $query->where('name', 'like', '%'.addcslashes($search, '%_\\').'%'))
             ->orderByDesc('updated_at')
             ->limit(200)
@@ -68,7 +66,7 @@ class PersonalizationStrategyWorkflowService
                 'algorithm' => PersonalizationAlgorithm::Manual,
                 'enabled' => false,
                 'status' => PersonalizationStrategyStatus::Draft,
-                'item_limit' => 8,
+                'item_limit' => 24,
                 'settings' => null,
                 'created_by' => $actor->id,
                 'updated_by' => $actor->id,
@@ -186,17 +184,26 @@ class PersonalizationStrategyWorkflowService
                 'checksum' => $payloadHash,
                 'lock_version' => $draft->lock_version + 1,
             ])->save();
-            if (! $lockedStrategy->published_version_id) {
-                $lockedStrategy->forceFill([
-                    'name' => $normalized['name'],
-                    'algorithm' => $normalized['algorithm'],
-                    'item_limit' => $normalized['item_limit'],
-                    'status' => PersonalizationStrategyStatus::Draft,
-                    'updated_by' => $actor->id,
-                ])->save();
-            } else {
-                $lockedStrategy->forceFill(['updated_by' => $actor->id])->save();
-            }
+            // Saving this compact form updates the strategy configuration. It
+            // never creates a page binding; components remain the sole control
+            // over whether a placement is visible to shoppers.
+            $this->applySnapshot($store, $lockedStrategy, $draft, $actor, false);
+            $hasLiveComponent = $lockedStrategy->components()
+                ->where('status', PersonalizationComponentStatus::Active->value)
+                ->exists();
+            $settings = is_array($lockedStrategy->settings) ? $lockedStrategy->settings : [];
+            $settings['discount'] = $normalized['configuration']['discount'];
+            $lockedStrategy->forceFill([
+                'name' => $normalized['name'],
+                'algorithm' => PersonalizationAlgorithm::Manual,
+                'item_limit' => 24,
+                'enabled' => $hasLiveComponent,
+                'status' => $hasLiveComponent
+                    ? PersonalizationStrategyStatus::Enabled
+                    : ($lockedStrategy->published_version_id ? PersonalizationStrategyStatus::Disabled : PersonalizationStrategyStatus::Draft),
+                'settings' => $settings,
+                'updated_by' => $actor->id,
+            ])->save();
             $this->rememberIdempotency($store, $actor, 'autosave_draft', $idempotencyKey, $payloadHash, $lockedStrategy, $draft);
             $this->audit($store, $actor, $lockedStrategy, 'personalization_strategy_draft_autosaved', [
                 'version_uuid' => $draft->uuid,
@@ -342,46 +349,82 @@ class PersonalizationStrategyWorkflowService
         return $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions']));
     }
 
-    public function recycle(Store $store, PersonalizationRecommendationStrategy $strategy, User $actor): void
+    /** @return array{deleted: bool, already_deleted: bool, detached_component_count: int} */
+    public function deleteStrategy(Store $store, string $strategyUuid, User $actor, string $idempotencyKey): array
     {
         $this->authorize($store, $actor, 'personalization.manage');
-        $this->assertStrategy($store, $strategy);
-        if ($strategy->components()->exists()) {
-            throw new PersonalizationException('STRATEGY_IN_USE', '该策略正在被页面或组件使用，请先解除关联或替换。', 409);
-        }
-        $strategy->forceFill([
-            'enabled' => false,
-            'status' => PersonalizationStrategyStatus::Archived,
-            'archived_at' => now(),
-            'purge_after' => now()->addDays(self::RECYCLE_DAYS),
-            'updated_by' => $actor->id,
-        ])->save();
-        $strategy->delete();
-        $this->audit($store, $actor, $strategy, 'personalization_strategy_recycled', ['purge_after' => $strategy->purge_after?->toIso8601String()]);
-    }
+        $strategyUuid = $this->uuid($strategyUuid, 'INVALID_STRATEGY_UUID');
+        $idempotencyKey = $this->uuid($idempotencyKey, 'INVALID_IDEMPOTENCY_KEY');
 
-    /** @return array<string, mixed> */
-    public function restore(Store $store, string $strategyUuid, User $actor): array
-    {
-        $this->authorize($store, $actor, 'personalization.manage');
-        $strategy = PersonalizationRecommendationStrategy::onlyTrashed()
-            ->where('organization_id', $store->organization_id)
-            ->where('store_id', $store->id)
-            ->where('uuid', $strategyUuid)
-            ->first();
-        if (! $strategy) {
-            throw new PersonalizationException('STRATEGY_NOT_FOUND', '回收站中找不到该策略。', 404);
-        }
-        $strategy->restore();
-        $strategy->forceFill([
-            'status' => $strategy->published_version_id ? PersonalizationStrategyStatus::Disabled : PersonalizationStrategyStatus::Draft,
-            'archived_at' => null,
-            'purge_after' => null,
-            'updated_by' => $actor->id,
-        ])->save();
-        $this->audit($store, $actor, $strategy, 'personalization_strategy_restored', []);
+        return DB::transaction(function () use ($store, $strategyUuid, $actor, $idempotencyKey): array {
+            $existingDeletion = DB::table('personalization_strategy_deletions')
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('strategy_uuid', $strategyUuid)
+                ->lockForUpdate()
+                ->first();
+            if ($existingDeletion) {
+                return [
+                    'deleted' => true,
+                    'already_deleted' => true,
+                    'detached_component_count' => (int) $existingDeletion->detached_component_count,
+                ];
+            }
 
-        return $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions']));
+            $strategy = PersonalizationRecommendationStrategy::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('uuid', $strategyUuid)
+                ->lockForUpdate()
+                ->first();
+            if (! $strategy) {
+                throw new PersonalizationException('STRATEGY_NOT_FOUND', '找不到该推荐策略。', 404);
+            }
+
+            $components = PersonalizationRecommendationComponent::withTrashed()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('strategy_id', $strategy->id)
+                ->lockForUpdate()
+                ->get();
+            $componentCount = $components->count();
+
+            $this->audit($store, $actor, $strategy, 'personalization_strategy_deleted', [
+                'strategy_uuid' => $strategy->uuid,
+                'strategy_name' => $strategy->name,
+                'detached_component_count' => $componentCount,
+                'irreversible' => true,
+            ]);
+            DB::table('personalization_strategy_deletions')->insert([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'strategy_uuid' => $strategy->uuid,
+                'strategy_name' => $strategy->name,
+                'idempotency_key' => $idempotencyKey,
+                'detached_component_count' => $componentCount,
+                'deleted_by' => $actor->id,
+                'deleted_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Foreign keys preserve historical event and attribution rows by
+            // nulling live references. Components are removed so storefront and
+            // Checkout endpoints safely return no recommendation instead of a
+            // broken configuration.
+            foreach ($components as $component) {
+                $component->style()->delete();
+                $component->forceDelete();
+            }
+            $strategy->forceFill([
+                'enabled' => false,
+                'published_version_id' => null,
+                'updated_by' => $actor->id,
+            ])->save();
+            $strategy->forceDelete();
+
+            return ['deleted' => true, 'already_deleted' => false, 'detached_component_count' => $componentCount];
+        });
     }
 
     /** @return list<array<string, mixed>> */
@@ -519,7 +562,6 @@ class PersonalizationStrategyWorkflowService
                 'published_at' => $strategy->publishedVersion->published_at?->toIso8601String(),
             ] : null,
             'has_draft' => (bool) $draft,
-            'recycle_until' => $strategy->purge_after?->toIso8601String(),
         ];
     }
 
@@ -550,12 +592,13 @@ class PersonalizationStrategyWorkflowService
                 'include_collection_ids' => [],
                 'exclude_collection_ids' => [],
                 'exclude_vendors' => [],
+                'exclude_purchase_options' => [],
                 'minimum_price' => null,
                 'maximum_price' => null,
                 'minimum_inventory' => null,
                 'in_stock_only' => true,
                 'exclude_cart_products' => true,
-                'exclude_purchased_products' => false,
+                'exclude_purchased_products' => true,
             ],
             'products' => ['manual' => [], 'pinned' => [], 'excluded' => []],
             'discount' => ['enabled' => false, 'reference' => null],
@@ -575,6 +618,7 @@ class PersonalizationStrategyWorkflowService
                 PersonalizationRuleType::IncludeCollections => $rule->value['collection_ids'] ?? [],
                 PersonalizationRuleType::ExcludeCollections => $rule->value['collection_ids'] ?? [],
                 PersonalizationRuleType::ExcludeVendors => $rule->value['vendors'] ?? [],
+                PersonalizationRuleType::ExcludePurchaseOptions => $rule->value['purchase_options'] ?? [],
                 PersonalizationRuleType::MinimumPrice, PersonalizationRuleType::MaximumPrice => $rule->value['amount'] ?? null,
                 PersonalizationRuleType::MinimumInventory => $rule->value['quantity'] ?? null,
                 PersonalizationRuleType::InStockOnly,
@@ -583,12 +627,13 @@ class PersonalizationStrategyWorkflowService
             };
         }
         foreach (PersonalizationProductOverrideType::cases() as $type) {
-            $configuration['products'][$type->value] = $strategy->productOverrides
-                ->where('type', $type)
-                ->sortBy('position')
-                ->pluck('shopify_product_id')
-                ->map(fn ($id): string => (string) $id)
-                ->values()->all();
+            $overrides = $strategy->productOverrides->where('type', $type)->sortBy('position')->values();
+            $configuration['products'][$type->value] = $type === PersonalizationProductOverrideType::Excluded
+                ? $overrides->pluck('shopify_product_id')->map(fn ($id): string => (string) $id)->values()->all()
+                : $overrides->map(fn (PersonalizationStrategyProductOverride $override): array => [
+                    'shopify_product_id' => (string) $override->shopify_product_id,
+                    'minimum_quantity' => max(1, (int) $override->minimum_quantity),
+                ])->all();
         }
         $configuration['placements'] = $strategy->components->map(fn (PersonalizationRecommendationComponent $component): array => [
             'placement' => $component->placement->value,
@@ -624,11 +669,9 @@ class PersonalizationStrategyWorkflowService
             throw new PersonalizationException('INVALID_STRATEGY_DRAFT', '策略草稿包含不支持的字段。');
         }
         $name = $this->text($draft['name'] ?? null, 80, 'STRATEGY_NAME_REQUIRED');
-        $algorithm = PersonalizationAlgorithm::tryFrom((string) ($draft['algorithm'] ?? ''));
-        if (! $algorithm) {
-            throw new PersonalizationException('INVALID_RECOMMENDATION_ALGORITHM', '推荐规则类型无效。');
-        }
-        $itemLimit = $this->integer($draft['item_limit'] ?? null, 1, 50, 'INVALID_ITEM_LIMIT');
+        // The compact editor deliberately exposes one deterministic mode only.
+        $algorithm = PersonalizationAlgorithm::Manual;
+        $itemLimit = 24;
         $configuration = $draft['configuration'] ?? null;
         if (! is_array($configuration) || array_is_list($configuration)
             || array_diff(array_keys($configuration), ['rules', 'products', 'discount', 'placements', 'checkout']) !== []) {
@@ -666,43 +709,89 @@ class PersonalizationStrategyWorkflowService
             'include_collection_ids' => $this->numericIds($rules['include_collection_ids'] ?? [], 100, 'INVALID_COLLECTION_RULE'),
             'exclude_collection_ids' => $this->numericIds($rules['exclude_collection_ids'] ?? [], 100, 'INVALID_COLLECTION_RULE'),
             'exclude_vendors' => $this->strings($rules['exclude_vendors'] ?? [], 100, 120, 'INVALID_VENDOR_RULE'),
+            'exclude_purchase_options' => $this->strings($rules['exclude_purchase_options'] ?? [], 100, 160, 'INVALID_PURCHASE_OPTION_RULE'),
             'minimum_price' => $this->nullableDecimal($rules['minimum_price'] ?? null),
             'maximum_price' => $this->nullableDecimal($rules['maximum_price'] ?? null),
             'minimum_inventory' => ($rules['minimum_inventory'] ?? null) === null || $rules['minimum_inventory'] === ''
                 ? null : $this->integer($rules['minimum_inventory'], 0, 1_000_000, 'INVALID_INVENTORY_RULE'),
             'in_stock_only' => (bool) ($rules['in_stock_only'] ?? true),
             'exclude_cart_products' => (bool) ($rules['exclude_cart_products'] ?? true),
-            'exclude_purchased_products' => (bool) ($rules['exclude_purchased_products'] ?? false),
+            'exclude_purchased_products' => (bool) ($rules['exclude_purchased_products'] ?? true),
         ];
     }
 
-    /** @return array<string, list<string>> */
+    /**
+     * @return array{
+     *   manual: list<array{shopify_product_id: string, minimum_quantity: int}>,
+     *   pinned: list<array{shopify_product_id: string, minimum_quantity: int}>,
+     *   excluded: list<string>
+     * }
+     */
     private function normalizeProducts(Store $store, mixed $products): array
     {
         if (! is_array($products) || array_is_list($products)
             || array_diff(array_keys($products), ['manual', 'pinned', 'excluded']) !== []) {
             throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置格式无效。');
         }
-        $normalized = [];
-        $seen = [];
-        foreach (['manual', 'pinned', 'excluded'] as $type) {
-            $normalized[$type] = $this->numericIds($products[$type] ?? [], 500, 'INVALID_PRODUCT_OVERRIDE');
-            foreach ($normalized[$type] as $productId) {
-                if (isset($seen[$productId])) {
-                    throw new PersonalizationException('CONFLICTING_PRODUCT_OVERRIDE', '同一商品不能同时出现在多个推荐操作中。');
+        $manual = $this->productSelections($products['manual'] ?? [], 24);
+        $pinned = $this->productSelections($products['pinned'] ?? [], 24);
+        $excluded = $this->numericIds($products['excluded'] ?? [], 100, 'INVALID_PRODUCT_OVERRIDE');
+
+        // A pinned product is also a candidate. Add missing pinned products to
+        // the end of the manual list so the merchant never has to select twice.
+        $manualIds = array_column($manual, 'shopify_product_id');
+        foreach ($pinned as $selection) {
+            if (! in_array($selection['shopify_product_id'], $manualIds, true)) {
+                if (count($manual) >= 24) {
+                    throw new PersonalizationException('TOO_MANY_MANUAL_PRODUCTS', '手动推荐商品最多可以选择 24 种。');
                 }
-                $seen[$productId] = true;
+                $manual[] = $selection;
+                $manualIds[] = $selection['shopify_product_id'];
             }
         }
+        $recommendedIds = array_values(array_unique([...$manualIds, ...array_column($pinned, 'shopify_product_id')]));
+        if (array_intersect($recommendedIds, $excluded) !== []) {
+            throw new PersonalizationException('CONFLICTING_PRODUCT_OVERRIDE', '同一商品不能同时被推荐和排除。');
+        }
+        $seen = array_values(array_unique([...$recommendedIds, ...$excluded]));
         if ($seen !== []) {
             $owned = Product::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
-                ->whereIn('shopify_product_id', array_keys($seen))->count();
+                ->whereIn('shopify_product_id', $seen)->count();
             if ($owned !== count($seen)) {
                 throw new PersonalizationException('PRODUCT_OVERRIDE_NOT_FOUND', '部分商品不属于当前店铺或尚未同步。', 404);
             }
         }
 
-        return $normalized;
+        return ['manual' => $manual, 'pinned' => $pinned, 'excluded' => $excluded];
+    }
+
+    /** @return list<array{shopify_product_id: string, minimum_quantity: int}> */
+    private function productSelections(mixed $values, int $maximum): array
+    {
+        if (! is_array($values) || count($values) > $maximum) {
+            throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', "手动推荐商品最多可以选择 {$maximum} 种。");
+        }
+        $result = [];
+        $seen = [];
+        foreach ($values as $value) {
+            $row = is_array($value) && ! array_is_list($value)
+                ? $value
+                : ['shopify_product_id' => $value, 'minimum_quantity' => 1];
+            if (array_diff(array_keys($row), ['shopify_product_id', 'minimum_quantity']) !== []) {
+                throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置包含不支持的字段。');
+            }
+            $productId = $this->numericProductId($row['shopify_product_id'] ?? null);
+            if (isset($seen[$productId])) {
+                continue;
+            }
+            $seen[$productId] = true;
+            $result[] = [
+                'shopify_product_id' => $productId,
+                'minimum_quantity' => $this->integer($row['minimum_quantity'] ?? 1, 1, 999, 'INVALID_MINIMUM_PURCHASE_QUANTITY'),
+            ];
+        }
+
+        return $result;
     }
 
     /** @return array{enabled: bool, reference: ?string} */
@@ -849,11 +938,16 @@ class PersonalizationStrategyWorkflowService
             ]);
         }
         $strategy->productOverrides()->delete();
-        $productIds = collect($configuration['products'] ?? [])->flatten()->unique()->values()->all();
+        $productIds = collect([
+            ...array_column($configuration['products']['manual'] ?? [], 'shopify_product_id'),
+            ...array_column($configuration['products']['pinned'] ?? [], 'shopify_product_id'),
+            ...($configuration['products']['excluded'] ?? []),
+        ])->map(fn ($id): string => (string) $id)->unique()->values()->all();
         $owned = Product::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
             ->whereIn('shopify_product_id', $productIds)->pluck('id', 'shopify_product_id');
         foreach (['manual', 'pinned', 'excluded'] as $type) {
-            foreach (($configuration['products'][$type] ?? []) as $position => $productId) {
+            foreach (($configuration['products'][$type] ?? []) as $position => $selection) {
+                $productId = is_array($selection) ? (string) ($selection['shopify_product_id'] ?? '') : (string) $selection;
                 PersonalizationStrategyProductOverride::query()->create([
                     'organization_id' => $store->organization_id,
                     'store_id' => $store->id,
@@ -862,6 +956,7 @@ class PersonalizationStrategyWorkflowService
                     'shopify_product_id' => $productId,
                     'type' => $type,
                     'position' => $position + 1,
+                    'minimum_quantity' => is_array($selection) ? max(1, (int) ($selection['minimum_quantity'] ?? 1)) : 1,
                 ]);
             }
         }
@@ -943,6 +1038,7 @@ class PersonalizationStrategyWorkflowService
             'include_collection_ids' => ['type' => PersonalizationRuleType::IncludeCollections->value, 'key' => 'collection_ids'],
             'exclude_collection_ids' => ['type' => PersonalizationRuleType::ExcludeCollections->value, 'key' => 'collection_ids'],
             'exclude_vendors' => ['type' => PersonalizationRuleType::ExcludeVendors->value, 'key' => 'vendors'],
+            'exclude_purchase_options' => ['type' => PersonalizationRuleType::ExcludePurchaseOptions->value, 'key' => 'purchase_options'],
         ];
         foreach ($map as $key => $definition) {
             if (($rules[$key] ?? []) !== []) {
@@ -992,12 +1088,14 @@ class PersonalizationStrategyWorkflowService
         });
         $overrides = collect();
         foreach (['manual', 'pinned', 'excluded'] as $type) {
-            foreach (($version->configuration['products'][$type] ?? []) as $position => $productId) {
+            foreach (($version->configuration['products'][$type] ?? []) as $position => $selection) {
+                $productId = is_array($selection) ? (string) ($selection['shopify_product_id'] ?? '') : (string) $selection;
                 $override = new PersonalizationStrategyProductOverride([
                     'strategy_id' => $strategy->id,
                     'shopify_product_id' => $productId,
                     'type' => $type,
                     'position' => $position + 1,
+                    'minimum_quantity' => is_array($selection) ? max(1, (int) ($selection['minimum_quantity'] ?? 1)) : 1,
                 ]);
                 $override->exists = true;
                 $overrides->push($override);
@@ -1013,7 +1111,11 @@ class PersonalizationStrategyWorkflowService
     private function skippedPreviewProducts(Store $store, array $configuration, array $cartIds, array $purchasedIds, Collection $recommended): array
     {
         $recommendedIds = $recommended->pluck('shopify_product_id')->map(fn ($id): string => (string) $id)->all();
-        $configured = collect($configuration['products'] ?? [])->flatten()->map(fn ($id): string => (string) $id)->unique()->values();
+        $configured = collect([
+            ...array_column($configuration['products']['manual'] ?? [], 'shopify_product_id'),
+            ...array_column($configuration['products']['pinned'] ?? [], 'shopify_product_id'),
+            ...($configuration['products']['excluded'] ?? []),
+        ])->map(fn ($id): string => (string) $id)->unique()->values();
         $ids = collect([...$cartIds, ...$purchasedIds, ...$configured])->unique()->values()->all();
         $products = Product::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
             ->whereIn('shopify_product_id', $ids)->with('variants')->get()->keyBy(fn (Product $product): string => (string) $product->shopify_product_id);

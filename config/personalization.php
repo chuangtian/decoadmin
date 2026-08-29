@@ -33,7 +33,7 @@ return [
     // them, after validating the current Shopify configuration and documentation.
     'required_scopes' => array_values(array_filter(array_map(
         'trim',
-        explode(',', (string) env('PERSONALIZATION_REQUIRED_SCOPES', 'write_app_proxy,write_pixels,read_customer_events')),
+        explode(',', (string) env('PERSONALIZATION_REQUIRED_SCOPES', 'write_app_proxy,write_pixels,read_customer_events,read_discounts,write_discounts')),
     ))),
 
     'id_token_leeway_seconds' => 5,

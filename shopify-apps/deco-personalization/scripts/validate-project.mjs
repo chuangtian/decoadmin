@@ -97,7 +97,7 @@ for (const absolutePath of files) {
   }
   if (!isValidator) {
     check(!/shopify-apps\/(student-discount|instagram-feed|commerce-hub)/i.test(contents), `Another Shopify App path is forbidden: ${relativePath}`);
-    check(!/read_discounts|write_discounts|student_discount|instagram_feed/i.test(contents), `Another App business scope is forbidden: ${relativePath}`);
+    check(!/student_discount|instagram_feed/i.test(contents), `Another App business scope is forbidden: ${relativePath}`);
   }
   check(!/(client_secret|access_token|refresh_token)\s*=\s*["'][^"']+["']/i.test(contents), `Committed secret-like value is forbidden: ${relativePath}`);
 }

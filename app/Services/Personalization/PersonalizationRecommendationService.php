@@ -100,8 +100,15 @@ class PersonalizationRecommendationService
             ->map(fn ($id): string => (string) $id)
             ->values()
             ->all();
+        $minimumQuantities = $strategy->productOverrides
+            ->whereIn('type', [PersonalizationProductOverrideType::Manual, PersonalizationProductOverrideType::Pinned])
+            ->sortBy('position')
+            ->groupBy(fn ($override): string => (string) $override->shopify_product_id)
+            ->map(fn (Collection $overrides): int => max(1, (int) ($overrides->firstWhere('type', PersonalizationProductOverrideType::Pinned)?->minimum_quantity
+                ?? $overrides->first()?->minimum_quantity
+                ?? 1)));
         $excludeCart = $this->booleanRule($strategy, PersonalizationRuleType::ExcludeCartProducts, true);
-        $excludePurchased = $this->booleanRule($strategy, PersonalizationRuleType::ExcludePurchasedProducts, false);
+        $excludePurchased = $this->booleanRule($strategy, PersonalizationRuleType::ExcludePurchasedProducts, true);
         $excluded = array_values(array_unique([
             ...$excluded,
             ...($excludeCart ? $normalizedContext['cart_product_ids'] : []),
@@ -133,6 +140,7 @@ class PersonalizationRecommendationService
                 'rank' => count($items) + 1,
                 'reason_code' => $isPinned ? 'pinned' : $strategy->algorithm->value,
                 'score' => $isPinned ? null : ($ranked[$shopifyProductId] ?? null),
+                'minimum_purchase_quantity' => $minimumQuantities->get($shopifyProductId, 1),
             ];
             if (count($items) >= $strategy->item_limit) {
                 break;
@@ -394,6 +402,7 @@ class PersonalizationRecommendationService
         $excludeTags = [];
         $excludeCollections = [];
         $excludeVendors = [];
+        $excludePurchaseOptions = [];
         $minimumInventory = null;
         foreach ($strategy->rules->where('enabled', true) as $rule) {
             if ($rule->type === PersonalizationRuleType::IncludeTags) {
@@ -410,6 +419,9 @@ class PersonalizationRecommendationService
             }
             if ($rule->type === PersonalizationRuleType::ExcludeVendors) {
                 $excludeVendors = array_map('strval', $rule->value['vendors'] ?? []);
+            }
+            if ($rule->type === PersonalizationRuleType::ExcludePurchaseOptions) {
+                $excludePurchaseOptions = array_map('strval', $rule->value['purchase_options'] ?? []);
             }
         }
         if ($includeTags !== []) {
@@ -431,6 +443,21 @@ class PersonalizationRecommendationService
         }
         if ($excludeVendors !== []) {
             $candidates = $candidates->reject(fn (array $product): bool => in_array((string) ($product['vendor'] ?? ''), $excludeVendors, true));
+        }
+        if ($excludePurchaseOptions !== []) {
+            $candidates = $candidates->reject(function (array $product) use ($excludePurchaseOptions): bool {
+                foreach ($product['variants'] ?? [] as $variant) {
+                    foreach ($variant['selected_options'] ?? [] as $option) {
+                        $name = trim((string) ($option['name'] ?? ''));
+                        $value = trim((string) ($option['value'] ?? ''));
+                        if ($name !== '' && $value !== '' && in_array("{$name}: {$value}", $excludePurchaseOptions, true)) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            });
         }
         if ($minimumInventory !== null) {
             $available = $this->inventoryByProduct($store, $candidates->pluck('id')->all());

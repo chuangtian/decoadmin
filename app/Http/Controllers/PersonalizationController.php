@@ -43,7 +43,7 @@ class PersonalizationController extends Controller
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
         }
-        $products = $this->catalog->candidates($store, ['in_stock_only' => false, 'limit' => 100]);
+        $products = $this->catalog->pickerProducts($store);
         $collections = $this->catalog->collections($store);
         $canViewAnalytics = $request->user()->hasPermission('personalization.analytics.read', $organization, $store);
         try {
@@ -60,7 +60,6 @@ class PersonalizationController extends Controller
         }
         try {
             $strategyRows = $this->strategyWorkflow->listing($store, $request->user());
-            $recycledStrategies = $this->strategyWorkflow->listing($store, $request->user(), null, true);
             $globalSettings = $this->globalSettings->configuration($store, $request->user());
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
@@ -89,10 +88,10 @@ class PersonalizationController extends Controller
                     'shopify_product_id' => (string) $override->shopify_product_id,
                     'type' => $override->type->value,
                     'position' => $override->position,
+                    'minimum_quantity' => $override->minimum_quantity,
                 ])->values(),
             ])->values(),
             'strategyRows' => $strategyRows,
-            'recycledStrategies' => $recycledStrategies,
             'globalSettings' => $globalSettings,
             'components' => $configuration['components']->map(fn ($component): array => [
                 'uuid' => $component->uuid,
@@ -135,9 +134,13 @@ class PersonalizationController extends Controller
                 'shopify_gid' => 'gid://shopify/Product/'.$product['shopify_product_id'],
                 'title' => $product['title'],
                 'handle' => $product['handle'],
+                'vendor' => $product['vendor'],
                 'image_url' => data_get($product, 'storefront.image.url'),
                 'price' => data_get($product, 'price.minimum'),
                 'currency' => data_get($product, 'price.currency'),
+                'status' => $product['status'],
+                'available_for_sale' => $product['available_for_sale'],
+                'availability_label' => $product['availability_label'],
                 'tags' => $product['tags'],
                 'collection_ids' => collect($product['collections'] ?? [])->pluck('shopify_collection_id')->values(),
                 'variants' => collect($product['variants'] ?? [])->map(fn (array $variant): array => [

@@ -796,6 +796,7 @@ class PersonalizationConfigurationService
             PersonalizationRuleType::IncludeCollections,
             PersonalizationRuleType::ExcludeCollections => ['collection_ids' => $this->resourceIds($value)],
             PersonalizationRuleType::ExcludeVendors => ['vendors' => $this->tags($value)],
+            PersonalizationRuleType::ExcludePurchaseOptions => ['purchase_options' => $this->tags($value)],
             PersonalizationRuleType::ExcludeCartProducts,
             PersonalizationRuleType::ExcludePurchasedProducts => ['enabled' => (bool) $value],
         };

@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\User;
 use App\Models\WebhookEvent;
 use App\Services\AppCenter\AppConfigurationCatalog;
+use App\Services\Personalization\PersonalizationDiscountService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -548,6 +549,47 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         $this->assertSame('待配置', $presented['configuration_status_label']);
         $this->assertStringContainsString('/shopify-app/personalization', $presented['management_url']);
         $this->assertSame('管理个性化推荐', $presented['action_label']);
+    }
+
+    public function test_personalization_discount_listing_and_creation_use_only_the_app_owned_store_token(): void
+    {
+        config(['personalization.required_scopes' => [
+            'write_app_proxy', 'write_pixels', 'read_customer_events', 'read_discounts', 'write_discounts',
+        ]]);
+        [$actor, , $store] = $this->context('store-admin');
+        $this->activeInstallation($store, $this->connection($store));
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push(['data' => ['discountNodes' => ['nodes' => [[
+                'id' => 'gid://shopify/DiscountCodeNode/1',
+                'discount' => [
+                    '__typename' => 'DiscountCodeBasic',
+                    'title' => 'Existing 10%',
+                    'summary' => '10% off products',
+                    'status' => 'ACTIVE',
+                    'codes' => ['nodes' => [['code' => 'EXISTING10']]],
+                ],
+            ]]]]])
+            ->push(['data' => ['discountCodeBasicCreate' => [
+                'codeDiscountNode' => ['id' => 'gid://shopify/DiscountCodeNode/2'],
+                'userErrors' => [],
+            ]]]);
+
+        $service = app(PersonalizationDiscountService::class);
+        $this->assertSame('Existing 10%', $service->listing($store, $actor)[0]['title']);
+        $created = $service->create($store, $actor, [
+            'title' => '九折优惠',
+            'code' => 'DECO10',
+            'percentage' => 10,
+            'product_ids' => ['123'],
+        ]);
+
+        $this->assertSame('gid://shopify/DiscountCodeNode/2', $created['id']);
+        Http::assertSent(fn ($request): bool => $request->hasHeader('X-Shopify-Access-Token', 'personalization-app-token')
+            && $request->url() === "https://{$store->shopify_domain}/admin/api/2026-07/graphql.json");
+        $this->assertDatabaseHas('audit_logs', [
+            'store_id' => $store->id,
+            'action' => 'personalization_discount_created',
+        ]);
     }
 
     /** @return array{User, Organization, Store} */

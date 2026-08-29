@@ -54,7 +54,7 @@ npm run deploy:test
 
 - 显示名称：`Deco 个性化推荐测试`；handle：`deco-personalization-test`。
 - Application URL：`https://testadmin.decomkt.com/shopify-app/personalization`。
-- 最小 scopes 仅为 `write_app_proxy`、`write_pixels`、`read_customer_events`。
+- 最小 scopes 为 `write_app_proxy`、`write_pixels`、`read_customer_events`、`read_discounts`、`write_discounts`。其中折扣读取、创建和编辑只服务于已确认的推荐优惠功能。
 - App Proxy：`/apps/deco-personalization-test` 指向 Test 后端 Personalization 代理入口。
 - App-specific Webhook：`app/uninstalled`、`app/scopes_update`。
 - 合规 Webhook：`customers/data_request`、`customers/redact`、`shop/redact`。

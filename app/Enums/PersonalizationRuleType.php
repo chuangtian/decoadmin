@@ -13,6 +13,7 @@ enum PersonalizationRuleType: string
     case IncludeCollections = 'include_collections';
     case ExcludeCollections = 'exclude_collections';
     case ExcludeVendors = 'exclude_vendors';
+    case ExcludePurchaseOptions = 'exclude_purchase_options';
     case ExcludeCartProducts = 'exclude_cart_products';
     case ExcludePurchasedProducts = 'exclude_purchased_products';
 }

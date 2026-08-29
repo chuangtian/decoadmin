@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_id', 'store_id', 'strategy_id', 'product_id', 'shopify_product_id', 'type', 'position'])]
+#[Fillable(['organization_id', 'store_id', 'strategy_id', 'product_id', 'shopify_product_id', 'type', 'position', 'minimum_quantity'])]
 class PersonalizationStrategyProductOverride extends Model
 {
     public function strategy(): BelongsTo
@@ -30,6 +30,7 @@ class PersonalizationStrategyProductOverride extends Model
         return [
             'type' => PersonalizationProductOverrideType::class,
             'position' => 'integer',
+            'minimum_quantity' => 'integer',
         ];
     }
 }
