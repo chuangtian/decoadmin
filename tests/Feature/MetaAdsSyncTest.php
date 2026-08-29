@@ -95,8 +95,13 @@ class MetaAdsSyncTest extends TestCase
         $this->assertSame('act_100', MetaAdInsight::query()->where('level', 'account')->value('account_external_id'));
         $this->assertEquals(3, MetaAdInsight::query()->where('level', 'account')->value('purchases'));
         $this->assertEquals(150, MetaAdInsight::query()->where('level', 'account')->value('purchase_value'));
-        $this->assertSame([], MetaAdInsight::query()->where('level', 'account')->sole()->raw_payload);
-        $this->assertNull(MetaAdInsight::query()->where('level', 'account')->value('actions'));
+        $this->assertDatabaseHas('meta_ad_insight_entities', [
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'level' => 'account',
+            'entity_id' => '100',
+            'account_name' => 'Meta Account',
+        ]);
 
         $job = SyncJob::query()->sole();
         $this->assertSame('completed', $job->status);
@@ -555,7 +560,7 @@ class MetaAdsSyncTest extends TestCase
             ->count());
     }
 
-    public function test_meta_insight_optimizer_removes_hourly_rows_and_redundant_json(): void
+    public function test_meta_insight_optimizer_removes_legacy_hourly_rows_after_schema_compaction(): void
     {
         $store = $this->configuredStore(
             'Optimize Org',
@@ -579,7 +584,6 @@ class MetaAdsSyncTest extends TestCase
             'meta_ad_account_id' => $account->id,
             'level' => 'account',
             'account_external_id' => 'act_optimize',
-            'account_name' => 'Optimize Account',
             'date_start' => '2026-08-22',
             'date_stop' => '2026-08-22',
             'synced_at' => now(),
@@ -588,17 +592,11 @@ class MetaAdsSyncTest extends TestCase
             ...$base,
             'entity_id' => 'act_optimize',
             'granularity' => 'day',
-            'raw_payload' => ['actions' => [['action_type' => 'purchase', 'value' => '1']]],
-            'actions' => [['action_type' => 'purchase', 'value' => '1']],
         ]);
         MetaAdInsight::query()->create([
             ...$base,
             'entity_id' => 'act_optimize_hour',
             'granularity' => 'hour',
-            'hourly_range' => '04:00:00 - 04:59:59',
-            'hour_start_at' => '2026-08-22 11:00:00',
-            'hour_end_at' => '2026-08-22 11:59:59',
-            'raw_payload' => ['hourly' => true],
         ]);
 
         $this->artisan('meta-ads:optimize-insights', [
@@ -610,12 +608,10 @@ class MetaAdsSyncTest extends TestCase
         $result = app(MetaAdsInsightOptimizationService::class)->optimize($store->id, 1000);
 
         $this->assertSame(1, $result['hourly_deleted']);
-        $this->assertSame(1, $result['json_sanitized']);
+        $this->assertSame(0, $result['json_sanitized']);
         $this->assertSame(1, $result['remaining_rows']);
         $retained = MetaAdInsight::query()->sole();
         $this->assertSame('day', $retained->granularity);
-        $this->assertSame([], $retained->raw_payload);
-        $this->assertNull($retained->actions);
         $this->assertSame(0, app(MetaAdsInsightOptimizationService::class)->estimate($store->id)['redundant_json_rows']);
     }
 

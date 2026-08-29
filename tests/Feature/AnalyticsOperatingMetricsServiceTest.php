@@ -125,9 +125,8 @@ class AnalyticsOperatingMetricsServiceTest extends TestCase
         MetaAdInsight::query()->create([
             'organization_id' => $organizationId, 'store_id' => $store->id, 'meta_ad_account_id' => $account->id,
             'level' => 'account', 'entity_id' => $account->meta_account_id, 'account_external_id' => $account->meta_account_id,
-            'account_name' => 'Facebook', 'date_start' => $date, 'date_stop' => $date,
-            'granularity' => 'day', 'hourly_range' => '', 'spend' => $spend, 'purchase_value' => $spend * 2,
-            'raw_payload' => [], 'synced_at' => now(),
+            'date_start' => $date, 'date_stop' => $date, 'granularity' => 'day',
+            'spend' => $spend, 'purchase_value' => $spend * 2, 'synced_at' => now(),
         ]);
     }
 

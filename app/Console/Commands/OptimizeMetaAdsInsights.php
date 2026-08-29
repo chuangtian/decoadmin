@@ -13,7 +13,7 @@ class OptimizeMetaAdsInsights extends Command
         {--chunk=10000 : 分批处理使用的 ID 区间大小}
         {--dry-run : 只统计，不删除或更新}';
 
-    protected $description = '删除未使用的 Meta 小时级洞察并清空重复 JSON';
+    protected $description = '验证并清理旧版小时级 Meta Ads 洞察记录';
 
     public function handle(MetaAdsInsightOptimizationService $optimizer): int
     {

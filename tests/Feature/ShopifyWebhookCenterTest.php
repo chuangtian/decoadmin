@@ -145,6 +145,32 @@ class ShopifyWebhookCenterTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_webhook_list_query_does_not_load_encrypted_payload_columns(): void
+    {
+        [$user, $organization, $store, $app, $connection] = $this->installedAppContext('organization-admin');
+        $this->event($organization, $store, $app, $connection);
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            $sql = strtolower($query->sql);
+            if (str_contains($sql, 'webhook_events')) {
+                $queries[] = $sql;
+            }
+        });
+
+        $this->actingAs($user)
+            ->withSession(['current_organization_id' => $organization->id, 'current_store_id' => $store->id])
+            ->get(route('webhooks.index'))
+            ->assertOk();
+
+        $listQuery = collect($queries)->first(
+            fn (string $sql): bool => str_contains($sql, 'order by') && str_contains($sql, 'received_at'),
+        );
+        $this->assertNotNull($listQuery);
+        $this->assertStringNotContainsString('payload_encrypted', $listQuery);
+        $this->assertStringNotContainsString('"payload"', $listQuery);
+        $this->assertStringNotContainsString('"headers"', $listQuery);
+    }
+
     public function test_viewer_cannot_access_webhook_center(): void
     {
         [$viewer, $organization, $store, $app, $connection] = $this->installedAppContext('viewer');
