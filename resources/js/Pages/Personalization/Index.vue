@@ -60,6 +60,10 @@ const props = defineProps<{
     };
 }>();
 
+// Inertia props and Vue refs are reactive proxies. Browser structuredClone()
+// rejects proxies, while this workspace payload is deliberately JSON-only.
+const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/personalization`;
 const activeTab = ref<TopTab>('overview');
 const tabs: Array<{ value: TopTab; label: string; hint: string }> = [
@@ -123,7 +127,7 @@ const editorSteps: Array<{ value: EditorStep; label: string }> = [
 function normalizeEditorPayload(payload: { strategy: StrategyRow; draft: StrategyDraft; versions: VersionRow[] }) {
     ignoreDraftWatch = true;
     editorStrategy.value = payload.strategy;
-    editorDraft.value = structuredClone(payload.draft);
+    editorDraft.value = cloneJson(payload.draft);
     versions.value = payload.versions;
     saveState.value = 'saved';
     savedAt.value = payload.draft.updated_at ?? '';
@@ -155,11 +159,11 @@ async function saveDraft() {
     if (pendingSave) return pendingSave;
     if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
     saveState.value = 'saving';
-    const draftSnapshot = structuredClone(editorDraft.value);
+    const draftSnapshot = cloneJson(editorDraft.value);
     pendingSave = (async () => {
         try {
             const payload = await requestJson<{ draft: StrategyDraft; saved_at: string }>(`${baseUrl}/strategy-workflow/${editorStrategy.value!.uuid}/draft`, { method: 'PATCH', body: JSON.stringify({ idempotency_key: requestId(), lock_version: draftSnapshot.lock_version, draft: draftSnapshot }) });
-            ignoreDraftWatch = true; editorDraft.value = structuredClone(payload.draft); saveState.value = 'saved'; savedAt.value = payload.saved_at;
+            ignoreDraftWatch = true; editorDraft.value = cloneJson(payload.draft); saveState.value = 'saved'; savedAt.value = payload.saved_at;
             const row = strategyRows.value.find(item => item.uuid === editorStrategy.value?.uuid);
             if (row) { row.name = payload.draft.name; row.algorithm = payload.draft.algorithm; row.updated_at = payload.saved_at; row.has_draft = true; }
             queueMicrotask(() => { ignoreDraftWatch = false; });
@@ -272,7 +276,7 @@ async function restoreStrategy(strategy: StrategyRow) {
 }
 
 const showGlobalSettings = ref(false);
-const globalForm = reactive(structuredClone(props.globalSettings));
+const globalForm = reactive(cloneJson(props.globalSettings));
 const globalSaveState = ref<SaveState>('idle');
 const globalError = ref('');
 async function saveGlobalSettings() {
