@@ -91,5 +91,6 @@ npm run deploy:test
 - 左侧信任信息在真实 Test Checkout 中成功读取后台配置并显示 `Trusted seller`、`Free US Shipping over $100`、`2-year warranty`；桌面与 375px 移动模拟均不阻塞原生结账。
 - Session Token 使用官方文档定义的签名、`aud`、`dest` 与生命周期字段完成验证；Shopify 附加但未记录在 Checkout Token 契约中的 `iss` 不作为授权输入。
 - 递进推荐的 Collection、最大数量 `3`、顺序、购物车去重、可售变体选择、快速重复点击保护、五类分析事件和耗尽隐藏已通过 App 自动化测试；Test 后端签名接口返回启用配置、3 个信任项与 Collection GID。
-- 外部递进加购 E2E 暂未完成：该开发店的 Online Store channel 被平台锁定，Storefront API 返回 `Online Store channel is locked`，Checkout 的预取 Storefront private token 请求返回 `401`。扩展按既定失败降级保持隐藏，原生结账继续可用。
-- 不得为绕过此限制修改 Checkout DOM、硬编码候选、改用不准确的默认 Market 价格，或擅自转移商店/选择付费方案。后续仅在 Shopify Storefront API 可用的获准 Test 环境重跑“显示候选 → 连续加购 → 第 3 项后隐藏”验收。
+- 远程第 6 版状态为 active，递进推荐扩展的 `api_access=true` 已生效；真实 Checkout 中配置接口与 Storefront GraphQL 均返回 `200`。早期出现的 private token `401` 不是当前推荐请求的阻塞原因。
+- 外部递进加购 E2E 暂未完成的真实原因是测试数据：所选 `Product Recomendations` Collection 的 7 个商品当前没有任何 `availableForSale=true` 变体，其中 3 个商品还是草稿。扩展按既定规则全部跳过并隐藏，原生结账继续可用。
+- 不得为绕过候选校验修改 Checkout DOM、硬编码候选或显示不准确的 Market 价格。获得明确的 Test 库存写入授权后，只在 `macfox-test-app` 临时补齐 3 个正式候选的测试库存，重跑“显示候选 → 连续加购 → 第 3 项后隐藏”，随后恢复原测试库存。
