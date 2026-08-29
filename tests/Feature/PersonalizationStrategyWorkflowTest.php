@@ -259,6 +259,32 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         $this->assertSame('enabled', $published['strategy']['status']);
     }
 
+    public function test_legacy_live_strategy_status_is_backfilled_without_fabricating_a_version(): void
+    {
+        [$actor, $organization, $store] = $this->context();
+        $strategy = PersonalizationRecommendationStrategy::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'name' => 'Legacy live strategy',
+            'algorithm' => 'manual',
+            'enabled' => true,
+            'status' => 'draft',
+            'item_limit' => 4,
+            'created_by' => $actor->id,
+            'updated_by' => $actor->id,
+        ]);
+
+        $migration = require database_path('migrations/2026_08_29_000210_backfill_personalization_strategy_status.php');
+        $migration->up();
+
+        $this->assertSame('enabled', $strategy->fresh()->status->value);
+        $this->assertNull($strategy->fresh()->published_version_id);
+        $this->assertDatabaseCount('personalization_strategy_versions', 0);
+
+        $migration->down();
+        $this->assertSame('draft', $strategy->fresh()->status->value);
+    }
+
     private function publishedStrategy(PersonalizationStrategyWorkflowService $service, Store $store, User $actor, string $name, string $productId, string $placement): PersonalizationRecommendationStrategy
     {
         $created = $service->createDraft($store, $actor, (string) Str::uuid());
