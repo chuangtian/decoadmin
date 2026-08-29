@@ -11,8 +11,6 @@ const activeTab = ref('overview');
 const tabs = [
     { id: 'overview', name: '概览' },
     { id: 'installations', name: '安装记录' },
-    { id: 'configuration', name: '应用配置' },
-    { id: 'logs', name: '应用日志' },
 ];
 const currentApp = computed(() => props.app.data);
 const { formatDateTime: currentStoreDateTime } = useStoreDateTime();
@@ -48,9 +46,9 @@ const currentInstallationStatus = computed(() => currentApp.value.current_store_
 
 <template>
     <Head :title="currentApp.name" />
-    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '应用列表', href: '/app-center' }, { label: currentApp.name }]">
+    <AppLayout :breadcrumbs="[{ label: '应用中心', href: '/app-center' }, { label: currentApp.name }]">
         <div class="mx-auto max-w-6xl">
-            <Link href="/app-center" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回应用列表</Link>
+            <Link href="/app-center" class="text-sm font-semibold text-slate-500 transition hover:text-slate-900">← 返回应用中心</Link>
             <div class="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div class="flex min-w-0 items-center gap-4"><span class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-xl font-bold text-emerald-700">{{ currentApp.name.charAt(0).toUpperCase() }}</span><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h2 class="truncate text-3xl font-semibold tracking-tight text-slate-950">{{ currentApp.name }}</h2><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="appStatusClass(currentApp.status)">{{ appStatusLabel(currentApp.status) }}</span></div><p class="mt-1 truncate font-mono text-xs text-slate-500">{{ currentApp.slug }}</p></div></div>
                 <div class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-500 shadow-sm"><span>当前店铺</span><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="installationStatusClass(currentInstallationStatus)">{{ installationStatusLabel(currentInstallationStatus) }}</span></div>
@@ -77,8 +75,6 @@ const currentInstallationStatus = computed(() => currentApp.value.current_store_
                 <EmptyState v-else class="border-0 shadow-none" title="当前店铺暂无安装记录" description="当前店铺尚未安装此应用。" icon="installations" />
             </section>
 
-            <EmptyState v-else-if="activeTab === 'configuration'" class="mt-6" title="按店铺管理应用配置" description="应用配置与店铺安装绑定；先选择目标店铺，再进入该应用提供的独立工作台。" icon="settings"><Link href="/app-configurations" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">前往应用配置</Link></EmptyState>
-            <EmptyState v-else class="mt-6" title="查看应用日志" description="统一日志中心会按当前账号的组织和店铺权限隔离应用安装、配置与业务操作记录。" icon="audit"><Link href="/app-logs" class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">前往应用日志</Link></EmptyState>
         </div>
     </AppLayout>
 </template>

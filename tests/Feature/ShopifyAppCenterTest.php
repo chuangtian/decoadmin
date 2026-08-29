@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\AppCenter\ApplicationCenterNavigationService;
 use App\Support\CurrentStore;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -144,6 +145,10 @@ class ShopifyAppCenterTest extends TestCase
                 ->has('apps.data', 1)
                 ->where('apps.data.0.id', $platformApp->id)
                 ->where('apps.data.0.current_store_installation.status', 'active')
+                ->has('applicationNavigation', 1)
+                ->where('applicationNavigation.0.app_id', $platformApp->id)
+                ->where('applicationNavigation.0.name', 'Shopify Commerce Hub')
+                ->where('applicationNavigation.0.route', "/app-center/{$platformApp->id}")
                 ->missing('apps.data.0.installations_count')
                 ->missing('apps.data.0.installation_records_count'));
 
@@ -156,16 +161,68 @@ class ShopifyAppCenterTest extends TestCase
             ->assertOk();
     }
 
-    public function test_application_center_sidebar_only_contains_the_merged_application_entries(): void
+    public function test_application_center_sidebar_uses_application_names_instead_of_generic_entries(): void
     {
         $menu = file_get_contents(resource_path('js/config/menu.ts'));
 
         $this->assertIsString($menu);
-        $this->assertStringContainsString("{ name: '应用列表', route: '/app-center'", $menu);
-        $this->assertStringContainsString("{ name: '应用配置', route: '/app-configurations'", $menu);
-        $this->assertStringContainsString("{ name: '应用日志', route: '/app-logs'", $menu);
+        $this->assertStringContainsString("dynamicChildren: 'applications'", $menu);
+        $this->assertStringNotContainsString("name: '应用列表'", $menu);
+        $this->assertStringNotContainsString("name: '应用配置'", $menu);
+        $this->assertStringNotContainsString("name: '应用日志'", $menu);
+        $this->assertStringNotContainsString("name: '学生优惠'", $menu);
         $this->assertStringNotContainsString("name: '安装管理'", $menu);
         $this->assertStringNotContainsString("route: '/app-installations'", $menu);
+    }
+
+    public function test_application_navigation_uses_dedicated_workspaces_and_current_store_scope(): void
+    {
+        [$user, $organization] = $this->userWithRole('organization-admin');
+        $store = $this->store($organization, 'Macfox', 'macfox.myshopify.com');
+        $otherStore = $this->store($organization, 'Macfox DE', 'macfox-de.myshopify.com');
+        $studentDiscount = $this->app($organization, 'Deco-学生优惠-test', 'deco-student-discount-test');
+        $instagram = $this->app($organization, 'Deco-Instagram-内容-test', 'deco-instagram-feed-test');
+        $personalization = $this->app($organization, 'Deco 个性化推荐测试', 'deco-personalization-test');
+        $generic = $this->app($organization, 'Commerce Hub', 'commerce-hub');
+        $otherStoreApp = $this->app($organization, 'Other Store App', 'other-store-app');
+        $studentInstallation = $this->installation($studentDiscount, $store, $user);
+
+        foreach ([$instagram, $personalization, $generic] as $app) {
+            AppInstallation::query()->create([
+                'app_id' => $app->id,
+                'store_id' => $store->id,
+                'shopify_connection_id' => $studentInstallation->shopify_connection_id,
+                'installed_by' => $user->id,
+                'status' => 'active',
+                'granted_scopes' => ['read_products'],
+                'installed_at' => now(),
+            ]);
+        }
+        $this->installation($otherStoreApp, $otherStore, $user);
+
+        $navigation = collect(app(ApplicationCenterNavigationService::class)->forStore(
+            $organization,
+            $store,
+            ['apps.view', 'student_discount.claim.read', 'instagram_feed.view', 'personalization.view'],
+        ))->keyBy('app_id');
+
+        $this->assertCount(4, $navigation);
+        $this->assertSame('学生优惠', $navigation[$studentDiscount->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/student-discounts", $navigation[$studentDiscount->id]['route']);
+        $this->assertSame('Instagram 内容', $navigation[$instagram->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/instagram-feed", $navigation[$instagram->id]['route']);
+        $this->assertSame('个性化推荐', $navigation[$personalization->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/personalization", $navigation[$personalization->id]['route']);
+        $this->assertSame("/app-center/{$generic->id}", $navigation[$generic->id]['route']);
+        $this->assertFalse($navigation->has($otherStoreApp->id));
+
+        $studentOnly = app(ApplicationCenterNavigationService::class)->forStore(
+            $organization,
+            $store,
+            ['student_discount.claim.read'],
+        );
+
+        $this->assertSame([$studentDiscount->id], collect($studentOnly)->pluck('app_id')->all());
     }
 
     public function test_precreated_store_shows_configured_app_as_not_installed(): void
