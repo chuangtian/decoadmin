@@ -68,6 +68,10 @@ return new class extends Migration
         });
 
         Schema::table('personalization_daily_metrics', function (Blueprint $table): void {
+            // MySQL may use the old composite unique index as the supporting
+            // index for the store_id foreign key. Give that foreign key a
+            // dedicated index before replacing the unique dimensions.
+            $table->index('store_id', 'personalization_daily_metric_store_fk_support_index');
             $table->dropUnique('personalization_daily_metric_dimension_unique');
             $table->string('strategy_version_key', 64)->default('')->after('strategy_key');
             $table->unique(
@@ -79,14 +83,18 @@ return new class extends Migration
 
         Schema::create('personalization_strategy_idempotencies', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('organization_id')->constrained(indexName: 'pers_strategy_idempotencies_org_fk')->cascadeOnDelete();
+            $table->foreignId('store_id')->constrained(indexName: 'pers_strategy_idempotencies_store_fk')->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained(indexName: 'pers_strategy_idempotencies_user_fk')->cascadeOnDelete();
             $table->string('operation', 40);
             $table->uuid('idempotency_key');
             $table->char('payload_hash', 64);
-            $table->foreignId('strategy_id')->nullable()->constrained('personalization_recommendation_strategies')->cascadeOnDelete();
-            $table->foreignId('strategy_version_id')->nullable()->constrained('personalization_strategy_versions')->cascadeOnDelete();
+            $table->foreignId('strategy_id')->nullable()
+                ->constrained('personalization_recommendation_strategies', indexName: 'pers_strategy_idempotencies_strategy_fk')
+                ->cascadeOnDelete();
+            $table->foreignId('strategy_version_id')->nullable()
+                ->constrained('personalization_strategy_versions', indexName: 'pers_strategy_idempotencies_version_fk')
+                ->cascadeOnDelete();
             $table->timestamps();
 
             $table->unique(['store_id', 'user_id', 'operation', 'idempotency_key'], 'personalization_strategy_idempotency_unique');
@@ -120,6 +128,7 @@ return new class extends Migration
                 ['store_id', 'metric_date', 'placement', 'component_key', 'strategy_key', 'currency'],
                 'personalization_daily_metric_dimension_unique',
             );
+            $table->dropIndex('personalization_daily_metric_store_fk_support_index');
         });
         Schema::table('personalization_attributions', function (Blueprint $table): void {
             $table->dropIndex('personalization_attribution_version_time_index');
