@@ -29,6 +29,12 @@ uri = "https://testadmin.decomkt.com/api/shopify-app/personalization/webhooks"
 scopes = "write_app_proxy,write_pixels,read_customer_events"
 use_legacy_install_flow = false
 
+[shop.metafields.deco_personalization.checkout_configuration_url]
+name = "Deco Checkout configuration URL"
+description = "Test backend endpoint used by Deco Checkout UI extensions."
+type = "single_line_text_field"
+access.storefront = "public_read"
+
 [auth]
 redirect_urls = [ "https://testadmin.decomkt.com/shopify-app/personalization" ]
 

@@ -37,7 +37,7 @@ Official references:
 
 - Dynamic recommendations use the Checkout UI Extension `network_access` capability.
 - The recommendation block uses `api_access` and `shopify.query()` to resolve each configured variant against the buyer's active Market, publication and currency context before rendering or adding it.
-- The configuration endpoint is read from the current Shop app-owned metafield `$app:deco_personalization.checkout_configuration_url`; Checkout UI extensions cannot read AppInstallation-owned app-data metafields. The extension does not hardcode a Test or Production origin.
+- The configuration endpoint is read from the declarative Shop app-owned metafield `$app:deco_personalization.checkout_configuration_url`; Checkout UI extensions cannot read AppInstallation-owned app-data metafields. Its definition is deployed from the environment-specific Shopify App TOML with Storefront read access, while the value is written during App Home bootstrap. The extension does not hardcode a Test or Production origin.
 - Every backend call obtains a fresh Shopify Session Token and sends it as a bearer token.
 - DecoAdmin validates the signed token audience, destination, lifetime, and signature, resolves the shop from signed claims, and then resolves the trusted Organization and Store server-side.
 - The request never supplies or stores customer email, name, phone, address, payment data, raw Session Token, or arbitrary Organization/Store identifiers.
