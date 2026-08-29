@@ -98,11 +98,16 @@ function Recommendations() {
   const canAdd = shopify.instructions.value.lines.canAddCartLine;
   const current = useMemo(() => {
     if (!canAdd || !configuration) return null;
+    if (configuration.maximum_recommendations !== null
+      && dismissed.size >= configuration.maximum_recommendations) return null;
     return selectNextCandidate(candidates, lines, dismissed);
   }, [canAdd, candidates, configuration, dismissed, lines]);
 
+  const maximumReached = Boolean(configuration?.maximum_recommendations !== null
+    && dismissed.size >= configuration.maximum_recommendations);
+
   useEffect(() => {
-    if (!loaded || !configuration || current || !nextCursor || pageRequestRef.current || paginationFailed) return;
+    if (!loaded || !configuration || current || maximumReached || !nextCursor || pageRequestRef.current || paginationFailed) return;
     const generation = paginationGenerationRef.current;
     pageRequestRef.current = true;
     setLoadingPage(true);
@@ -121,7 +126,7 @@ function Recommendations() {
         pageRequestRef.current = false;
         setLoadingPage(false);
       });
-  }, [configuration, current, loaded, nextCursor, paginationFailed, scannedCount]);
+  }, [configuration, current, loaded, maximumReached, nextCursor, paginationFailed, scannedCount]);
 
   useEffect(() => {
     if (!configuration || !current || impressionRef.current === current.variant_id) return;
@@ -131,11 +136,11 @@ function Recommendations() {
   }, [configuration, current]);
 
   useEffect(() => {
-    if (!loaded || !configuration || current || nextCursor || loadingPage || paginationFailed || completionRef.current) return;
+    if (!loaded || !configuration || current || (!maximumReached && nextCursor) || loadingPage || paginationFailed || completionRef.current) return;
     completionRef.current = true;
     const offered = candidates.filter((candidate) => shown.has(candidate.variant_id));
     publish(EVENTS.sequenceCompleted, eventPayload(configuration, offered));
-  }, [candidates, configuration, current, loaded, loadingPage, nextCursor, paginationFailed, shown]);
+  }, [candidates, configuration, current, loaded, loadingPage, maximumReached, nextCursor, paginationFailed, shown]);
 
   async function addCurrent() {
     if (!configuration || !current || busyRef.current || !canAdd) return;
@@ -161,7 +166,7 @@ function Recommendations() {
     }
   }
 
-  const awaitingNext = Boolean(configuration && loaded && !current && nextCursor && !paginationFailed);
+  const awaitingNext = Boolean(configuration && loaded && !current && !maximumReached && nextCursor && !paginationFailed);
   if (!configuration || (!current && !awaitingNext)) return null;
 
   return (

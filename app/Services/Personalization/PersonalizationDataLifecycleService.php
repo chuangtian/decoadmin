@@ -10,6 +10,7 @@ use App\Models\PersonalizationCheckoutSetting;
 use App\Models\PersonalizationDailyMetric;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventSource;
+use App\Models\PersonalizationGlobalSetting;
 use App\Models\PersonalizationRecommendationComponent;
 use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\PersonalizationSmartCartSetting;
@@ -39,6 +40,7 @@ class PersonalizationDataLifecycleService
             'attributions_deleted' => 0,
             'aggregates_deleted' => 0,
             'audits_deleted' => 0,
+            'strategies_purged' => 0,
         ];
 
         PersonalizationEventSource::query()
@@ -71,6 +73,20 @@ class PersonalizationDataLifecycleService
             ->where('action', 'like', 'personalization_%')
             ->where('created_at', '<', now()->subDays($auditDays))
             ->delete();
+        PersonalizationRecommendationStrategy::onlyTrashed()
+            ->where('status', 'archived')
+            ->whereNotNull('purge_after')
+            ->where('purge_after', '<=', now())
+            ->orderBy('id')
+            ->chunkById(100, function ($strategies) use (&$result): void {
+                foreach ($strategies as $strategy) {
+                    PersonalizationRecommendationComponent::withTrashed()
+                        ->where('strategy_id', $strategy->id)
+                        ->forceDelete();
+                    $strategy->forceDelete();
+                    $result['strategies_purged']++;
+                }
+            });
 
         return $result;
     }
@@ -161,6 +177,7 @@ class PersonalizationDataLifecycleService
             PersonalizationEventSource::query()->where('store_id', $store->id)->delete();
             PersonalizationCheckoutSetting::query()->where('store_id', $store->id)->delete();
             PersonalizationSmartCartSetting::query()->where('store_id', $store->id)->delete();
+            PersonalizationGlobalSetting::query()->where('store_id', $store->id)->delete();
             PersonalizationRecommendationComponent::withTrashed()->where('store_id', $store->id)->forceDelete();
             PersonalizationRecommendationStrategy::withTrashed()->where('store_id', $store->id)->forceDelete();
 

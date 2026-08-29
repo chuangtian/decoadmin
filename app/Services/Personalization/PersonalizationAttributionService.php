@@ -135,6 +135,7 @@ class PersonalizationAttributionService
             'click_event_id' => $click->id,
             'component_id' => $click->component_id,
             'strategy_id' => $click->strategy_id,
+            'strategy_version_id' => $click->strategy_version_id,
             'product_id' => $clickedProduct?->product_id,
             'shopify_product_id' => $clickedProduct?->shopify_product_id,
             'placement' => $click->placement,

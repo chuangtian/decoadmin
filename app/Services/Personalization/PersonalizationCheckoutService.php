@@ -49,6 +49,7 @@ class PersonalizationCheckoutService
         $component = $this->component($store, $input['component_uuid'] ?? null);
         $trustItems = $this->trustItems($input['trust_items'] ?? []);
         $collection = $this->collection($store, $input['shopify_collection_id'] ?? null);
+        $maximumRecommendations = $this->maximumRecommendations($input['maximum_recommendations'] ?? null);
 
         if ($enabled) {
             if (! $component
@@ -69,7 +70,7 @@ class PersonalizationCheckoutService
             }
         }
 
-        $setting = DB::transaction(function () use ($store, $actor, $enabled, $component, $collection, $trustItems): PersonalizationCheckoutSetting {
+        $setting = DB::transaction(function () use ($store, $actor, $enabled, $component, $collection, $trustItems, $maximumRecommendations): PersonalizationCheckoutSetting {
             $setting = PersonalizationCheckoutSetting::query()->updateOrCreate(
                 ['store_id' => $store->id],
                 [
@@ -87,6 +88,7 @@ class PersonalizationCheckoutService
                         'sequence_mode' => 'sequential',
                         'sequence_exhaustion' => 'collection',
                         'hide_when_exhausted' => true,
+                        'maximum_recommendations' => $maximumRecommendations,
                         'trust_placement' => 'WALLETS1',
                         'recommendation_placement' => 'ORDER_SUMMARY2',
                     ],
@@ -109,6 +111,7 @@ class PersonalizationCheckoutService
                 'component_uuid' => $component?->uuid,
                 'shopify_collection_id' => $collection?->shopify_collection_id,
                 'sequence_exhaustion' => 'collection',
+                'maximum_recommendations' => $maximumRecommendations,
                 'trust_item_count' => count(array_filter($trustItems, fn (array $item): bool => $item['enabled'])),
             ],
         ]);
@@ -170,6 +173,7 @@ class PersonalizationCheckoutService
                 ))),
                 'exhaustion' => 'collection',
                 'hide_when_exhausted' => true,
+                'maximum_recommendations' => data_get($setting->settings, 'maximum_recommendations'),
             ],
         ];
     }
@@ -244,6 +248,18 @@ class PersonalizationCheckoutService
         }
 
         return $collection;
+    }
+
+    private function maximumRecommendations(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value < 1 || (int) $value > 1000) {
+            throw new PersonalizationException('INVALID_CHECKOUT_MAXIMUM', 'Checkout 最大推荐数量必须在 1 到 1000 之间，留空表示遍历整个集合。');
+        }
+
+        return (int) $value;
     }
 
     private function component(Store $store, mixed $uuid): ?PersonalizationRecommendationComponent

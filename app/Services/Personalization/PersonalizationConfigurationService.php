@@ -318,13 +318,16 @@ class PersonalizationConfigurationService
     ): PersonalizationRecommendationComponent {
         $this->authorize($store, $actor, 'personalization.manage');
         $this->assertComponent($store, $component);
-        $component->loadMissing(['strategy.productOverrides', 'style']);
+        $component->loadMissing(['strategy.productOverrides', 'strategy.rules', 'style']);
         $strategy = $component->strategy;
         if (! $strategy) {
             throw new PersonalizationException('STRATEGY_NOT_FOUND', '推荐组件缺少有效策略。', 409);
         }
         if ($strategy->algorithm === PersonalizationAlgorithm::Manual
-            && ! $strategy->productOverrides->contains('type', PersonalizationProductOverrideType::Manual)) {
+            && ! $strategy->productOverrides->contains('type', PersonalizationProductOverrideType::Manual)
+            && ! $strategy->rules->contains(fn ($rule): bool => $rule->enabled
+                && $rule->type === PersonalizationRuleType::IncludeCollections
+                && ($rule->value['collection_ids'] ?? []) !== [])) {
             throw new PersonalizationException(
                 'MANUAL_PRODUCTS_REQUIRED',
                 '手动推荐策略至少需要选择一个手动推荐商品。',
@@ -588,8 +591,9 @@ class PersonalizationConfigurationService
             throw new PersonalizationException('SMART_CART_STRATEGY_REQUIRED', 'Smart Cart 尚未选择有效推荐策略。', 409);
         }
         if ($strategy->algorithm === PersonalizationAlgorithm::Manual
-            && ! $strategy->productOverrides()->where('type', PersonalizationProductOverrideType::Manual->value)->exists()) {
-            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要一个商品。', 409);
+            && ! $strategy->productOverrides()->where('type', PersonalizationProductOverrideType::Manual->value)->exists()
+            && ! $strategy->rules()->where('type', PersonalizationRuleType::IncludeCollections->value)->where('enabled', true)->exists()) {
+            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要一个商品或集合。', 409);
         }
 
         DB::transaction(function () use ($setting, $strategy, $actor): void {
@@ -789,7 +793,33 @@ class PersonalizationConfigurationService
                 'quantity' => $this->integer($value, 0, 1_000_000, 'INVALID_INVENTORY_RULE'),
             ],
             PersonalizationRuleType::InStockOnly => ['enabled' => (bool) $value],
+            PersonalizationRuleType::IncludeCollections,
+            PersonalizationRuleType::ExcludeCollections => ['collection_ids' => $this->resourceIds($value)],
+            PersonalizationRuleType::ExcludeVendors => ['vendors' => $this->tags($value)],
+            PersonalizationRuleType::ExcludeCartProducts,
+            PersonalizationRuleType::ExcludePurchasedProducts => ['enabled' => (bool) $value],
         };
+    }
+
+    /** @return list<string> */
+    private function resourceIds(mixed $value): array
+    {
+        if (! is_array($value) || count($value) > 100) {
+            throw new PersonalizationException('INVALID_COLLECTION_RULE', '集合规则最多包含 100 个集合。');
+        }
+        $ids = [];
+        foreach ($value as $id) {
+            $id = trim((string) $id);
+            if (preg_match('#^gid://shopify/Collection/(\d+)$#', $id, $matches) === 1) {
+                $id = $matches[1];
+            }
+            if (preg_match('/^\d+$/', $id) !== 1) {
+                throw new PersonalizationException('INVALID_COLLECTION_RULE', '集合规则包含无效 Shopify ID。');
+            }
+            $ids[] = $id;
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /** @return list<string> */

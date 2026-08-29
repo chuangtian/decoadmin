@@ -1,715 +1,394 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 type Algorithm = 'manual' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'recently_viewed' | 'similar_products';
 type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart' | 'checkout';
-type ComponentStatus = 'draft' | 'active' | 'disabled';
-type Tab = 'overview' | 'strategies' | 'components' | 'checkout' | 'smart-cart' | 'analytics';
+type StrategyStatus = 'draft' | 'enabled' | 'disabled' | 'configuration_error' | 'archived';
+type TopTab = 'overview' | 'strategies' | 'analytics';
+type EditorStep = 'basic' | 'rules' | 'products' | 'discount' | 'usage' | 'preview';
+type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 
-interface Rule { type: string; value: Record<string, unknown>; enabled: boolean }
-interface ProductOverride { shopify_product_id: string; type: 'manual' | 'pinned' | 'excluded'; position: number }
-interface Strategy {
-    uuid: string;
-    name: string;
-    algorithm: Algorithm;
-    enabled: boolean;
-    item_limit: number;
-    rules: Rule[];
-    product_overrides: ProductOverride[];
+interface Usage { component_uuid: string; name: string; placement: Placement; status: 'configured_not_enabled' | 'live' | 'disabled' | 'configuration_error' }
+interface StrategyRow {
+    uuid: string; name: string; technical_id: string; status: StrategyStatus; algorithm: Algorithm; item_limit: number;
+    used_in: Usage[]; created_at: string | null; updated_at: string | null;
+    published_version: { uuid: string; version_number: number; published_at: string | null } | null;
+    has_draft: boolean; recycle_until: string | null;
 }
-interface Style {
-    layout: 'carousel' | 'grid';
-    desktop_columns: number;
-    mobile_columns: number;
-    show_image: boolean;
-    show_vendor: boolean;
-    show_price: boolean;
-    show_compare_at_price: boolean;
-    show_add_to_cart: boolean;
-    tokens: Record<string, string | number>;
+interface PlacementDraft {
+    placement: Placement; enabled: boolean; component_uuid: string | null; name: string; heading: string; button_label: string;
+    style: { layout: 'carousel' | 'grid'; desktop_columns: number; mobile_columns: number; show_image: boolean; show_vendor: boolean; show_price: boolean; show_compare_at_price: boolean; show_add_to_cart: boolean; tokens: Record<string, never> };
 }
-interface Component {
-    uuid: string;
-    strategy_uuid: string;
-    strategy_name: string;
-    name: string;
-    placement: Placement;
-    status: ComponentStatus;
-    heading: string | null;
-    button_label: string | null;
-    published_at: string | null;
-    style: Style;
+interface StrategyDraft {
+    uuid: string; version_number: number; status: 'draft' | 'published' | 'superseded'; name: string; algorithm: Algorithm; item_limit: number; lock_version: number; updated_at: string | null;
+    configuration: {
+        rules: { include_tags: string[]; exclude_tags: string[]; include_collection_ids: string[]; exclude_collection_ids: string[]; exclude_vendors: string[]; minimum_price: string | null; maximum_price: string | null; minimum_inventory: number | null; in_stock_only: boolean; exclude_cart_products: boolean; exclude_purchased_products: boolean };
+        products: { manual: string[]; pinned: string[]; excluded: string[] };
+        discount: { enabled: boolean; reference: string | null };
+        placements: PlacementDraft[];
+        checkout: { maximum_recommendations: number | null; collection_id: string | null };
+    };
 }
+interface VersionRow { uuid: string; version_number: number; status: string; name: string; created_at: string | null; published_at: string | null; is_current: boolean }
 interface ProductOption {
-    shopify_product_id: string;
-    shopify_gid: string;
-    title: string;
-    handle: string;
-    image_url: string | null;
-    price: string | null;
-    currency: string;
-    tags: string[];
-    collection_ids: string[];
-    variants: Array<{
-        shopify_variant_id: string;
-        shopify_gid: string;
-        title: string;
-        sku: string | null;
-        price: string;
-        available_for_sale: boolean;
-        selected_options: Array<{ name: string; value: string }>;
-    }>;
+    shopify_product_id: string; shopify_gid: string; title: string; handle: string; image_url: string | null; price: string | null; currency: string; tags: string[]; collection_ids: string[];
+    variants: Array<{ shopify_variant_id: string; shopify_gid: string; title: string; sku: string | null; price: string; available_for_sale: boolean }>;
 }
 interface CheckoutTrustItem { key: string; icon: string; title: string; description: string; position: number; enabled: boolean }
-interface PreviewProduct {
-    shopify_product_id: string;
-    title: string;
-    vendor: string | null;
-    price: { currency: string; minimum: string | null; maximum: string | null };
-    storefront: { image: { url: string | null; alt: string | null }; path: string };
-    reason_code: string;
-}
+interface ComponentOption { uuid: string; strategy_uuid: string; strategy_name: string; name: string; placement: Placement; status: string; heading: string | null; button_label: string | null }
 
 const props = defineProps<{
     organization: { id: number; name: string };
     store: { id: number; name: string; shopify_domain: string; currency: string };
-    strategies: Strategy[];
-    components: Component[];
-    smartCart: {
-        uuid: string;
-        strategy_uuid: string | null;
-        enabled: boolean;
-        compatibility_status: string;
-        compatibility_details: { checks?: Array<{ key: string; label: string; passed: boolean; details: string | null }> };
-        compatibility_checked_at: string | null;
-        theme_id: string | null;
-        theme_name: string | null;
-        preview_confirmed_at: string | null;
-        enabled_at: string | null;
-        fallback_mode: string;
-        settings: Record<string, unknown>;
-    } | null;
-    products: ProductOption[];
+    strategyRows: StrategyRow[]; recycledStrategies: StrategyRow[];
+    strategies: Array<{ uuid: string; name: string; algorithm: Algorithm; enabled: boolean }>;
+    components: ComponentOption[]; products: ProductOption[];
     collections: Array<{ shopify_collection_id: string; title: string; handle: string; sort_order: string | null; product_count: number }>;
-    checkout: {
-        uuid: string | null;
-        enabled: boolean;
-        component_uuid: string | null;
-        trust_items: CheckoutTrustItem[];
-        shopify_collection_id: string | null;
-        settings: {
-            candidate_source: string;
-            candidate_order: string;
-            variant_fallback: string;
-            candidate_page_size: number;
-            sequence_mode: string;
-            sequence_exhaustion: string;
-            hide_when_exhausted: boolean;
-            trust_placement: string;
-            recommendation_placement: string;
-        };
-        icon_options: Array<{ value: string; label: string }>;
-    };
+    checkout: { uuid: string | null; enabled: boolean; component_uuid: string | null; trust_items: CheckoutTrustItem[]; shopify_collection_id: string | null; settings: { maximum_recommendations?: number | null }; icon_options: Array<{ value: string; label: string }> };
+    smartCart: { uuid: string; strategy_uuid: string | null; enabled: boolean; compatibility_status: string; compatibility_details: { checks?: Array<{ key: string; label: string; passed: boolean; details: string | null }> }; compatibility_checked_at: string | null; theme_id: string | null; theme_name: string | null; preview_confirmed_at: string | null; fallback_mode: string; settings: Record<string, unknown> } | null;
+    globalSettings: { default_locale: 'zh-CN' | 'en'; copy: { recommendation_heading: string; add_button: string; checkout_heading: string }; attribution: { model: string; window_days: number; click_only: boolean; refund_cancel_reversal: boolean } };
     options: { algorithms: Array<{ value: Algorithm; label: string }>; placements: Array<{ value: Placement; label: string }> };
     permissions: { manage: boolean; manageSmartCart: boolean; viewAnalytics: boolean };
     analytics: {
-        status: string;
-        period: { days: number; from: string; to: string; timezone: string };
-        currency: string;
-        impressions: number;
-        clicks: number;
-        add_to_carts: number;
-        orders: number;
-        attributed_revenue: string;
-        aov: string;
-        click_through_rate: number;
-        add_to_cart_rate: number;
-        reversed_orders: number;
-        excluded_currency_orders: number;
+        status: string; period: { days: number; from: string; to: string; timezone: string }; currency: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; aov: string; click_through_rate: number; add_to_cart_rate: number; reversed_orders: number; excluded_currency_orders: number;
         attribution: { model: string; window_days: number; click_only: boolean; refund_cancel_reversal: boolean };
         daily: Array<{ date: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string }>;
         placements: Array<{ placement: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; click_through_rate: number }>;
+        dimensions: Array<{ strategy_uuid: string | null; strategy_name: string; strategy_version_uuid: string | null; strategy_version: number | null; component_uuid: string | null; component_name: string; placement: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; click_through_rate: number }>;
     };
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/personalization`;
-const tabs: Array<{ value: Tab; label: string; description: string }> = [
-    { value: 'overview', label: '概览', description: '查看配置进度' },
-    { value: 'strategies', label: '推荐策略', description: '算法、规则与商品' },
-    { value: 'components', label: '推荐组件', description: '位置、样式与预览' },
-    { value: 'checkout', label: 'Checkout', description: '信任信息与递进推荐' },
-    { value: 'smart-cart', label: 'Smart Cart', description: '安全草稿与兼容性' },
-    { value: 'analytics', label: '分析', description: '曝光与归因结果' },
+const activeTab = ref<TopTab>('overview');
+const tabs: Array<{ value: TopTab; label: string; hint: string }> = [
+    { value: 'overview', label: '概览', hint: '上线状态与全局设置' },
+    { value: 'strategies', label: '策略', hint: '制定、发布与恢复' },
+    { value: 'analytics', label: '分析', hint: '按版本和页面拆分' },
 ];
-const activeTab = ref<Tab>('overview');
+const strategyRows = ref<StrategyRow[]>(props.strategyRows.map(row => ({ ...row })));
+const recycledRows = ref<StrategyRow[]>(props.recycledStrategies.map(row => ({ ...row })));
+watch(() => props.strategyRows, value => { strategyRows.value = value.map(row => ({ ...row })); }, { deep: true });
+watch(() => props.recycledStrategies, value => { recycledRows.value = value.map(row => ({ ...row })); }, { deep: true });
+
 const algorithmLabel = (value: Algorithm) => props.options.algorithms.find(option => option.value === value)?.label ?? value;
 const placementLabel = (value: string) => props.options.placements.find(option => option.value === value)?.label ?? value;
-const statusLabel = (status: ComponentStatus) => ({ draft: '草稿', active: '后端已启用', disabled: '已停用' }[status]);
+const statusLabel = (value: StrategyStatus) => ({ draft: '草稿', enabled: '已启用', disabled: '已停用', configuration_error: '配置异常', archived: '回收站' }[value]);
+const statusClass = (value: StrategyStatus) => ({ draft: 'bg-slate-100 text-slate-700', enabled: 'bg-emerald-100 text-emerald-800', disabled: 'bg-amber-100 text-amber-800', configuration_error: 'bg-rose-100 text-rose-800', archived: 'bg-violet-100 text-violet-800' }[value]);
+const usageLabel = (value: Usage['status']) => ({ configured_not_enabled: '已配置未启用', live: '已上线', disabled: '已停用', configuration_error: '配置异常' }[value]);
+const formatDate = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const money = (value: string | null, currency = props.store.currency) => value === null ? '—' : new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(Number(value));
+const csrf = () => document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+const requestId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12)}`;
 
-const createStrategyForm = useForm({ name: '', algorithm: 'manual' as Algorithm, item_limit: 8 });
-const createStrategy = () => createStrategyForm.post(`${baseUrl}/strategies`, {
-    preserveScroll: true,
-    onSuccess: () => createStrategyForm.reset(),
+class ApiError extends Error { constructor(public code: string, message: string, public status: number) { super(message); } }
+async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+    const response = await fetch(url, { ...options, credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), ...(options.headers ?? {}) } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const validation = payload?.errors ? Object.values(payload.errors).flat().join('；') : '';
+        throw new ApiError(payload?.error?.code ?? 'REQUEST_FAILED', payload?.error?.message ?? validation ?? '操作失败，请重试。', response.status);
+    }
+    return payload.data as T;
+}
+
+const search = ref('');
+const showRecycleBin = ref(false);
+const filteredStrategies = computed(() => {
+    const keyword = search.value.trim().toLocaleLowerCase();
+    return strategyRows.value.filter(row => !keyword || [row.name, row.technical_id, algorithmLabel(row.algorithm), ...row.used_in.map(item => item.name)].some(value => value.toLocaleLowerCase().includes(keyword)));
 });
 
-const selectedStrategyUuid = ref(props.strategies[0]?.uuid ?? '');
-const selectedStrategy = computed(() => props.strategies.find(strategy => strategy.uuid === selectedStrategyUuid.value) ?? null);
-const editStrategyForm = useForm({ name: '', algorithm: 'manual' as Algorithm, item_limit: 8 });
-const ruleForm = useForm({
-    include_tags_text: '',
-    exclude_tags_text: '',
-    minimum_price: '' as string | number,
-    maximum_price: '' as string | number,
-    minimum_inventory: '' as string | number,
-    in_stock_only: true,
-});
-const productForm = useForm({ manual: [] as string[], pinned: [] as string[], excluded: [] as string[] });
-const productFields: Array<{ key: 'manual' | 'pinned' | 'excluded'; label: string }> = [
-    { key: 'manual', label: '手动推荐' },
-    { key: 'pinned', label: '置顶商品' },
-    { key: 'excluded', label: '排除商品' },
+const editorOpen = ref(false);
+const editorStep = ref<EditorStep>('basic');
+const editorStrategy = ref<StrategyRow | null>(null);
+const editorDraft = ref<StrategyDraft | null>(null);
+const versions = ref<VersionRow[]>([]);
+const editorLoading = ref(false);
+const editorError = ref('');
+const saveState = ref<SaveState>('idle');
+const savedAt = ref('');
+const closePrompt = ref(false);
+const replacementPrompt = ref(false);
+const replacementMessage = ref('');
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let ignoreDraftWatch = false;
+let pendingSave: Promise<void> | null = null;
+const editorSteps: Array<{ value: EditorStep; label: string }> = [
+    { value: 'basic', label: '基本信息' }, { value: 'rules', label: '推荐规则' }, { value: 'products', label: '置顶与排除' },
+    { value: 'discount', label: '优惠' }, { value: 'usage', label: '使用场景' }, { value: 'preview', label: '预览与启用' },
 ];
-const splitTags = (value: string) => value.split(/[\n,]/).map(tag => tag.trim()).filter(Boolean);
-const hydrateStrategyForms = () => {
-    const strategy = selectedStrategy.value;
-    if (!strategy) return;
-    editStrategyForm.name = strategy.name;
-    editStrategyForm.algorithm = strategy.algorithm;
-    editStrategyForm.item_limit = strategy.item_limit;
-    const rule = (type: string) => strategy.rules.find(item => item.type === type)?.value ?? {};
-    ruleForm.include_tags_text = ((rule('include_tags').tags as string[] | undefined) ?? []).join(', ');
-    ruleForm.exclude_tags_text = ((rule('exclude_tags').tags as string[] | undefined) ?? []).join(', ');
-    ruleForm.minimum_price = (rule('minimum_price').amount as string | undefined) ?? '';
-    ruleForm.maximum_price = (rule('maximum_price').amount as string | undefined) ?? '';
-    ruleForm.minimum_inventory = (rule('minimum_inventory').quantity as number | undefined) ?? '';
-    ruleForm.in_stock_only = (rule('in_stock_only').enabled as boolean | undefined) ?? true;
-    productForm.manual = strategy.product_overrides.filter(item => item.type === 'manual').map(item => `gid://shopify/Product/${item.shopify_product_id}`);
-    productForm.pinned = strategy.product_overrides.filter(item => item.type === 'pinned').map(item => `gid://shopify/Product/${item.shopify_product_id}`);
-    productForm.excluded = strategy.product_overrides.filter(item => item.type === 'excluded').map(item => `gid://shopify/Product/${item.shopify_product_id}`);
-    editStrategyForm.clearErrors();
-    ruleForm.clearErrors();
-    productForm.clearErrors();
-};
-watch(selectedStrategyUuid, hydrateStrategyForms);
-onMounted(hydrateStrategyForms);
-const updateStrategy = () => selectedStrategy.value && editStrategyForm.put(`${baseUrl}/strategies/${selectedStrategy.value.uuid}`, { preserveScroll: true });
-const updateRules = () => selectedStrategy.value && ruleForm
-    .transform(data => ({
-        include_tags: splitTags(data.include_tags_text),
-        exclude_tags: splitTags(data.exclude_tags_text),
-        minimum_price: data.minimum_price === '' ? null : data.minimum_price,
-        maximum_price: data.maximum_price === '' ? null : data.maximum_price,
-        minimum_inventory: data.minimum_inventory === '' ? null : data.minimum_inventory,
-        in_stock_only: data.in_stock_only,
-    }))
-    .put(`${baseUrl}/strategies/${selectedStrategy.value.uuid}/rules`, { preserveScroll: true });
-const updateProducts = () => selectedStrategy.value && productForm.put(`${baseUrl}/strategies/${selectedStrategy.value.uuid}/products`, { preserveScroll: true });
 
-const createComponentForm = useForm({
-    strategy_uuid: props.strategies[0]?.uuid ?? '',
-    name: '',
-    placement: 'product_page' as Placement,
-    heading: '你可能还喜欢',
-    button_label: '加入购物车',
-});
-const createComponent = () => createComponentForm.post(`${baseUrl}/components`, {
-    preserveScroll: true,
-    onSuccess: () => createComponentForm.reset('name'),
-});
-const selectedComponentUuid = ref(props.components[0]?.uuid ?? '');
-const selectedComponent = computed(() => props.components.find(component => component.uuid === selectedComponentUuid.value) ?? null);
-const componentForm = useForm({ strategy_uuid: '', name: '', placement: 'product_page' as Placement, heading: '', button_label: '' });
-const styleForm = useForm({
-    layout: 'carousel' as 'carousel' | 'grid',
-    desktop_columns: 4,
-    mobile_columns: 2,
-    show_image: true,
-    show_vendor: false,
-    show_price: true,
-    show_compare_at_price: true,
-    show_add_to_cart: true,
-    tokens: { text_color: '#111827', background_color: '#FFFFFF', button_color: '#111827', button_text_color: '#FFFFFF', border_radius: 12, gap: 16 },
-});
-const hydrateComponentForms = () => {
-    const component = selectedComponent.value;
-    if (!component) return;
-    componentForm.strategy_uuid = component.strategy_uuid;
-    componentForm.name = component.name;
-    componentForm.placement = component.placement;
-    componentForm.heading = component.heading ?? '';
-    componentForm.button_label = component.button_label ?? '';
-    styleForm.layout = component.style.layout;
-    styleForm.desktop_columns = component.style.desktop_columns;
-    styleForm.mobile_columns = component.style.mobile_columns;
-    styleForm.show_image = component.style.show_image;
-    styleForm.show_vendor = component.style.show_vendor;
-    styleForm.show_price = component.style.show_price;
-    styleForm.show_compare_at_price = component.style.show_compare_at_price;
-    styleForm.show_add_to_cart = component.style.show_add_to_cart;
-    styleForm.tokens = {
-        text_color: String(component.style.tokens.text_color ?? '#111827'),
-        background_color: String(component.style.tokens.background_color ?? '#FFFFFF'),
-        button_color: String(component.style.tokens.button_color ?? '#111827'),
-        button_text_color: String(component.style.tokens.button_text_color ?? '#FFFFFF'),
-        border_radius: Number(component.style.tokens.border_radius ?? 12),
-        gap: Number(component.style.tokens.gap ?? 16),
-    };
-    void loadPreview();
-};
-watch(selectedComponentUuid, hydrateComponentForms);
-onMounted(hydrateComponentForms);
-const updateComponent = () => selectedComponent.value && componentForm.put(`${baseUrl}/components/${selectedComponent.value.uuid}`, { preserveScroll: true });
-const updateStyle = () => selectedComponent.value && styleForm.put(`${baseUrl}/components/${selectedComponent.value.uuid}/style`, {
-    preserveScroll: true,
-    onSuccess: () => void loadPreview(),
-});
-const activateComponent = (component: Component) => router.post(`${baseUrl}/components/${component.uuid}/activate`, {}, { preserveScroll: true });
-const disableComponent = (component: Component) => router.post(`${baseUrl}/components/${component.uuid}/disable`, {}, { preserveScroll: true });
+function normalizeEditorPayload(payload: { strategy: StrategyRow; draft: StrategyDraft; versions: VersionRow[] }) {
+    ignoreDraftWatch = true;
+    editorStrategy.value = payload.strategy;
+    editorDraft.value = structuredClone(payload.draft);
+    versions.value = payload.versions;
+    saveState.value = 'saved';
+    savedAt.value = payload.draft.updated_at ?? '';
+    queueMicrotask(() => { ignoreDraftWatch = false; });
+}
+async function createStrategy() {
+    editorOpen.value = true; editorLoading.value = true; editorError.value = ''; editorStep.value = 'basic';
+    try {
+        const payload = await requestJson<{ strategy: StrategyRow; draft: StrategyDraft; versions: VersionRow[] }>(`${baseUrl}/strategy-workflow/drafts`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId() }) });
+        normalizeEditorPayload(payload); upsertStrategy(payload.strategy);
+    } catch (error) { editorError.value = error instanceof Error ? error.message : '无法创建策略草稿。'; }
+    finally { editorLoading.value = false; }
+}
+async function openEditor(strategy: StrategyRow, step: EditorStep = 'basic') {
+    editorOpen.value = true; editorLoading.value = true; editorError.value = ''; editorStep.value = step;
+    try { normalizeEditorPayload(await requestJson(`${baseUrl}/strategy-workflow/${strategy.uuid}`)); }
+    catch (error) { editorError.value = error instanceof Error ? error.message : '无法读取策略草稿。'; }
+    finally { editorLoading.value = false; }
+}
+function scheduleAutosave() {
+    if (!editorOpen.value || !editorDraft.value || ignoreDraftWatch) return;
+    saveState.value = 'idle';
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => { void saveDraft(); }, 800);
+}
+watch(editorDraft, scheduleAutosave, { deep: true });
+async function saveDraft() {
+    if (!editorStrategy.value || !editorDraft.value) return;
+    if (pendingSave) return pendingSave;
+    if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+    saveState.value = 'saving';
+    const draftSnapshot = structuredClone(editorDraft.value);
+    pendingSave = (async () => {
+        try {
+            const payload = await requestJson<{ draft: StrategyDraft; saved_at: string }>(`${baseUrl}/strategy-workflow/${editorStrategy.value!.uuid}/draft`, { method: 'PATCH', body: JSON.stringify({ idempotency_key: requestId(), lock_version: draftSnapshot.lock_version, draft: draftSnapshot }) });
+            ignoreDraftWatch = true; editorDraft.value = structuredClone(payload.draft); saveState.value = 'saved'; savedAt.value = payload.saved_at;
+            const row = strategyRows.value.find(item => item.uuid === editorStrategy.value?.uuid);
+            if (row) { row.name = payload.draft.name; row.algorithm = payload.draft.algorithm; row.updated_at = payload.saved_at; row.has_draft = true; }
+            queueMicrotask(() => { ignoreDraftWatch = false; });
+        } catch (error) { saveState.value = 'failed'; editorError.value = error instanceof Error ? error.message : '自动保存失败。'; }
+        finally { pendingSave = null; }
+    })();
+    return pendingSave;
+}
+async function requestClose() {
+    if (saveState.value === 'failed') { closePrompt.value = true; return; }
+    if (saveState.value === 'saving' || saveState.value === 'idle') {
+        await saveDraft();
+        if ((saveState.value as SaveState) === 'failed') { closePrompt.value = true; return; }
+    }
+    closeEditor();
+}
+function closeEditor() {
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = null; editorOpen.value = false; editorDraft.value = null; editorStrategy.value = null; closePrompt.value = false; replacementPrompt.value = false; editorError.value = '';
+}
+function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape' && editorOpen.value) { event.preventDefault(); requestClose(); } }
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKeydown); if (autosaveTimer) clearTimeout(autosaveTimer); });
 
-const previewMode = ref<'desktop' | 'mobile'>('desktop');
-const previewItems = ref<PreviewProduct[]>([]);
+function splitValues(value: string) { return value.split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
+function joined(values: string[]) { return values.join(', '); }
+function updateStringList(target: string[], value: string) { target.splice(0, target.length, ...splitValues(value)); }
+function placementDraft(type: Placement): PlacementDraft | null { return editorDraft.value?.configuration.placements.find(item => item.placement === type) ?? null; }
+function togglePlacement(type: Placement, enabled: boolean) {
+    if (!editorDraft.value) return;
+    let placement = placementDraft(type);
+    if (!placement) {
+        placement = { placement: type, enabled, component_uuid: null, name: `${placementLabel(type)}推荐`, heading: props.globalSettings.copy.recommendation_heading, button_label: props.globalSettings.copy.add_button, style: { layout: 'carousel', desktop_columns: 4, mobile_columns: 2, show_image: true, show_vendor: false, show_price: true, show_compare_at_price: true, show_add_to_cart: true, tokens: {} } };
+        editorDraft.value.configuration.placements.push(placement);
+    } else if (!enabled) {
+        editorDraft.value.configuration.placements = editorDraft.value.configuration.placements.filter(item => item.placement !== type);
+    } else placement.enabled = true;
+}
+function removePlacement(type: Placement) {
+    if (!editorDraft.value) return;
+    editorDraft.value.configuration.placements = editorDraft.value.configuration.placements.filter(item => item.placement !== type);
+}
+const selectedUsagePlacement = ref<Placement>('homepage');
+const selectedPlacementDraft = computed(() => placementDraft(selectedUsagePlacement.value));
+
+const previewContext = reactive({ seed_product_id: '', cart_product_ids: [] as string[], purchased_product_ids: [] as string[] });
 const previewLoading = ref(false);
 const previewError = ref('');
+const previewResult = ref<null | { items: Array<{ shopify_product_id: string; title: string; reason_code: string; price: { minimum: string | null; currency: string }; storefront: { image: { url: string | null } } }>; skipped: Array<{ shopify_product_id: string; title: string; reason: string }>; checkout_sequence: { maximum_recommendations: number | null; items: Array<{ shopify_product_id: string; title: string }> } }>(null);
+const skipReason = (reason: string) => ({ already_in_cart: '已在购物车', already_purchased: '已购买', excluded_by_strategy: '被策略排除', out_of_stock_or_market_unavailable: '无库存或当前市场不可售' }[reason] ?? reason);
 async function loadPreview() {
-    const component = selectedComponent.value;
-    if (!component) return;
-    previewLoading.value = true;
-    previewError.value = '';
-    const params = new URLSearchParams();
-    if (props.products[0]) {
-        params.set('seed_product_id', props.products[0].shopify_product_id);
-        params.append('recently_viewed_product_ids[]', props.products[0].shopify_product_id);
-    }
+    if (!editorStrategy.value) return;
+    await saveDraft(); if (saveState.value === 'failed') return;
+    previewLoading.value = true; previewError.value = '';
+    try { previewResult.value = await requestJson(`${baseUrl}/strategy-workflow/${editorStrategy.value.uuid}/preview`, { method: 'POST', body: JSON.stringify(previewContext) }); }
+    catch (error) { previewResult.value = null; previewError.value = error instanceof Error ? error.message : '无法生成预览。'; }
+    finally { previewLoading.value = false; }
+}
+async function publishStrategy(confirmReplacements = false) {
+    if (!editorStrategy.value || !editorDraft.value) return;
+    await saveDraft(); if (saveState.value === 'failed') return;
+    editorError.value = '';
     try {
-        const response = await fetch(`${baseUrl}/components/${component.uuid}/preview?${params.toString()}`, {
-            credentials: 'same-origin',
-            headers: { Accept: 'application/json' },
-        });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error?.message ?? '无法生成预览。');
-        previewItems.value = payload.data.items ?? [];
+        const payload = await requestJson<{ strategy: StrategyRow; published_version: StrategyDraft }>(`${baseUrl}/strategy-workflow/${editorStrategy.value.uuid}/publish`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId(), lock_version: editorDraft.value.lock_version, confirm_replacements: confirmReplacements }) });
+        upsertStrategy(payload.strategy); replacementPrompt.value = false;
+        router.reload({ only: ['strategyRows', 'components', 'checkout', 'smartCart'] });
+        await openEditor(payload.strategy, 'preview');
     } catch (error) {
-        previewItems.value = [];
-        previewError.value = error instanceof Error ? error.message : '无法生成预览。';
-    } finally {
-        previewLoading.value = false;
+        if (error instanceof ApiError && error.code === 'PLACEMENT_REPLACEMENT_CONFIRMATION_REQUIRED') { replacementMessage.value = error.message; editorError.value = error.message; replacementPrompt.value = true; }
+        else editorError.value = error instanceof Error ? error.message : '发布失败。';
     }
 }
-onMounted(() => void loadPreview());
-const previewColumns = computed(() => previewMode.value === 'desktop' ? styleForm.desktop_columns : styleForm.mobile_columns);
-const money = (value: string | null, currency: string) => value === null ? '—' : new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(Number(value));
+async function restoreVersion(version: VersionRow) {
+    if (!editorStrategy.value || !confirm(`确认将版本 ${version.version_number} 恢复为新的线上版本？历史版本不会被覆盖。`)) return;
+    try {
+        const payload = await requestJson<{ strategy: StrategyRow; published_version: StrategyDraft }>(`${baseUrl}/strategy-workflow/${editorStrategy.value.uuid}/versions/${version.uuid}/restore`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId(), confirm_replacements: true }) });
+        upsertStrategy(payload.strategy); router.reload({ only: ['strategyRows', 'components'] }); await openEditor(payload.strategy, 'preview');
+    } catch (error) { editorError.value = error instanceof Error ? error.message : '版本恢复失败。'; }
+}
+function upsertStrategy(row: StrategyRow) { const index = strategyRows.value.findIndex(item => item.uuid === row.uuid); if (index < 0) strategyRows.value.unshift(row); else strategyRows.value.splice(index, 1, row); }
+async function duplicateStrategy(strategy: StrategyRow) {
+    try {
+        const payload = await requestJson<{ strategy: StrategyRow; draft: StrategyDraft; versions: VersionRow[] }>(`${baseUrl}/strategy-workflow/${strategy.uuid}/duplicate`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId() }) });
+        upsertStrategy(payload.strategy); editorOpen.value = true; editorStep.value = 'basic'; normalizeEditorPayload(payload);
+    } catch (error) { alert(error instanceof Error ? error.message : '复制失败。'); }
+}
+async function disableStrategy(strategy: StrategyRow) {
+    if (!confirm(`确认停用“${strategy.name}”及其线上组件？`)) return;
+    try { upsertStrategy(await requestJson(`${baseUrl}/strategy-workflow/${strategy.uuid}/disable`, { method: 'POST', body: '{}' })); }
+    catch (error) { alert(error instanceof Error ? error.message : '停用失败。'); }
+}
+async function recycleStrategy(strategy: StrategyRow) {
+    if (strategy.used_in.length) {
+        alert('该策略仍有关联页面或组件，请先在“使用场景”中解除关联并发布。');
+        await openEditor(strategy, 'usage');
+        return;
+    }
+    if (!confirm(`将“${strategy.name}”移入回收站？30 天内可以恢复。`)) return;
+    try {
+        await requestJson(`${baseUrl}/strategy-workflow/${strategy.uuid}`, { method: 'DELETE' });
+        strategyRows.value = strategyRows.value.filter(item => item.uuid !== strategy.uuid);
+        recycledRows.value.unshift({ ...strategy, status: 'archived', recycle_until: new Date(Date.now() + 30 * 86400000).toISOString() });
+    } catch (error) { alert(error instanceof Error ? error.message : '无法删除策略。'); }
+}
+async function restoreStrategy(strategy: StrategyRow) {
+    try {
+        const restored = await requestJson<StrategyRow>(`${baseUrl}/strategy-workflow/recycle-bin/${strategy.uuid}/restore`, { method: 'POST', body: '{}' });
+        recycledRows.value = recycledRows.value.filter(item => item.uuid !== strategy.uuid); upsertStrategy(restored);
+    } catch (error) { alert(error instanceof Error ? error.message : '恢复失败。'); }
+}
 
+const showGlobalSettings = ref(false);
+const globalForm = reactive(structuredClone(props.globalSettings));
+const globalSaveState = ref<SaveState>('idle');
+const globalError = ref('');
+async function saveGlobalSettings() {
+    globalSaveState.value = 'saving'; globalError.value = '';
+    try { await requestJson(`${baseUrl}/global-settings`, { method: 'PUT', body: JSON.stringify({ default_locale: globalForm.default_locale, copy: globalForm.copy }) }); globalSaveState.value = 'saved'; }
+    catch (error) { globalSaveState.value = 'failed'; globalError.value = error instanceof Error ? error.message : '保存失败。'; }
+}
 const checkoutComponents = computed(() => props.components.filter(component => component.placement === 'checkout'));
-const checkoutForm = useForm({
-    enabled: props.checkout.enabled,
-    component_uuid: props.checkout.component_uuid ?? '',
-    shopify_collection_id: props.checkout.shopify_collection_id ?? '',
-    trust_items: props.checkout.trust_items.map(item => ({ ...item })),
-});
-const hydrateCheckoutForm = () => {
-    checkoutForm.enabled = props.checkout.enabled;
-    checkoutForm.component_uuid = props.checkout.component_uuid ?? '';
-    checkoutForm.shopify_collection_id = props.checkout.shopify_collection_id ?? '';
-    checkoutForm.trust_items = props.checkout.trust_items.map(item => ({ ...item }));
-    checkoutForm.clearErrors();
-};
-watch(() => props.checkout, hydrateCheckoutForm, { deep: true });
-const addTrustItem = () => {
-    if (checkoutForm.trust_items.length >= 6) return;
-    checkoutForm.trust_items.push({
-        key: `custom_${Date.now()}`,
-        icon: 'check-circle',
-        title: '',
-        description: '',
-        position: checkoutForm.trust_items.length + 1,
-        enabled: true,
-    });
-};
-const removeTrustItem = (index: number) => checkoutForm.trust_items.splice(index, 1);
-const moveTrustItem = (index: number, offset: number) => {
-    const destination = index + offset;
-    if (destination < 0 || destination >= checkoutForm.trust_items.length) return;
-    const [item] = checkoutForm.trust_items.splice(index, 1);
-    checkoutForm.trust_items.splice(destination, 0, item);
-};
-const selectedCheckoutComponent = computed(() => checkoutComponents.value.find(component => component.uuid === checkoutForm.component_uuid) ?? null);
-const checkoutPreviewMode = ref<'desktop' | 'mobile'>('desktop');
-const checkoutPreviewCandidate = computed(() => {
-    const product = props.products.find(item => item.collection_ids.includes(checkoutForm.shopify_collection_id)) ?? null;
-    const variant = product?.variants.find(item => item.available_for_sale) ?? product?.variants[0] ?? null;
-    return product && variant ? {
-        product_title: product.title,
-        variant_title: variant.title,
-        image_url: product.image_url,
-        price: variant.price,
-        currency: product.currency,
-    } : null;
-});
-const saveCheckout = () => checkoutForm
-    .transform(data => ({
-        enabled: data.enabled,
-        component_uuid: data.component_uuid || null,
-        shopify_collection_id: data.shopify_collection_id || null,
-        trust_items: data.trust_items.map((item, index) => ({ ...item, position: index + 1 })),
-    }))
-    .put(`${baseUrl}/checkout`, { preserveScroll: true });
-
-const smartCartForm = useForm({
-    strategy_uuid: props.smartCart?.strategy_uuid ?? '',
-    heading: String(props.smartCart?.settings?.heading ?? '购物车推荐'),
-});
-const saveSmartCartDraft = () => smartCartForm.put(`${baseUrl}/smart-cart`, { preserveScroll: true });
-const smartCartCompatibilityForm = useForm({
-    theme_id: props.smartCart?.theme_id ?? '',
-    theme_name: props.smartCart?.theme_name ?? '',
-    unpublished_copy: false,
-    app_embed_loaded: false,
-    browser_dialog: false,
-    cart_link: false,
-    cart_routes: false,
-    cart_behaviour_verified: false,
-});
-const recordSmartCartCompatibility = () => smartCartCompatibilityForm
-    .transform(data => ({
-        theme_id: data.theme_id,
-        theme_name: data.theme_name,
-        checks: [
-            { key: 'unpublished_copy', label: '使用未发布的测试主题副本', passed: data.unpublished_copy, details: null },
-            { key: 'app_embed_loaded', label: 'App Embed 已在测试主题预览中加载', passed: data.app_embed_loaded, details: null },
-            { key: 'browser_dialog', label: '浏览器支持安全购物车抽屉', passed: data.browser_dialog, details: null },
-            { key: 'cart_link', label: '测试主题可识别购物车入口', passed: data.cart_link, details: null },
-            { key: 'cart_routes', label: 'Shopify 购物车接口可用', passed: data.cart_routes, details: null },
-            { key: 'cart_behaviour_verified', label: '购物车打开、数量、删除与加购行为已验证', passed: data.cart_behaviour_verified, details: null },
-        ],
-    }))
-    .post(`${baseUrl}/smart-cart/compatibility`, { preserveScroll: true });
+const checkoutForm = useForm({ enabled: props.checkout.enabled, component_uuid: props.checkout.component_uuid ?? '', shopify_collection_id: props.checkout.shopify_collection_id ?? '', maximum_recommendations: props.checkout.settings.maximum_recommendations ?? null as number | null, trust_items: props.checkout.trust_items.map(item => ({ ...item })) });
+function addTrustItem() { if (checkoutForm.trust_items.length < 6) checkoutForm.trust_items.push({ key: `trust_${Date.now()}`, icon: 'check-circle', title: '', description: '', position: checkoutForm.trust_items.length + 1, enabled: true }); }
+function saveCheckout() {
+    checkoutForm.transform(data => ({ ...data, component_uuid: data.component_uuid || null, shopify_collection_id: data.shopify_collection_id || null, maximum_recommendations: data.maximum_recommendations || null, trust_items: data.trust_items.map((item, index) => ({ ...item, position: index + 1 })) })).put(`${baseUrl}/checkout`, { preserveScroll: true });
+}
+const smartCartForm = useForm({ strategy_uuid: props.smartCart?.strategy_uuid ?? '', heading: String(props.smartCart?.settings?.heading ?? '购物车推荐') });
+const smartChecks = useForm({ theme_id: props.smartCart?.theme_id ?? '', theme_name: props.smartCart?.theme_name ?? '', unpublished_copy: false, app_embed_loaded: false, browser_dialog: false, cart_link: false, cart_routes: false, cart_behaviour_verified: false });
+function saveSmartCartDraft() { smartCartForm.put(`${baseUrl}/smart-cart`, { preserveScroll: true }); }
+function saveSmartCompatibility() {
+    smartChecks.transform(data => ({ theme_id: data.theme_id, theme_name: data.theme_name, checks: [
+        ['unpublished_copy', '使用未发布的测试主题副本'], ['app_embed_loaded', 'App Embed 已加载'], ['browser_dialog', '浏览器支持安全购物车抽屉'], ['cart_link', '可识别购物车入口'], ['cart_routes', '购物车接口可用'], ['cart_behaviour_verified', '购物车行为已验证'],
+    ].map(([key, label]) => ({ key, label, passed: Boolean(data[key as keyof typeof data]), details: null })) })).post(`${baseUrl}/smart-cart/compatibility`, { preserveScroll: true });
+}
+const restoreShopifyCart = () => router.post(`${baseUrl}/smart-cart/restore`, {}, { preserveScroll: true });
 const confirmSmartCartPreview = () => router.post(`${baseUrl}/smart-cart/preview-confirmation`, {}, { preserveScroll: true });
 const activateSmartCart = () => router.post(`${baseUrl}/smart-cart/activate`, {}, { preserveScroll: true });
-const restoreShopifyCart = () => router.post(`${baseUrl}/smart-cart/restore`, {}, { preserveScroll: true });
-const analyticsCards = computed(() => [
-    ['曝光', props.analytics.impressions.toLocaleString()],
-    ['点击', props.analytics.clicks.toLocaleString()],
-    ['加购', props.analytics.add_to_carts.toLocaleString()],
-    ['订单', props.analytics.orders.toLocaleString()],
-    ['归因收入', money(props.analytics.attributed_revenue, props.store.currency)],
-    ['AOV', money(props.analytics.aov, props.store.currency)],
+
+const setupChecks = computed(() => [
+    { label: '至少一个策略已发布', passed: strategyRows.value.some(row => row.status === 'enabled') },
+    { label: '至少一个页面或组件已上线', passed: strategyRows.value.some(row => row.used_in.some(usage => usage.status === 'live')) },
+    { label: 'Checkout 配置已启用', passed: props.checkout.enabled },
+    { label: 'Smart Cart 已通过人工安全流程', passed: Boolean(props.smartCart?.enabled) },
 ]);
+const configurationAlerts = computed(() => strategyRows.value.filter(row => row.status === 'configuration_error'));
+const analyticsStrategy = ref(''); const analyticsVersion = ref(''); const analyticsPlacement = ref('');
+const analyticsRows = computed(() => props.analytics.dimensions.filter(row => (!analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value) && (!analyticsVersion.value || row.strategy_version_uuid === analyticsVersion.value) && (!analyticsPlacement.value || row.placement === analyticsPlacement.value)));
+const analyticsVersions = computed(() => props.analytics.dimensions.filter(row => !analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value).filter((row, index, rows) => row.strategy_version_uuid && rows.findIndex(item => item.strategy_version_uuid === row.strategy_version_uuid) === index));
+const analyticsCards = computed(() => [['曝光', props.analytics.impressions.toLocaleString()], ['点击', props.analytics.clicks.toLocaleString()], ['加购', props.analytics.add_to_carts.toLocaleString()], ['订单', props.analytics.orders.toLocaleString()], ['归因收入', money(props.analytics.attributed_revenue, props.analytics.currency)], ['AOV', money(props.analytics.aov, props.analytics.currency)]]);
 </script>
 
 <template>
-    <Head title="个性化推荐" />
+    <Head title="Deco 个性化推荐" />
     <AppLayout>
-        <div class="space-y-6">
-            <header class="rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-7 text-white shadow-sm">
+        <div class="mx-auto max-w-[1480px] space-y-6 p-4 sm:p-6 lg:p-8">
+            <header class="overflow-hidden rounded-3xl bg-slate-950 px-6 py-7 text-white shadow-xl sm:px-8">
                 <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-300">Deco 个性化推荐</p>
-                        <h1 class="mt-2 text-2xl font-semibold">{{ store.name }} 的推荐工作台</h1>
-                        <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">复用 Commerce Hub 商品、库存与订单信号。先保存草稿并预览，再启用后端配置；主题展示将在 Test 联调阶段单独开启。</p>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div class="rounded-xl bg-white/10 px-4 py-3"><strong class="block text-xl">{{ strategies.length }}</strong>策略</div>
-                        <div class="rounded-xl bg-white/10 px-4 py-3"><strong class="block text-xl">{{ components.length }}</strong>组件</div>
-                        <div class="rounded-xl bg-white/10 px-4 py-3"><strong class="block text-xl">{{ components.filter(item => item.status === 'active').length }}</strong>已启用</div>
-                    </div>
+                    <div><p class="text-xs font-semibold uppercase tracking-[.22em] text-indigo-300">Deco Personalization</p><h1 class="mt-2 text-3xl font-semibold">个性化推荐</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">使用 Commerce Hub 的真实商品、库存和订单数据制定确定性推荐策略。草稿自动保存，只有明确发布后才影响线上顾客。</p></div>
+                    <div class="rounded-2xl bg-white/10 px-4 py-3 text-sm"><p class="font-semibold">{{ store.name }}</p><p class="mt-1 text-xs text-slate-300">{{ store.shopify_domain }}</p></div>
                 </div>
             </header>
-
-            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-3 xl:grid-cols-6" aria-label="个性化推荐页面">
-                <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-4 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value">
-                    <span class="block text-sm font-semibold">{{ tab.label }}</span>
-                    <span class="mt-1 block text-xs" :class="activeTab === tab.value ? 'text-slate-300' : 'text-slate-400'">{{ tab.description }}</span>
-                </button>
+            <nav class="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="个性化推荐主导航">
+                <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-3 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value"><span class="block text-sm font-semibold">{{ tab.label }}</span><span class="mt-0.5 hidden text-xs opacity-70 sm:block">{{ tab.hint }}</span></button>
             </nav>
 
-            <section v-if="activeTab === 'overview'" class="grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 class="text-lg font-semibold text-slate-900">上线检查</h2>
-                    <div class="mt-5 space-y-3">
-                        <div v-for="item in [
-                            { done: strategies.length > 0, label: '创建至少一个推荐策略' },
-                            { done: components.length > 0, label: '创建首页、商品页或购物车组件' },
-                            { done: components.some(component => component.status === 'active'), label: '完成桌面与移动预览并启用后端配置' },
-                            { done: false, label: '在 Test 主题中添加 App Block（后续阶段）' },
-                        ]" :key="item.label" class="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3">
-                            <span class="flex size-7 items-center justify-center rounded-full text-sm font-bold" :class="item.done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'">{{ item.done ? '✓' : '·' }}</span>
-                            <span class="text-sm text-slate-700">{{ item.label }}</span>
-                        </div>
-                    </div>
+            <section v-if="activeTab === 'overview'" class="space-y-6">
+                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">策略</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.length }}</p><p class="mt-2 text-xs text-slate-500">{{ strategyRows.filter(row => row.status === 'enabled').length }} 个已启用</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">线上场景</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.reduce((total, row) => total + row.used_in.filter(item => item.status === 'live').length, 0) }}</p><p class="mt-2 text-xs text-slate-500">同一页面组件仅允许一个有效策略</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Checkout</p><p class="mt-2 text-xl font-semibold">{{ checkout.enabled ? '已启用' : '默认关闭' }}</p><p class="mt-2 text-xs text-slate-500">信任信息与集合递进推荐</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Smart Cart</p><p class="mt-2 text-xl font-semibold">{{ smartCart?.enabled ? '已启用' : '默认关闭' }}</p><p class="mt-2 text-xs text-slate-500">{{ smartCart?.compatibility_status ?? 'unchecked' }}</p></div>
                 </div>
-                <div class="rounded-2xl border border-amber-200 bg-amber-50 p-6">
-                    <p class="text-sm font-semibold text-amber-900">安全状态</p>
-                    <h2 class="mt-2 text-xl font-semibold text-slate-900">Smart Cart 默认关闭</h2>
-                    <p class="mt-3 text-sm leading-6 text-slate-600">当前只能保存草稿。兼容性检查、主题预览和人工启用完成前，系统始终使用 Shopify 默认购物车。</p>
-                    <button type="button" class="mt-5 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900" @click="activeTab = 'smart-cart'">查看 Smart Cart 草稿</button>
+                <div class="grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold">上线检查</h2><p class="mt-1 text-sm text-slate-500">发布前确认策略、场景和店面能力。</p></div><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{{ setupChecks.filter(item => item.passed).length }}/{{ setupChecks.length }}</span></div><div class="mt-5 space-y-3"><div v-for="item in setupChecks" :key="item.label" class="flex items-center gap-3 rounded-xl border p-3" :class="item.passed ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-slate-50'"><span class="flex size-7 items-center justify-center rounded-full text-xs font-bold" :class="item.passed ? 'bg-emerald-600 text-white' : 'bg-white text-slate-400'">{{ item.passed ? '✓' : '·' }}</span><span class="text-sm font-medium text-slate-700">{{ item.label }}</span></div></div></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold">异常提醒</h2><p class="mt-1 text-sm text-slate-500">仅展示当前店铺真实状态。</p></div><span class="rounded-full px-3 py-1 text-xs font-semibold" :class="configurationAlerts.length ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'">{{ configurationAlerts.length ? `${configurationAlerts.length} 项` : '正常' }}</span></div><div v-if="configurationAlerts.length" class="mt-5 space-y-2"><button v-for="strategy in configurationAlerts" :key="strategy.uuid" type="button" class="block w-full rounded-xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900" @click="openEditor(strategy, 'usage')">{{ strategy.name }}：页面或组件绑定配置异常</button></div><p v-else class="mt-8 text-center text-sm text-slate-500">没有发现配置异常。</p></div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-lg font-semibold">全局设置</h2><p class="mt-1 text-sm text-slate-500">默认文案、Checkout 信任信息、Smart Cart 和归因口径集中管理。</p></div><button type="button" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" @click="showGlobalSettings = !showGlobalSettings">{{ showGlobalSettings ? '收起设置' : '打开全局设置' }}</button></div></div>
+
+                <div v-if="showGlobalSettings" class="space-y-6">
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveGlobalSettings"><h2 class="text-lg font-semibold">默认语言与文案</h2><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="text-sm font-medium">默认语言<select v-model="globalForm.default_locale" class="mt-1 w-full rounded-xl border-slate-300"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label><label class="text-sm font-medium">推荐标题<input v-model="globalForm.copy.recommendation_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label><label class="text-sm font-medium">加购按钮<input v-model="globalForm.copy.add_button" class="mt-1 w-full rounded-xl border-slate-300" maxlength="60"></label><label class="text-sm font-medium">Checkout 标题<input v-model="globalForm.copy.checkout_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label></div><div class="mt-5 flex items-center gap-3"><button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="globalSaveState === 'saving'">{{ globalSaveState === 'saving' ? '保存中…' : '保存默认设置' }}</button><span class="text-sm" :class="globalSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ globalError || (globalSaveState === 'saved' ? '已保存' : '') }}</span></div></form>
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveCheckout">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 class="text-lg font-semibold">Checkout</h2><p class="mt-1 text-sm text-slate-500">由 Checkout Editor 添加区块；这里管理后端开关、Collection 和信任信息。</p></div><label class="flex items-center gap-2 text-sm font-semibold"><input v-model="checkoutForm.enabled" type="checkbox" class="rounded">总开关</label></div>
+                        <div class="mt-5 grid gap-4 lg:grid-cols-3"><label class="text-sm font-medium">推荐组件<select v-model="checkoutForm.component_uuid" class="mt-1 w-full rounded-xl border-slate-300"><option value="">暂不选择</option><option v-for="component in checkoutComponents" :key="component.uuid" :value="component.uuid">{{ component.name }} · {{ component.status }}</option></select></label><label class="text-sm font-medium">候选 Collection<select v-model="checkoutForm.shopify_collection_id" class="mt-1 w-full rounded-xl border-slate-300"><option value="">暂不选择</option><option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }}（{{ collection.product_count }}）</option></select></label><label class="text-sm font-medium">最大推荐数量<input v-model.number="checkoutForm.maximum_recommendations" type="number" min="1" max="1000" placeholder="留空表示遍历整个集合" class="mt-1 w-full rounded-xl border-slate-300"><span class="mt-1 block text-xs text-slate-500">不是固定商品槽位，按 Collection 顺序逐个显示。</span></label></div>
+                        <div class="mt-6"><div class="flex items-center justify-between"><h3 class="font-semibold">左侧信任信息</h3><button v-if="checkoutForm.trust_items.length < 6" type="button" class="text-sm font-semibold text-indigo-700" @click="addTrustItem">+ 添加</button></div><div class="mt-3 grid gap-3 lg:grid-cols-2"><div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4"><div class="flex items-center justify-between"><label class="flex items-center gap-2 text-sm font-semibold"><input v-model="item.enabled" type="checkbox" class="rounded">第 {{ index + 1 }} 项</label><button type="button" class="text-xs text-rose-600" @click="checkoutForm.trust_items.splice(index, 1)">移除</button></div><div class="mt-3 grid gap-3 sm:grid-cols-2"><label class="text-xs">图标<select v-model="item.icon" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></label><label class="text-xs">标题<input v-model="item.title" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><label class="text-xs sm:col-span-2">说明<input v-model="item.description" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label></div></div></div></div><button v-if="permissions.manage" class="mt-5 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="checkoutForm.processing">{{ checkoutForm.processing ? '保存中…' : '保存 Checkout 设置' }}</button>
+                    </form>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h2 class="text-lg font-semibold">Smart Cart</h2><p class="mt-1 text-sm text-slate-500">默认关闭；兼容性检查、预览确认和人工启用流程不变。</p></div><button v-if="permissions.manageSmartCart && smartCart?.enabled" type="button" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700" @click="restoreShopifyCart">一键恢复 Shopify 默认购物车</button></div><div class="mt-5 grid gap-4 xl:grid-cols-3"><form class="rounded-xl bg-slate-50 p-4" @submit.prevent="saveSmartCartDraft"><h3 class="font-semibold">1. 草稿</h3><label class="mt-3 block text-sm">策略<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">暂不选择</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="mt-3 block text-sm">标题<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300"></label><button v-if="permissions.manageSmartCart" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存关闭状态草稿</button></form><form class="rounded-xl bg-slate-50 p-4" @submit.prevent="saveSmartCompatibility"><h3 class="font-semibold">2. 测试主题检查</h3><div class="mt-3 grid grid-cols-2 gap-2"><input v-model="smartChecks.theme_name" placeholder="测试主题名称" class="rounded-lg border-slate-300 text-sm"><input v-model="smartChecks.theme_id" placeholder="Theme ID" class="rounded-lg border-slate-300 text-sm"></div><div class="mt-3 space-y-1 text-xs"><label v-for="key in ['unpublished_copy','app_embed_loaded','browser_dialog','cart_link','cart_routes','cart_behaviour_verified']" :key="key" class="flex gap-2"><input v-model="smartChecks[key as keyof typeof smartChecks]" type="checkbox" class="rounded">{{ key }}</label></div><button v-if="permissions.manageSmartCart" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">记录兼容性</button></form><div class="rounded-xl bg-slate-50 p-4"><h3 class="font-semibold">3. 预览与启用</h3><p class="mt-3 text-sm">兼容状态：<strong>{{ smartCart?.compatibility_status ?? 'unchecked' }}</strong></p><p class="mt-2 text-sm">预览：<strong>{{ smartCart?.preview_confirmed_at ? '已确认' : '待确认' }}</strong></p><button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && !smartCart?.preview_confirmed_at" type="button" class="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800" @click="confirmSmartCartPreview">确认桌面/移动预览</button><button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && smartCart?.preview_confirmed_at && !smartCart?.enabled" type="button" class="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" @click="activateSmartCart">人工启用</button></div></div></div>
+                    <div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-950"><strong>归因规则：</strong>7 天内最后一次推荐点击，仅点击归因；退款或取消自动冲销。该已确认口径为只读设置。</div>
                 </div>
             </section>
 
-            <section v-else-if="activeTab === 'strategies'" class="grid gap-5 xl:grid-cols-[320px_1fr]">
-                <div class="space-y-5">
-                    <form v-if="permissions.manage" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" @submit.prevent="createStrategy">
-                        <h2 class="font-semibold text-slate-900">新建推荐策略</h2>
-                        <label class="mt-4 block text-sm font-medium text-slate-700">策略名称<input v-model="createStrategyForm.name" class="mt-1 w-full rounded-lg border-slate-300" required maxlength="80"></label>
-                        <label class="mt-3 block text-sm font-medium text-slate-700">算法<select v-model="createStrategyForm.algorithm" class="mt-1 w-full rounded-lg border-slate-300"><option v-for="option in options.algorithms" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                        <label class="mt-3 block text-sm font-medium text-slate-700">推荐数量<input v-model.number="createStrategyForm.item_limit" type="number" min="1" max="50" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                        <button class="mt-4 w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="createStrategyForm.processing">创建草稿</button>
-                    </form>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                        <p class="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">策略列表</p>
-                        <button v-for="strategy in strategies" :key="strategy.uuid" type="button" class="mb-1 w-full rounded-xl px-3 py-3 text-left" :class="selectedStrategyUuid === strategy.uuid ? 'bg-indigo-50 text-indigo-900' : 'hover:bg-slate-50'" @click="selectedStrategyUuid = strategy.uuid">
-                            <span class="block text-sm font-semibold">{{ strategy.name }}</span><span class="mt-1 block text-xs text-slate-500">{{ algorithmLabel(strategy.algorithm) }} · {{ strategy.item_limit }} 件</span>
-                        </button>
-                        <p v-if="strategies.length === 0" class="px-3 py-6 text-center text-sm text-slate-400">尚未创建策略</p>
-                    </div>
-                </div>
-
-                <div v-if="selectedStrategy" class="space-y-5">
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="updateStrategy">
-                        <div class="flex items-center justify-between"><h2 class="text-lg font-semibold text-slate-900">基本设置</h2><span class="rounded-full px-3 py-1 text-xs font-medium" :class="selectedStrategy.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ selectedStrategy.enabled ? '后端已启用' : '草稿' }}</span></div>
-                        <div class="mt-5 grid gap-4 md:grid-cols-3">
-                            <label class="text-sm font-medium text-slate-700">名称<input v-model="editStrategyForm.name" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                            <label class="text-sm font-medium text-slate-700">算法<select v-model="editStrategyForm.algorithm" class="mt-1 w-full rounded-lg border-slate-300"><option v-for="option in options.algorithms" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                            <label class="text-sm font-medium text-slate-700">数量<input v-model.number="editStrategyForm.item_limit" type="number" min="1" max="50" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                        </div>
-                        <button v-if="permissions.manage" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存基本设置</button>
-                    </form>
-
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="updateRules">
-                        <h2 class="text-lg font-semibold text-slate-900">过滤规则</h2><p class="mt-1 text-sm text-slate-500">多个包含标签按“命中任一”处理；排除规则始终优先。</p>
-                        <div class="mt-5 grid gap-4 md:grid-cols-2">
-                            <label class="text-sm font-medium text-slate-700">包含标签<textarea v-model="ruleForm.include_tags_text" rows="2" class="mt-1 w-full rounded-lg border-slate-300" placeholder="Bike, Featured"></textarea></label>
-                            <label class="text-sm font-medium text-slate-700">排除标签<textarea v-model="ruleForm.exclude_tags_text" rows="2" class="mt-1 w-full rounded-lg border-slate-300" placeholder="Clearance, Hidden"></textarea></label>
-                            <label class="text-sm font-medium text-slate-700">最低价格<input v-model="ruleForm.minimum_price" type="number" min="0" step="0.01" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                            <label class="text-sm font-medium text-slate-700">最高价格<input v-model="ruleForm.maximum_price" type="number" min="0" step="0.01" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                            <label class="text-sm font-medium text-slate-700">最低库存<input v-model="ruleForm.minimum_inventory" type="number" min="0" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                            <label class="flex items-center gap-3 self-end rounded-lg border border-slate-200 px-4 py-3 text-sm text-slate-700"><input v-model="ruleForm.in_stock_only" type="checkbox" class="rounded border-slate-300">仅推荐可售商品</label>
-                        </div>
-                        <button v-if="permissions.manage" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存规则</button>
-                    </form>
-
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="updateProducts">
-                        <h2 class="text-lg font-semibold text-slate-900">手动、置顶与排除</h2><p class="mt-1 text-sm text-slate-500">按住 Command / Ctrl 可多选。同一商品只能属于一种操作。</p>
-                        <div class="mt-5 grid gap-4 lg:grid-cols-3">
-                            <label v-for="field in productFields" :key="field.key" class="text-sm font-medium text-slate-700">{{ field.label }}
-                                <select v-model="productForm[field.key]" multiple size="8" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="product in products" :key="product.shopify_gid" :value="product.shopify_gid">{{ product.title }}</option></select>
-                            </label>
-                        </div>
-                        <button v-if="permissions.manage" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存商品操作</button>
-                    </form>
-                </div>
-                <div v-else class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">先创建一个推荐策略。</div>
-            </section>
-
-            <section v-else-if="activeTab === 'components'" class="space-y-5">
-                <form v-if="permissions.manage" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="createComponent">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-end">
-                        <label class="flex-1 text-sm font-medium text-slate-700">组件名称<input v-model="createComponentForm.name" required class="mt-1 w-full rounded-lg border-slate-300" placeholder="商品页 · 你可能还喜欢"></label>
-                        <label class="flex-1 text-sm font-medium text-slate-700">推荐策略<select v-model="createComponentForm.strategy_uuid" required class="mt-1 w-full rounded-lg border-slate-300"><option value="" disabled>选择策略</option><option v-for="strategy in strategies" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
-                        <label class="flex-1 text-sm font-medium text-slate-700">展示位置<select v-model="createComponentForm.placement" class="mt-1 w-full rounded-lg border-slate-300"><option v-for="option in options.placements" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                        <button class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="strategies.length === 0">创建组件草稿</button>
-                    </div>
-                </form>
-
-                <div class="grid gap-5 xl:grid-cols-[300px_1fr]">
-                    <aside class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                        <button v-for="component in components" :key="component.uuid" type="button" class="mb-2 w-full rounded-xl border px-4 py-3 text-left" :class="selectedComponentUuid === component.uuid ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-slate-50'" @click="selectedComponentUuid = component.uuid">
-                            <div class="flex items-center justify-between gap-2"><span class="text-sm font-semibold text-slate-900">{{ component.name }}</span><span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{{ statusLabel(component.status) }}</span></div>
-                            <p class="mt-1 text-xs text-slate-500">{{ placementLabel(component.placement) }} · {{ component.strategy_name }}</p>
-                        </button>
-                        <p v-if="components.length === 0" class="p-8 text-center text-sm text-slate-400">尚未创建组件</p>
-                    </aside>
-
-                    <div v-if="selectedComponent" class="space-y-5">
-                        <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="updateComponent">
-                            <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-slate-900">组件设置</h2><p class="text-sm text-slate-500">保存会退回草稿，需重新预览后启用。</p></div><div class="flex gap-2"><button v-if="permissions.manage && selectedComponent.status !== 'active'" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" @click="activateComponent(selectedComponent)">启用后端配置</button><button v-if="permissions.manage && selectedComponent.status === 'active'" type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700" @click="disableComponent(selectedComponent)">停用</button></div></div>
-                            <div class="mt-5 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950"><span class="font-semibold">主题组件标识：</span><code class="break-all">{{ selectedComponent.uuid }}</code><p class="mt-1 text-xs text-indigo-700">在测试主题的 “Deco recommendations” 区块中粘贴此标识。</p></div>
-                            <div class="mt-5 grid gap-4 md:grid-cols-2">
-                                <label class="text-sm font-medium text-slate-700">名称<input v-model="componentForm.name" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                                <label class="text-sm font-medium text-slate-700">策略<select v-model="componentForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option v-for="strategy in strategies" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
-                                <label class="text-sm font-medium text-slate-700">位置<select v-model="componentForm.placement" class="mt-1 w-full rounded-lg border-slate-300"><option v-for="option in options.placements" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-                                <label class="text-sm font-medium text-slate-700">标题<input v-model="componentForm.heading" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                                <label class="text-sm font-medium text-slate-700">按钮文案<input v-model="componentForm.button_label" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                            </div>
-                            <button v-if="permissions.manage" class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存组件设置</button>
-                        </form>
-
-                        <div class="grid gap-5 2xl:grid-cols-[360px_1fr]">
-                            <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="updateStyle">
-                                <h2 class="text-lg font-semibold text-slate-900">样式</h2>
-                                <div class="mt-4 grid grid-cols-2 gap-3">
-                                    <label class="text-sm text-slate-700">布局<select v-model="styleForm.layout" class="mt-1 w-full rounded-lg border-slate-300"><option value="carousel">横向轮播</option><option value="grid">商品网格</option></select></label>
-                                    <label class="text-sm text-slate-700">桌面列数<input v-model.number="styleForm.desktop_columns" type="number" min="1" max="6" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                                    <label class="text-sm text-slate-700">移动列数<input v-model.number="styleForm.mobile_columns" type="number" min="1" max="3" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                                    <label class="text-sm text-slate-700">圆角<input v-model.number="styleForm.tokens.border_radius" type="number" min="0" max="48" class="mt-1 w-full rounded-lg border-slate-300"></label>
-                                    <label class="text-sm text-slate-700">文字颜色<input v-model="styleForm.tokens.text_color" type="color" class="mt-1 h-10 w-full rounded border border-slate-300"></label>
-                                    <label class="text-sm text-slate-700">背景颜色<input v-model="styleForm.tokens.background_color" type="color" class="mt-1 h-10 w-full rounded border border-slate-300"></label>
-                                </div>
-                                <div class="mt-4 grid grid-cols-2 gap-2 text-sm text-slate-700"><label><input v-model="styleForm.show_image" type="checkbox" class="mr-2 rounded">图片</label><label><input v-model="styleForm.show_vendor" type="checkbox" class="mr-2 rounded">品牌</label><label><input v-model="styleForm.show_price" type="checkbox" class="mr-2 rounded">价格</label><label><input v-model="styleForm.show_add_to_cart" type="checkbox" class="mr-2 rounded">加购按钮</label></div>
-                                <button v-if="permissions.manage" class="mt-5 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存样式</button>
-                            </form>
-
-                            <div class="rounded-2xl border border-slate-200 bg-slate-100 p-5 shadow-sm">
-                                <div class="mb-4 flex items-center justify-between"><div><h2 class="font-semibold text-slate-900">实时预览</h2><p class="text-xs text-slate-500">示例上下文只用于离线预览</p></div><div class="flex rounded-lg bg-white p-1 text-xs"><button type="button" class="rounded-md px-3 py-1.5" :class="previewMode === 'desktop' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="previewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-3 py-1.5" :class="previewMode === 'mobile' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="previewMode = 'mobile'">移动</button></div></div>
-                                <div class="mx-auto min-h-72 overflow-hidden border border-slate-200 bg-white p-5 shadow-sm transition-all" :class="previewMode === 'mobile' ? 'max-w-[390px]' : 'max-w-full'" :style="{ backgroundColor: String(styleForm.tokens.background_color), color: String(styleForm.tokens.text_color), borderRadius: `${styleForm.tokens.border_radius}px` }">
-                                    <h3 class="mb-4 text-lg font-semibold">{{ componentForm.heading || '你可能还喜欢' }}</h3>
-                                    <p v-if="previewLoading" class="py-16 text-center text-sm text-slate-400">正在生成预览…</p><p v-else-if="previewError" class="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">{{ previewError }}</p><p v-else-if="previewItems.length === 0" class="py-16 text-center text-sm text-slate-400">当前示例上下文没有符合规则的商品。</p>
-                                    <div v-else class="grid" :style="{ gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))`, gap: `${styleForm.tokens.gap}px` }">
-                                        <article v-for="product in previewItems" :key="product.shopify_product_id" class="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
-                                            <div v-if="styleForm.show_image" class="aspect-square overflow-hidden rounded-lg bg-slate-100"><img v-if="product.storefront.image.url" :src="product.storefront.image.url" :alt="product.storefront.image.alt ?? product.title" class="size-full object-cover"><div v-else class="flex size-full items-center justify-center text-xs text-slate-400">暂无图片</div></div>
-                                            <p v-if="styleForm.show_vendor && product.vendor" class="mt-3 text-[10px] uppercase tracking-wider text-slate-400">{{ product.vendor }}</p><h4 class="mt-1 truncate text-sm font-semibold">{{ product.title }}</h4><p v-if="styleForm.show_price" class="mt-1 text-sm">{{ money(product.price.minimum, product.price.currency) }}</p><button v-if="styleForm.show_add_to_cart" type="button" class="mt-3 w-full rounded-lg px-2 py-2 text-xs font-semibold" :style="{ backgroundColor: String(styleForm.tokens.button_color), color: String(styleForm.tokens.button_text_color) }">{{ componentForm.button_label || '加入购物车' }}</button>
-                                        </article>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section v-else-if="activeTab === 'checkout'" class="space-y-5">
-                <div class="flex flex-col gap-4 rounded-2xl border p-6 shadow-sm md:flex-row md:items-center md:justify-between" :class="checkoutForm.enabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'">
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wider" :class="checkoutForm.enabled ? 'text-emerald-700' : 'text-amber-700'">Shopify Checkout UI Extension</p>
-                        <h2 class="mt-1 text-xl font-semibold text-slate-950">{{ checkoutForm.enabled ? '后端配置已开启' : '默认关闭' }}</h2>
-                        <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">即使后台开启，商家仍需在 Shopify Checkout Editor 中分别添加信任信息和递进推荐区块。扩展加载失败时不会阻止结账。</p>
-                    </div>
-                    <label class="flex shrink-0 items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200">
-                        <input v-model="checkoutForm.enabled" type="checkbox" class="rounded" :disabled="!permissions.manage">
-                        Checkout 总开关
-                    </label>
-                </div>
-
-                <form class="grid gap-5 xl:grid-cols-2" @submit.prevent="saveCheckout">
-                    <div class="space-y-5">
-                        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                            <div class="flex items-start justify-between gap-4">
-                                <div><h2 class="text-lg font-semibold text-slate-900">订单摘要递进推荐</h2><p class="mt-1 text-sm leading-6 text-slate-500">从一个 Shopify 商品集合按集合默认顺序动态取候选；已在购物车、不可售或已添加的商品会自动跳过。</p></div>
-                                <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">ORDER_SUMMARY2</span>
-                            </div>
-                            <label class="mt-5 block text-sm font-medium text-slate-700">Checkout 推荐组件
-                                <select v-model="checkoutForm.component_uuid" class="mt-1 w-full rounded-lg border-slate-300">
-                                    <option value="">请选择 Checkout 组件</option>
-                                    <option v-for="component in checkoutComponents" :key="component.uuid" :value="component.uuid">{{ component.name }} · {{ statusLabel(component.status) }}</option>
-                                </select>
-                            </label>
-                            <p v-if="checkoutComponents.length === 0" class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">请先在“推荐组件”创建 placement 为 Checkout 的组件，配置标题/按钮文案并启用后端配置。</p>
-                            <div class="mt-5">
-                                <label class="text-sm font-medium text-slate-700">候选 Shopify Collection
-                                    <select v-model="checkoutForm.shopify_collection_id" class="mt-1 w-full rounded-lg border-slate-300" :required="checkoutForm.enabled">
-                                        <option value="">请选择已同步集合</option>
-                                        <option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }} · {{ collection.product_count }} 个商品</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>候选规则：</strong>页面一次只显示一个商品；当前商品加入成功后，再按 Shopify Collection 默认顺序取得并显示下一个合格商品。每个商品选择当前 Market 下第一个可售变体，跳过已在购物车或不可售商品；只有集合中没有剩余合格候选时才隐藏，不循环、不重复。</div>
-                            <p v-if="collections.length === 0" class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Commerce Hub 尚未同步可选 Collection；后台保持关闭，直到集合数据可用。</p>
-                        </div>
-
-                        <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                            <div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-900">左侧信任信息</h2><p class="mt-1 text-sm leading-6 text-slate-500">图标、标题、说明、顺序和启停均可配置；最多 6 项。</p></div><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">WALLETS1</span></div>
-                            <div class="mt-5 space-y-3">
-                                <div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4">
-                                    <div class="flex flex-wrap items-center justify-between gap-3"><label class="flex items-center gap-2 text-sm font-semibold text-slate-700"><input v-model="item.enabled" type="checkbox" class="rounded">第 {{ index + 1 }} 项</label><div class="flex gap-1"><button type="button" class="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100" :disabled="index === 0" @click="moveTrustItem(index, -1)">上移</button><button type="button" class="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100" :disabled="index === checkoutForm.trust_items.length - 1" @click="moveTrustItem(index, 1)">下移</button><button type="button" class="rounded-md px-2 py-1 text-xs text-rose-600 hover:bg-rose-50" @click="removeTrustItem(index)">移除</button></div></div>
-                                    <div class="mt-3 grid gap-3 md:grid-cols-[150px_1fr]">
-                                        <label class="text-xs font-medium text-slate-600">图标<select v-model="item.icon" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></label>
-                                        <label class="text-xs font-medium text-slate-600">标题<input v-model="item.title" class="mt-1 w-full rounded-lg border-slate-300 text-sm" maxlength="80" :required="item.enabled"></label>
-                                        <label class="text-xs font-medium text-slate-600 md:col-start-2">说明<input v-model="item.description" class="mt-1 w-full rounded-lg border-slate-300 text-sm" maxlength="120"></label>
-                                    </div>
-                                </div>
-                            </div>
-                            <button v-if="checkoutForm.trust_items.length < 6" type="button" class="mt-4 rounded-lg border border-dashed border-indigo-300 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50" @click="addTrustItem">+ 添加信任信息</button>
-                        </div>
-                    </div>
-
-                    <div class="space-y-5">
-                        <div class="rounded-2xl border border-slate-200 bg-slate-100 p-5 shadow-sm xl:sticky xl:top-5">
-                            <div class="mb-4 flex items-center justify-between gap-3"><div><h2 class="font-semibold text-slate-900">Checkout 配置预览</h2><p class="mt-1 text-xs text-slate-500">示意布局；最终位置、间距和移动端折叠由 Shopify 控制。</p></div><div class="flex rounded-lg bg-white p-1 text-xs"><button type="button" class="rounded-md px-3 py-1.5" :class="checkoutPreviewMode === 'desktop' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="checkoutPreviewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-3 py-1.5" :class="checkoutPreviewMode === 'mobile' ? 'bg-slate-950 text-white' : 'text-slate-500'" @click="checkoutPreviewMode = 'mobile'">移动</button></div></div>
-                            <div class="mx-auto overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all" :class="checkoutPreviewMode === 'mobile' ? 'max-w-[390px]' : 'max-w-full'">
-                                <div class="border-b border-slate-200 px-5 py-4 text-center font-semibold">{{ store.name }}</div>
-                                <div class="grid min-h-96" :class="checkoutPreviewMode === 'desktop' ? 'md:grid-cols-[1fr_.9fr]' : 'grid-cols-1'">
-                                    <div class="p-5">
-                                        <div class="grid gap-4" :class="checkoutPreviewMode === 'desktop' ? 'grid-cols-3' : 'grid-cols-1'">
-                                            <div v-for="item in checkoutForm.trust_items.filter(trustItem => trustItem.enabled)" :key="item.key" class="text-center">
-                                                <div class="mx-auto flex size-9 items-center justify-center rounded-full bg-slate-100 text-sm">✓</div><p class="mt-2 text-xs font-semibold text-slate-900">{{ item.title || '信任信息标题' }}</p><p v-if="item.description" class="mt-1 text-[11px] text-slate-500">{{ item.description }}</p>
-                                            </div>
-                                        </div>
-                                        <div class="mt-8 rounded-xl bg-slate-50 p-5 text-sm text-slate-400">Express checkout 与联系/配送表单由 Shopify 原生渲染</div>
-                                    </div>
-                                    <div class="border-slate-200 bg-slate-50 p-5" :class="checkoutPreviewMode === 'desktop' ? 'border-l' : 'border-t'">
-                                        <div class="rounded-xl bg-white p-4 shadow-sm"><p class="text-xs text-slate-500">购物车商品摘要</p><div class="mt-3 h-12 rounded-lg bg-slate-100"></div></div>
-                                        <div v-if="checkoutPreviewCandidate" class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                                            <h3 class="text-center text-sm font-semibold text-slate-950">{{ selectedCheckoutComponent?.heading || 'Great Value Bundles for You' }}</h3>
-                                            <div class="mt-4 flex items-center gap-3"><div class="size-14 shrink-0 overflow-hidden rounded-lg bg-slate-100"><img v-if="checkoutPreviewCandidate.image_url" :src="checkoutPreviewCandidate.image_url" :alt="checkoutPreviewCandidate.product_title" class="size-full object-cover"></div><div class="min-w-0 flex-1"><p class="truncate text-sm font-medium">{{ checkoutPreviewCandidate.product_title }}</p><p class="truncate text-xs text-slate-500">{{ checkoutPreviewCandidate.variant_title }}</p><p class="mt-1 text-sm">{{ money(checkoutPreviewCandidate.price, checkoutPreviewCandidate.currency) }}</p></div><button type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white">{{ selectedCheckoutComponent?.button_label || 'Add' }}</button></div>
-                                            <p class="mt-3 text-[11px] leading-5 text-slate-500">成功加入后自动展示下一个；候选耗尽时整个区块隐藏。</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>平台边界：</strong>仅使用 Shopify 官方 Checkout UI Extension 组件，不修改 Checkout DOM、不注入自定义 HTML/CSS。实际可用位置受 Shopify Plus 与 Checkout Editor 限制。</div>
-                        </div>
-                    </div>
-
-                    <div class="xl:col-span-2 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"><p class="text-sm text-slate-600">保存后仍需在 Checkout Editor 添加两个区块；关闭总开关会让两个扩展安全地不渲染。</p><button v-if="permissions.manage" class="shrink-0 rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="checkoutForm.processing">{{ checkoutForm.processing ? '保存中…' : '保存 Checkout 配置' }}</button></div>
-                </form>
-            </section>
-
-            <section v-else-if="activeTab === 'smart-cart'" class="space-y-5">
-                <div class="flex flex-col gap-4 rounded-2xl border p-6 shadow-sm md:flex-row md:items-center md:justify-between" :class="smartCart?.enabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'">
-                    <div><p class="text-xs font-semibold uppercase tracking-wider" :class="smartCart?.enabled ? 'text-emerald-700' : 'text-amber-700'">Smart Cart 基础版</p><h2 class="mt-1 text-xl font-semibold text-slate-950">{{ smartCart?.enabled ? '已人工启用' : '默认关闭' }}</h2><p class="mt-2 text-sm text-slate-600">回退方式始终为 Shopify 默认购物车。</p></div>
-                    <button v-if="permissions.manageSmartCart && smartCart?.enabled" type="button" class="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200" @click="restoreShopifyCart">一键恢复 Shopify 默认购物车</button>
-                </div>
-
-                <div class="grid gap-5 xl:grid-cols-3">
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveSmartCartDraft">
-                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">1</div><h2 class="mt-4 font-semibold text-slate-900">保存关闭状态草稿</h2><p class="mt-1 text-sm text-slate-500">修改策略会清除旧兼容性与预览确认。</p>
-                        <label class="mt-4 block text-sm font-medium text-slate-700">推荐策略<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">暂不选择</option><option v-for="strategy in strategies" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
-                        <label class="mt-3 block text-sm font-medium text-slate-700">标题<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label>
-                        <button v-if="permissions.manageSmartCart" class="mt-5 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">保存草稿并保持关闭</button>
-                    </form>
-
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="recordSmartCartCompatibility">
-                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">2</div><h2 class="mt-4 font-semibold text-slate-900">记录测试主题兼容性</h2><p class="mt-1 text-sm text-slate-500">只接受未发布的测试主题，不得使用已发布主题。</p>
-                        <div class="mt-4 grid grid-cols-2 gap-3"><label class="text-sm font-medium text-slate-700">主题名称<input v-model="smartCartCompatibilityForm.theme_name" class="mt-1 w-full rounded-lg border-slate-300" required></label><label class="text-sm font-medium text-slate-700">Theme ID<input v-model="smartCartCompatibilityForm.theme_id" class="mt-1 w-full rounded-lg border-slate-300" required pattern="[0-9]+"></label></div>
-                        <div class="mt-4 space-y-2 text-sm text-slate-700"><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.unpublished_copy" type="checkbox" class="mt-1 rounded">这是未发布的测试主题副本</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.app_embed_loaded" type="checkbox" class="mt-1 rounded">App Embed 已在主题预览中加载</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.browser_dialog" type="checkbox" class="mt-1 rounded">浏览器支持安全购物车抽屉</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_link" type="checkbox" class="mt-1 rounded">测试主题可识别购物车入口</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_routes" type="checkbox" class="mt-1 rounded">Shopify 购物车接口可用</label><label class="flex gap-2"><input v-model="smartCartCompatibilityForm.cart_behaviour_verified" type="checkbox" class="mt-1 rounded">购物车打开、数量、删除和加购已验证</label></div>
-                        <button v-if="permissions.manageSmartCart" class="mt-5 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">记录检查并保持关闭</button>
-                    </form>
-
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                        <div class="flex size-8 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">3</div><h2 class="mt-4 font-semibold text-slate-900">预览并人工启用</h2><dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">兼容状态</dt><dd class="font-semibold">{{ smartCart?.compatibility_status ?? 'unchecked' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">测试主题</dt><dd class="text-right font-semibold">{{ smartCart?.theme_name || '未记录' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">桌面/移动预览</dt><dd class="font-semibold">{{ smartCart?.preview_confirmed_at ? '已确认' : '待确认' }}</dd></div></dl>
-                        <button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && !smartCart?.preview_confirmed_at" type="button" class="mt-5 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800" @click="confirmSmartCartPreview">确认桌面和移动预览</button>
-                        <button v-if="permissions.manageSmartCart && smartCart?.compatibility_status === 'compatible' && smartCart?.preview_confirmed_at && !smartCart?.enabled" type="button" class="mt-3 w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" @click="activateSmartCart">人工启用 Smart Cart</button>
-                        <p v-if="!permissions.manageSmartCart" class="mt-5 text-sm text-slate-500">当前账号没有 Smart Cart 管理权限。</p>
-                    </div>
-                </div>
-
-                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900"><strong>故障安全：</strong>App Embed 只有在后端返回 <code>enabled=true</code> 后才拦截购物车入口；任何请求失败、配置缺失或门禁失效都会保留主题原购物车。</div>
+            <section v-else-if="activeTab === 'strategies'" class="space-y-5">
+                <div class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between"><div><h2 class="text-lg font-semibold">推荐策略</h2><p class="mt-1 text-sm text-slate-500">草稿自动保存；发布前不会影响线上顾客。</p></div><div class="flex flex-col gap-2 sm:flex-row"><input v-model="search" type="search" placeholder="搜索名称、场景或技术 ID" class="min-w-72 rounded-xl border-slate-300 text-sm"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="showRecycleBin = !showRecycleBin">回收站 {{ recycledRows.length }}</button><button v-if="permissions.manage" type="button" class="rounded-xl bg-slate-950 px-5 py-2 text-sm font-semibold text-white" @click="createStrategy">制定策略</button></div></div>
+                <div v-if="showRecycleBin" class="rounded-2xl border border-violet-200 bg-violet-50 p-5"><div class="mb-3 flex items-center justify-between"><h3 class="font-semibold text-violet-950">回收站</h3><span class="text-xs text-violet-700">删除后保留 30 天</span></div><p v-if="!recycledRows.length" class="text-sm text-violet-700">回收站为空。</p><div v-else class="space-y-2"><div v-for="strategy in recycledRows" :key="strategy.uuid" class="flex items-center justify-between rounded-xl bg-white p-3"><div><p class="font-medium">{{ strategy.name }}</p><p class="text-xs text-slate-500">保留至 {{ formatDate(strategy.recycle_until) }}</p></div><button type="button" class="rounded-lg border border-violet-200 px-3 py-1.5 text-sm font-semibold text-violet-800" @click="restoreStrategy(strategy)">恢复</button></div></div></div>
+                <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div v-if="!filteredStrategies.length" class="p-14 text-center"><p class="font-semibold text-slate-700">没有匹配策略</p><p class="mt-1 text-sm text-slate-500">点击“制定策略”会立即创建一份独立草稿。</p></div><div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-5 py-3">名称</th><th class="px-5 py-3">状态</th><th class="px-5 py-3">用于</th><th class="px-5 py-3">创建 / 最后修改</th><th class="px-5 py-3 text-right">操作</th></tr></thead><tbody><tr v-for="strategy in filteredStrategies" :key="strategy.uuid" class="border-t border-slate-100 align-top"><td class="px-5 py-4"><button type="button" class="font-semibold text-slate-950 hover:text-indigo-700" @click="openEditor(strategy)">{{ strategy.name }}</button><p class="mt-1 text-xs text-slate-500">{{ algorithmLabel(strategy.algorithm) }} · 最多 {{ strategy.item_limit }} 个结果</p><p class="mt-1 max-w-56 truncate font-mono text-[10px] text-slate-400" :title="strategy.technical_id">{{ strategy.technical_id }}</p></td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="statusClass(strategy.status)">{{ statusLabel(strategy.status) }}</span><p v-if="strategy.has_draft && strategy.published_version" class="mt-2 text-xs text-indigo-700">有未发布草稿</p></td><td class="px-5 py-4"><span v-if="!strategy.used_in.length" class="text-slate-400">没有场景</span><div v-else class="flex max-w-md flex-wrap gap-2"><button v-for="usage in strategy.used_in" :key="usage.component_uuid" type="button" class="rounded-lg border border-slate-200 px-2.5 py-1 text-left text-xs hover:border-indigo-300 hover:bg-indigo-50" @click="openEditor(strategy, 'usage')"><strong>{{ placementLabel(usage.placement) }}</strong><span class="ml-1 text-slate-500">{{ usageLabel(usage.status) }}</span></button></div></td><td class="px-5 py-4 text-xs text-slate-500"><p>{{ formatDate(strategy.created_at) }}</p><p class="mt-2">{{ formatDate(strategy.updated_at) }}</p></td><td class="px-5 py-4"><div class="flex justify-end gap-2"><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="openEditor(strategy)">编辑</button><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="duplicateStrategy(strategy)">复制</button><button v-if="strategy.status === 'enabled'" type="button" class="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-800" @click="disableStrategy(strategy)">停用</button><button type="button" class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700" @click="recycleStrategy(strategy)">{{ strategy.used_in.some(item => item.status === 'live') ? '先解除关联' : '归档/删除' }}</button></div></td></tr></tbody></table></div></div>
             </section>
 
             <section v-else class="space-y-5">
-                <div v-if="!permissions.viewAnalytics" class="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-500">当前账号没有个性化推荐分析权限。</div>
-                <template v-else>
-                    <div class="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-900 lg:flex-row lg:items-center lg:justify-between">
-                        <div><strong>归因口径：</strong>7 天内最后一次推荐点击；仅点击归因；每个订单只归给一个组件和策略；退款与取消自动冲销。</div>
-                        <div class="shrink-0 text-indigo-700">{{ analytics.period.from }} 至 {{ analytics.period.to }} · {{ analytics.period.timezone }}</div>
-                    </div>
-                    <div v-if="analytics.status === 'awaiting_events'" class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">Web Pixel 尚未收到 Test 店事件，以下均为真实 0 值，不使用模拟数据。</div>
-                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"><div v-for="card in analyticsCards" :key="card[0]" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">{{ card[0] }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ card[1] }}</p></div></div>
-                    <div class="grid gap-5 xl:grid-cols-2">
-                        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                            <div class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-950">最近 14 天趋势</h2><p class="mt-1 text-sm text-slate-500">按店铺时区统计真实事件与净归因收入。</p></div>
-                            <div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">日期</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">加购</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analytics.daily.slice(-14)" :key="row.date" class="border-t border-slate-100"><td class="px-4 py-3 font-medium">{{ row.date }}</td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }}</td><td class="px-4 py-3">{{ row.add_to_carts }}</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div>
-                        </div>
-                        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                            <div class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-950">展示位置表现</h2><p class="mt-1 text-sm text-slate-500">CTR 为推荐点击 ÷ 推荐曝光。</p></div>
-                            <div v-if="analytics.placements.length === 0" class="p-10 text-center text-sm text-slate-500">暂无展示位置事件。</div>
-                            <div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">位置</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">CTR</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analytics.placements" :key="row.placement" class="border-t border-slate-100"><td class="px-4 py-3 font-medium">{{ placementLabel(row.placement) }}</td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }}</td><td class="px-4 py-3">{{ row.click_through_rate.toFixed(2) }}%</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div>
-                            <div class="border-t border-slate-200 bg-slate-50 px-5 py-4 text-xs text-slate-600">已冲销订单 {{ analytics.reversed_orders }} 个<span v-if="analytics.excluded_currency_orders">；另有 {{ analytics.excluded_currency_orders }} 个非 {{ analytics.currency }} 订单未计入金额与 AOV</span>。</div>
-                        </div>
-                    </div>
-                </template>
+                <div v-if="!permissions.viewAnalytics" class="rounded-2xl border border-slate-200 bg-white p-14 text-center text-slate-500">当前账号没有个性化推荐分析权限。</div>
+                <template v-else><div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-950"><strong>归因口径：</strong>7 天内最后一次推荐点击；仅点击归因；退款与取消冲销。数据保留 strategy_id、strategy_version 和 placement/page。</div><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"><div v-for="card in analyticsCards" :key="card[0]" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs text-slate-500">{{ card[0] }}</p><p class="mt-2 text-2xl font-semibold">{{ card[1] }}</p></div></div><div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div class="grid gap-3 md:grid-cols-3"><label class="text-sm">策略<select v-model="analyticsStrategy" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部策略</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="text-sm">策略版本<select v-model="analyticsVersion" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部版本</option><option v-for="row in analyticsVersions" :key="row.strategy_version_uuid!" :value="row.strategy_version_uuid!">版本 {{ row.strategy_version }}</option></select></label><label class="text-sm">页面 / 组件<select v-model="analyticsPlacement" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部位置</option><option v-for="placement in options.placements" :key="placement.value" :value="placement.value">{{ placement.label }}</option></select></label></div></div><div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div v-if="!analyticsRows.length" class="p-12 text-center text-sm text-slate-500">当前筛选条件没有事件。</div><div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">策略 / 版本</th><th class="px-4 py-3">页面 / 组件</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">加购</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analyticsRows" :key="`${row.strategy_version_uuid}-${row.component_uuid}-${row.placement}`" class="border-t border-slate-100"><td class="px-4 py-3"><strong>{{ row.strategy_name }}</strong><p class="text-xs text-slate-500">版本 {{ row.strategy_version ?? '未记录' }}</p></td><td class="px-4 py-3"><strong>{{ placementLabel(row.placement) }}</strong><p class="text-xs text-slate-500">{{ row.component_name }}</p></td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }} <span class="text-xs text-slate-400">{{ row.click_through_rate }}%</span></td><td class="px-4 py-3">{{ row.add_to_carts }}</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3 font-semibold">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div></div></template>
             </section>
+        </div>
+        <div v-if="editorOpen" class="fixed inset-0 z-[100] bg-slate-950/45" role="dialog" aria-modal="true" aria-label="策略编辑器">
+            <div class="absolute inset-0 flex flex-col bg-slate-50">
+                <header class="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm sm:px-6"><div class="min-w-0"><p class="truncate font-semibold text-slate-950">{{ editorDraft?.name || '策略草稿' }}</p><p class="text-xs" :class="saveState === 'failed' ? 'text-rose-700' : 'text-slate-500'"><template v-if="saveState === 'saving'">保存中…</template><template v-else-if="saveState === 'saved'">已保存 {{ formatDate(savedAt) }}</template><template v-else-if="saveState === 'failed'">保存失败，请重试</template><template v-else>等待自动保存</template></p></div><div class="flex items-center gap-2"><button v-if="saveState === 'failed'" type="button" class="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700" @click="saveDraft">重试保存</button><button type="button" class="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" aria-label="关闭策略编辑器" @click="requestClose">关闭</button></div></header>
+                <div class="grid min-h-0 flex-1 lg:grid-cols-[240px_1fr]">
+                    <aside class="border-b border-slate-200 bg-white p-3 lg:border-b-0 lg:border-r lg:p-5"><nav class="flex gap-2 overflow-x-auto lg:flex-col"><button v-for="(step, index) in editorSteps" :key="step.value" type="button" class="shrink-0 rounded-xl px-4 py-3 text-left text-sm font-semibold" :class="editorStep === step.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="editorStep = step.value"><span class="mr-2 opacity-60">{{ index + 1 }}</span>{{ step.label }}</button></nav></aside>
+                    <main class="min-h-0 overflow-y-auto p-4 sm:p-6 lg:p-8">
+                        <div v-if="editorLoading" class="mx-auto max-w-4xl rounded-2xl bg-white p-12 text-center text-slate-500">正在读取独立草稿…</div>
+                        <div v-else-if="editorError && !editorDraft" class="mx-auto max-w-4xl rounded-2xl border border-rose-200 bg-rose-50 p-8 text-rose-800">{{ editorError }}</div>
+                        <div v-else-if="editorDraft" class="mx-auto max-w-5xl space-y-6">
+                            <div v-if="editorError" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{{ editorError }}</div>
+                            <section v-if="editorStep === 'basic'" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">基本信息</h2><p class="mt-1 text-sm text-slate-500">技术 UUID 稳定不变；商家主要看到名称和状态。</p><div class="mt-6 grid gap-5 md:grid-cols-2"><label class="text-sm font-medium md:col-span-2">策略名称<input v-model="editorDraft.name" maxlength="80" class="mt-1 w-full rounded-xl border-slate-300" placeholder="例如：商品页配件推荐"></label><label class="text-sm font-medium">预设推荐规则<select v-model="editorDraft.algorithm" class="mt-1 w-full rounded-xl border-slate-300"><option v-for="option in options.algorithms" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label class="text-sm font-medium">最多返回商品数<input v-model.number="editorDraft.item_limit" type="number" min="1" max="50" class="mt-1 w-full rounded-xl border-slate-300"></label></div><div class="mt-5 rounded-xl bg-slate-50 p-4 text-xs text-slate-500">内部 ID：<code>{{ editorStrategy?.technical_id }}</code></div></section>
+
+                            <section v-else-if="editorStep === 'rules'" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">确定性推荐规则</h2><p class="mt-1 text-sm text-slate-500">只提供可由 Commerce Hub 商品、库存和订单数据明确计算的预设规则。</p><div class="mt-6 grid gap-5 md:grid-cols-2"><label class="text-sm font-medium">包含标签<textarea :value="joined(editorDraft.configuration.rules.include_tags)" rows="3" class="mt-1 w-full rounded-xl border-slate-300" placeholder="逗号或换行分隔" @input="updateStringList(editorDraft.configuration.rules.include_tags, ($event.target as HTMLTextAreaElement).value)"></textarea></label><label class="text-sm font-medium">排除标签<textarea :value="joined(editorDraft.configuration.rules.exclude_tags)" rows="3" class="mt-1 w-full rounded-xl border-slate-300" @input="updateStringList(editorDraft.configuration.rules.exclude_tags, ($event.target as HTMLTextAreaElement).value)"></textarea></label><label class="text-sm font-medium">排除供应商<textarea :value="joined(editorDraft.configuration.rules.exclude_vendors)" rows="3" class="mt-1 w-full rounded-xl border-slate-300" @input="updateStringList(editorDraft.configuration.rules.exclude_vendors, ($event.target as HTMLTextAreaElement).value)"></textarea></label><label class="text-sm font-medium">排除集合<select v-model="editorDraft.configuration.rules.exclude_collection_ids" multiple class="mt-1 h-28 w-full rounded-xl border-slate-300"><option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }}</option></select></label></div><div class="mt-5 grid gap-4 sm:grid-cols-3"><label class="text-sm">最低价格<input v-model="editorDraft.configuration.rules.minimum_price" type="number" min="0" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">最高价格<input v-model="editorDraft.configuration.rules.maximum_price" type="number" min="0" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">最低库存<input v-model.number="editorDraft.configuration.rules.minimum_inventory" type="number" min="0" class="mt-1 w-full rounded-xl border-slate-300"></label></div><div class="mt-5 grid gap-3 sm:grid-cols-3"><label class="flex gap-2 rounded-xl bg-slate-50 p-3 text-sm"><input v-model="editorDraft.configuration.rules.in_stock_only" type="checkbox" class="mt-1 rounded">始终跳过无库存商品</label><label class="flex gap-2 rounded-xl bg-slate-50 p-3 text-sm"><input v-model="editorDraft.configuration.rules.exclude_cart_products" type="checkbox" class="mt-1 rounded">排除购物车已有商品</label><label class="flex gap-2 rounded-xl bg-slate-50 p-3 text-sm"><input v-model="editorDraft.configuration.rules.exclude_purchased_products" type="checkbox" class="mt-1 rounded">排除订单已购商品</label></div></section>
+
+                            <section v-else-if="editorStep === 'products'" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">手动选择、置顶与排除</h2><p class="mt-1 text-sm text-slate-500">可以手动选择商品或集合；同一商品只能出现在一个商品列表，不可售商品仍会安全跳过。</p><label class="mt-6 block text-sm font-medium">手动推荐集合<select v-model="editorDraft.configuration.rules.include_collection_ids" multiple class="mt-1 h-32 w-full rounded-xl border-slate-300"><option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }}（{{ collection.product_count }}）</option></select></label><div class="mt-6 grid gap-5 lg:grid-cols-3"><label v-for="field in [{key:'manual',label:'手动推荐商品'}, {key:'pinned',label:'置顶商品'}, {key:'excluded',label:'排除商品'}]" :key="field.key" class="text-sm font-medium">{{ field.label }}<select v-model="editorDraft.configuration.products[field.key as 'manual'|'pinned'|'excluded']" multiple class="mt-1 h-72 w-full rounded-xl border-slate-300"><option v-for="product in products" :key="product.shopify_product_id" :value="product.shopify_product_id">{{ product.title }}</option></select></label></div></section>
+
+                            <section v-else-if="editorStep === 'discount'" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">优惠关联</h2><p class="mt-1 text-sm text-slate-500">仅关联已有折扣，不创建或修改 Shopify 折扣。折扣失效不会阻止基础推荐展示。</p><label class="mt-6 flex items-center gap-3 rounded-xl bg-slate-50 p-4 text-sm font-semibold"><input v-model="editorDraft.configuration.discount.enabled" type="checkbox" class="rounded">启用已有折扣关联</label><label v-if="editorDraft.configuration.discount.enabled" class="mt-4 block text-sm font-medium">已有折扣引用 / 代码<input v-model="editorDraft.configuration.discount.reference" maxlength="255" class="mt-1 w-full rounded-xl border-slate-300" placeholder="填写现有折扣代码或引用"></label></section>
+
+                            <section v-else-if="editorStep === 'usage'" class="space-y-5"><div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">使用场景与展示设置</h2><p class="mt-1 text-sm text-slate-500">发布时才切换线上绑定；若目标位置已有其他有效策略，会要求明确确认替换。</p><div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><button v-for="placement in options.placements" :key="placement.value" type="button" class="rounded-xl border p-3 text-left text-sm" :class="placementDraft(placement.value)?.enabled ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-slate-200'" @click="selectedUsagePlacement = placement.value; togglePlacement(placement.value, !placementDraft(placement.value)?.enabled)"><strong>{{ placement.label }}</strong><span class="mt-1 block text-xs">{{ placementDraft(placement.value)?.enabled ? '已加入草稿' : '未使用' }}</span></button></div></div><div v-if="selectedPlacementDraft" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-center justify-between"><h3 class="font-semibold">{{ placementLabel(selectedPlacementDraft.placement) }}</h3><label class="flex items-center gap-2 text-sm"><input v-model="selectedPlacementDraft.enabled" type="checkbox" class="rounded">启用此场景</label></div><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="text-sm">组件名称<input v-model="selectedPlacementDraft.name" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">标题<input v-model="selectedPlacementDraft.heading" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">按钮文案<input v-model="selectedPlacementDraft.button_label" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">布局<select v-model="selectedPlacementDraft.style.layout" class="mt-1 w-full rounded-xl border-slate-300"><option value="carousel">轮播</option><option value="grid">网格</option></select></label></div><div class="mt-5 grid gap-3 sm:grid-cols-3"><label class="text-sm">桌面列数<input v-model.number="selectedPlacementDraft.style.desktop_columns" type="number" min="1" max="6" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="text-sm">移动列数<input v-model.number="selectedPlacementDraft.style.mobile_columns" type="number" min="1" max="3" class="mt-1 w-full rounded-xl border-slate-300"></label><label class="flex items-end gap-2 rounded-xl bg-slate-50 p-3 text-sm"><input v-model="selectedPlacementDraft.style.show_add_to_cart" type="checkbox" class="rounded">显示加购按钮</label></div><div v-if="selectedPlacementDraft.placement === 'checkout'" class="mt-5 grid gap-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 md:grid-cols-2"><label class="text-sm">Checkout Collection<select v-model="editorDraft.configuration.checkout.collection_id" class="mt-1 w-full rounded-lg border-indigo-200"><option :value="null">未选择</option><option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }}</option></select></label><label class="text-sm">最大推荐数量<input v-model.number="editorDraft.configuration.checkout.maximum_recommendations" type="number" min="1" max="1000" placeholder="留空表示遍历整个集合" class="mt-1 w-full rounded-lg border-indigo-200"></label></div></div></section>
+
+                            <section v-else class="space-y-5"><div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h2 class="text-xl font-semibold">真实数据预览</h2><p class="mt-1 text-sm text-slate-500">选择真实商品或模拟购物车/已购商品，查看推荐顺序及跳过原因。</p></div><button type="button" class="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white" :disabled="previewLoading" @click="loadPreview">{{ previewLoading ? '生成中…' : '生成预览' }}</button></div><div class="mt-5 grid gap-4 md:grid-cols-3"><label class="text-sm">当前商品<select v-model="previewContext.seed_product_id" class="mt-1 w-full rounded-xl border-slate-300"><option value="">无</option><option v-for="product in products" :key="product.shopify_product_id" :value="product.shopify_product_id">{{ product.title }}</option></select></label><label class="text-sm">模拟购物车<select v-model="previewContext.cart_product_ids" multiple class="mt-1 h-28 w-full rounded-xl border-slate-300"><option v-for="product in products" :key="product.shopify_product_id" :value="product.shopify_product_id">{{ product.title }}</option></select></label><label class="text-sm">模拟已购商品<select v-model="previewContext.purchased_product_ids" multiple class="mt-1 h-28 w-full rounded-xl border-slate-300"><option v-for="product in products" :key="product.shopify_product_id" :value="product.shopify_product_id">{{ product.title }}</option></select></label></div><p v-if="previewError" class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ previewError }}</p><div v-if="previewResult" class="mt-6 grid gap-5 lg:grid-cols-[1fr_.7fr]"><div><h3 class="font-semibold">将推荐的商品与顺序</h3><div v-if="!previewResult.items.length" class="mt-3 rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">没有合格候选，店面组件会安全隐藏。</div><ol v-else class="mt-3 space-y-2"><li v-for="(item, index) in previewResult.items" :key="item.shopify_product_id" class="flex items-center gap-3 rounded-xl border border-slate-200 p-3"><span class="flex size-7 items-center justify-center rounded-full bg-slate-950 text-xs font-bold text-white">{{ index + 1 }}</span><img v-if="item.storefront.image.url" :src="item.storefront.image.url" :alt="item.title" class="size-10 rounded-lg object-cover"><div><p class="text-sm font-semibold">{{ item.title }}</p><p class="text-xs text-slate-500">{{ item.reason_code }}</p></div></li></ol><div v-if="editorDraft.configuration.placements.some(item => item.placement === 'checkout' && item.enabled)" class="mt-4 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900">Checkout 一次显示一个，加入成功后获取下一个；本次最多 {{ previewResult.checkout_sequence.maximum_recommendations ?? '遍历整个集合' }} 个。</div></div><div><h3 class="font-semibold">跳过原因</h3><div v-if="!previewResult.skipped.length" class="mt-3 text-sm text-slate-500">没有被跳过的模拟商品。</div><div v-else class="mt-3 space-y-2"><div v-for="item in previewResult.skipped" :key="item.shopify_product_id" class="rounded-xl bg-slate-50 p-3"><p class="text-sm font-medium">{{ item.title }}</p><p class="text-xs text-slate-500">{{ skipReason(item.reason) }}</p></div></div></div></div></div>
+                                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h2 class="text-xl font-semibold">发布与恢复</h2><p class="mt-1 text-sm text-slate-500">自动保存只更新草稿。明确发布后才切换线上版本。</p></div><button v-if="permissions.manage" type="button" class="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white" @click="publishStrategy(false)">启用 / 发布当前草稿</button></div><div class="mt-6 overflow-hidden rounded-xl border border-slate-200"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">版本</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">发布时间</th><th class="px-4 py-3"></th></tr></thead><tbody><tr v-for="version in versions" :key="version.uuid" class="border-t border-slate-100"><td class="px-4 py-3">{{ version.version_number }}</td><td class="px-4 py-3">{{ version.is_current ? '当前线上' : version.status }}</td><td class="px-4 py-3">{{ formatDate(version.published_at) }}</td><td class="px-4 py-3 text-right"><button v-if="version.status !== 'draft' && !version.is_current" type="button" class="text-sm font-semibold text-indigo-700" @click="restoreVersion(version)">恢复为新版本</button></td></tr></tbody></table></div></div></section>
+                        </div>
+                    </main>
+                </div>
+                <div v-if="closePrompt" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/50 p-4"><div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 class="text-lg font-semibold">关闭策略编辑器？</h2><p class="mt-2 text-sm leading-6 text-slate-600">草稿会保留。若保存失败，尚未送达服务器的最后修改可能丢失；可以继续编辑并重试。</p><div class="mt-6 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="closePrompt = false">继续编辑</button><button type="button" class="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white" @click="closeEditor">关闭并保留草稿</button></div></div></div>
+                <div v-if="replacementPrompt" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/50 p-4"><div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><h2 class="text-lg font-semibold">目标场景已有线上策略</h2><p class="mt-2 text-sm leading-6 text-slate-600">第一版同一页面组件只允许一个有效策略。确认后将停用当前绑定，并用这份新版本替换；历史版本仍保留。</p><div class="mt-6 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="replacementPrompt = false">取消</button><button type="button" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white" @click="publishStrategy(true)">确认替换并发布</button></div></div></div>
+            </div>
         </div>
     </AppLayout>
 </template>

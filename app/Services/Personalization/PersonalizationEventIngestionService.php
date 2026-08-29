@@ -135,6 +135,7 @@ class PersonalizationEventIngestionService
                 'payload_hash' => $payloadHash,
                 'component_id' => $context['component_id'],
                 'strategy_id' => $context['strategy_id'],
+                'strategy_version_id' => $context['strategy_version_id'],
                 'placement' => $context['placement'],
                 'shopify_order_id' => $context['shopify_order_id'],
                 'occurred_at' => $occurredAt,
@@ -152,7 +153,7 @@ class PersonalizationEventIngestionService
         });
     }
 
-    /** @param array<string, mixed> $payload @return array{component_id: ?int, strategy_id: ?int, placement: ?string, shopify_order_id: ?string, products: list<array<string, mixed>>} */
+    /** @param array<string, mixed> $payload @return array{component_id: ?int, strategy_id: ?int, strategy_version_id: ?int, placement: ?string, shopify_order_id: ?string, products: list<array<string, mixed>>} */
     private function recommendationContext(Store $store, string $eventName, array $payload): array
     {
         $placement = PersonalizationPlacement::tryFrom((string) ($payload['placement'] ?? ''));
@@ -164,6 +165,7 @@ class PersonalizationEventIngestionService
 
         $componentId = null;
         $strategyId = null;
+        $strategyVersionId = null;
         if ($placement === PersonalizationPlacement::SmartCart && $componentUuid === '') {
             $setting = PersonalizationSmartCartSetting::query()
                 ->where('organization_id', $store->organization_id)
@@ -177,6 +179,7 @@ class PersonalizationEventIngestionService
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_CONTEXT', 'Smart Cart 推荐上下文未启用。', 409);
             }
             $strategyId = $setting->strategy->id;
+            $strategyVersionId = $setting->strategy->published_version_id;
         } else {
             if (! Str::isUuid($componentUuid)) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_CONTEXT', '推荐组件标识无效。');
@@ -195,18 +198,20 @@ class PersonalizationEventIngestionService
             }
             $componentId = $component->id;
             $strategyId = $component->strategy->id;
+            $strategyVersionId = $component->strategy_version_id ?: $component->strategy->published_version_id;
         }
 
         return [
             'component_id' => $componentId,
             'strategy_id' => $strategyId,
+            'strategy_version_id' => $strategyVersionId,
             'placement' => $placement->value,
             'shopify_order_id' => null,
             'products' => $this->products($store, $eventName, $payload['products'] ?? null),
         ];
     }
 
-    /** @param array<string, mixed> $payload @return array{component_id: null, strategy_id: null, placement: null, shopify_order_id: string, products: array{}} */
+    /** @param array<string, mixed> $payload @return array{component_id: null, strategy_id: null, strategy_version_id: null, placement: null, shopify_order_id: string, products: array{}} */
     private function checkoutContext(array $payload): array
     {
         $orderId = $this->numericShopifyId($payload['shopify_order_id'] ?? null, 'Order');
@@ -217,6 +222,7 @@ class PersonalizationEventIngestionService
         return [
             'component_id' => null,
             'strategy_id' => null,
+            'strategy_version_id' => null,
             'placement' => null,
             'shopify_order_id' => $orderId,
             'products' => [],

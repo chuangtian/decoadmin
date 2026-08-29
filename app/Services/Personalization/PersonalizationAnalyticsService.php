@@ -7,6 +7,9 @@ use App\Models\Organization;
 use App\Models\PersonalizationAttribution;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventSource;
+use App\Models\PersonalizationRecommendationComponent;
+use App\Models\PersonalizationRecommendationStrategy;
+use App\Models\PersonalizationStrategyVersion;
 use App\Models\Store;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -41,6 +44,7 @@ class PersonalizationAnalyticsService
             ];
         }
         $placements = [];
+        $dimensions = [];
         $totals = [
             'impressions' => 0,
             'clicks' => 0,
@@ -64,7 +68,7 @@ class PersonalizationAnalyticsService
                 PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
             ])
             ->orderBy('id')
-            ->cursor(['event_name', 'placement', 'occurred_at']) as $event) {
+            ->cursor(['event_name', 'component_id', 'strategy_id', 'strategy_version_id', 'placement', 'occurred_at']) as $event) {
             $metric = match ($event->event_name) {
                 PersonalizationEventIngestionService::IMPRESSION,
                 PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION => 'impressions',
@@ -87,6 +91,14 @@ class PersonalizationAnalyticsService
                 'attributed_revenue' => 0.0,
             ];
             $placements[$placement][$metric]++;
+            $dimensionKey = implode('|', [
+                (string) ($event->strategy_id ?? 0),
+                (string) ($event->strategy_version_id ?? 0),
+                (string) ($event->component_id ?? 0),
+                $placement,
+            ]);
+            $dimensions[$dimensionKey] ??= $this->dimensionRow($event->strategy_id, $event->strategy_version_id, $event->component_id, $placement);
+            $dimensions[$dimensionKey][$metric]++;
         }
 
         foreach (PersonalizationAttribution::query()
@@ -94,7 +106,7 @@ class PersonalizationAnalyticsService
             ->where('store_id', $store->id)
             ->whereBetween('ordered_at', [$start, $end])
             ->orderBy('id')
-            ->cursor(['status', 'currency', 'placement', 'attributed_revenue', 'ordered_at']) as $attribution) {
+            ->cursor(['status', 'currency', 'component_id', 'strategy_id', 'strategy_version_id', 'placement', 'attributed_revenue', 'ordered_at']) as $attribution) {
             if (! in_array($attribution->status, self::ACTIVE_ATTRIBUTION_STATUSES, true)) {
                 $totals['reversed_orders']++;
 
@@ -124,6 +136,20 @@ class PersonalizationAnalyticsService
             ];
             $placements[$placement]['orders']++;
             $placements[$placement]['attributed_revenue'] += $revenue;
+            $dimensionKey = implode('|', [
+                (string) ($attribution->strategy_id ?? 0),
+                (string) ($attribution->strategy_version_id ?? 0),
+                (string) ($attribution->component_id ?? 0),
+                $placement,
+            ]);
+            $dimensions[$dimensionKey] ??= $this->dimensionRow(
+                $attribution->strategy_id,
+                $attribution->strategy_version_id,
+                $attribution->component_id,
+                $placement,
+            );
+            $dimensions[$dimensionKey]['orders']++;
+            $dimensions[$dimensionKey]['attributed_revenue'] += $revenue;
         }
 
         $formattedDaily = array_map(function (array $row): array {
@@ -140,6 +166,7 @@ class PersonalizationAnalyticsService
             return $row;
         }, array_values($placements));
         usort($formattedPlacements, fn (array $left, array $right): int => (float) $right['attributed_revenue'] <=> (float) $left['attributed_revenue']);
+        $formattedDimensions = $this->formatDimensions($dimensions);
 
         $source = PersonalizationEventSource::query()
             ->where('organization_id', $store->organization_id)
@@ -178,7 +205,56 @@ class PersonalizationAnalyticsService
             ],
             'daily' => $formattedDaily,
             'placements' => $formattedPlacements,
+            'dimensions' => $formattedDimensions,
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function dimensionRow(?int $strategyId, ?int $versionId, ?int $componentId, string $placement): array
+    {
+        return [
+            'strategy_id' => $strategyId,
+            'strategy_version_id' => $versionId,
+            'component_id' => $componentId,
+            'placement' => $placement,
+            'impressions' => 0,
+            'clicks' => 0,
+            'add_to_carts' => 0,
+            'orders' => 0,
+            'attributed_revenue' => 0.0,
+        ];
+    }
+
+    /** @param array<string, array<string, mixed>> $dimensions @return list<array<string, mixed>> */
+    private function formatDimensions(array $dimensions): array
+    {
+        $strategyIds = collect($dimensions)->pluck('strategy_id')->filter()->unique()->values();
+        $versionIds = collect($dimensions)->pluck('strategy_version_id')->filter()->unique()->values();
+        $componentIds = collect($dimensions)->pluck('component_id')->filter()->unique()->values();
+        $strategies = PersonalizationRecommendationStrategy::withTrashed()->whereIn('id', $strategyIds)->get()->keyBy('id');
+        $versions = PersonalizationStrategyVersion::query()->whereIn('id', $versionIds)->get()->keyBy('id');
+        $components = PersonalizationRecommendationComponent::withTrashed()->whereIn('id', $componentIds)->get()->keyBy('id');
+
+        $rows = array_map(function (array $row) use ($strategies, $versions, $components): array {
+            $version = $versions->get($row['strategy_version_id']);
+            $component = $components->get($row['component_id']);
+            $strategy = $strategies->get($row['strategy_id']);
+            $row['strategy_uuid'] = $strategy?->uuid;
+            $row['strategy_name'] = $strategy?->name ?? '未知策略';
+            $row['strategy_version_uuid'] = $version?->uuid;
+            $row['strategy_version'] = $version?->version_number;
+            $row['component_uuid'] = $component?->uuid;
+            $row['component_name'] = $component?->name ?? '未知组件';
+            $row['attributed_revenue'] = number_format((float) $row['attributed_revenue'], 2, '.', '');
+            $row['click_through_rate'] = $row['impressions'] > 0
+                ? round($row['clicks'] / $row['impressions'] * 100, 2)
+                : 0.0;
+
+            return $row;
+        }, array_values($dimensions));
+        usort($rows, fn (array $left, array $right): int => (float) $right['attributed_revenue'] <=> (float) $left['attributed_revenue']);
+
+        return $rows;
     }
 
     private function authorize(Store $store, User $actor): void

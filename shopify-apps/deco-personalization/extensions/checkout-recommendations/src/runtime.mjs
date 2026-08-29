@@ -45,11 +45,14 @@ export async function fetchConfiguration(api, entries = api?.appMetafields?.valu
 export function normalizeConfiguration(value) {
   const component = value?.component;
   const pageSize = Number(value?.sequence?.page_size);
+  const rawMaximum = value?.sequence?.maximum_recommendations;
+  const maximum = rawMaximum === null || rawMaximum === undefined || rawMaximum === '' ? null : Number(rawMaximum);
   if (!value || value.enabled !== true
     || !component || !uuid(component.uuid) || !uuid(component.strategy_uuid)
     || component.placement !== 'checkout'
     || !gid(value?.collection?.id, 'Collection')
     || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 250
+    || (maximum !== null && (!Number.isInteger(maximum) || maximum < 1 || maximum > 1000))
     || value?.sequence?.order !== 'collection_default'
     || value?.sequence?.variant_fallback !== 'first_available'
     || value?.sequence?.mode !== 'sequential'
@@ -64,6 +67,7 @@ export function normalizeConfiguration(value) {
     },
     collection_id: value.collection.id,
     page_size: pageSize,
+    maximum_recommendations: maximum,
   };
 }
 

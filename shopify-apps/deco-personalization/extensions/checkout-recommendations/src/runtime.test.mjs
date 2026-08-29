@@ -29,16 +29,29 @@ const configuration = normalizeConfiguration({
   },
 });
 
-test('configuration uses a Collection until it is exhausted instead of a fixed recommendation maximum', () => {
+test('configuration uses a Collection and supports an optional merchant maximum without fixed slots', () => {
   assert.equal(configuration.collection_id, 'gid://shopify/Collection/99');
   assert.equal(configuration.page_size, 25);
-  assert.equal('maximum_recommendations' in configuration, false);
+  assert.equal(configuration.maximum_recommendations, null);
+  const bounded = normalizeConfiguration({
+    enabled: true,
+    component: configuration.component,
+    collection: {id: 'gid://shopify/Collection/99'},
+    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 25, maximum_recommendations: 7, exhaustion: 'collection'},
+  });
+  assert.equal(bounded.maximum_recommendations, 7);
   assert.equal(normalizeConfiguration({enabled: false}), null);
   assert.equal(normalizeConfiguration({
     enabled: true,
     component: configuration.component,
     collection: {id: 'gid://shopify/Collection/99'},
     sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 251, exhaustion: 'collection'},
+  }), null);
+  assert.equal(normalizeConfiguration({
+    enabled: true,
+    component: configuration.component,
+    collection: {id: 'gid://shopify/Collection/99'},
+    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 25, maximum_recommendations: 1001, exhaustion: 'collection'},
   }), null);
 });
 
@@ -85,8 +98,8 @@ test('candidate row remounts and fetches another Collection page when the sequen
   assert.match(source, /<s-grid key=\{current\.variant_id\}/);
   assert.match(source, /products\(first: \$productsFirst, after: \$after\)/);
   assert.match(source, /pageInfo \{ hasNextPage endCursor \}/);
-  assert.match(source, /!current && nextCursor/);
-  assert.doesNotMatch(source, /maximum_recommendations/);
+  assert.match(source, /!current && !maximumReached && nextCursor/);
+  assert.match(source, /dismissed\.size >= configuration\.maximum_recommendations/);
 });
 
 test('analytics payload is anonymous and uses the five checkout event names', () => {

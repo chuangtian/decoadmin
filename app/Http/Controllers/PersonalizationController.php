@@ -13,7 +13,9 @@ use App\Services\Personalization\PersonalizationAnalyticsService;
 use App\Services\Personalization\PersonalizationCatalogService;
 use App\Services\Personalization\PersonalizationCheckoutService;
 use App\Services\Personalization\PersonalizationConfigurationService;
+use App\Services\Personalization\PersonalizationGlobalSettingsService;
 use App\Services\Personalization\PersonalizationRecommendationService;
+use App\Services\Personalization\PersonalizationStrategyWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,6 +31,8 @@ class PersonalizationController extends Controller
         private PersonalizationCatalogService $catalog,
         private PersonalizationAnalyticsService $analytics,
         private PersonalizationCheckoutService $checkout,
+        private PersonalizationStrategyWorkflowService $strategyWorkflow,
+        private PersonalizationGlobalSettingsService $globalSettings,
     ) {}
 
     public function index(Request $request, Organization $organization, Store $store): Response
@@ -51,6 +55,13 @@ class PersonalizationController extends Controller
         }
         try {
             $checkout = $this->checkout->configuration($store, $request->user());
+        } catch (PersonalizationException $exception) {
+            abort($exception->statusCode, $exception->getMessage());
+        }
+        try {
+            $strategyRows = $this->strategyWorkflow->listing($store, $request->user());
+            $recycledStrategies = $this->strategyWorkflow->listing($store, $request->user(), null, true);
+            $globalSettings = $this->globalSettings->configuration($store, $request->user());
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
         }
@@ -80,6 +91,9 @@ class PersonalizationController extends Controller
                     'position' => $override->position,
                 ])->values(),
             ])->values(),
+            'strategyRows' => $strategyRows,
+            'recycledStrategies' => $recycledStrategies,
+            'globalSettings' => $globalSettings,
             'components' => $configuration['components']->map(fn ($component): array => [
                 'uuid' => $component->uuid,
                 'strategy_uuid' => $component->strategy?->uuid,
@@ -151,6 +165,7 @@ class PersonalizationController extends Controller
                     'sequence_mode' => 'sequential',
                     'sequence_exhaustion' => 'collection',
                     'hide_when_exhausted' => true,
+                    'maximum_recommendations' => null,
                     'trust_placement' => 'WALLETS1',
                     'recommendation_placement' => 'ORDER_SUMMARY2',
                 ],
@@ -371,6 +386,7 @@ class PersonalizationController extends Controller
             'enabled' => ['required', 'boolean'],
             'component_uuid' => ['nullable', 'uuid'],
             'shopify_collection_id' => ['nullable', 'string', 'regex:/^(?:gid:\/\/shopify\/Collection\/)?\d+$/'],
+            'maximum_recommendations' => ['nullable', 'integer', 'between:1,1000'],
             'trust_items' => ['array', 'max:'.PersonalizationCheckoutService::MAX_TRUST_ITEMS],
             'trust_items.*.key' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
             'trust_items.*.icon' => ['required', Rule::in(PersonalizationCheckoutService::ICONS)],
@@ -474,6 +490,7 @@ class PersonalizationController extends Controller
             ],
             'daily' => [],
             'placements' => [],
+            'dimensions' => [],
         ];
     }
 

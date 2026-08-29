@@ -10,4 +10,9 @@ enum PersonalizationRuleType: string
     case MaximumPrice = 'maximum_price';
     case MinimumInventory = 'minimum_inventory';
     case InStockOnly = 'in_stock_only';
+    case IncludeCollections = 'include_collections';
+    case ExcludeCollections = 'exclude_collections';
+    case ExcludeVendors = 'exclude_vendors';
+    case ExcludeCartProducts = 'exclude_cart_products';
+    case ExcludePurchasedProducts = 'exclude_purchased_products';
 }

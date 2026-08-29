@@ -47,7 +47,7 @@ Pixel 只声明分析用途：`analytics = true`，营销、偏好和数据销�
 
 `extensions/checkout-trust-badges` 与 `extensions/checkout-recommendations` 使用 API `2026-07` 的官方 `purchase.checkout.block.render` target。信任信息建议放在 `WALLETS1`，递进推荐建议放在订单摘要 `ORDER_SUMMARY2`；实际位置由商家在 Checkout Editor 添加和调整，不能保证与参考图像素级一致。
 
-后台选择一个 Commerce Hub 已同步的 Shopify Collection，并配置单次最多展示的推荐数量（默认 3，可配置 1–20）。扩展按 Shopify Collection 默认顺序读取当前 Market 下的商品，每个商品选择第一个可售变体；已在购物车、缺货、不可售、加入失败或已展示的商品不会重复循环。达到配置上限或没有合格候选时区块隐藏。两个扩展默认关闭，任何后端、Storefront API、Cart Lines API 或分析事件失败都不得阻止结账。
+后台选择一个 Commerce Hub 已同步的 Shopify Collection，并可选配置递进推荐数量上限（1–1000；留空表示遍历整个集合）。扩展始终一次只显示一个商品，加入成功后获取下一个；这不是固定商品槽位。扩展按 Shopify Collection 默认顺序读取当前 Market 下的商品，每个商品选择第一个可售变体；已在购物车、缺货、不可售、加入失败或已展示的商品不会重复循环。达到可选上限或没有合格候选时区块隐藏。两个扩展默认关闭，任何后端、Storefront API、Cart Lines API 或分析事件失败都不得阻止结账。
 
 Checkout 扩展新增的是 `api_access` 与 `network_access` capability，不增加 Admin API scope，也不申请客户、订单、商品或主题写权限。平台限制和官方依据见 [`CHECKOUT_EXTENSION.md`](./CHECKOUT_EXTENSION.md)。
 
@@ -80,4 +80,5 @@ npm run check
 ## 发布文档
 
 - Test 发布与回滚：[`TEST_RELEASE.md`](./TEST_RELEASE.md)
+- 策略草稿、版本、预览与回收站：[`STRATEGY_WORKFLOW.md`](./STRATEGY_WORKFLOW.md)
 - Production 规划与未来授权闸门：[`PRODUCTION_RELEASE.md`](./PRODUCTION_RELEASE.md)

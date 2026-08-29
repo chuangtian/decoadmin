@@ -33,6 +33,7 @@ use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
+use App\Http\Controllers\PersonalizationStrategyWorkflowController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
@@ -592,6 +593,40 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::post('/strategies', [PersonalizationController::class, 'storeStrategy'])
             ->middleware(['permission:personalization.manage', 'throttle:30,1'])
             ->name('personalization.strategies.store');
+        Route::post('/strategy-workflow/drafts', [PersonalizationStrategyWorkflowController::class, 'createDraft'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategy-workflow.drafts.create');
+        Route::get('/strategy-workflow/{strategy}', [PersonalizationStrategyWorkflowController::class, 'editor'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.editor');
+        Route::patch('/strategy-workflow/{strategy}/draft', [PersonalizationStrategyWorkflowController::class, 'autosave'])
+            ->middleware(['permission:personalization.manage', 'throttle:120,1'])
+            ->name('personalization.strategy-workflow.autosave');
+        Route::post('/strategy-workflow/{strategy}/publish', [PersonalizationStrategyWorkflowController::class, 'publish'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.publish');
+        Route::post('/strategy-workflow/{strategy}/duplicate', [PersonalizationStrategyWorkflowController::class, 'duplicate'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.duplicate');
+        Route::post('/strategy-workflow/{strategy}/disable', [PersonalizationStrategyWorkflowController::class, 'disable'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.disable');
+        Route::delete('/strategy-workflow/{strategy}', [PersonalizationStrategyWorkflowController::class, 'recycle'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.recycle');
+        Route::post('/strategy-workflow/recycle-bin/{strategyUuid}/restore', [PersonalizationStrategyWorkflowController::class, 'restore'])
+            ->whereUuid('strategyUuid')
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.restore');
+        Route::post('/strategy-workflow/{strategy}/versions/{version}/restore', [PersonalizationStrategyWorkflowController::class, 'restoreVersion'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.versions.restore');
+        Route::post('/strategy-workflow/{strategy}/preview', [PersonalizationStrategyWorkflowController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.preview');
+        Route::put('/global-settings', [PersonalizationStrategyWorkflowController::class, 'saveGlobalSettings'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.global-settings.update');
         Route::put('/strategies/{strategy}', [PersonalizationController::class, 'updateStrategy'])
             ->middleware(['permission:personalization.manage', 'throttle:30,1'])
             ->name('personalization.strategies.update');

@@ -7,6 +7,7 @@ use App\Models\PersonalizationDailyMetric;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationRecommendationComponent;
 use App\Models\PersonalizationRecommendationStrategy;
+use App\Models\PersonalizationStrategyVersion;
 use App\Models\Store;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,7 @@ class PersonalizationDailyMetricsService
         $metrics = [];
         $componentKeys = [];
         $strategyKeys = [];
+        $strategyVersionKeys = [];
         $eventCount = 0;
         $orderCount = 0;
 
@@ -43,11 +45,12 @@ class PersonalizationDailyMetricsService
                 PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
             ])
             ->orderBy('id')
-            ->cursor(['event_name', 'component_id', 'strategy_id', 'placement']) as $event) {
+            ->cursor(['event_name', 'component_id', 'strategy_id', 'strategy_version_id', 'placement']) as $event) {
             $componentKey = $this->componentKey($event->component_id, $componentKeys);
             $strategyKey = $this->strategyKey($event->strategy_id, $strategyKeys);
-            $key = $this->dimensionKey($event->placement ?: 'unknown', $componentKey, $strategyKey, $defaultCurrency);
-            $metrics[$key] ??= $this->row($store, $localDate, $event->placement ?: 'unknown', $componentKey, $strategyKey, $defaultCurrency);
+            $strategyVersionKey = $this->strategyVersionKey($event->strategy_version_id, $strategyVersionKeys);
+            $key = $this->dimensionKey($event->placement ?: 'unknown', $componentKey, $strategyKey, $strategyVersionKey, $defaultCurrency);
+            $metrics[$key] ??= $this->row($store, $localDate, $event->placement ?: 'unknown', $componentKey, $strategyKey, $strategyVersionKey, $defaultCurrency);
             $column = match ($event->event_name) {
                 PersonalizationEventIngestionService::IMPRESSION,
                 PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_IMPRESSION => 'impressions',
@@ -65,12 +68,13 @@ class PersonalizationDailyMetricsService
             ->whereBetween('ordered_at', [$start, $end])
             ->whereIn('status', ['attributed', 'partially_refunded'])
             ->orderBy('id')
-            ->cursor(['component_id', 'strategy_id', 'placement', 'currency', 'attributed_revenue']) as $attribution) {
+            ->cursor(['component_id', 'strategy_id', 'strategy_version_id', 'placement', 'currency', 'attributed_revenue']) as $attribution) {
             $componentKey = $this->componentKey($attribution->component_id, $componentKeys);
             $strategyKey = $this->strategyKey($attribution->strategy_id, $strategyKeys);
+            $strategyVersionKey = $this->strategyVersionKey($attribution->strategy_version_id, $strategyVersionKeys);
             $currency = strtoupper((string) $attribution->currency);
-            $key = $this->dimensionKey($attribution->placement ?: 'unknown', $componentKey, $strategyKey, $currency);
-            $metrics[$key] ??= $this->row($store, $localDate, $attribution->placement ?: 'unknown', $componentKey, $strategyKey, $currency);
+            $key = $this->dimensionKey($attribution->placement ?: 'unknown', $componentKey, $strategyKey, $strategyVersionKey, $currency);
+            $metrics[$key] ??= $this->row($store, $localDate, $attribution->placement ?: 'unknown', $componentKey, $strategyKey, $strategyVersionKey, $currency);
             $metrics[$key]['orders']++;
             $metrics[$key]['attributed_revenue'] += max(0.0, (float) $attribution->attributed_revenue);
             $orderCount++;
@@ -115,9 +119,21 @@ class PersonalizationDailyMetricsService
             ->value('uuid') ?? '');
     }
 
-    private function dimensionKey(string $placement, string $component, string $strategy, string $currency): string
+    /** @param array<int, string> $cache */
+    private function strategyVersionKey(?int $id, array &$cache): string
     {
-        return implode('|', [$placement, $component, $strategy, $currency]);
+        if (! $id) {
+            return '';
+        }
+
+        return $cache[$id] ??= (string) (PersonalizationStrategyVersion::query()
+            ->whereKey($id)
+            ->value('uuid') ?? '');
+    }
+
+    private function dimensionKey(string $placement, string $component, string $strategy, string $strategyVersion, string $currency): string
+    {
+        return implode('|', [$placement, $component, $strategy, $strategyVersion, $currency]);
     }
 
     /** @return array<string, mixed> */
@@ -127,6 +143,7 @@ class PersonalizationDailyMetricsService
         string $placement,
         string $component,
         string $strategy,
+        string $strategyVersion,
         string $currency,
     ): array {
         return [
@@ -136,6 +153,7 @@ class PersonalizationDailyMetricsService
             'placement' => $placement,
             'component_key' => $component,
             'strategy_key' => $strategy,
+            'strategy_version_key' => $strategyVersion,
             'currency' => $currency,
             'impressions' => 0,
             'clicks' => 0,

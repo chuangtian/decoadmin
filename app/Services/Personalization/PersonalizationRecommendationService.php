@@ -26,7 +26,8 @@ class PersonalizationRecommendationService
      * @param  array{
      *   seed_product_id?: int|string|null,
      *   cart_product_ids?: list<int|string>,
-     *   recently_viewed_product_ids?: list<int|string>
+     *   recently_viewed_product_ids?: list<int|string>,
+     *   purchased_product_ids?: list<int|string>
      * }  $context
      * @return array<string, mixed>
      */
@@ -68,7 +69,8 @@ class PersonalizationRecommendationService
      * @param  array{
      *   seed_product_id?: int|string|null,
      *   cart_product_ids?: list<int|string>,
-     *   recently_viewed_product_ids?: list<int|string>
+     *   recently_viewed_product_ids?: list<int|string>,
+     *   purchased_product_ids?: list<int|string>
      * }  $context
      * @return array{strategy: array<string, mixed>, context: array<string, mixed>, items: list<array<string, mixed>>}
      */
@@ -98,9 +100,12 @@ class PersonalizationRecommendationService
             ->map(fn ($id): string => (string) $id)
             ->values()
             ->all();
+        $excludeCart = $this->booleanRule($strategy, PersonalizationRuleType::ExcludeCartProducts, true);
+        $excludePurchased = $this->booleanRule($strategy, PersonalizationRuleType::ExcludePurchasedProducts, false);
         $excluded = array_values(array_unique([
             ...$excluded,
-            ...$normalizedContext['cart_product_ids'],
+            ...($excludeCart ? $normalizedContext['cart_product_ids'] : []),
+            ...($excludePurchased ? $normalizedContext['purchased_product_ids'] : []),
             ...($normalizedContext['seed_product_id'] === null ? [] : [$normalizedContext['seed_product_id']]),
         ]));
 
@@ -150,7 +155,7 @@ class PersonalizationRecommendationService
     }
 
     /**
-     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
+     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
      * @return array<string, int|float>
      */
     private function algorithmProductIds(
@@ -159,7 +164,7 @@ class PersonalizationRecommendationService
         array $context,
     ): array {
         return match ($strategy->algorithm) {
-            PersonalizationAlgorithm::Manual => $this->manualIds($strategy),
+            PersonalizationAlgorithm::Manual => $this->manualIds($store, $strategy),
             PersonalizationAlgorithm::BestSeller => $this->bestSellerIds($store),
             PersonalizationAlgorithm::NewArrivals => $this->newArrivalIds($store),
             PersonalizationAlgorithm::FrequentlyBoughtTogether => $this->frequentlyBoughtTogetherIds($store, $context),
@@ -169,13 +174,36 @@ class PersonalizationRecommendationService
     }
 
     /** @return array<string, int> */
-    private function manualIds(PersonalizationRecommendationStrategy $strategy): array
+    private function manualIds(Store $store, PersonalizationRecommendationStrategy $strategy): array
     {
         $result = [];
         foreach ($strategy->productOverrides
             ->where('type', PersonalizationProductOverrideType::Manual)
             ->sortBy('position') as $position => $override) {
             $result[(string) $override->shopify_product_id] = 1_000_000 - (int) $position;
+        }
+        $collectionIds = $strategy->rules
+            ->where('enabled', true)
+            ->where('type', PersonalizationRuleType::IncludeCollections)
+            ->flatMap(fn ($rule) => $rule->value['collection_ids'] ?? [])
+            ->map(fn ($id): string => (string) $id)
+            ->unique()->values()->all();
+        if ($collectionIds !== []) {
+            $collectionProducts = DB::table('product_collection_memberships')
+                ->join('product_collections', 'product_collections.id', '=', 'product_collection_memberships.product_collection_id')
+                ->join('products', 'products.id', '=', 'product_collection_memberships.product_id')
+                ->where('product_collection_memberships.organization_id', $store->organization_id)
+                ->where('product_collection_memberships.store_id', $store->id)
+                ->whereIn('product_collections.shopify_collection_id', $collectionIds)
+                ->where('products.organization_id', $store->organization_id)
+                ->where('products.store_id', $store->id)
+                ->where('products.status', 'active')
+                ->orderBy('product_collection_memberships.id')
+                ->limit(500)
+                ->pluck('products.shopify_product_id');
+            foreach ($collectionProducts as $position => $productId) {
+                $result[(string) $productId] ??= 500_000 - (int) $position;
+            }
         }
 
         return $result;
@@ -231,7 +259,7 @@ class PersonalizationRecommendationService
     }
 
     /**
-     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
+     * @param  array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}  $context
      * @return array<string, int>
      */
     private function frequentlyBoughtTogetherIds(Store $store, array $context): array
@@ -364,6 +392,8 @@ class PersonalizationRecommendationService
     ): Collection {
         $includeTags = [];
         $excludeTags = [];
+        $excludeCollections = [];
+        $excludeVendors = [];
         $minimumInventory = null;
         foreach ($strategy->rules->where('enabled', true) as $rule) {
             if ($rule->type === PersonalizationRuleType::IncludeTags) {
@@ -374,6 +404,12 @@ class PersonalizationRecommendationService
             }
             if ($rule->type === PersonalizationRuleType::MinimumInventory) {
                 $minimumInventory = (int) ($rule->value['quantity'] ?? 0);
+            }
+            if ($rule->type === PersonalizationRuleType::ExcludeCollections) {
+                $excludeCollections = array_map('strval', $rule->value['collection_ids'] ?? []);
+            }
+            if ($rule->type === PersonalizationRuleType::ExcludeVendors) {
+                $excludeVendors = array_map('strval', $rule->value['vendors'] ?? []);
             }
         }
         if ($includeTags !== []) {
@@ -387,6 +423,14 @@ class PersonalizationRecommendationService
                 $excludeTags,
                 array_values($product['tags'] ?? []),
             ) !== []);
+        }
+        if ($excludeCollections !== []) {
+            $candidates = $candidates->reject(fn (array $product): bool => collect($product['collections'] ?? [])
+                ->pluck('shopify_collection_id')->map(fn ($id): string => (string) $id)
+                ->intersect($excludeCollections)->isNotEmpty());
+        }
+        if ($excludeVendors !== []) {
+            $candidates = $candidates->reject(fn (array $product): bool => in_array((string) ($product['vendor'] ?? ''), $excludeVendors, true));
         }
         if ($minimumInventory !== null) {
             $available = $this->inventoryByProduct($store, $candidates->pluck('id')->all());
@@ -419,11 +463,11 @@ class PersonalizationRecommendationService
 
     /**
      * @param  array<string, mixed>  $context
-     * @return array{seed_product_id: ?string, cart_product_ids: list<string>, recently_viewed_product_ids: list<string>}
+     * @return array{seed_product_id: ?string, cart_product_ids: list<string>, purchased_product_ids: list<string>, recently_viewed_product_ids: list<string>}
      */
     private function context(array $context): array
     {
-        $allowed = ['seed_product_id', 'cart_product_ids', 'recently_viewed_product_ids'];
+        $allowed = ['seed_product_id', 'cart_product_ids', 'purchased_product_ids', 'recently_viewed_product_ids'];
         if (array_diff(array_keys($context), $allowed) !== []) {
             throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '推荐上下文包含不支持的字段。');
         }
@@ -433,8 +477,19 @@ class PersonalizationRecommendationService
                 ? null
                 : $this->numericProductId($context['seed_product_id']),
             'cart_product_ids' => $this->productIds($context['cart_product_ids'] ?? [], 20),
+            'purchased_product_ids' => $this->productIds($context['purchased_product_ids'] ?? [], 50),
             'recently_viewed_product_ids' => $this->productIds($context['recently_viewed_product_ids'] ?? [], 50),
         ];
+    }
+
+    private function booleanRule(
+        PersonalizationRecommendationStrategy $strategy,
+        PersonalizationRuleType $type,
+        bool $default,
+    ): bool {
+        $rule = $strategy->rules->first(fn ($rule): bool => $rule->enabled && $rule->type === $type);
+
+        return $rule ? (bool) ($rule->value['enabled'] ?? $default) : $default;
     }
 
     /** @return list<string> */

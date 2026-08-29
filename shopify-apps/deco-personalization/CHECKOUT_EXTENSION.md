@@ -27,7 +27,7 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 - Accelerated checkout or another Shopify instruction can reject cart changes. The extension must hide or disable the offer and must never block checkout.
 - The candidate source is one merchant-selected Shopify Collection. Products retain Shopify's Collection order, and each product falls back to its first variant that is available in the buyer's active Market.
 - The recommendation area renders exactly one offer at a time. After that offer is added successfully, the same area obtains and renders the next eligible Collection product; it does not render multiple cards or hide between already-loaded candidates.
-- There is no merchant-configured recommendation-count maximum. The extension pages through the selected Collection as needed and continues until no eligible product remains. Existing cart products, unavailable variants, and candidates rejected by Shopify are skipped; displayed products are never repeated or looped. Only then is the recommendation area hidden.
+- The merchant can optionally configure a maximum recommendation count; leaving it empty continues through the selected Collection until no eligible product remains. This is a sequence limit, not a set of fixed product slots. Existing cart products, unavailable variants, and candidates rejected by Shopify are skipped; displayed products are never repeated or looped. The recommendation area hides only when the configured maximum is reached or the Collection is exhausted.
 
 Official references:
 
@@ -66,6 +66,6 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 
 ## Explicit exclusions
 
-- No Post-purchase, Thank you, Order status, Customer Account, Checkout Function, payment customization, AI recommendation, or Production work.
+- No Post-purchase, Thank you, Order status, Customer Account, Checkout Function, payment customization, generative recommendation, or Production work.
 - Native Shop Pay, PayPal, Apple Pay, and Google Pay buttons remain entirely owned by Shopify.
 - The permanent production-store denylist remains enforced for every backend and release action.

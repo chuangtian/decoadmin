@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_id', 'store_id', 'order_id', 'checkout_event_id', 'click_event_id', 'component_id', 'strategy_id', 'product_id', 'shopify_product_id', 'placement', 'model', 'window_days', 'status', 'currency', 'gross_revenue', 'refund_amount', 'attributed_revenue', 'clicked_at', 'ordered_at', 'reconciled_at'])]
+#[Fillable(['organization_id', 'store_id', 'order_id', 'checkout_event_id', 'click_event_id', 'component_id', 'strategy_id', 'strategy_version_id', 'product_id', 'shopify_product_id', 'placement', 'model', 'window_days', 'status', 'currency', 'gross_revenue', 'refund_amount', 'attributed_revenue', 'clicked_at', 'ordered_at', 'reconciled_at'])]
 class PersonalizationAttribution extends Model
 {
     public function order(): BelongsTo
@@ -32,6 +32,11 @@ class PersonalizationAttribution extends Model
     public function strategy(): BelongsTo
     {
         return $this->belongsTo(PersonalizationRecommendationStrategy::class);
+    }
+
+    public function strategyVersion(): BelongsTo
+    {
+        return $this->belongsTo(PersonalizationStrategyVersion::class, 'strategy_version_id');
     }
 
     public function product(): BelongsTo

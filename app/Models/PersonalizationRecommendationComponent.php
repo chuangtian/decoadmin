@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
-#[Fillable(['uuid', 'organization_id', 'store_id', 'strategy_id', 'name', 'placement', 'status', 'heading', 'button_label', 'position', 'settings', 'published_at', 'created_by', 'updated_by'])]
+#[Fillable(['uuid', 'organization_id', 'store_id', 'strategy_id', 'strategy_version_id', 'name', 'placement', 'status', 'configuration_status', 'heading', 'button_label', 'position', 'settings', 'published_at', 'created_by', 'updated_by'])]
 class PersonalizationRecommendationComponent extends Model
 {
     use SoftDeletes;
@@ -24,6 +24,11 @@ class PersonalizationRecommendationComponent extends Model
     public function strategy(): BelongsTo
     {
         return $this->belongsTo(PersonalizationRecommendationStrategy::class, 'strategy_id');
+    }
+
+    public function strategyVersion(): BelongsTo
+    {
+        return $this->belongsTo(PersonalizationStrategyVersion::class, 'strategy_version_id');
     }
 
     public function store(): BelongsTo
