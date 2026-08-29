@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use JsonException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -24,46 +25,52 @@ class VerifyShopifyCheckoutToken
         $clientId = (string) config($configKey.'.active.client_id', '');
         $clientSecret = (string) config($configKey.'.active.client_secret', '');
         if (! is_string($token) || $token === '' || $clientId === '' || $clientSecret === '') {
-            return $this->unauthorized();
+            return $this->unauthorized('missing_token_or_configuration');
         }
 
         $segments = explode('.', $token);
         if (count($segments) !== 3) {
-            return $this->unauthorized();
+            return $this->unauthorized('invalid_token_segments');
         }
 
         try {
             $header = json_decode($this->decodeSegment($segments[0]), true, 8, JSON_THROW_ON_ERROR);
             $claims = json_decode($this->decodeSegment($segments[1]), true, 32, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            return $this->unauthorized();
+            return $this->unauthorized('invalid_token_encoding');
         }
         if (! is_array($header) || ! is_array($claims) || ($header['alg'] ?? null) !== 'HS256') {
-            return $this->unauthorized();
+            return $this->unauthorized('invalid_token_header');
         }
 
         $expected = $this->base64UrlEncode(hash_hmac('sha256', $segments[0].'.'.$segments[1], $clientSecret, true));
         if (! hash_equals($expected, $segments[2])) {
-            return $this->unauthorized();
+            return $this->unauthorized('signature_mismatch');
         }
 
         $shop = $this->shopFromDestination($claims['dest'] ?? null);
         $audiences = is_array($claims['aud'] ?? null) ? $claims['aud'] : [$claims['aud'] ?? null];
         $now = now()->timestamp;
         $leeway = (int) config($configKey.'.id_token_leeway_seconds', 5);
-        if ($shop === null
-            || ! in_array($clientId, $audiences, true)
-            || ! is_numeric($claims['exp'] ?? null)
-            || (int) $claims['exp'] <= $now - $leeway
-            || ! is_numeric($claims['nbf'] ?? null)
-            || (int) $claims['nbf'] > $now + $leeway
-            || (isset($claims['iat']) && (! is_numeric($claims['iat']) || (int) $claims['iat'] > $now + $leeway))) {
-            return $this->unauthorized();
+        if ($shop === null) {
+            return $this->unauthorized('invalid_destination');
+        }
+        if (! in_array($clientId, $audiences, true)) {
+            return $this->unauthorized('audience_mismatch');
+        }
+        if (! is_numeric($claims['exp'] ?? null) || (int) $claims['exp'] <= $now - $leeway) {
+            return $this->unauthorized('expired_or_missing_expiry');
+        }
+        if (! is_numeric($claims['nbf'] ?? null) || (int) $claims['nbf'] > $now + $leeway) {
+            return $this->unauthorized('invalid_not_before');
+        }
+        if (isset($claims['iat']) && (! is_numeric($claims['iat']) || (int) $claims['iat'] > $now + $leeway)) {
+            return $this->unauthorized('invalid_issued_at');
         }
 
         $issuer = rtrim((string) ($claims['iss'] ?? ''), '/');
         if ($issuer !== '' && ! in_array($issuer, ['https://'.$shop, 'https://'.$shop.'/admin'], true)) {
-            return $this->unauthorized();
+            return $this->unauthorized('issuer_mismatch');
         }
 
         $request->attributes->set('shopify_checkout_token_claims', $claims);
@@ -102,8 +109,12 @@ class VerifyShopifyCheckoutToken
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 
-    private function unauthorized(): JsonResponse
+    private function unauthorized(string $reason): JsonResponse
     {
+        Log::notice('Shopify Checkout session token rejected.', [
+            'reason' => $reason,
+        ]);
+
         return response()->json(['error' => [
             'code' => 'INVALID_SHOPIFY_CHECKOUT_TOKEN',
             'message' => 'Shopify Checkout 身份令牌无效或已过期。',
