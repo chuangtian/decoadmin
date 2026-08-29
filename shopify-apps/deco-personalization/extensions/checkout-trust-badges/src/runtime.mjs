@@ -20,8 +20,8 @@ export function configurationEndpoint(entries) {
   }
 }
 
-export async function fetchConfiguration(api) {
-  const endpoint = configurationEndpoint(api?.appMetafields?.value);
+export async function fetchConfiguration(api, entries = api?.appMetafields?.value) {
+  const endpoint = configurationEndpoint(entries);
   if (!endpoint) return null;
   const token = await api.sessionToken.get();
   const response = await fetch(endpoint, {

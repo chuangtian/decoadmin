@@ -1,4 +1,5 @@
 import '@shopify/ui-extensions/preact';
+import {useAppMetafields} from '@shopify/ui-extensions/checkout/preact';
 import {render} from 'preact';
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks';
 import {
@@ -8,6 +9,12 @@ import {
   normalizeCollectionProducts,
   selectNextCandidate,
 } from './runtime.mjs';
+
+const CONFIGURATION_METAFIELD_FILTER = Object.freeze({
+  namespace: '$app:deco_personalization',
+  key: 'checkout_configuration_url',
+  type: 'shop',
+});
 
 const COLLECTION_QUERY = `query CheckoutPersonalizationCollection($id: ID!, $productsFirst: Int!) {
   node(id: $id) {
@@ -49,10 +56,12 @@ function Recommendations() {
   const busyRef = useRef(false);
   const impressionRef = useRef('');
   const completionRef = useRef(false);
+  const configurationMetafields = useAppMetafields(CONFIGURATION_METAFIELD_FILTER);
 
   useEffect(() => {
     let active = true;
-    fetchConfiguration(shopify)
+    setLoaded(false);
+    fetchConfiguration(shopify, configurationMetafields)
       .then(async (value) => {
         if (!active || !value) return;
         const result = /** @type {{data?: {node?: unknown}, errors?: unknown[]}} */ (await shopify.query(COLLECTION_QUERY, {
@@ -66,7 +75,7 @@ function Recommendations() {
       .catch(() => {})
       .finally(() => active && setLoaded(true));
     return () => { active = false; };
-  }, []);
+  }, [configurationMetafields]);
 
   const lines = shopify.lines.value;
   const canAdd = shopify.instructions.value.lines.canAddCartLine;
