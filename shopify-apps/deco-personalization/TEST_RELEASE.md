@@ -87,12 +87,13 @@ npm run deploy:test
 
 ## 2026-08-29 Checkout Test 验收记录
 
-- `deco-personalization-test-7` 已发布并替代第 6 版；两个 Checkout App Block 继续保存在 `macfox-test-app` 的活跃 Checkout 配置。
+- `deco-personalization-test-8` 已发布并替代第 7 版；版本地址：<https://dev.shopify.com/dashboard/74225522/apps/416463355905/versions/1108046610433>。两个 Checkout App Block 继续保存在 `macfox-test-app` 的活跃 Checkout 配置。
 - 左侧信任信息在真实 Test Checkout 中成功读取后台配置并显示 `Trusted seller`、`Free US Shipping over $100`、`2-year warranty`；桌面与 375px 移动模拟均不阻塞原生结账。
 - Session Token 使用官方文档定义的签名、`aud`、`dest` 与生命周期字段完成验证；Shopify 附加但未记录在 Checkout Token 契约中的 `iss` 不作为授权输入。
-- 第 7 版曾使用当前 Test 配置中的 `3` 完成三款商品验收；该数值只代表当次测试商品数，不是产品上限。后续规则已更正为一次只显示一个、加入成功后取得下一个，并持续到 Collection 没有合格候选。
-- 真实 Test Checkout 的配置接口与 Storefront GraphQL 请求正常；Test Nginx 最近事件请求均返回 `202`，事件 source UUID 已在检查输出中脱敏。
+- 第 7 版曾使用当前 Test 配置中的 `3` 完成三款商品验收；该数值只代表当次测试商品数，不是产品上限。第 8 版已完全移除运行时和后台界面的推荐数量上限：同一区域一次只显示一个，加入成功后取得并显示下一个，并持续到 Collection 没有合格候选。
+- 第 8 版真实 Test Checkout 的配置接口与 Storefront GraphQL 请求正常；本次三次递进加购产生的最近 `12` 个 Test 事件请求全部返回 `202`，没有非 `202` 响应，事件 source UUID 未输出。
 - 经用户明确授权，`Macfox E-bike Storage Bag`、`Macfox E-bike Mobile Phone Holder`、`Macfox E-bike Rearview Mirror Kit` 在 `macfox-test-app` 的 `Shop location` 可用库存均设为 `10`，验收后保持 `10`，不恢复为 `0`。
-- 真实 E2E 从仅含 `Macfox X7` 的 Checkout 开始，按 Collection 默认顺序成功加入 Rearview Mirror Kit、Storage Bag、Mobile Phone Holder；每次加入后实际购物车与金额立即更新，第三项后推荐标题和按钮完全隐藏，未循环、未重复。
+- 第 8 版真实 E2E 从仅含 `Macfox X7` 的 Checkout 开始，按 Collection 默认顺序成功加入 Rearview Mirror Kit、Storage Bag、Mobile Phone Holder；每次都只有一个推荐卡片，加购成功后同一区域取得并显示下一项。当前 Collection 没有剩余合格商品后推荐区才隐藏，未循环、未重复，最终测试总额为 `USD $1,826.00`。
 - 第 6 版复测发现候选切换时图片已更新但标题/价格残留上一项；提交 `fe7b0f4` 通过以 `variant_id` 为 key 重建候选行修复。第 7 版已确认第 2、3 项图片、标题、价格和实际加入商品一致，最终测试总额为 `USD $1,826.00`。
+- 自动化验证覆盖超过三项的 `6` 商品递进选择以及 Collection 跨页继续获取；App 检查为 `30` 项通过，Personalization 后端测试为 `46` 项、`491` 个断言通过，DecoAdmin 前端生产构建通过。
 - 不使用 Checkout DOM 修改、任意 HTML/CSS 注入、固定商品槽位或不准确的 Market 价格；Checkout 扩展加载失败或候选耗尽时仍保持原生结账可用。
