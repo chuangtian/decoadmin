@@ -26,7 +26,7 @@ class CheckPersonalizationTestRelease extends Command
         $secretConfigured = (string) config('personalization.active.client_secret') !== '';
         $scopes = array_values((array) config('personalization.required_scopes', []));
         sort($scopes);
-        $expectedScopes = ['read_customer_events', 'write_app_proxy', 'write_pixels'];
+        $expectedScopes = ['read_customer_events', 'read_discounts', 'write_app_proxy', 'write_discounts', 'write_pixels'];
         $retention = (array) config('personalization.retention', []);
 
         $check($environment === 'test', 'Personalization environment must be test.');

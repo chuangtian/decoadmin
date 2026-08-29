@@ -25,7 +25,7 @@
 
 - `shopify.app.production.toml` 在获批前保持不可运行占位；不得提前填入 Client ID、URL、Webhook、App Proxy 或发布命令。
 - Application URL 预期使用 `https://admin.decomkt.com/shopify-app/personalization`；回调、Webhook、App Proxy 和事件入口必须全部使用同一 Production 源站。
-- P0 最小显式 scopes 预期仅为 `write_app_proxy`、`write_pixels`、`read_customer_events`。发布前必须以当时 Shopify 官方文档和 CLI 校验为准；不得增加 P0 无关权限。
+- 当前 P0 最小显式 scopes 为 `write_app_proxy`、`write_pixels`、`read_customer_events`、`read_discounts`、`write_discounts`；新增两项仅用于已确认的推荐优惠读取、创建和编辑。未来 Production 发布前仍必须以当时 Shopify 官方文档和 CLI 校验为准，不得增加 P0 无关权限。
 - App Proxy 的 Production subpath 必须独立于 Test；最终值需在 Production App 唯一确定后写入配置、后端和发布门禁，三处必须一致。
 - App-specific Webhook 仅包括 `app/uninstalled`、`app/scopes_update`；合规 Webhook 包括 `customers/data_request`、`customers/redact`、`shop/redact`。
 - Theme App Extension 不申请 `read_themes` 或 `write_themes`；主题区块由获批的商家操作添加并保存。

@@ -16,7 +16,7 @@ class PersonalizationReleasePreflightTest extends TestCase
         $this->artisan('personalization:release-check')
             ->expectsOutput('Personalization Test backend release check passed.')
             ->expectsOutput('Client ID: configured; Client Secret: configured; secrets were not displayed.')
-            ->expectsOutput('Scopes: read_customer_events, write_app_proxy, write_pixels.')
+            ->expectsOutput('Scopes: read_customer_events, read_discounts, write_app_proxy, write_discounts, write_pixels.')
             ->doesntExpectOutput('super-secret-value')
             ->assertSuccessful();
     }
@@ -45,7 +45,7 @@ class PersonalizationReleasePreflightTest extends TestCase
             'personalization.active.handle' => 'deco-personalization-test',
             'personalization.active.app_url' => 'https://testadmin.decomkt.com',
             'personalization.active_proxy_path' => '/apps/deco-personalization-test',
-            'personalization.required_scopes' => ['write_app_proxy', 'write_pixels', 'read_customer_events'],
+            'personalization.required_scopes' => ['write_app_proxy', 'write_pixels', 'read_customer_events', 'read_discounts', 'write_discounts'],
             'personalization.denied_shop_domains' => ['macfoxebike.myshopify.com'],
             'personalization.retention' => [
                 'raw_event_days' => 90,
