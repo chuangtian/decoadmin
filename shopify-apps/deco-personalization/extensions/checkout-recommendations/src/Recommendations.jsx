@@ -132,7 +132,7 @@ function Recommendations() {
       <s-stack gap="base">
         <s-heading>{configuration.component.heading}</s-heading>
         {error ? <s-banner tone="critical">{error}</s-banner> : null}
-        <s-grid gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
+        <s-grid key={current.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
           {current.image_url
             ? <s-image src={current.image_url} alt={current.image_alt || current.title} aspectRatio="1" />
             : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}

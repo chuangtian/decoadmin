@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   EVENTS,
@@ -57,6 +58,11 @@ test('collection order chooses the first market-available variant and skips cart
   const lines = [{merchandise: {id: 'gid://shopify/ProductVariant/999', product: {id: 'gid://shopify/Product/2'}}}];
   assert.equal(selectNextCandidate(variants, lines)?.variant_id, 'gid://shopify/ProductVariant/31');
   assert.equal(selectNextCandidate(variants, lines, new Set(['gid://shopify/ProductVariant/31'])), null);
+});
+
+test('candidate row remounts when the sequential recommendation advances', async () => {
+  const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<s-grid key=\{current\.variant_id\}/);
 });
 
 test('analytics payload is anonymous and uses the five checkout event names', () => {
