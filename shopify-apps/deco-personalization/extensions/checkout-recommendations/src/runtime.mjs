@@ -1,4 +1,5 @@
 const CONFIGURATION_PATH = '/api/shopify-app/personalization/checkout/configuration';
+const MAX_EVENT_PRODUCTS = 50;
 
 export const EVENTS = {
   impression: 'deco_personalization:checkout_recommendation_impression',
@@ -43,16 +44,16 @@ export async function fetchConfiguration(api, entries = api?.appMetafields?.valu
 
 export function normalizeConfiguration(value) {
   const component = value?.component;
-  const maximum = Number(value?.sequence?.maximum);
-  const scanLimit = Number(value?.sequence?.scan_limit);
+  const pageSize = Number(value?.sequence?.page_size);
   if (!value || value.enabled !== true
     || !component || !uuid(component.uuid) || !uuid(component.strategy_uuid)
     || component.placement !== 'checkout'
     || !gid(value?.collection?.id, 'Collection')
-    || !Number.isInteger(maximum) || maximum < 1 || maximum > 20
-    || !Number.isInteger(scanLimit) || scanLimit < maximum || scanLimit > 250
+    || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 250
     || value?.sequence?.order !== 'collection_default'
-    || value?.sequence?.variant_fallback !== 'first_available') return null;
+    || value?.sequence?.variant_fallback !== 'first_available'
+    || value?.sequence?.mode !== 'sequential'
+    || value?.sequence?.exhaustion !== 'collection') return null;
   return {
     component: {
       uuid: component.uuid,
@@ -62,12 +63,11 @@ export function normalizeConfiguration(value) {
       button_label: string(component.button_label, 60) || 'Add',
     },
     collection_id: value.collection.id,
-    maximum_recommendations: maximum,
-    scan_limit: scanLimit,
+    page_size: pageSize,
   };
 }
 
-export function normalizeCollectionProducts(collection) {
+export function normalizeCollectionProducts(collection, rankOffset = 0) {
   if (!collection || collection.__typename !== 'Collection' || !Array.isArray(collection.products?.nodes)) return [];
   return collection.products.nodes.map((product, index) => {
     const variants = Array.isArray(product?.variants?.nodes) ? product.variants.nodes : [];
@@ -76,7 +76,7 @@ export function normalizeCollectionProducts(collection) {
     return {
       product_id: product.id,
       variant_id: variant.id,
-      rank: index + 1,
+      rank: rankOffset + index + 1,
       title: string(product.title, 200),
       variant_title: string(variant.title, 200),
       available: true,
@@ -106,7 +106,7 @@ export function eventPayload(configuration, products) {
     component_uuid: configuration.component.uuid,
     strategy_uuid: configuration.component.strategy_uuid,
     placement: 'checkout',
-    products: products.slice(0, configuration.maximum_recommendations).map((product) => ({
+    products: products.slice(0, MAX_EVENT_PRODUCTS).map((product) => ({
       product_id: numericId(product.product_id, 'Product'),
       variant_id: numericId(product.variant_id, 'ProductVariant'),
       rank: product.rank,

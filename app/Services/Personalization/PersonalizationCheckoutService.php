@@ -16,9 +16,7 @@ use Illuminate\Support\Facades\DB;
 
 class PersonalizationCheckoutService
 {
-    public const DEFAULT_MAXIMUM_RECOMMENDATIONS = 3;
-
-    public const MAXIMUM_RECOMMENDATIONS = 20;
+    public const COLLECTION_PAGE_SIZE = 20;
 
     public const MAX_TRUST_ITEMS = 6;
 
@@ -51,15 +49,6 @@ class PersonalizationCheckoutService
         $component = $this->component($store, $input['component_uuid'] ?? null);
         $trustItems = $this->trustItems($input['trust_items'] ?? []);
         $collection = $this->collection($store, $input['shopify_collection_id'] ?? null);
-        $maximumRecommendations = filter_var($input['maximum_recommendations'] ?? self::DEFAULT_MAXIMUM_RECOMMENDATIONS, FILTER_VALIDATE_INT);
-        if ($maximumRecommendations === false
-            || $maximumRecommendations < 1
-            || $maximumRecommendations > self::MAXIMUM_RECOMMENDATIONS) {
-            throw new PersonalizationException(
-                'INVALID_CHECKOUT_MAXIMUM_RECOMMENDATIONS',
-                'Checkout 最大递进推荐数量必须介于 1 和 '.self::MAXIMUM_RECOMMENDATIONS.' 之间。',
-            );
-        }
 
         if ($enabled) {
             if (! $component
@@ -80,7 +69,7 @@ class PersonalizationCheckoutService
             }
         }
 
-        $setting = DB::transaction(function () use ($store, $actor, $enabled, $component, $collection, $maximumRecommendations, $trustItems): PersonalizationCheckoutSetting {
+        $setting = DB::transaction(function () use ($store, $actor, $enabled, $component, $collection, $trustItems): PersonalizationCheckoutSetting {
             $setting = PersonalizationCheckoutSetting::query()->updateOrCreate(
                 ['store_id' => $store->id],
                 [
@@ -88,15 +77,15 @@ class PersonalizationCheckoutService
                     'component_id' => $component?->id,
                     'collection_id' => $collection?->id,
                     'shopify_collection_id' => $collection ? (string) $collection->shopify_collection_id : null,
-                    'maximum_recommendations' => $maximumRecommendations,
                     'enabled' => $enabled,
                     'trust_items' => $trustItems,
                     'settings' => [
                         'candidate_source' => 'collection',
                         'candidate_order' => 'collection_default',
                         'variant_fallback' => 'first_available',
-                        'candidate_scan_limit' => min(250, max(20, $maximumRecommendations * 5)),
+                        'candidate_page_size' => self::COLLECTION_PAGE_SIZE,
                         'sequence_mode' => 'sequential',
+                        'sequence_exhaustion' => 'collection',
                         'hide_when_exhausted' => true,
                         'trust_placement' => 'WALLETS1',
                         'recommendation_placement' => 'ORDER_SUMMARY2',
@@ -119,7 +108,7 @@ class PersonalizationCheckoutService
                 'enabled' => $enabled,
                 'component_uuid' => $component?->uuid,
                 'shopify_collection_id' => $collection?->shopify_collection_id,
-                'maximum_recommendations' => $maximumRecommendations,
+                'sequence_exhaustion' => 'collection',
                 'trust_item_count' => count(array_filter($trustItems, fn (array $item): bool => $item['enabled'])),
             ],
         ]);
@@ -171,11 +160,15 @@ class PersonalizationCheckoutService
                 'id' => 'gid://shopify/Collection/'.$setting->shopify_collection_id,
             ],
             'sequence' => [
-                'maximum' => max(1, min(self::MAXIMUM_RECOMMENDATIONS, (int) $setting->maximum_recommendations)),
                 'mode' => 'sequential',
                 'order' => 'collection_default',
                 'variant_fallback' => 'first_available',
-                'scan_limit' => min(250, max(20, (int) data_get($setting->settings, 'candidate_scan_limit', 20))),
+                'page_size' => min(250, max(1, (int) data_get(
+                    $setting->settings,
+                    'candidate_page_size',
+                    data_get($setting->settings, 'candidate_scan_limit', self::COLLECTION_PAGE_SIZE),
+                ))),
+                'exhaustion' => 'collection',
                 'hide_when_exhausted' => true,
             ],
         ];

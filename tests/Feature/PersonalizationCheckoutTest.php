@@ -34,7 +34,7 @@ class PersonalizationCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_checkout_configuration_is_off_by_default_and_uses_collection_with_configurable_maximum(): void
+    public function test_checkout_configuration_is_off_by_default_and_runs_until_collection_is_exhausted(): void
     {
         [$admin, $organization, $store] = $this->context('Checkout A');
         $products = collect([101, 102, 103, 104])->map(fn (int $id): Product => $this->product($organization, $store, $id));
@@ -45,36 +45,23 @@ class PersonalizationCheckoutTest extends TestCase
         $this->assertNull($service->configuration($store, $admin));
         $this->assertSame(['enabled' => false, 'trust_items' => [], 'collection' => null], $service->storefront($store));
 
-        try {
-            $service->save($store, $admin, [
-                'enabled' => true,
-                'component_uuid' => $component->uuid,
-                'trust_items' => $service->defaultTrustItems(),
-                'shopify_collection_id' => (string) $collection->shopify_collection_id,
-                'maximum_recommendations' => 21,
-            ]);
-            $this->fail('Checkout must reject an unbounded maximum.');
-        } catch (PersonalizationException $exception) {
-            $this->assertSame('INVALID_CHECKOUT_MAXIMUM_RECOMMENDATIONS', $exception->errorCode);
-        }
-
         $setting = $service->save($store, $admin, [
             'enabled' => true,
             'component_uuid' => $component->uuid,
             'trust_items' => $service->defaultTrustItems(),
             'shopify_collection_id' => (string) $collection->shopify_collection_id,
-            'maximum_recommendations' => 5,
         ]);
         $payload = $service->storefront($store);
 
         $this->assertTrue($setting->enabled);
         $this->assertSame('501', $setting->shopify_collection_id);
-        $this->assertSame(5, $setting->maximum_recommendations);
         $this->assertTrue($payload['enabled']);
         $this->assertSame('checkout', data_get($payload, 'component.placement'));
         $this->assertSame('ORDER_SUMMARY2', data_get($setting->settings, 'recommendation_placement'));
         $this->assertSame('gid://shopify/Collection/501', data_get($payload, 'collection.id'));
-        $this->assertSame(5, data_get($payload, 'sequence.maximum'));
+        $this->assertArrayNotHasKey('maximum', $payload['sequence']);
+        $this->assertSame(PersonalizationCheckoutService::COLLECTION_PAGE_SIZE, data_get($payload, 'sequence.page_size'));
+        $this->assertSame('collection', data_get($payload, 'sequence.exhaustion'));
         $this->assertSame('collection_default', data_get($payload, 'sequence.order'));
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'personalization_checkout_configuration_saved',
@@ -99,7 +86,6 @@ class PersonalizationCheckoutTest extends TestCase
                 'component_uuid' => $component->uuid,
                 'trust_items' => [],
                 'shopify_collection_id' => (string) $otherCollection->shopify_collection_id,
-                'maximum_recommendations' => 3,
             ]);
             $this->fail('Checkout must reject a Collection from another store.');
         } catch (PersonalizationException $exception) {
@@ -126,7 +112,6 @@ class PersonalizationCheckoutTest extends TestCase
             'component_uuid' => $component->uuid,
             'trust_items' => app(PersonalizationCheckoutService::class)->defaultTrustItems(),
             'shopify_collection_id' => (string) $collection->shopify_collection_id,
-            'maximum_recommendations' => 7,
         ]);
 
         $response = $this->withToken($this->checkoutToken($store->shopify_domain))
@@ -136,7 +121,9 @@ class PersonalizationCheckoutTest extends TestCase
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonPath('data.enabled', true)
             ->assertJsonPath('data.collection.id', 'gid://shopify/Collection/503')
-            ->assertJsonPath('data.sequence.maximum', 7)
+            ->assertJsonPath('data.sequence.page_size', PersonalizationCheckoutService::COLLECTION_PAGE_SIZE)
+            ->assertJsonPath('data.sequence.exhaustion', 'collection')
+            ->assertJsonMissingPath('data.sequence.maximum')
             ->assertJsonMissingPath('data.store_id')
             ->assertJsonMissingPath('data.organization_id')
             ->assertJsonMissingPath('data.customer');

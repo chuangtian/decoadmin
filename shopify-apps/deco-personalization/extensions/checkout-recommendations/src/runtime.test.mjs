@@ -21,23 +21,24 @@ const configuration = normalizeConfiguration({
   },
   collection: {id: 'gid://shopify/Collection/99'},
   sequence: {
-    maximum: 5,
     mode: 'sequential',
     order: 'collection_default',
     variant_fallback: 'first_available',
-    scan_limit: 25,
+    page_size: 25,
+    exhaustion: 'collection',
   },
 });
 
-test('configuration uses a Collection with a merchant-set maximum instead of fixed slots', () => {
+test('configuration uses a Collection until it is exhausted instead of a fixed recommendation maximum', () => {
   assert.equal(configuration.collection_id, 'gid://shopify/Collection/99');
-  assert.equal(configuration.maximum_recommendations, 5);
+  assert.equal(configuration.page_size, 25);
+  assert.equal('maximum_recommendations' in configuration, false);
   assert.equal(normalizeConfiguration({enabled: false}), null);
   assert.equal(normalizeConfiguration({
     enabled: true,
     component: configuration.component,
     collection: {id: 'gid://shopify/Collection/99'},
-    sequence: {...configuration, maximum: 21},
+    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 251, exhaustion: 'collection'},
   }), null);
 });
 
@@ -54,26 +55,50 @@ test('collection order chooses the first market-available variant and skips cart
       ]},
     }))},
   };
-  const variants = normalizeCollectionProducts(collection);
+  const variants = normalizeCollectionProducts(collection, 250);
   const lines = [{merchandise: {id: 'gid://shopify/ProductVariant/999', product: {id: 'gid://shopify/Product/2'}}}];
   assert.equal(selectNextCandidate(variants, lines)?.variant_id, 'gid://shopify/ProductVariant/31');
+  assert.equal(selectNextCandidate(variants, lines)?.rank, 253);
   assert.equal(selectNextCandidate(variants, lines, new Set(['gid://shopify/ProductVariant/31'])), null);
 });
 
-test('candidate row remounts when the sequential recommendation advances', async () => {
+test('sequential selection continues beyond three products until every eligible candidate is exhausted', () => {
+  const candidates = Array.from({length: 6}, (_, index) => ({
+    product_id: `gid://shopify/Product/${index + 1}`,
+    variant_id: `gid://shopify/ProductVariant/${index + 101}`,
+    available: true,
+  }));
+  const dismissed = new Set();
+  const offered = [];
+  while (true) {
+    const candidate = selectNextCandidate(candidates, [], dismissed);
+    if (!candidate) break;
+    offered.push(candidate.variant_id);
+    dismissed.add(candidate.variant_id);
+  }
+  assert.equal(offered.length, 6);
+  assert.equal(selectNextCandidate(candidates, [], dismissed), null);
+});
+
+test('candidate row remounts and fetches another Collection page when the sequence advances', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /<s-grid key=\{current\.variant_id\}/);
+  assert.match(source, /products\(first: \$productsFirst, after: \$after\)/);
+  assert.match(source, /pageInfo \{ hasNextPage endCursor \}/);
+  assert.match(source, /!current && nextCursor/);
+  assert.doesNotMatch(source, /maximum_recommendations/);
 });
 
 test('analytics payload is anonymous and uses the five checkout event names', () => {
   assert.deepEqual(Object.keys(EVENTS), ['impression', 'click', 'addSuccess', 'addFailed', 'sequenceCompleted']);
-  const products = Array.from({length: 7}, (_, index) => ({
+  const products = Array.from({length: 60}, (_, index) => ({
     product_id: `gid://shopify/Product/${index + 1}`,
     variant_id: `gid://shopify/ProductVariant/${index + 10}`,
     rank: index + 1,
   }));
   const payload = eventPayload(configuration, products);
-  assert.deepEqual(payload.products.map((product) => product.product_id), ['1', '2', '3', '4', '5']);
+  assert.equal(payload.products.length, 50);
+  assert.deepEqual(payload.products.slice(0, 3).map((product) => product.product_id), ['1', '2', '3']);
   assert.equal(JSON.stringify(payload).includes('email'), false);
 });
 

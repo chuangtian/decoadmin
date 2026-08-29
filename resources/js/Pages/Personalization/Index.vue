@@ -99,13 +99,13 @@ const props = defineProps<{
         component_uuid: string | null;
         trust_items: CheckoutTrustItem[];
         shopify_collection_id: string | null;
-        maximum_recommendations: number;
         settings: {
             candidate_source: string;
             candidate_order: string;
             variant_fallback: string;
-            candidate_scan_limit: number;
+            candidate_page_size: number;
             sequence_mode: string;
+            sequence_exhaustion: string;
             hide_when_exhausted: boolean;
             trust_placement: string;
             recommendation_placement: string;
@@ -306,14 +306,12 @@ const checkoutForm = useForm({
     enabled: props.checkout.enabled,
     component_uuid: props.checkout.component_uuid ?? '',
     shopify_collection_id: props.checkout.shopify_collection_id ?? '',
-    maximum_recommendations: props.checkout.maximum_recommendations,
     trust_items: props.checkout.trust_items.map(item => ({ ...item })),
 });
 const hydrateCheckoutForm = () => {
     checkoutForm.enabled = props.checkout.enabled;
     checkoutForm.component_uuid = props.checkout.component_uuid ?? '';
     checkoutForm.shopify_collection_id = props.checkout.shopify_collection_id ?? '';
-    checkoutForm.maximum_recommendations = props.checkout.maximum_recommendations;
     checkoutForm.trust_items = props.checkout.trust_items.map(item => ({ ...item }));
     checkoutForm.clearErrors();
 };
@@ -354,7 +352,6 @@ const saveCheckout = () => checkoutForm
         enabled: data.enabled,
         component_uuid: data.component_uuid || null,
         shopify_collection_id: data.shopify_collection_id || null,
-        maximum_recommendations: data.maximum_recommendations,
         trust_items: data.trust_items.map((item, index) => ({ ...item, position: index + 1 })),
     }))
     .put(`${baseUrl}/checkout`, { preserveScroll: true });
@@ -598,18 +595,15 @@ const analyticsCards = computed(() => [
                                 </select>
                             </label>
                             <p v-if="checkoutComponents.length === 0" class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">请先在“推荐组件”创建 placement 为 Checkout 的组件，配置标题/按钮文案并启用后端配置。</p>
-                            <div class="mt-5 grid gap-4 md:grid-cols-[1fr_220px]">
+                            <div class="mt-5">
                                 <label class="text-sm font-medium text-slate-700">候选 Shopify Collection
                                     <select v-model="checkoutForm.shopify_collection_id" class="mt-1 w-full rounded-lg border-slate-300" :required="checkoutForm.enabled">
                                         <option value="">请选择已同步集合</option>
                                         <option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }} · {{ collection.product_count }} 个商品</option>
                                     </select>
                                 </label>
-                                <label class="text-sm font-medium text-slate-700">最多依次推荐数量
-                                    <input v-model.number="checkoutForm.maximum_recommendations" type="number" min="1" max="20" class="mt-1 w-full rounded-lg border-slate-300" required>
-                                </label>
                             </div>
-                            <div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>候选规则：</strong>沿用 Shopify Collection 默认顺序；每个商品选择当前 Market 下第一个可售变体。达到商家设置的最多推荐数量或集合中没有合格候选时隐藏，不循环、不补回已展示商品。</div>
+                            <div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-xs leading-5 text-indigo-900"><strong>候选规则：</strong>页面一次只显示一个商品；当前商品加入成功后，再按 Shopify Collection 默认顺序取得并显示下一个合格商品。每个商品选择当前 Market 下第一个可售变体，跳过已在购物车或不可售商品；只有集合中没有剩余合格候选时才隐藏，不循环、不重复。</div>
                             <p v-if="collections.length === 0" class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Commerce Hub 尚未同步可选 Collection；后台保持关闭，直到集合数据可用。</p>
                         </div>
 

@@ -70,7 +70,7 @@ npm run deploy:test
 - 原始匿名事件/归因 90 天、聚合 13 个月、审计 365 天、在线清理不超过 72 小时、备份不超过 30 天。
 - App Proxy 未签名返回 401；Webhook 错误 HMAC 返回 401；事件入口无效 source 返回 404。
 - Checkout 配置入口无效或过期 Session Token 返回 401；只从签名 `dest` 解析店铺，不接受前端 Organization/Store 参数。
-- 后台选择一个已同步 Shopify Collection，并配置最多推荐数；Test Checkout 按集合默认顺序验证已在购物车、Market 不可售、首个可售变体、连续加购、失败重试、移动端与候选耗尽隐藏。
+- 后台选择一个已同步 Shopify Collection；Test Checkout 一次只显示一个商品，加入成功后取得并显示下一个，按集合默认顺序持续到没有合格候选。验证已在购物车、Market 不可售、首个可售变体、跨页连续加购、失败重试、移动端与候选耗尽隐藏。
 - Test Client ID/Secret、App Proxy Secret、Token 和 Cookie 不出现在日志与构建产物。
 
 ## 回滚
@@ -90,7 +90,7 @@ npm run deploy:test
 - `deco-personalization-test-7` 已发布并替代第 6 版；两个 Checkout App Block 继续保存在 `macfox-test-app` 的活跃 Checkout 配置。
 - 左侧信任信息在真实 Test Checkout 中成功读取后台配置并显示 `Trusted seller`、`Free US Shipping over $100`、`2-year warranty`；桌面与 375px 移动模拟均不阻塞原生结账。
 - Session Token 使用官方文档定义的签名、`aud`、`dest` 与生命周期字段完成验证；Shopify 附加但未记录在 Checkout Token 契约中的 `iss` 不作为授权输入。
-- 递进推荐的 Collection、最大数量 `3`、顺序、购物车去重、可售变体选择、快速重复点击保护、五类分析事件和耗尽隐藏已通过 29 项 App 自动化测试；Test 后端签名接口返回启用配置、3 个信任项与 Collection GID。
+- 第 7 版曾使用当前 Test 配置中的 `3` 完成三款商品验收；该数值只代表当次测试商品数，不是产品上限。后续规则已更正为一次只显示一个、加入成功后取得下一个，并持续到 Collection 没有合格候选。
 - 真实 Test Checkout 的配置接口与 Storefront GraphQL 请求正常；Test Nginx 最近事件请求均返回 `202`，事件 source UUID 已在检查输出中脱敏。
 - 经用户明确授权，`Macfox E-bike Storage Bag`、`Macfox E-bike Mobile Phone Holder`、`Macfox E-bike Rearview Mirror Kit` 在 `macfox-test-app` 的 `Shop location` 可用库存均设为 `10`，验收后保持 `10`，不恢复为 `0`。
 - 真实 E2E 从仅含 `Macfox X7` 的 Checkout 开始，按 Collection 默认顺序成功加入 Rearview Mirror Kit、Storage Bag、Mobile Phone Holder；每次加入后实际购物车与金额立即更新，第三项后推荐标题和按钮完全隐藏，未循环、未重复。

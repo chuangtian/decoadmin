@@ -242,14 +242,6 @@ class PersonalizationEventIngestionService
         ], true) && count($value) !== 1) {
             throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '点击或加购事件必须只包含一个商品。');
         }
-        if ($eventName === self::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED
-            && count($value) > PersonalizationCheckoutService::MAXIMUM_RECOMMENDATIONS) {
-            throw new PersonalizationException(
-                'INVALID_PERSONALIZATION_EVENT_PRODUCTS',
-                'Checkout 推荐完成事件商品数超过允许上限。',
-            );
-        }
-
         $normalized = [];
         $seen = [];
         foreach ($value as $position => $item) {
@@ -259,7 +251,7 @@ class PersonalizationEventIngestionService
             $productId = $this->numericShopifyId($item['product_id'] ?? null, 'Product');
             $variantId = $this->numericShopifyId($item['variant_id'] ?? null, 'ProductVariant', true);
             $rank = filter_var($item['rank'] ?? ($position + 1), FILTER_VALIDATE_INT);
-            if ($productId === null || isset($seen[$productId]) || $rank === false || $rank < 1 || $rank > 100) {
+            if ($productId === null || isset($seen[$productId]) || $rank === false || $rank < 1 || $rank > 65535) {
                 throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '推荐事件商品字段无效。');
             }
             if (in_array($eventName, [

@@ -26,7 +26,8 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 - An offer is added with `applyCartLinesChange({type: 'addCartLine', merchandiseId, quantity: 1})` only when `instructions.lines.canAddCartLine` is true.
 - Accelerated checkout or another Shopify instruction can reject cart changes. The extension must hide or disable the offer and must never block checkout.
 - The candidate source is one merchant-selected Shopify Collection. Products retain Shopify's Collection order, and each product falls back to its first variant that is available in the buyer's active Market.
-- The merchant configures the maximum number of offers shown in one sequence (default `3`, bounded to `1..20`). Existing cart products, unavailable variants, and candidates rejected by Shopify are skipped. Displayed products are never repeated or looped.
+- The recommendation area renders exactly one offer at a time. After that offer is added successfully, the same area obtains and renders the next eligible Collection product; it does not render multiple cards or hide between already-loaded candidates.
+- There is no merchant-configured recommendation-count maximum. The extension pages through the selected Collection as needed and continues until no eligible product remains. Existing cart products, unavailable variants, and candidates rejected by Shopify are skipped; displayed products are never repeated or looped. Only then is the recommendation area hidden.
 
 Official references:
 
