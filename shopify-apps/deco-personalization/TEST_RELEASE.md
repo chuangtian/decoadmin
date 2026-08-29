@@ -48,7 +48,7 @@ export PERSONALIZATION_TEST_RELEASE_CONFIRM=deco-personalization-test
 npm run deploy:test
 ```
 
-包装器只允许 `validate`、`build`、`deploy` 三种 Test 动作；店铺、组织、确认值不匹配或命中 denylist 会在调用 Shopify CLI 前失败。
+包装器只允许 `validate`、`build`、`deploy` 三种 Test 动作；`deploy` 在非交互流程中只传入 `--allow-updates`，不允许删除扩展。店铺、组织、确认值不匹配或命中 denylist 会在调用 Shopify CLI 前失败。
 
 ## Test 配置合同
 

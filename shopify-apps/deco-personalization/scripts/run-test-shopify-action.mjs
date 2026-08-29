@@ -7,7 +7,7 @@ const action = process.argv[2];
 const commands = {
   validate: ['app', 'config', 'validate', '--config', 'test', '--json'],
   build: ['app', 'build', '--config', 'test'],
-  deploy: ['app', 'deploy', '--config', 'test'],
+  deploy: ['app', 'deploy', '--config', 'test', '--allow-updates'],
 };
 if (!commands[action]) {
   throw new Error('Allowed Test Shopify actions are validate, build, and deploy.');
