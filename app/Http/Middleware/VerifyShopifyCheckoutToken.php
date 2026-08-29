@@ -15,9 +15,11 @@ class VerifyShopifyCheckoutToken
      * Validate a Shopify Checkout UI Extension Session Token.
      *
      * Checkout tokens use the app client secret but, unlike App Home tokens,
-     * their signed `dest` claim can be a bare myshopify domain and `iss` is not
-     * guaranteed. The trusted shop is therefore derived from `dest`, never from
-     * a request-supplied Organization, Store, or customer value.
+     * their signed `dest` claim can be a bare myshopify domain. Shopify's
+     * documented Checkout token contract does not include `iss`, so an
+     * undocumented issuer claim is ignored after the signature is verified.
+     * The trusted shop is derived from signed `dest`, never from a
+     * request-supplied Organization, Store, or customer value.
      */
     public function handle(Request $request, Closure $next, string $configKey = 'personalization'): Response
     {
@@ -66,11 +68,6 @@ class VerifyShopifyCheckoutToken
         }
         if (isset($claims['iat']) && (! is_numeric($claims['iat']) || (int) $claims['iat'] > $now + $leeway)) {
             return $this->unauthorized('invalid_issued_at');
-        }
-
-        $issuer = rtrim((string) ($claims['iss'] ?? ''), '/');
-        if ($issuer !== '' && ! in_array($issuer, ['https://'.$shop, 'https://'.$shop.'/admin'], true)) {
-            return $this->unauthorized('issuer_mismatch');
         }
 
         $request->attributes->set('shopify_checkout_token_claims', $claims);

@@ -251,6 +251,10 @@ class PersonalizationCheckoutTest extends TestCase
         $payload = $this->base64Url(json_encode([
             'aud' => 'personalization-test-client-id',
             'dest' => $shop,
+            // Checkout's documented token contract does not define `iss`.
+            // Shopify may still attach one, so it must not override the
+            // verified signature, audience, destination, or lifetime checks.
+            'iss' => 'https://checkout.shopify.com',
             'nbf' => $now - 1,
             'iat' => $now,
             'exp' => $now + 60,
