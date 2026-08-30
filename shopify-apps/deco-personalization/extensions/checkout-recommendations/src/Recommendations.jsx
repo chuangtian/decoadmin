@@ -105,7 +105,10 @@ function Recommendations() {
   const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
     : null, [candidates, configuration, dismissed, lineSignature]);
-  const displayedCandidate = current ?? lastCandidate;
+  const retainedCandidate = useMemo(() => lastCandidate
+    ? selectNextCandidate([lastCandidate], lines, dismissed)
+    : null, [dismissed, lastCandidate, lineSignature]);
+  const displayedCandidate = current ?? retainedCandidate;
 
   useEffect(() => {
     if (!configuration || !current || impressionRef.current === current.variant_id) return;

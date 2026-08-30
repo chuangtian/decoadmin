@@ -73,12 +73,30 @@ test('cached candidates advance immediately when the Shopify cart line updates',
   assert.equal(selectNextCandidate(candidates, lines)?.variant_id, candidates[1].variant_id);
 });
 
+test('the final candidate is no longer rendered after its cart line appears', () => {
+  const candidate = {
+    product_id: 'gid://shopify/Product/1',
+    variant_id: 'gid://shopify/ProductVariant/101',
+    available: true,
+  };
+  const lines = [{
+    quantity: 1,
+    merchandise: {
+      id: candidate.variant_id,
+      product: {id: candidate.product_id},
+    },
+  }];
+
+  assert.equal(selectNextCandidate([candidate], lines), null);
+});
+
 test('candidate row advances without unmounting during background revalidation', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /const \[advancing, setAdvancing\] = useState\(false\)/);
   assert.match(source, /const \[lastCandidate, setLastCandidate\] = useState\(null\)/);
   assert.match(source, /setLastCandidate\(selectNextCandidate\(items, lines, dismissed\)\)/);
-  assert.match(source, /const displayedCandidate = current \?\? lastCandidate/);
+  assert.match(source, /selectNextCandidate\(\[lastCandidate\], lines, dismissed\)/);
+  assert.match(source, /const displayedCandidate = current \?\? retainedCandidate/);
   assert.match(source, /setBusy\(true\);\s*setAdvancing\(true\);/);
   assert.match(source, /<s-grid key=\{displayedCandidate\.variant_id\}/);
   assert.match(source, /const \[refreshing, setRefreshing\] = useState\(false\)/);
