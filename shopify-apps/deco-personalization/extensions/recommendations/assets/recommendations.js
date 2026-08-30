@@ -35,8 +35,8 @@
 
     const url = new URL(`${proxyPath}/recommendations/${componentUuid}`, window.location.origin);
     if (productId) url.searchParams.set('seed_product_id', productId);
-    cartProductIds.forEach((id) => url.searchParams.append('cart_product_ids[]', id));
-    recentProducts().forEach((id) => url.searchParams.append('recently_viewed_product_ids[]', id));
+    setIdQuery(url, 'cart_product_ids', cartProductIds);
+    setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
 
     try {
       const response = await fetch(url.toString(), {
@@ -86,6 +86,11 @@
     content.hidden = false;
     if (status instanceof HTMLElement) status.hidden = true;
     publishRecommendationEvent(element, 'impression', component, data.strategy, items);
+  }
+
+  function setIdQuery(url, key, ids) {
+    const values = numericIds(ids, 20);
+    if (values.length > 0) url.searchParams.set(key, values.join(','));
   }
 
   function createProductCard(element, product, component, strategy, style, discount) {

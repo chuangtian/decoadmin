@@ -109,7 +109,9 @@ class PersonalizationSmartCartTest extends TestCase
         $this->assertNull($setting->disabled_at);
         $this->assertTrue($strategy->fresh()->enabled);
 
-        $this->getJson($this->signedSmartCartUrl($store, ['cart_product_ids' => ['999']]))
+        // Theme App Extensions use one comma-separated value so Shopify App
+        // Proxy signs the same key shape that Laravel verifies.
+        $this->getJson($this->signedSmartCartUrl($store, ['cart_product_ids' => '999,998']))
             ->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonPath('data.enabled', true)

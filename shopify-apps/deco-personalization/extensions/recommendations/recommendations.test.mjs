@@ -27,6 +27,8 @@ test('storefront runtime uses only same-origin signed App Proxy and cart routes'
   assert.doesNotMatch(javascript, /innerHTML|eval\(|new Function/);
   assert.match(javascript, /minimum_purchase_quantity/);
   assert.match(javascript, /quantity: boundedNumber/);
+  assert.match(javascript, /setIdQuery\(url, 'cart_product_ids', cartProductIds\)/);
+  assert.doesNotMatch(javascript, /cart_product_ids\[\]/);
 });
 
 test('recently viewed context is anonymous, bounded and contains no customer identity', () => {
@@ -66,6 +68,8 @@ test('Smart Cart defaults off, reports compatibility and restores the native car
   assert.match(smartCartJavascript, /window\.location\.origin/);
   assert.doesNotMatch(smartCartJavascript, /https?:\/\//);
   assert.doesNotMatch(smartCartJavascript, /innerHTML|eval\(|new Function/);
+  assert.match(smartCartJavascript, /setIdQuery\(url, 'cart_product_ids', productIds\(cart\.items\)\)/);
+  assert.doesNotMatch(smartCartJavascript, /cart_product_ids\[\]/);
 });
 
 test('Smart Cart context stays anonymous and bounded', () => {

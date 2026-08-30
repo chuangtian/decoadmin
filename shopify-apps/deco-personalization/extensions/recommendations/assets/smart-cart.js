@@ -32,8 +32,8 @@
     try {
       const cart = await requestShopifyJson(cartRoute('cart.js'));
       const configUrl = new URL(`${path}/smart-cart`, window.location.origin);
-      productIds(cart.items).forEach((id) => configUrl.searchParams.append('cart_product_ids[]', id));
-      recentProducts().forEach((id) => configUrl.searchParams.append('recently_viewed_product_ids[]', id));
+      setIdQuery(configUrl, 'cart_product_ids', productIds(cart.items));
+      setIdQuery(configUrl, 'recently_viewed_product_ids', recentProducts());
       const config = await requestProxyJson(configUrl.toString());
       if (config.enabled !== true || config.fallback_mode !== 'shopify_default') return;
 
@@ -120,8 +120,8 @@
     try {
       const cart = await requestShopifyJson(cartRoute('cart.js'));
       const url = new URL(`${proxyPath}/smart-cart`, window.location.origin);
-      productIds(cart.items).forEach((id) => url.searchParams.append('cart_product_ids[]', id));
-      recentProducts().forEach((id) => url.searchParams.append('recently_viewed_product_ids[]', id));
+      setIdQuery(url, 'cart_product_ids', productIds(cart.items));
+      setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
       const config = await requestProxyJson(url.toString());
       if (config.enabled !== true) {
         restoreThemeCart();
@@ -364,9 +364,14 @@
 
   async function fetchConfig(cart) {
     const url = new URL(`${proxyPath}/smart-cart`, window.location.origin);
-    productIds(cart.items).forEach((id) => url.searchParams.append('cart_product_ids[]', id));
-    recentProducts().forEach((id) => url.searchParams.append('recently_viewed_product_ids[]', id));
+    setIdQuery(url, 'cart_product_ids', productIds(cart.items));
+    setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
     return requestProxyJson(url.toString());
+  }
+
+  function setIdQuery(url, key, ids) {
+    const values = numericIds(ids, 20);
+    if (values.length > 0) url.searchParams.set(key, values.join(','));
   }
 
   function restoreThemeCart() {
