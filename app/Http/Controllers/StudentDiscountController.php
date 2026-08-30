@@ -249,6 +249,24 @@ class StudentDiscountController extends Controller
     private function emailTemplateRules(): array
     {
         $urlRules = ['nullable', 'string', 'max:2048', 'url:http,https'];
+        $blockRules = function (string $type) use ($urlRules): array {
+            return [
+                "{$type}.content_blocks" => ['nullable', 'array', 'min:1', 'max:20'],
+                "{$type}.content_blocks.*" => ['required', 'array'],
+                "{$type}.content_blocks.*.type" => ['required', Rule::in(['heading', 'paragraph', 'button', 'note', 'divider', 'spacer', 'discount_code'])],
+                "{$type}.content_blocks.*.text" => ['nullable', 'string', 'max:5000'],
+                "{$type}.content_blocks.*.align" => ['nullable', Rule::in(['left', 'center', 'right'])],
+                "{$type}.content_blocks.*.font_size" => ['nullable', 'integer', 'between:10,48'],
+                "{$type}.content_blocks.*.bold" => ['nullable', 'boolean'],
+                "{$type}.content_blocks.*.italic" => ['nullable', 'boolean'],
+                "{$type}.content_blocks.*.underline" => ['nullable', 'boolean'],
+                "{$type}.content_blocks.*.color" => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+                "{$type}.content_blocks.*.background_color" => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+                "{$type}.content_blocks.*.url" => $urlRules,
+                "{$type}.content_blocks.*.width" => ['nullable', Rule::in(['auto', 'full'])],
+                "{$type}.content_blocks.*.spacing" => ['nullable', 'integer', 'between:8,64'],
+            ];
+        };
 
         return [
             'branding' => ['nullable', 'array'],
@@ -268,6 +286,7 @@ class StudentDiscountController extends Controller
             'approval.body' => ['required', 'string', 'max:5000'],
             'approval.cta_label' => ['nullable', 'string', 'max:60'],
             'approval.footer_note' => ['nullable', 'string', 'max:500'],
+            ...$blockRules('approval'),
             'rejection' => ['required', 'array'],
             'rejection.subject' => ['required', 'string', 'max:180', 'not_regex:/[\r\n]/'],
             'rejection.preheader' => ['nullable', 'string', 'max:240'],
@@ -275,6 +294,7 @@ class StudentDiscountController extends Controller
             'rejection.body' => ['required', 'string', 'max:5000'],
             'rejection.cta_label' => ['nullable', 'string', 'max:60'],
             'rejection.footer_note' => ['nullable', 'string', 'max:500'],
+            ...$blockRules('rejection'),
         ];
     }
 
