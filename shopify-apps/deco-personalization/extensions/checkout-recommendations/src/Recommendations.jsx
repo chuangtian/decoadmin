@@ -11,6 +11,7 @@ import {render} from 'preact';
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks';
 import {
   EVENTS,
+  configurationEndpoint,
   eventPayload,
   fetchConfiguration,
   fetchRecommendations,
@@ -44,6 +45,7 @@ function Recommendations() {
   const impressionRef = useRef('');
   const completionRef = useRef(false);
   const configurationMetafields = useAppMetafields(CONFIGURATION_METAFIELD_FILTER);
+  const configurationUrl = configurationEndpoint(configurationMetafields);
   const lines = useCartLines();
   const instructions = useInstructions();
   const discountCodes = useDiscountCodes();
@@ -70,7 +72,7 @@ function Recommendations() {
       .catch(() => { if (active) setConfiguration(null); })
       .finally(() => { if (active) setConfigurationLoaded(true); });
     return () => { active = false; };
-  }, [configurationMetafields]);
+  }, [configurationUrl]);
 
   useEffect(() => {
     if (!configuration) {

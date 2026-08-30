@@ -82,6 +82,9 @@ test('candidate row advances without unmounting during background revalidation',
   assert.match(source, /setBusy\(true\);\s*setAdvancing\(true\);/);
   assert.match(source, /<s-grid key=\{displayedCandidate\.variant_id\}/);
   assert.match(source, /const \[refreshing, setRefreshing\] = useState\(false\)/);
+  assert.match(source, /const configurationUrl = configurationEndpoint\(configurationMetafields\)/);
+  assert.match(source, /}, \[configurationUrl\]\);/);
+  assert.doesNotMatch(source, /}, \[configurationMetafields\]\);/);
   assert.match(source, /setRefreshing\(true\);/);
   assert.match(source, /if \(!configurationLoaded \|\| !recommendationsLoaded \|\| !configuration \|\| !displayedCandidate\) return null/);
   assert.match(source, /loading=\{busy \|\| advancing \|\| \(refreshing && !current\)\}/);
