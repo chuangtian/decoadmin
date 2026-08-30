@@ -154,6 +154,7 @@ class PersonalizationRecommendationService
         $candidates = $pinnedCandidates->concat($normalCandidates)->unique('shopify_product_id')->values();
         $byId = $candidates->keyBy(fn (array $product): string => $product['shopify_product_id']);
         $orderedIds = array_values(array_unique([...$pinnedIds, ...$normalIds]));
+        $discount = $this->discountPayload($strategy);
 
         $items = [];
         foreach ($orderedIds as $shopifyProductId) {
@@ -177,6 +178,13 @@ class PersonalizationRecommendationService
             ) ?? collect($product['variants'] ?? [])->first(
                 fn (array $variant): bool => ($variant['available_for_sale'] ?? false) === true,
             );
+            $originalAmount = is_array($selectedVariant) && is_numeric($selectedVariant['price'] ?? null)
+                ? round((float) $selectedVariant['price'], 2)
+                : null;
+            $discountPercentage = is_array($discount) ? (float) ($discount['percentage'] ?? 0) : 0.0;
+            $discountedAmount = $originalAmount !== null && $discountPercentage > 0
+                ? round($originalAmount * (1 - ($discountPercentage / 100)), 2)
+                : null;
             $items[] = [
                 ...$product,
                 'rank' => count($items) + 1,
@@ -190,6 +198,12 @@ class PersonalizationRecommendationService
                     : null,
                 'status' => 'available',
                 'rule_id' => $selection['rule_ids'][$shopifyProductId] ?? null,
+                'pricing' => [
+                    'currency' => (string) data_get($product, 'price.currency', $normalizedContext['currency']),
+                    'original_amount' => $originalAmount === null ? null : number_format($originalAmount, 2, '.', ''),
+                    'discount_percentage' => $discountedAmount === null ? null : $discountPercentage,
+                    'discounted_amount' => $discountedAmount === null ? null : number_format($discountedAmount, 2, '.', ''),
+                ],
             ];
             if (count($items) >= $strategy->item_limit) {
                 break;
@@ -216,7 +230,7 @@ class PersonalizationRecommendationService
                 'language' => $normalizedContext['language'],
             ],
             'items' => $items,
-            'discount' => $this->discountPayload($strategy),
+            'discount' => $discount,
             'debug' => [
                 'diagnostics' => $selection['diagnostics'],
                 'excluded' => $this->excludedDiagnostics(
@@ -533,14 +547,10 @@ class PersonalizationRecommendationService
             || ($discount['enabled'] ?? false) !== true
             || ($discount['status'] ?? null) !== 'active'
             || ! filled($discount['reference'] ?? null)
+            || ! is_numeric($discount['percentage'] ?? null)
+            || (float) $discount['percentage'] <= 0
+            || (float) $discount['percentage'] >= 100
             || ! filled($discount['validated_at'] ?? null)) {
-            return null;
-        }
-        try {
-            if (now()->diffInMinutes($discount['validated_at'], absolute: true) > 15) {
-                return null;
-            }
-        } catch (\Throwable) {
             return null;
         }
 
@@ -549,6 +559,7 @@ class PersonalizationRecommendationService
             'title' => (string) ($discount['title'] ?? ''),
             'summary' => (string) ($discount['summary'] ?? ''),
             'code' => (string) ($discount['code'] ?? ''),
+            'percentage' => round((float) $discount['percentage'], 4),
             'minimum_purchase_quantity_enforced' => true,
         ];
     }

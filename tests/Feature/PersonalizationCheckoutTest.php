@@ -4,9 +4,8 @@ namespace Tests\Feature;
 
 use App\Exceptions\PersonalizationException;
 use App\Models\Organization;
-use App\Models\PersonalizationRecommendationComponent;
+use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\Product;
-use App\Models\ProductCollection;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
@@ -34,36 +33,34 @@ class PersonalizationCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_checkout_configuration_is_off_by_default_and_supports_optional_collection_sequence_maximum(): void
+    public function test_checkout_directly_binds_and_activates_a_store_strategy(): void
     {
         [$admin, $organization, $store] = $this->context('Checkout A');
-        $products = collect([101, 102, 103, 104])->map(fn (int $id): Product => $this->product($organization, $store, $id));
-        $collection = $this->collection($organization, $store, 501, $products->all());
-        $component = $this->activeCheckoutComponent($store, $admin, $products->first());
+        $product = $this->product($organization, $store, 101);
+        $strategy = $this->checkoutStrategy($store, $admin, $product);
         $service = app(PersonalizationCheckoutService::class);
 
         $this->assertNull($service->configuration($store, $admin));
-        $this->assertSame(['enabled' => false, 'trust_items' => [], 'collection' => null], $service->storefront($store));
+        $this->assertSame(['enabled' => false, 'trust_items' => []], $service->storefront($store));
 
         $setting = $service->save($store, $admin, [
-            'enabled' => true,
-            'component_uuid' => $component->uuid,
+            'strategy_uuid' => $strategy->uuid,
             'trust_items' => $service->defaultTrustItems(),
-            'shopify_collection_id' => (string) $collection->shopify_collection_id,
-            'maximum_recommendations' => 7,
         ]);
         $payload = $service->storefront($store);
 
         $this->assertTrue($setting->enabled);
-        $this->assertSame('501', $setting->shopify_collection_id);
+        $this->assertNull($setting->shopify_collection_id);
         $this->assertTrue($payload['enabled']);
         $this->assertSame('checkout', data_get($payload, 'component.placement'));
+        $this->assertSame($strategy->uuid, data_get($payload, 'component.strategy_uuid'));
+        $this->assertSame('active', $setting->component->status->value);
+        $this->assertTrue($strategy->refresh()->enabled);
+        $this->assertSame('enabled', $strategy->status->value);
         $this->assertSame('ORDER_SUMMARY2', data_get($setting->settings, 'recommendation_placement'));
-        $this->assertSame('gid://shopify/Collection/501', data_get($payload, 'collection.id'));
-        $this->assertSame(7, $payload['sequence']['maximum_recommendations']);
-        $this->assertSame(PersonalizationCheckoutService::COLLECTION_PAGE_SIZE, data_get($payload, 'sequence.page_size'));
-        $this->assertSame('collection', data_get($payload, 'sequence.exhaustion'));
-        $this->assertSame('collection_default', data_get($payload, 'sequence.order'));
+        $this->assertSame('strategy', data_get($setting->settings, 'candidate_source'));
+        $this->assertArrayNotHasKey('collection', $payload);
+        $this->assertArrayNotHasKey('sequence', $payload);
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'personalization_checkout_configuration_saved',
             'store_id' => $store->id,
@@ -71,26 +68,22 @@ class PersonalizationCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_checkout_rejects_cross_store_collection_and_permanent_denied_store(): void
+    public function test_checkout_rejects_cross_store_strategy_and_permanent_denied_store(): void
     {
         [$admin, $organization, $store] = $this->context('Checkout Scope A');
-        $product = $this->product($organization, $store, 201);
-        $component = $this->activeCheckoutComponent($store, $admin, $product);
-        [, $otherOrganization, $otherStore] = $this->context('Checkout Scope B');
+        [$otherAdmin, $otherOrganization, $otherStore] = $this->context('Checkout Scope B');
         $otherProduct = $this->product($otherOrganization, $otherStore, 202);
-        $otherCollection = $this->collection($otherOrganization, $otherStore, 502, [$otherProduct]);
+        $otherStrategy = $this->checkoutStrategy($otherStore, $otherAdmin, $otherProduct);
         $service = app(PersonalizationCheckoutService::class);
 
         try {
             $service->save($store, $admin, [
-                'enabled' => true,
-                'component_uuid' => $component->uuid,
+                'strategy_uuid' => $otherStrategy->uuid,
                 'trust_items' => [],
-                'shopify_collection_id' => (string) $otherCollection->shopify_collection_id,
             ]);
-            $this->fail('Checkout must reject a Collection from another store.');
+            $this->fail('Checkout must reject a strategy from another store.');
         } catch (PersonalizationException $exception) {
-            $this->assertSame('CHECKOUT_COLLECTION_NOT_FOUND', $exception->errorCode);
+            $this->assertSame('CHECKOUT_STRATEGY_NOT_FOUND', $exception->errorCode);
         }
 
         $store->forceFill(['shopify_domain' => 'macfoxebike.myshopify.com'])->save();
@@ -106,14 +99,10 @@ class PersonalizationCheckoutTest extends TestCase
     {
         [$admin, $organization, $store] = $this->context('Checkout Endpoint');
         $product = $this->product($organization, $store, 301);
-        $collection = $this->collection($organization, $store, 503, [$product]);
-        $component = $this->activeCheckoutComponent($store, $admin, $product);
+        $strategy = $this->checkoutStrategy($store, $admin, $product);
         app(PersonalizationCheckoutService::class)->save($store, $admin, [
-            'enabled' => true,
-            'component_uuid' => $component->uuid,
+            'strategy_uuid' => $strategy->uuid,
             'trust_items' => app(PersonalizationCheckoutService::class)->defaultTrustItems(),
-            'shopify_collection_id' => (string) $collection->shopify_collection_id,
-            'maximum_recommendations' => null,
         ]);
 
         $response = $this->withToken($this->checkoutToken($store->shopify_domain))
@@ -122,10 +111,9 @@ class PersonalizationCheckoutTest extends TestCase
             ->assertHeader('Access-Control-Allow-Origin', '*')
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonPath('data.enabled', true)
-            ->assertJsonPath('data.collection.id', 'gid://shopify/Collection/503')
-            ->assertJsonPath('data.sequence.page_size', PersonalizationCheckoutService::COLLECTION_PAGE_SIZE)
-            ->assertJsonPath('data.sequence.exhaustion', 'collection')
-            ->assertJsonPath('data.sequence.maximum_recommendations', null)
+            ->assertJsonPath('data.component.strategy_uuid', $strategy->uuid)
+            ->assertJsonMissingPath('data.collection')
+            ->assertJsonMissingPath('data.sequence')
             ->assertJsonMissingPath('data.store_id')
             ->assertJsonMissingPath('data.organization_id')
             ->assertJsonMissingPath('data.customer');
@@ -210,31 +198,7 @@ class PersonalizationCheckoutTest extends TestCase
         return $product->load('variants');
     }
 
-    /** @param list<Product> $products */
-    private function collection(Organization $organization, Store $store, int $shopifyId, array $products): ProductCollection
-    {
-        $collection = ProductCollection::query()->create([
-            'organization_id' => $organization->id,
-            'store_id' => $store->id,
-            'shopify_collection_id' => $shopifyId,
-            'title' => 'Checkout Collection '.$shopifyId,
-            'handle' => 'checkout-collection-'.$shopifyId,
-            'sort_order' => 'manual',
-            'synced_at' => now(),
-        ]);
-        foreach ($products as $product) {
-            $collection->products()->attach($product->id, [
-                'organization_id' => $organization->id,
-                'store_id' => $store->id,
-                'shopify_product_id' => $product->shopify_product_id,
-                'sync_batch' => (string) Str::uuid(),
-            ]);
-        }
-
-        return $collection;
-    }
-
-    private function activeCheckoutComponent(Store $store, User $admin, Product $product): PersonalizationRecommendationComponent
+    private function checkoutStrategy(Store $store, User $admin, Product $product): PersonalizationRecommendationStrategy
     {
         $service = app(PersonalizationConfigurationService::class);
         $strategy = $service->createStrategy($store, $admin, [
@@ -245,14 +209,8 @@ class PersonalizationCheckoutTest extends TestCase
             'shopify_product_id' => 'gid://shopify/Product/'.$product->shopify_product_id,
             'type' => 'manual',
         ]]);
-        $component = $service->createComponent($store, $strategy, $admin, [
-            'name' => 'Checkout sequence',
-            'placement' => 'checkout',
-            'heading' => 'Great Value Bundles for You',
-            'button_label' => 'Add',
-        ]);
 
-        return $service->activateComponent($store, $component, $admin);
+        return $strategy->refresh();
     }
 
     private function checkoutToken(string $shop, string $secret = 'personalization-test-secret'): string

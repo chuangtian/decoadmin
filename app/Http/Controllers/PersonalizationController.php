@@ -156,22 +156,8 @@ class PersonalizationController extends Controller
             'collections' => $collections,
             'checkout' => [
                 'uuid' => $checkout?->uuid,
-                'enabled' => $checkout?->enabled ?? false,
-                'component_uuid' => $checkout?->component?->uuid,
+                'strategy_uuid' => $checkout?->component?->strategy?->uuid,
                 'trust_items' => $checkout?->trust_items ?? $this->checkout->defaultTrustItems(),
-                'shopify_collection_id' => $checkout?->shopify_collection_id,
-                'settings' => $checkout?->settings ?? [
-                    'candidate_source' => 'collection',
-                    'candidate_order' => 'collection_default',
-                    'variant_fallback' => 'first_available',
-                    'candidate_page_size' => PersonalizationCheckoutService::COLLECTION_PAGE_SIZE,
-                    'sequence_mode' => 'sequential',
-                    'sequence_exhaustion' => 'collection',
-                    'hide_when_exhausted' => true,
-                    'maximum_recommendations' => null,
-                    'trust_placement' => 'WALLETS1',
-                    'recommendation_placement' => 'ORDER_SUMMARY2',
-                ],
                 'icon_options' => array_map(fn (string $icon): array => [
                     'value' => $icon,
                     'label' => $this->checkoutIconLabel($icon),
@@ -386,10 +372,7 @@ class PersonalizationController extends Controller
     {
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
         $values = $request->validate([
-            'enabled' => ['required', 'boolean'],
-            'component_uuid' => ['nullable', 'uuid'],
-            'shopify_collection_id' => ['nullable', 'string', 'regex:/^(?:gid:\/\/shopify\/Collection\/)?\d+$/'],
-            'maximum_recommendations' => ['nullable', 'integer', 'between:1,1000'],
+            'strategy_uuid' => ['required', 'uuid'],
             'trust_items' => ['array', 'max:'.PersonalizationCheckoutService::MAX_TRUST_ITEMS],
             'trust_items.*.key' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
             'trust_items.*.icon' => ['required', Rule::in(PersonalizationCheckoutService::ICONS)],
@@ -400,7 +383,7 @@ class PersonalizationController extends Controller
 
         return $this->run(
             fn () => $this->checkout->save($store, $request->user(), $values),
-            'Checkout 配置已保存。扩展仍需在 Shopify Checkout Editor 中添加并启用。',
+            'Checkout 策略已绑定。Shopify Checkout Editor 中添加区块后会自动使用该策略。',
         );
     }
 

@@ -4,20 +4,19 @@ namespace App\Services\Personalization;
 
 use App\Enums\PersonalizationComponentStatus;
 use App\Enums\PersonalizationPlacement;
+use App\Enums\PersonalizationStrategyStatus;
 use App\Exceptions\PersonalizationException;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\PersonalizationCheckoutSetting;
 use App\Models\PersonalizationRecommendationComponent;
-use App\Models\ProductCollection;
+use App\Models\PersonalizationRecommendationStrategy;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 class PersonalizationCheckoutService
 {
-    public const COLLECTION_PAGE_SIZE = 20;
-
     public const MAX_TRUST_ITEMS = 6;
 
     /** @var list<string> */
@@ -28,6 +27,7 @@ class PersonalizationCheckoutService
     public function __construct(
         private PersonalizationShopGuard $shopGuard,
         private PersonalizationRecommendationService $recommendations,
+        private PersonalizationConfigurationService $configuration,
     ) {}
 
     public function configuration(Store $store, User $actor): ?PersonalizationCheckoutSetting
@@ -37,10 +37,7 @@ class PersonalizationCheckoutService
         return PersonalizationCheckoutSetting::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
-            ->with([
-                'component.strategy',
-                'collection',
-            ])
+            ->with('component.strategy')
             ->first();
     }
 
@@ -48,50 +45,25 @@ class PersonalizationCheckoutService
     public function save(Store $store, User $actor, array $input): PersonalizationCheckoutSetting
     {
         $this->authorize($store, $actor, 'personalization.manage');
-        $enabled = (bool) ($input['enabled'] ?? false);
-        $component = $this->component($store, $input['component_uuid'] ?? null);
+        $strategy = $this->strategy($store, $input['strategy_uuid'] ?? null);
         $trustItems = $this->trustItems($input['trust_items'] ?? []);
-        $collection = $this->collection($store, $input['shopify_collection_id'] ?? null);
-        $maximumRecommendations = $this->maximumRecommendations($input['maximum_recommendations'] ?? null);
 
-        if ($enabled) {
-            if (! $component
-                || $component->status !== PersonalizationComponentStatus::Active
-                || ! $component->strategy?->enabled) {
-                throw new PersonalizationException(
-                    'CHECKOUT_COMPONENT_NOT_ACTIVE',
-                    '启用 Checkout 前必须选择已启用的 Checkout 推荐组件与策略。',
-                    409,
-                );
-            }
-            if (! $collection) {
-                throw new PersonalizationException(
-                    'CHECKOUT_COLLECTION_REQUIRED',
-                    '启用 Checkout 前必须选择一个 Shopify 商品集合。',
-                    409,
-                );
-            }
-        }
-
-        $setting = DB::transaction(function () use ($store, $actor, $enabled, $component, $collection, $trustItems, $maximumRecommendations): PersonalizationCheckoutSetting {
+        $setting = DB::transaction(function () use ($store, $actor, $strategy, $trustItems): PersonalizationCheckoutSetting {
+            $component = $this->bindStrategy($store, $actor, $strategy);
             $setting = PersonalizationCheckoutSetting::query()->updateOrCreate(
                 ['store_id' => $store->id],
                 [
                     'organization_id' => $store->organization_id,
-                    'component_id' => $component?->id,
-                    'collection_id' => $collection?->id,
-                    'shopify_collection_id' => $collection ? (string) $collection->shopify_collection_id : null,
-                    'enabled' => $enabled,
+                    'component_id' => $component->id,
+                    'collection_id' => null,
+                    'shopify_collection_id' => null,
+                    'enabled' => true,
                     'trust_items' => $trustItems,
                     'settings' => [
-                        'candidate_source' => 'collection',
-                        'candidate_order' => 'collection_default',
-                        'variant_fallback' => 'first_available',
-                        'candidate_page_size' => self::COLLECTION_PAGE_SIZE,
+                        'candidate_source' => 'strategy',
                         'sequence_mode' => 'sequential',
-                        'sequence_exhaustion' => 'collection',
+                        'sequence_exhaustion' => 'strategy',
                         'hide_when_exhausted' => true,
-                        'maximum_recommendations' => $maximumRecommendations,
                         'trust_placement' => 'WALLETS1',
                         'recommendation_placement' => 'ORDER_SUMMARY2',
                     ],
@@ -99,7 +71,7 @@ class PersonalizationCheckoutService
                 ],
             );
 
-            return $setting;
+            return $setting->load('component.strategy');
         });
 
         AuditLog::query()->create([
@@ -110,16 +82,15 @@ class PersonalizationCheckoutService
             'subject_type' => $setting->getMorphClass(),
             'subject_id' => $setting->id,
             'new_values' => [
-                'enabled' => $enabled,
-                'component_uuid' => $component?->uuid,
-                'shopify_collection_id' => $collection?->shopify_collection_id,
-                'sequence_exhaustion' => 'collection',
-                'maximum_recommendations' => $maximumRecommendations,
+                'strategy_uuid' => $strategy->uuid,
+                'component_uuid' => $setting->component?->uuid,
+                'placement' => PersonalizationPlacement::Checkout->value,
+                'sequence_exhaustion' => 'strategy',
                 'trust_item_count' => count(array_filter($trustItems, fn (array $item): bool => $item['enabled'])),
             ],
         ]);
 
-        return $setting->load(['component.strategy', 'collection']);
+        return $setting;
     }
 
     /** @return array<string, mixed> */
@@ -150,22 +121,6 @@ class PersonalizationCheckoutService
                 ->sortBy(fn (array $item): int => (int) ($item['position'] ?? 0))
                 ->values()
                 ->all(),
-            'collection' => [
-                'id' => 'gid://shopify/Collection/'.$setting->shopify_collection_id,
-            ],
-            'sequence' => [
-                'mode' => 'sequential',
-                'order' => 'collection_default',
-                'variant_fallback' => 'first_available',
-                'page_size' => min(250, max(1, (int) data_get(
-                    $setting->settings,
-                    'candidate_page_size',
-                    data_get($setting->settings, 'candidate_scan_limit', self::COLLECTION_PAGE_SIZE),
-                ))),
-                'exhaustion' => 'collection',
-                'hide_when_exhausted' => true,
-                'maximum_recommendations' => data_get($setting->settings, 'maximum_recommendations'),
-            ],
         ];
     }
 
@@ -197,15 +152,10 @@ class PersonalizationCheckoutService
             ->with([
                 'component.strategy.publishedVersion',
                 'component.strategyVersion',
-                'collection',
             ])->first();
         $component = $setting?->component;
         if (! $setting
             || ! $component
-            || ! $setting->collection
-            || (int) $setting->collection->organization_id !== (int) $store->organization_id
-            || (int) $setting->collection->store_id !== (int) $store->id
-            || (string) $setting->collection->shopify_collection_id !== (string) $setting->shopify_collection_id
             || $component->placement !== PersonalizationPlacement::Checkout
             || $component->status !== PersonalizationComponentStatus::Active
             || ! $component->strategy?->enabled) {
@@ -265,58 +215,104 @@ class PersonalizationCheckoutService
         return $normalized;
     }
 
-    private function collection(Store $store, mixed $id): ?ProductCollection
-    {
-        $id = trim((string) $id);
-        if ($id === '') {
-            return null;
-        }
-        if (preg_match('#^(?:gid://shopify/Collection/)?(\d+)$#', $id, $matches) !== 1) {
-            throw new PersonalizationException('INVALID_CHECKOUT_COLLECTION', 'Checkout 商品集合标识无效。');
-        }
-
-        $collection = ProductCollection::query()
-            ->where('organization_id', $store->organization_id)
-            ->where('store_id', $store->id)
-            ->where('shopify_collection_id', $matches[1])
-            ->first();
-        if (! $collection) {
-            throw new PersonalizationException('CHECKOUT_COLLECTION_NOT_FOUND', '所选 Shopify 商品集合不属于当前店铺或尚未同步。', 404);
-        }
-
-        return $collection;
-    }
-
-    private function maximumRecommendations(mixed $value): ?int
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-        if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value < 1 || (int) $value > 1000) {
-            throw new PersonalizationException('INVALID_CHECKOUT_MAXIMUM', 'Checkout 最大推荐数量必须在 1 到 1000 之间，留空表示遍历整个集合。');
-        }
-
-        return (int) $value;
-    }
-
-    private function component(Store $store, mixed $uuid): ?PersonalizationRecommendationComponent
+    private function strategy(Store $store, mixed $uuid): PersonalizationRecommendationStrategy
     {
         $uuid = trim((string) $uuid);
-        if ($uuid === '') {
-            return null;
-        }
-
-        $component = PersonalizationRecommendationComponent::query()
+        $strategy = PersonalizationRecommendationStrategy::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
             ->where('uuid', $uuid)
-            ->with('strategy')
+            ->withoutTrashed()
+            ->with(['productOverrides', 'rules', 'versions', 'publishedVersion'])
             ->first();
-        if (! $component || $component->placement !== PersonalizationPlacement::Checkout) {
-            throw new PersonalizationException('CHECKOUT_COMPONENT_NOT_FOUND', '找不到当前店铺的 Checkout 推荐组件。', 404);
+        if (! $strategy) {
+            throw new PersonalizationException('CHECKOUT_STRATEGY_NOT_FOUND', '所选推荐策略不属于当前店铺或已被删除。', 404);
         }
 
-        return $component;
+        return $strategy;
+    }
+
+    private function bindStrategy(
+        Store $store,
+        User $actor,
+        PersonalizationRecommendationStrategy $strategy,
+    ): PersonalizationRecommendationComponent {
+        $setting = PersonalizationCheckoutSetting::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->with('component.strategy')
+            ->lockForUpdate()
+            ->first();
+        $component = $setting?->component;
+        if (! $component || $component->placement !== PersonalizationPlacement::Checkout) {
+            $component = PersonalizationRecommendationComponent::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('placement', PersonalizationPlacement::Checkout->value)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+        }
+        $previousStrategy = $component?->strategy;
+        $componentName = mb_substr('Checkout · '.$strategy->name, 0, 80);
+
+        if (! $component) {
+            $component = $this->configuration->createComponent($store, $strategy, $actor, [
+                'name' => $componentName,
+                'placement' => PersonalizationPlacement::Checkout->value,
+                'heading' => 'Great Value Bundles for You',
+                'button_label' => 'Add',
+            ]);
+        } else {
+            $component = $this->configuration->updateComponent($store, $component, $strategy, $actor, [
+                'name' => $componentName,
+                'placement' => PersonalizationPlacement::Checkout->value,
+                'heading' => $component->heading ?: 'Great Value Bundles for You',
+                'button_label' => $component->button_label ?: 'Add',
+            ]);
+        }
+        $component = $this->configuration->activateComponent($store, $component, $actor);
+        $version = $strategy->versions->first(fn ($version): bool => $version->status->value === 'draft')
+            ?: $strategy->publishedVersion;
+        $component->forceFill([
+            'strategy_version_id' => $version?->id,
+            'configuration_status' => 'valid',
+        ])->save();
+        $strategy->forceFill([
+            'enabled' => true,
+            'status' => PersonalizationStrategyStatus::Enabled,
+            'updated_by' => $actor->id,
+        ])->save();
+
+        PersonalizationRecommendationComponent::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('placement', PersonalizationPlacement::Checkout->value)
+            ->where('id', '!=', $component->id)
+            ->where('status', PersonalizationComponentStatus::Active->value)
+            ->update([
+                'status' => PersonalizationComponentStatus::Disabled->value,
+                'published_at' => null,
+                'updated_by' => $actor->id,
+                'updated_at' => now(),
+            ]);
+
+        if ($previousStrategy && (int) $previousStrategy->id !== (int) $strategy->id) {
+            $hasOtherActivePlacement = $previousStrategy->components()
+                ->where('status', PersonalizationComponentStatus::Active->value)
+                ->exists();
+            $previousStrategy->forceFill([
+                'enabled' => $hasOtherActivePlacement,
+                'status' => $hasOtherActivePlacement
+                    ? PersonalizationStrategyStatus::Enabled
+                    : ($previousStrategy->published_version_id
+                        ? PersonalizationStrategyStatus::Disabled
+                        : PersonalizationStrategyStatus::Draft),
+                'updated_by' => $actor->id,
+            ])->save();
+        }
+
+        return $component->refresh()->load('strategy');
     }
 
     private function authorize(Store $store, User $actor, string $permission): void
@@ -342,9 +338,9 @@ class PersonalizationCheckoutService
         }
     }
 
-    /** @return array{enabled: false, trust_items: array{}, collection: null} */
+    /** @return array{enabled: false, trust_items: array{}} */
     private function disabledPayload(): array
     {
-        return ['enabled' => false, 'trust_items' => [], 'collection' => null];
+        return ['enabled' => false, 'trust_items' => []];
     }
 }

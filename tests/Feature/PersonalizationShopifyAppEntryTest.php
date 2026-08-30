@@ -567,6 +567,7 @@ class PersonalizationShopifyAppEntryTest extends TestCase
                     'summary' => '10% off products',
                     'status' => 'ACTIVE',
                     'codes' => ['nodes' => [['code' => 'EXISTING10']]],
+                    'customerGets' => ['value' => ['percentage' => 0.1]],
                 ],
             ]]]]])
             ->push(['data' => ['discountCodeBasicCreate' => [
@@ -575,7 +576,9 @@ class PersonalizationShopifyAppEntryTest extends TestCase
             ]]]);
 
         $service = app(PersonalizationDiscountService::class);
-        $this->assertSame('Existing 10%', $service->listing($store, $actor)[0]['title']);
+        $listed = $service->listing($store, $actor)[0];
+        $this->assertSame('Existing 10%', $listed['title']);
+        $this->assertSame(10.0, $listed['percentage']);
         $created = $service->create($store, $actor, [
             'title' => '九折优惠',
             'code' => 'DECO10',
@@ -584,6 +587,7 @@ class PersonalizationShopifyAppEntryTest extends TestCase
         ]);
 
         $this->assertSame('gid://shopify/DiscountCodeNode/2', $created['id']);
+        $this->assertSame(10, $created['percentage']);
         Http::assertSent(fn ($request): bool => $request->hasHeader('X-Shopify-Access-Token', 'personalization-app-token')
             && $request->url() === "https://{$store->shopify_domain}/admin/api/2026-07/graphql.json");
         $this->assertDatabaseHas('audit_logs', [

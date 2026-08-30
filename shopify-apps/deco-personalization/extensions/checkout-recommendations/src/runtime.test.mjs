@@ -5,7 +5,6 @@ import {
   EVENTS,
   configurationEndpoint,
   eventPayload,
-  normalizeCollectionProducts,
   normalizeConfiguration,
   normalizeServiceRecommendations,
   selectNextCandidate,
@@ -20,63 +19,19 @@ const configuration = normalizeConfiguration({
     heading: 'Bundles',
     button_label: 'Add',
   },
-  collection: {id: 'gid://shopify/Collection/99'},
   recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
-  sequence: {
-    mode: 'sequential',
-    order: 'collection_default',
-    variant_fallback: 'first_available',
-    page_size: 25,
-    exhaustion: 'collection',
-  },
 });
 
-test('configuration uses a Collection and supports an optional merchant maximum without fixed slots', () => {
-  assert.equal(configuration.collection_id, 'gid://shopify/Collection/99');
-  assert.equal(configuration.page_size, 25);
-  assert.equal(configuration.maximum_recommendations, null);
-  const bounded = normalizeConfiguration({
-    enabled: true,
-    component: configuration.component,
-    collection: {id: 'gid://shopify/Collection/99'},
-    recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
-    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 25, maximum_recommendations: 7, exhaustion: 'collection'},
-  });
-  assert.equal(bounded.maximum_recommendations, 7);
+test('configuration uses one backend strategy binding without merchant collection or limit controls', () => {
+  assert.equal(configuration.component.strategy_uuid, 'aeed57d4-2ace-41d4-8a41-2b8f23687808');
+  assert.equal('collection_id' in configuration, false);
+  assert.equal('maximum_recommendations' in configuration, false);
   assert.equal(normalizeConfiguration({enabled: false}), null);
   assert.equal(normalizeConfiguration({
     enabled: true,
     component: configuration.component,
-    collection: {id: 'gid://shopify/Collection/99'},
-    recommendations_url: 'https://test.example/api/shopify-app/personalization/checkout/recommendations',
-    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 251, exhaustion: 'collection'},
+    recommendations_url: 'https://test.example/admin',
   }), null);
-  assert.equal(normalizeConfiguration({
-    enabled: true,
-    component: configuration.component,
-    collection: {id: 'gid://shopify/Collection/99'},
-    sequence: {mode: 'sequential', order: 'collection_default', variant_fallback: 'first_available', page_size: 25, maximum_recommendations: 1001, exhaustion: 'collection'},
-  }), null);
-});
-
-test('collection order chooses the first market-available variant and skips cart products without looping', () => {
-  const collection = {
-    __typename: 'Collection',
-    products: {nodes: [1, 2, 3].map((id) => ({
-      id: `gid://shopify/Product/${id}`,
-      title: `Product ${id}`,
-      featuredImage: null,
-      variants: {nodes: [
-        {id: `gid://shopify/ProductVariant/${id * 10}`, title: 'Unavailable', availableForSale: false, price: {amount: '9.00', currencyCode: 'USD'}},
-        {id: `gid://shopify/ProductVariant/${id * 10 + 1}`, title: 'Available', availableForSale: id !== 1, price: {amount: '10.00', currencyCode: 'USD'}},
-      ]},
-    }))},
-  };
-  const variants = normalizeCollectionProducts(collection, 250);
-  const lines = [{merchandise: {id: 'gid://shopify/ProductVariant/999', product: {id: 'gid://shopify/Product/2'}}}];
-  assert.equal(selectNextCandidate(variants, lines)?.variant_id, 'gid://shopify/ProductVariant/31');
-  assert.equal(selectNextCandidate(variants, lines)?.rank, 253);
-  assert.equal(selectNextCandidate(variants, lines, new Set(['gid://shopify/ProductVariant/31'])), null);
 });
 
 test('sequential selection continues beyond three products until every eligible candidate is exhausted', () => {
@@ -103,6 +58,8 @@ test('candidate row remounts and refreshes the shared strategy service after car
   assert.match(source, /fetchRecommendations\(shopify/);
   assert.match(source, /quantity: current\.minimum_purchase_quantity/);
   assert.match(source, /shopify\.lines\.value/);
+  assert.match(source, /applyDiscountCodeChange/);
+  assert.match(source, /canUpdateDiscountCodes/);
 });
 
 test('shared strategy results preserve order, minimum quantity, rule and version traceability', () => {
@@ -119,14 +76,19 @@ test('shared strategy results preserve order, minimum quantity, rule and version
       minimum_purchase_quantity: 3,
       rule_id: ruleId,
       price: {currency: 'USD'},
+      pricing: {currency: 'USD', original_amount: '19.00', discount_percentage: 10, discounted_amount: '17.10'},
       storefront: {image: {url: 'https://cdn.example/mirror.jpg', alt: 'Mirror'}},
       variants: [{shopify_variant_id: '911', title: 'Default', available_for_sale: true, price: '19.00', image: {url: null, alt: null}}],
     }],
+    discount: {title: 'Ten off', summary: '10% off', code: 'DECO10', percentage: 10},
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].minimum_purchase_quantity, 3);
   assert.equal(rows[0].rule_id, ruleId);
   assert.equal(rows[0].strategy_version_uuid, versionId);
+  assert.equal(rows[0].amount, '19.00');
+  assert.equal(rows[0].discounted_amount, '17.10');
+  assert.equal(rows[0].discount.percentage, 10);
 });
 
 test('analytics payload is anonymous and uses the five checkout event names', () => {

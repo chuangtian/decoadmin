@@ -1104,7 +1104,7 @@ class PersonalizationStrategyWorkflowService
     private function normalizeDiscount(mixed $discount): array
     {
         if (! is_array($discount) || array_is_list($discount)
-            || array_diff(array_keys($discount), ['enabled', 'reference', 'title', 'summary', 'code', 'status', 'validated_at']) !== []) {
+            || array_diff(array_keys($discount), ['enabled', 'reference', 'title', 'summary', 'code', 'status', 'percentage', 'validated_at']) !== []) {
             throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '优惠关联配置无效。');
         }
         $enabled = (bool) ($discount['enabled'] ?? false);
@@ -1122,6 +1122,10 @@ class PersonalizationStrategyWorkflowService
         } catch (\Throwable) {
             throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '折扣校验时间格式无效。');
         }
+        $percentage = $discount['percentage'] ?? null;
+        if ($percentage !== null && (! is_numeric($percentage) || (float) $percentage <= 0 || (float) $percentage >= 100)) {
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '折扣百分比必须大于 0 且小于 100。');
+        }
 
         return [
             'enabled' => $enabled,
@@ -1130,6 +1134,7 @@ class PersonalizationStrategyWorkflowService
             'summary' => $this->optionalText($discount['summary'] ?? null, 160),
             'code' => $this->optionalText($discount['code'] ?? null, 80),
             'status' => $status,
+            'percentage' => $percentage === null ? null : round((float) $percentage, 4),
             'validated_at' => $validatedAt,
         ];
     }

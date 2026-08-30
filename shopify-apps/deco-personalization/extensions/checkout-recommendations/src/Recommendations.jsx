@@ -35,6 +35,7 @@ function Recommendations() {
   const configurationMetafields = useAppMetafields(CONFIGURATION_METAFIELD_FILTER);
   const lines = shopify.lines.value;
   const canAdd = shopify.instructions.value.lines.canAddCartLine;
+  const canUpdateDiscountCodes = shopify.instructions.value.discounts?.canUpdateDiscountCodes === true;
   const lineSignature = JSON.stringify((Array.isArray(lines) ? lines : []).map((line) => [
     line?.merchandise?.product?.id,
     line?.merchandise?.id,
@@ -103,6 +104,22 @@ function Recommendations() {
         quantity: current.minimum_purchase_quantity,
       });
       if (result?.type === 'error') throw new Error('cart_change_rejected');
+      if (current.discount?.code) {
+        const alreadyApplied = (shopify.discountCodes?.value ?? []).some(
+          (discount) => String(discount?.code ?? '').toLowerCase() === current.discount.code.toLowerCase(),
+        );
+        if (!alreadyApplied && canUpdateDiscountCodes) {
+          const discountResult = await shopify.applyDiscountCodeChange({
+            type: 'addDiscountCode',
+            code: current.discount.code,
+          });
+          if (discountResult?.type === 'error') {
+            setError(`Item added. Apply discount code ${current.discount.code} to receive the offer.`);
+          }
+        } else if (!alreadyApplied && !canUpdateDiscountCodes) {
+          setError(`Item added. Apply discount code ${current.discount.code} to receive the offer.`);
+        }
+      }
       publish(EVENTS.addSuccess, eventPayload(configuration, [current]));
       setDismissed((previous) => new Set([...previous, current.variant_id]));
       const refreshed = await refreshRecommendations(configuration, shopify.lines.value);
@@ -132,10 +149,14 @@ function Recommendations() {
             {current.variant_title && current.variant_title !== 'Default Title'
               ? <s-text type="small">{current.variant_title}</s-text>
               : null}
-            <s-text>{current.currency} {current.amount}</s-text>
-            {current.discount?.summary && current.discount?.code
-              ? <s-text tone="success">{current.discount.summary} · {current.discount.code}</s-text>
-              : null}
+            {current.discount?.percentage && current.discounted_amount
+              ? <s-stack gap="small-100">
+                  <s-text tone="neutral">Original {current.currency} {current.amount}</s-text>
+                  <s-text tone="success">{current.discount.percentage}% off</s-text>
+                  <s-text>Now {current.currency} {current.discounted_amount}</s-text>
+                  {current.discount.code ? <s-text tone="success">Code {current.discount.code}</s-text> : null}
+                </s-stack>
+              : <s-text>{current.currency} {current.amount}</s-text>}
           </s-stack>
           <s-button variant="primary" disabled={busy || !canAdd} loading={busy} onClick={addCurrent}>
             {configuration.component.button_label}

@@ -23,6 +23,11 @@ class PersonalizationDiscountService
                   summary
                   status
                   codes(first: 1) { nodes { code } }
+                  customerGets {
+                    value {
+                      ... on DiscountPercentage { percentage }
+                    }
+                  }
                 }
               }
             }
@@ -73,6 +78,7 @@ class PersonalizationDiscountService
                     'summary' => (string) ($discount['summary'] ?? ''),
                     'status' => strtolower((string) ($discount['status'] ?? 'unknown')),
                     'code' => (string) data_get($discount, 'codes.nodes.0.code', ''),
+                    'percentage' => $this->percentage(data_get($discount, 'customerGets.value.percentage')),
                     'editable' => ($discount['__typename'] ?? '') === 'DiscountCodeBasic',
                 ];
             })
@@ -90,7 +96,7 @@ class PersonalizationDiscountService
         $id = $this->resultId($payload, 'discountCodeBasicCreate');
         $this->audit($store, $actor, 'personalization_discount_created', $id, $input);
 
-        return ['id' => $id, 'title' => $input['title'], 'summary' => $input['percentage'].'% off', 'status' => 'active', 'code' => $input['code'], 'editable' => true];
+        return ['id' => $id, 'title' => $input['title'], 'summary' => $input['percentage'].'% off', 'status' => 'active', 'code' => $input['code'], 'percentage' => $input['percentage'], 'editable' => true];
     }
 
     /** @param array{id: string, title: string, code: string, percentage: int, product_ids: list<string>} $input */
@@ -104,7 +110,7 @@ class PersonalizationDiscountService
         $id = $this->resultId($payload, 'discountCodeBasicUpdate');
         $this->audit($store, $actor, 'personalization_discount_updated', $id, $input);
 
-        return ['id' => $id, 'title' => $input['title'], 'summary' => $input['percentage'].'% off', 'status' => 'active', 'code' => $input['code'], 'editable' => true];
+        return ['id' => $id, 'title' => $input['title'], 'summary' => $input['percentage'].'% off', 'status' => 'active', 'code' => $input['code'], 'percentage' => $input['percentage'], 'editable' => true];
     }
 
     /** @param array{title: string, code: string, percentage: int, product_ids: list<string>} $input */
@@ -137,6 +143,18 @@ class PersonalizationDiscountService
         }
 
         return $id;
+    }
+
+    private function percentage(mixed $value): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+        $percentage = (float) $value;
+
+        return $percentage > 0 && $percentage < 1
+            ? round($percentage * 100, 4)
+            : ($percentage >= 1 && $percentage <= 100 ? round($percentage, 4) : null);
     }
 
     /** @param array<string, mixed> $variables */

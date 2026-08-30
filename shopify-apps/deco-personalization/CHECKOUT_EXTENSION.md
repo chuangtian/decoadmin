@@ -15,7 +15,7 @@ Both blocks use Shopify's movable `purchase.checkout.block.render` target:
 - Trust badges recommend the legal `WALLETS1` placement, immediately above native accelerated checkout buttons. The placement is unavailable when Shopify doesn't render accelerated checkout.
 - Sequential recommendations recommend `ORDER_SUMMARY2`, immediately below checkout line items in the order summary.
 
-The merchant must add and enable both blocks in the Checkout and accounts editor. Backend configuration is off by default and never edits a Checkout profile automatically.
+The merchant must add both blocks in the Checkout and accounts editor. The recommendation block is named **Deco 推荐策略**. DecoAdmin exposes one direct Checkout strategy selector; saving it creates or updates the internal Checkout binding and records the strategy as used by Checkout. There is no merchant-facing Checkout master switch, Collection selector, maximum-count field, or component selector.
 
 Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/targets/checkout/block>
 
@@ -27,11 +27,13 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 - Accelerated checkout or another Shopify instruction can reject cart changes. The extension must hide or disable the offer and must never block checkout.
 - Checkout sends its reactive cart lines, Market, currency, and language to the same backend Recommendation Strategy Service used by other surfaces. The extension does not evaluate strategy rules or choose products from a Collection itself.
 - The recommendation area renders exactly one service-ranked offer at a time. After a successful add it requests a fresh result and renders the next eligible product. A failed add leaves the current offer available for retry.
+- A strategy percentage discount renders the original price, percentage saving, and discounted price. After a successful add, the extension applies the associated code with Shopify's `applyDiscountCodeChange` only when `instructions.discounts.canUpdateDiscountCodes` permits it. If Shopify rejects the code, the product remains added and the buyer receives a non-blocking instruction to enter the code manually.
 - Existing cart products, unavailable variants, excluded products, and duplicates are removed by the service. The area hides when the service returns no candidate. It never loops or renders a broken empty frame.
 
 Official references:
 
 - <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/target-apis/checkout-apis/cart-lines-api>
+- <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/target-apis/checkout-apis/discounts-api>
 - <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/web-components>
 
 ## Backend identity and network access

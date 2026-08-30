@@ -36,13 +36,13 @@ Every surface consumes `PersonalizationRecommendationService`; extensions do not
 
 Final processing order is: rule candidates and de-duplication; hard storefront/variant availability; context and merchant exclusions; then available pinned products at the front. Pinned products can bypass ordinary tag/Collection/vendor filters, but never hard availability, the current product, or cart/order duplicate protection.
 
-Autosave applies the strategy's name, deterministic rules, ordered products, minimum quantities, and discount reference. It does not create a placement or enable a component. Existing components remain the only source of storefront visibility and safely hide when no eligible product remains.
+Autosave applies the strategy's name, deterministic rules, ordered products, minimum quantities, and discount reference. The merchant binds a Checkout placement separately under 概览 by selecting a strategy name and saving. That action creates or updates the internal Checkout component, activates the binding, and makes the strategy list show Checkout under “用于”. Shopify's Checkout Editor block remains the final shopper-visible placement and safely hides when no eligible product remains.
 
 ## Discounts
 
 The editor defaults to disabled. Enabling requires a selected Shopify discount. The discount dialog can list existing basic code discounts and create or edit a percentage discount for the currently selected recommendation products. The provided default is **九折优惠** (`10% off`).
 
-Listing requires `read_discounts`; creation and editing require `write_discounts`. Both scopes belong only to the independent Personalization App and must be granted through the Test installation before discount management is available. A missing, inactive, or failed discount never breaks the underlying recommendation response.
+Listing requires `read_discounts`; creation and editing require `write_discounts`. Both scopes belong only to the independent Personalization App and must be granted through the Test installation before discount management is available. For an active percentage discount, the recommendation response includes the original amount, discount percentage, discounted amount, currency, and code. Checkout attempts to apply the code after adding the product; a missing, inactive, or rejected discount never breaks the underlying recommendation or checkout.
 
 ## Permanent deletion
 
@@ -58,4 +58,4 @@ There is no merchant-visible recycle bin, archive action, restore route, retenti
 
 Every Business Service validates the authenticated user, Organization, Store, RBAC permission, active tenant state, and permanent shop denylist. Tokens, customer PII, and raw authorization data are never stored in strategy configuration or audit metadata.
 
-Code rollback can restore a previous application build, but intentionally cannot restore strategies that merchants permanently deleted. Checkout and Smart Cart retain their independent off switches and Shopify-default-cart recovery path.
+Code rollback can restore a previous application build, but intentionally cannot restore strategies that merchants permanently deleted. Removing the Checkout block from Shopify's editor removes its shopper-visible placement. Smart Cart retains its independent safety switch and Shopify-default-cart recovery path.

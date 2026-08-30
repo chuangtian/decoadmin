@@ -145,6 +145,38 @@ class PersonalizationRecommendationTest extends TestCase
         $this->assertSame([], $this->ids(app(PersonalizationRecommendationService::class)->recommend($store, $strategy->fresh())));
     }
 
+    public function test_active_percentage_discount_returns_original_rate_and_discounted_price(): void
+    {
+        [$actor, $organization, $store] = $this->context();
+        $product = $this->product($organization, $store, 250, 'Discounted Mirror', 'Accessory', 'Deco', ['Mirror'], 99, now());
+        $config = app(PersonalizationConfigurationService::class);
+        $strategy = $config->createStrategy($store, $actor, ['name' => 'Discounted', 'algorithm' => 'manual']);
+        $config->replaceProductOverrides($store, $strategy, $actor, [[
+            'shopify_product_id' => 'gid://shopify/Product/'.$product->shopify_product_id,
+            'type' => 'manual',
+        ]]);
+        $strategy->forceFill(['settings' => [
+            'discount' => [
+                'enabled' => true,
+                'reference' => 'gid://shopify/DiscountCodeNode/123',
+                'title' => 'Ten off',
+                'summary' => '10% off',
+                'code' => 'DECO10',
+                'status' => 'active',
+                'percentage' => 10,
+                'validated_at' => now()->toIso8601String(),
+            ],
+        ]])->save();
+
+        $result = app(PersonalizationRecommendationService::class)->recommend($store, $strategy->fresh());
+
+        $this->assertSame(10.0, $result['discount']['percentage']);
+        $this->assertSame('99.00', data_get($result, 'items.0.pricing.original_amount'));
+        $this->assertSame(10.0, data_get($result, 'items.0.pricing.discount_percentage'));
+        $this->assertSame('89.10', data_get($result, 'items.0.pricing.discounted_amount'));
+        $this->assertSame('USD', data_get($result, 'items.0.pricing.currency'));
+    }
+
     public function test_component_requires_activation_but_preview_uses_the_same_result_contract(): void
     {
         [$actor, $organization, $store] = $this->context();

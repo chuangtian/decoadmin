@@ -64,19 +64,9 @@ export async function fetchRecommendations(api, configuration, lines, context = 
 
 export function normalizeConfiguration(value) {
   const component = value?.component;
-  const pageSize = Number(value?.sequence?.page_size);
-  const rawMaximum = value?.sequence?.maximum_recommendations;
-  const maximum = rawMaximum === null || rawMaximum === undefined || rawMaximum === '' ? null : Number(rawMaximum);
   if (!value || value.enabled !== true
     || !component || !uuid(component.uuid) || !uuid(component.strategy_uuid)
     || component.placement !== 'checkout'
-    || !gid(value?.collection?.id, 'Collection')
-    || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 250
-    || (maximum !== null && (!Number.isInteger(maximum) || maximum < 1 || maximum > 1000))
-    || value?.sequence?.order !== 'collection_default'
-    || value?.sequence?.variant_fallback !== 'first_available'
-    || value?.sequence?.mode !== 'sequential'
-    || value?.sequence?.exhaustion !== 'collection'
     || !safeEndpoint(value?.recommendations_url, RECOMMENDATIONS_PATH)) return null;
   return {
     component: {
@@ -88,9 +78,6 @@ export function normalizeConfiguration(value) {
     },
     strategy_version_uuid: uuid(value?.strategy?.version_uuid) ? value.strategy.version_uuid : '',
     recommendations_url: safeEndpoint(value.recommendations_url, RECOMMENDATIONS_PATH),
-    collection_id: value.collection.id,
-    page_size: pageSize,
-    maximum_recommendations: maximum,
   };
 }
 
@@ -116,8 +103,11 @@ export function normalizeServiceRecommendations(value) {
       available: true,
       image_url: safeImage(variant?.image?.url || product?.storefront?.image?.url),
       image_alt: string(variant?.image?.alt || product?.storefront?.image?.alt, 200) || string(product?.title, 200),
-      amount: money(variant?.price),
-      currency: /^[A-Z]{3}$/.test(String(product?.price?.currency ?? '')) ? product.price.currency : '',
+      amount: money(product?.pricing?.original_amount ?? variant?.price),
+      discounted_amount: money(product?.pricing?.discounted_amount),
+      currency: /^[A-Z]{3}$/.test(String(product?.pricing?.currency ?? product?.price?.currency ?? ''))
+        ? String(product?.pricing?.currency ?? product?.price?.currency)
+        : '',
       minimum_purchase_quantity: boundedInteger(product?.minimum_purchase_quantity, 1, 999, 1),
       rule_id: uuid(product?.rule_id) ? product.rule_id : '',
       strategy_version_uuid: strategyVersionUuid,
@@ -125,28 +115,8 @@ export function normalizeServiceRecommendations(value) {
         title: string(value.discount.title, 80),
         summary: string(value.discount.summary, 160),
         code: string(value.discount.code, 80),
+        percentage: boundedNumber(value.discount.percentage, 0.0001, 99.9999, null),
       } : null,
-    };
-  }).filter(Boolean);
-}
-
-export function normalizeCollectionProducts(collection, rankOffset = 0) {
-  if (!collection || collection.__typename !== 'Collection' || !Array.isArray(collection.products?.nodes)) return [];
-  return collection.products.nodes.map((product, index) => {
-    const variants = Array.isArray(product?.variants?.nodes) ? product.variants.nodes : [];
-    const variant = variants.find((candidate) => candidate?.availableForSale === true);
-    if (!gid(product?.id, 'Product') || !variant || !gid(variant.id, 'ProductVariant')) return null;
-    return {
-      product_id: product.id,
-      variant_id: variant.id,
-      rank: rankOffset + index + 1,
-      title: string(product.title, 200),
-      variant_title: string(variant.title, 200),
-      available: true,
-      image_url: safeImage(variant.image?.url || product.featuredImage?.url),
-      image_alt: string(variant.image?.altText || product.featuredImage?.altText, 200) || string(product.title, 200),
-      amount: money(variant.price?.amount),
-      currency: /^[A-Z]{3}$/.test(String(variant.price?.currencyCode ?? '')) ? variant.price.currencyCode : '',
     };
   }).filter(Boolean);
 }
@@ -201,6 +171,11 @@ function string(value, maximum) {
 function money(value) {
   const normalized = Number(value);
   return Number.isFinite(normalized) && normalized >= 0 ? normalized.toFixed(2) : '';
+}
+
+function boundedNumber(value, minimum, maximum, fallback) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) && normalized >= minimum && normalized <= maximum ? normalized : fallback;
 }
 
 function safeImage(value) {
