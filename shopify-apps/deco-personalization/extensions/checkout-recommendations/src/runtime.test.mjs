@@ -52,14 +52,17 @@ test('sequential selection continues beyond three products until every eligible 
   assert.equal(selectNextCandidate(candidates, [], dismissed), null);
 });
 
-test('candidate row remounts and refreshes the shared strategy service after cart changes', async () => {
+test('candidate row remounts and reacts to Shopify cart and instruction changes', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /<s-grid key=\{current\.variant_id\}/);
   assert.match(source, /fetchRecommendations\(shopify/);
   assert.match(source, /quantity: current\.minimum_purchase_quantity/);
-  assert.match(source, /shopify\.lines\.value/);
-  assert.match(source, /applyDiscountCodeChange/);
-  assert.match(source, /canUpdateDiscountCodes/);
+  assert.match(source, /useCartLines\(\)/);
+  assert.match(source, /useInstructions\(\)/);
+  assert.match(source, /useDiscountCodes\(\)/);
+  assert.match(source, /useApplyCartLinesChange\(\)/);
+  assert.match(source, /useApplyDiscountCodeChange\(\)/);
+  assert.doesNotMatch(source, /shopify\.lines\.value/);
 });
 
 test('shared strategy results preserve order, minimum quantity, rule and version traceability', () => {

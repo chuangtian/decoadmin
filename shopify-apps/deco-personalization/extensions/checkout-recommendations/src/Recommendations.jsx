@@ -1,5 +1,12 @@
 import '@shopify/ui-extensions/preact';
-import {useAppMetafields} from '@shopify/ui-extensions/checkout/preact';
+import {
+  useAppMetafields,
+  useApplyCartLinesChange,
+  useApplyDiscountCodeChange,
+  useCartLines,
+  useDiscountCodes,
+  useInstructions,
+} from '@shopify/ui-extensions/checkout/preact';
 import {render} from 'preact';
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks';
 import {
@@ -33,9 +40,13 @@ function Recommendations() {
   const impressionRef = useRef('');
   const completionRef = useRef(false);
   const configurationMetafields = useAppMetafields(CONFIGURATION_METAFIELD_FILTER);
-  const lines = shopify.lines.value;
-  const canAdd = shopify.instructions.value.lines.canAddCartLine;
-  const canUpdateDiscountCodes = shopify.instructions.value.discounts?.canUpdateDiscountCodes === true;
+  const lines = useCartLines();
+  const instructions = useInstructions();
+  const discountCodes = useDiscountCodes();
+  const applyCartLinesChange = useApplyCartLinesChange();
+  const applyDiscountCodeChange = useApplyDiscountCodeChange();
+  const canAdd = instructions.lines.canAddCartLine;
+  const canUpdateDiscountCodes = instructions.discounts?.canUpdateDiscountCodes === true;
   const lineSignature = JSON.stringify((Array.isArray(lines) ? lines : []).map((line) => [
     line?.merchandise?.product?.id,
     line?.merchandise?.id,
@@ -66,9 +77,9 @@ function Recommendations() {
       .finally(() => { if (generation === requestGeneration.current) setLoaded(true); });
   }, [configuration, lineSignature]);
 
-  const current = useMemo(() => canAdd && configuration
+  const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
-    : null, [canAdd, candidates, configuration, dismissed, lineSignature]);
+    : null, [candidates, configuration, dismissed, lineSignature]);
 
   useEffect(() => {
     if (!configuration || !current || impressionRef.current === current.variant_id) return;
@@ -98,18 +109,18 @@ function Recommendations() {
     setError('');
     publish(EVENTS.click, eventPayload(configuration, [current]));
     try {
-      const result = await shopify.applyCartLinesChange({
+      const result = await applyCartLinesChange({
         type: 'addCartLine',
         merchandiseId: current.variant_id,
         quantity: current.minimum_purchase_quantity,
       });
       if (result?.type === 'error') throw new Error('cart_change_rejected');
       if (current.discount?.code) {
-        const alreadyApplied = (shopify.discountCodes?.value ?? []).some(
+        const alreadyApplied = discountCodes.some(
           (discount) => String(discount?.code ?? '').toLowerCase() === current.discount.code.toLowerCase(),
         );
         if (!alreadyApplied && canUpdateDiscountCodes) {
-          const discountResult = await shopify.applyDiscountCodeChange({
+          const discountResult = await applyDiscountCodeChange({
             type: 'addDiscountCode',
             code: current.discount.code,
           });
@@ -122,8 +133,6 @@ function Recommendations() {
       }
       publish(EVENTS.addSuccess, eventPayload(configuration, [current]));
       setDismissed((previous) => new Set([...previous, current.variant_id]));
-      const refreshed = await refreshRecommendations(configuration, shopify.lines.value);
-      setCandidates(refreshed);
     } catch {
       setError('This item could not be added. Please try again.');
       publish(EVENTS.addFailed, eventPayload(configuration, [current]));
