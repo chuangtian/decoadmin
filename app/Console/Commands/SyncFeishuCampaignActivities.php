@@ -3,16 +3,19 @@
 namespace App\Console\Commands;
 
 use App\Services\Feishu\CampaignActivitySyncService;
+use App\Services\Feishu\CampaignPlanningDocumentSyncService;
 use Illuminate\Console\Command;
 
 class SyncFeishuCampaignActivities extends Command
 {
     protected $signature = 'feishu:sync-campaign-activities {--store= : 仅同步指定店铺 ID}';
 
-    protected $description = '同步每个店铺 App Token 下的全部飞书数据表及活动主题数据';
+    protected $description = '同步每个店铺 App Token 下的全部飞书数据表、活动主题及策划书快照';
 
-    public function handle(CampaignActivitySyncService $sync): int
-    {
+    public function handle(
+        CampaignActivitySyncService $sync,
+        CampaignPlanningDocumentSyncService $planningDocuments,
+    ): int {
         $storeOption = $this->option('store');
         $storeId = filled($storeOption) ? filter_var($storeOption, FILTER_VALIDATE_INT) : null;
 
@@ -44,6 +47,29 @@ class SyncFeishuCampaignActivities extends Command
             ));
         }
 
-        return $result['failed'] === 0 ? self::SUCCESS : self::FAILURE;
+        $planningResult = $planningDocuments->syncConfiguredStores($storeId ?: null);
+        $this->components->info(sprintf(
+            '飞书策划书自动同步完成：店铺 %d，文档 %d，新增 %d，更新 %d，无变化 %d，失败 %d。',
+            $planningResult['stores'],
+            $planningResult['documents'],
+            $planningResult['inserted'],
+            $planningResult['updated'],
+            $planningResult['unchanged'],
+            $planningResult['failed'],
+        ));
+
+        foreach ($planningResult['failures'] as $failure) {
+            $this->components->warn(sprintf(
+                '组织 %d / 店铺 %d / 活动 %d：%s',
+                $failure['organization_id'],
+                $failure['store_id'],
+                $failure['campaign_activity_id'],
+                $failure['error'],
+            ));
+        }
+
+        return $result['failed'] === 0 && $planningResult['failed'] === 0
+            ? self::SUCCESS
+            : self::FAILURE;
     }
 }
