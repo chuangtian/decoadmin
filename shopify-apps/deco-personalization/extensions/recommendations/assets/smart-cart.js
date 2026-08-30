@@ -2,454 +2,256 @@
   const root = document.querySelector('[data-deco-smart-cart-root]');
   const PROXY_PATTERN = /^\/(?:a|apps|community|tools)\/[A-Za-z0-9_-]{1,30}$/;
   const RECENT_KEY = 'deco_personalization_recent_products_v1';
-  let enabled = false;
-  let drawer = null;
-  let lastFocus = null;
+  const HOST_SELECTOR = '[data-deco-native-cart-recommendation]';
+  const DRAWER_SELECTORS = '#t4s-mini_cart, #CartDrawer, cart-drawer, [data-cart-drawer], .cart-drawer, .mini-cart';
+  let proxyPath = '';
+  let timer = 0;
+  let syncing = false;
+  let rerun = false;
   let impressionKey = '';
-
-  const compatibility = () => ({
-    themeUrl: window.location.pathname,
-    checks: [
-      {key: 'browser_dialog', label: 'Browser dialog support', passed: typeof HTMLDialogElement !== 'undefined'},
-      {key: 'cart_link', label: 'Theme cart link detected', passed: [...document.querySelectorAll('a[href]')].some(isCartLink)},
-      {key: 'cart_routes', label: 'Shopify cart routes available', passed: typeof window.fetch === 'function'},
-      {key: 'app_embed', label: 'Smart Cart App Embed loaded', passed: root instanceof HTMLElement},
-    ],
-  });
 
   Object.defineProperty(window, 'DecoPersonalizationSmartCart', {
     configurable: true,
-    value: Object.freeze({compatibility}),
+    value: Object.freeze({
+      compatibility: () => ({
+        mode: 'native_cart_embed',
+        nativeCartFound: Boolean(document.querySelector(DRAWER_SELECTORS)),
+        placementFound: Boolean(nativePlacement()),
+      }),
+    }),
   });
 
   if (!(root instanceof HTMLElement)) return;
-  const proxyPath = normalizeProxyPath(root.dataset.proxyPath);
+  proxyPath = normalizeProxyPath(root.dataset.proxyPath);
   if (!proxyPath) return;
 
-  void initialize(proxyPath);
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.every(isOwnMutation)) return;
+    queueSync(120);
+  });
+  observer.observe(document.documentElement, {childList: true, subtree: true});
+  document.addEventListener('click', handleNativeCartChange, true);
+  document.addEventListener('change', handleNativeCartChange, true);
+  document.addEventListener('deco-personalization:cart-updated', () => queueSync(80));
+  queueSync(0);
 
-  async function initialize(path) {
+  function handleNativeCartChange(event) {
+    if (!(event.target instanceof Element)) return;
+    const drawer = event.target.closest(DRAWER_SELECTORS);
+    if (!drawer || event.target.closest(HOST_SELECTOR)) return;
+    if (event.type === 'change' || event.target.closest('[data-cart-remove], [data-quantity-selector], [data-action-change]')) queueSync(650);
+  }
+
+  function queueSync(delay = 100) {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => void sync(), delay);
+  }
+
+  async function sync() {
+    if (syncing) { rerun = true; return; }
+    const host = ensureHost();
+    if (!(host instanceof HTMLElement)) return;
+    syncing = true;
     try {
       const cart = await requestShopifyJson(cartRoute('cart.js'));
-      const configUrl = new URL(`${path}/smart-cart`, window.location.origin);
-      setIdQuery(configUrl, 'cart_product_ids', productIds(cart.items));
-      setIdQuery(configUrl, 'recently_viewed_product_ids', recentProducts());
-      const config = await requestProxyJson(configUrl.toString());
-      if (config.enabled !== true || config.fallback_mode !== 'shopify_default') return;
-
-      enabled = true;
-      drawer = buildDrawer();
-      document.body.append(drawer);
-      bindThemeEvents();
-      await render(cart, config, false);
+      const config = await fetchConfig(cart);
+      render(host, cart, config, true);
     } catch {
-      restoreThemeCart();
+      host.replaceChildren();
+      host.hidden = true;
+    } finally {
+      syncing = false;
+      if (rerun) { rerun = false; queueSync(80); }
     }
   }
 
-  function buildDrawer() {
-    const dialog = document.createElement('dialog');
-    dialog.className = 'deco-smart-cart';
-    dialog.setAttribute('aria-label', 'Shopping cart');
-
-    const panel = document.createElement('div');
-    panel.className = 'deco-smart-cart__panel';
-    const header = document.createElement('header');
-    header.className = 'deco-smart-cart__header';
-    const heading = document.createElement('h2');
-    heading.textContent = 'Your cart';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'deco-smart-cart__close';
-    close.setAttribute('aria-label', 'Close cart');
-    close.textContent = '×';
-    close.addEventListener('click', closeDrawer);
-    header.append(heading, close);
-
-    const status = document.createElement('div');
-    status.className = 'deco-smart-cart__status';
-    status.dataset.decoCartStatus = '';
-    status.setAttribute('aria-live', 'polite');
-    const lines = document.createElement('div');
-    lines.dataset.decoCartLines = '';
-    const recommendations = document.createElement('div');
-    recommendations.dataset.decoCartRecommendations = '';
-    const footer = document.createElement('footer');
-    footer.className = 'deco-smart-cart__footer';
-    footer.dataset.decoCartFooter = '';
-    panel.append(header, status, lines, recommendations, footer);
-    dialog.append(panel);
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) closeDrawer();
-    });
-    dialog.addEventListener('cancel', (event) => {
-      event.preventDefault();
-      closeDrawer();
-    });
-    return dialog;
+  function nativePlacement() {
+    const drawer = document.querySelector(DRAWER_SELECTORS);
+    if (!(drawer instanceof HTMLElement)) return null;
+    const exact = drawer.querySelector('[data-personalization-id="00007"]');
+    if (exact instanceof HTMLElement) return {drawer, anchor: exact, mode: 'after'};
+    const items = drawer.querySelector('[data-cart-items], .cart-drawer__items, [data-mini-cart-items], .mini-cart__items');
+    if (items instanceof HTMLElement) return {drawer, anchor: items, mode: 'append'};
+    const footer = drawer.querySelector('.t4s-drawer__bottom, .drawer__footer, [data-cart-footer]');
+    if (footer instanceof HTMLElement && footer.parentElement) return {drawer, anchor: footer, mode: 'before'};
+    return null;
   }
 
-  function bindThemeEvents() {
-    document.addEventListener('click', handleCartLink, true);
-    document.addEventListener('submit', handleAddForm, true);
-    document.addEventListener('deco-personalization:cart-updated', handleExternalCartUpdate);
+  function ensureHost() {
+    const placement = nativePlacement();
+    if (!placement) return null;
+    const existing = placement.drawer.querySelector(HOST_SELECTOR);
+    if (existing instanceof HTMLElement) return existing;
+    const host = document.createElement('section');
+    host.dataset.decoNativeCartRecommendation = '';
+    host.className = 'deco-native-cart-recommendation';
+    host.hidden = true;
+    host.setAttribute('aria-live', 'polite');
+    if (placement.mode === 'after') placement.anchor.after(host);
+    else if (placement.mode === 'before') placement.anchor.before(host);
+    else placement.anchor.append(host);
+    return host;
   }
 
-  function handleCartLink(event) {
-    if (!enabled || !(event.target instanceof Element)) return;
-    const link = event.target.closest('a[href]');
-    if (!link || !isCartLink(link) || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    void refreshAndOpen(link);
-  }
-
-  function handleAddForm(event) {
-    if (!enabled || !(event.target instanceof HTMLFormElement)) return;
-    const action = String(event.target.getAttribute('action') || '');
-    if (!/\/cart\/add(?:\.js)?(?:\?|$)/.test(action)) return;
-    window.setTimeout(() => void refreshAndOpen(event.target), 500);
-  }
-
-  function handleExternalCartUpdate() {
-    if (enabled) window.setTimeout(() => void refreshAndOpen(document.activeElement), 150);
-  }
-
-  async function refreshAndOpen(source) {
-    if (!enabled || !(drawer instanceof HTMLDialogElement)) return;
-    lastFocus = source instanceof HTMLElement ? source : document.activeElement;
-    try {
-      const cart = await requestShopifyJson(cartRoute('cart.js'));
-      const url = new URL(`${proxyPath}/smart-cart`, window.location.origin);
-      setIdQuery(url, 'cart_product_ids', productIds(cart.items));
-      setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
-      const config = await requestProxyJson(url.toString());
-      if (config.enabled !== true) {
-        restoreThemeCart();
-        return;
-      }
-      if (!drawer.open) drawer.showModal();
-      document.documentElement.classList.add('deco-smart-cart-open');
-      await render(cart, config, true);
-      drawer.querySelector('.deco-smart-cart__close')?.focus();
-    } catch {
-      restoreThemeCart();
-      window.location.assign(cartRoute('cart'));
-    }
-  }
-
-  function closeDrawer() {
-    if (!(drawer instanceof HTMLDialogElement)) return;
-    drawer.close();
-    document.documentElement.classList.remove('deco-smart-cart-open');
-    impressionKey = '';
-    if (lastFocus instanceof HTMLElement) lastFocus.focus();
-  }
-
-  async function render(cart, config, publishImpression = false) {
-    if (!(drawer instanceof HTMLDialogElement)) return;
-    const lines = drawer.querySelector('[data-deco-cart-lines]');
-    const recommendations = drawer.querySelector('[data-deco-cart-recommendations]');
-    const footer = drawer.querySelector('[data-deco-cart-footer]');
-    if (!(lines instanceof HTMLElement) || !(recommendations instanceof HTMLElement) || !(footer instanceof HTMLElement)) return;
-
-    lines.replaceChildren();
-    if (!Array.isArray(cart.items) || cart.items.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'deco-smart-cart__empty';
-      empty.textContent = 'Your cart is empty.';
-      lines.append(empty);
-    } else {
-      cart.items.slice(0, 100).forEach((item) => lines.append(createCartLine(item, cart.currency)));
-    }
-
-    recommendations.replaceChildren();
-    const recommendation = nextRecommendation(config?.recommendations?.items, cart);
-    if (recommendation) {
-      const heading = document.createElement('h3');
-      heading.className = 'deco-smart-cart__recommendation-heading';
-      heading.textContent = String(config.heading || 'You may also like');
-      const list = document.createElement('div');
-      list.className = 'deco-smart-cart__recommendations';
-      list.append(createRecommendation(recommendation.product, recommendation.variant, config));
-      recommendations.append(heading, list);
-      const trackedProduct = eventProduct(recommendation.product, recommendation.variant);
-      const nextImpressionKey = `${config?.recommendations?.strategy?.uuid || ''}:${trackedProduct.selected_variant_id}`;
-      if (publishImpression && nextImpressionKey !== impressionKey) {
-        impressionKey = nextImpressionKey;
-        publishRecommendationEvent('impression', config, [trackedProduct]);
-      }
-    } else {
+  function render(host, cart, config, publishImpression) {
+    host.replaceChildren();
+    const recommendation = config?.enabled === true ? nextRecommendation(config?.recommendations?.items, cart) : null;
+    if (!recommendation) {
+      host.hidden = true;
       impressionKey = '';
+      return;
     }
-
-    footer.replaceChildren();
-    const total = document.createElement('div');
-    total.className = 'deco-smart-cart__total';
-    total.append(document.createTextNode('Subtotal'), document.createTextNode(money(cart.total_price, cart.currency)));
-    const checkout = document.createElement('a');
-    checkout.className = 'deco-smart-cart__checkout';
-    checkout.href = '/checkout';
-    checkout.textContent = 'Checkout';
-    footer.append(total, checkout);
+    host.hidden = false;
+    const heading = document.createElement('h3');
+    heading.className = 'deco-native-cart-recommendation__heading';
+    heading.textContent = String(config.heading || 'You may also like');
+    const status = document.createElement('p');
+    status.className = 'deco-native-cart-recommendation__status';
+    status.hidden = true;
+    const card = createRecommendation(recommendation.product, recommendation.variant, config, status);
+    host.append(heading, status, card);
+    const tracked = eventProduct(recommendation.product, recommendation.variant);
+    const nextImpressionKey = `${config?.recommendations?.strategy?.uuid || ''}:${tracked.selected_variant_id}`;
+    if (publishImpression && nextImpressionKey !== impressionKey) {
+      impressionKey = nextImpressionKey;
+      publishRecommendationEvent('impression', config, [tracked]);
+    }
   }
 
-  function createCartLine(item, currency) {
-    const line = document.createElement('article');
-    line.className = 'deco-smart-cart__line';
-    const image = document.createElement('img');
-    image.className = 'deco-smart-cart__line-image';
-    image.src = safeImageUrl(item?.image);
-    image.alt = String(item?.product_title || '');
-    image.loading = 'lazy';
-    image.width = 96;
-    image.height = 96;
-
-    const details = document.createElement('div');
-    details.className = 'deco-smart-cart__line-details';
-    const title = document.createElement('a');
-    title.href = safeProductPath(item?.url);
-    title.textContent = String(item?.product_title || item?.title || 'Product');
-    title.className = 'deco-smart-cart__line-title';
-    const variant = document.createElement('p');
-    variant.className = 'deco-smart-cart__line-variant';
-    variant.textContent = String(item?.variant_title && item.variant_title !== 'Default Title' ? item.variant_title : '');
-    const controls = document.createElement('div');
-    controls.className = 'deco-smart-cart__line-controls';
-    const decrease = quantityButton('−', 'Decrease quantity', () => changeLine(item.key, Math.max(0, Number(item.quantity) - 1)));
-    const quantity = document.createElement('span');
-    quantity.textContent = String(Math.max(0, Number(item.quantity) || 0));
-    const increase = quantityButton('+', 'Increase quantity', () => changeLine(item.key, Number(item.quantity) + 1));
-    const remove = quantityButton('Remove', 'Remove item', () => changeLine(item.key, 0));
-    remove.classList.add('deco-smart-cart__remove');
-    controls.append(decrease, quantity, increase, remove);
-    details.append(title, variant, controls);
-
-    const price = document.createElement('p');
-    price.className = 'deco-smart-cart__line-price';
-    price.textContent = money(item?.final_line_price, currency);
-    line.append(image, details, price);
-    return line;
-  }
-
-  function createRecommendation(product, variant, config) {
+  function createRecommendation(product, variant, config, status) {
     const card = document.createElement('article');
-    card.className = 'deco-smart-cart__recommendation';
+    card.className = 'deco-native-cart-recommendation__card';
     const imageUrl = safeImageUrl(variant?.image?.url || product?.storefront?.image?.url);
     const image = imageUrl ? document.createElement('img') : document.createElement('div');
-    image.className = 'deco-smart-cart__recommendation-image';
+    image.className = 'deco-native-cart-recommendation__image';
     if (image instanceof HTMLImageElement) {
       image.src = imageUrl;
       image.alt = String(variant?.image?.alt || product?.storefront?.image?.alt || product?.title || '');
-      image.loading = 'lazy';
-      image.width = 88;
-      image.height = 88;
-    } else {
-      image.setAttribute('aria-hidden', 'true');
-    }
+      image.loading = 'lazy'; image.width = 88; image.height = 88;
+    } else image.setAttribute('aria-hidden', 'true');
 
     const details = document.createElement('div');
-    details.className = 'deco-smart-cart__recommendation-details';
+    details.className = 'deco-native-cart-recommendation__details';
     const title = document.createElement('a');
+    title.className = 'deco-native-cart-recommendation__title';
     title.href = safeProductPath(product?.storefront?.path);
     title.textContent = String(product?.title || 'Product');
     title.addEventListener('click', () => publishRecommendationEvent('click', config, [eventProduct(product, variant)]));
     details.append(title);
-
     if (variant?.title && variant.title !== 'Default Title') {
       const variantTitle = document.createElement('p');
-      variantTitle.className = 'deco-smart-cart__recommendation-variant';
+      variantTitle.className = 'deco-native-cart-recommendation__variant';
       variantTitle.textContent = String(variant.title);
       details.append(variantTitle);
     }
     const pricing = recommendationPricing(product, config);
     if (pricing.discounted) {
       const offer = document.createElement('p');
-      offer.className = 'deco-smart-cart__recommendation-offer';
+      offer.className = 'deco-native-cart-recommendation__offer';
       offer.textContent = `${pricing.percentage}% off`;
       const prices = document.createElement('div');
-      prices.className = 'deco-smart-cart__recommendation-prices';
-      const original = document.createElement('s');
-      original.textContent = pricing.original;
-      const discounted = document.createElement('strong');
-      discounted.textContent = pricing.discounted;
-      prices.append(original, discounted);
-      details.append(offer, prices);
+      prices.className = 'deco-native-cart-recommendation__prices';
+      const original = document.createElement('s'); original.textContent = pricing.original;
+      const discounted = document.createElement('strong'); discounted.textContent = pricing.discounted;
+      prices.append(original, discounted); details.append(offer, prices);
     } else if (pricing.original) {
       const price = document.createElement('p');
-      price.className = 'deco-smart-cart__recommendation-price';
-      price.textContent = pricing.original;
-      details.append(price);
+      price.className = 'deco-native-cart-recommendation__price';
+      price.textContent = pricing.original; details.append(price);
     }
-
+    const minimum = boundedQuantity(product?.minimum_purchase_quantity);
+    if (minimum > 1) {
+      const quantity = document.createElement('p');
+      quantity.className = 'deco-native-cart-recommendation__minimum';
+      quantity.textContent = `Minimum quantity: ${minimum}`;
+      details.append(quantity);
+    }
     const add = document.createElement('button');
-    add.type = 'button';
-    add.textContent = 'Add';
-    add.addEventListener('click', () => void addRecommendation(add, variant.shopify_variant_id, product, variant, config));
+    add.type = 'button'; add.textContent = 'Add';
+    add.addEventListener('click', () => void addRecommendation(add, variant.shopify_variant_id, product, variant, config, status));
     card.append(image, details, add);
     return card;
   }
 
-  function quantityButton(text, label, action) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = text;
-    button.setAttribute('aria-label', label);
-    button.addEventListener('click', () => void action());
-    return button;
-  }
-
-  async function changeLine(key, quantity) {
-    try {
-      const cart = await requestShopifyJson(cartRoute('cart/change.js'), {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: String(key || ''), quantity: Math.max(0, Number(quantity) || 0)}),
-      });
-      const config = await fetchConfig(cart);
-      await render(cart, config, true);
-    } catch {
-      restoreThemeCart();
-      window.location.assign(cartRoute('cart'));
-    }
-  }
-
-  async function addRecommendation(button, variantId, product, variant, config) {
+  async function addRecommendation(button, variantId, product, variant, config, status) {
     if (!(button instanceof HTMLButtonElement) || button.disabled) return;
     const id = numericId(variantId);
     if (!id) return;
-    button.disabled = true;
-    button.textContent = 'Adding…';
-    showStatus('');
-    const trackedProduct = eventProduct(product, variant);
-    publishRecommendationEvent('click', config, [trackedProduct]);
+    button.disabled = true; button.textContent = 'Adding…';
+    status.hidden = true; status.textContent = '';
+    const tracked = eventProduct(product, variant);
+    publishRecommendationEvent('click', config, [tracked]);
     try {
       await requestShopifyJson(cartRoute('cart/add.js'), {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({items: [{id: Number(id), quantity: boundedQuantity(product?.minimum_purchase_quantity)}]}),
       });
-      publishRecommendationEvent('add_to_cart', config, [trackedProduct]);
+      publishRecommendationEvent('add_to_cart', config, [tracked]);
       let cart = await requestShopifyJson(cartRoute('cart.js'));
       const discountCode = activeDiscountCode(config);
+      let discountWarning = '';
       if (discountCode && !cartHasDiscountCode(cart, discountCode)) {
         try {
           cart = await requestShopifyJson(cartRoute('cart/update.js'), {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({discount: [...cartDiscountCodes(cart), discountCode].join(',')}),
           });
-          if (!cartHasDiscountCode(cart, discountCode)) {
-            showStatus(`Item added. Apply discount code ${discountCode} to receive the offer.`);
-          }
+          if (!cartHasDiscountCode(cart, discountCode)) discountWarning = `Item added. Apply discount code ${discountCode} to receive the offer.`;
         } catch {
-          showStatus(`Item added. Apply discount code ${discountCode} to receive the offer.`);
+          discountWarning = `Item added. Apply discount code ${discountCode} to receive the offer.`;
           cart = await requestShopifyJson(cartRoute('cart.js'));
         }
       }
-      await render(cart, await fetchConfig(cart), true);
+      const [nextConfig, nativeSection] = await Promise.all([fetchConfig(cart), fetchNativeCartSection()]);
+      refreshNativeCart(nativeSection, cart);
+      const host = ensureHost();
+      if (host) {
+        render(host, cart, nextConfig, true);
+        const nextStatus = host.querySelector('.deco-native-cart-recommendation__status');
+        if (discountWarning && nextStatus instanceof HTMLElement) {
+          nextStatus.textContent = discountWarning;
+          nextStatus.hidden = false;
+        }
+      }
+      document.dispatchEvent(new CustomEvent('deco-personalization:cart-updated', {detail: {source: 'smart_cart'}}));
     } catch {
-      button.disabled = false;
-      button.textContent = 'Add';
-      showStatus('This item could not be added. Please try again.');
-      publishRecommendationEvent('add_failed', config, [trackedProduct]);
+      button.disabled = false; button.textContent = 'Add';
+      status.textContent = 'This item could not be added. Please try again.';
+      status.hidden = false;
+      publishRecommendationEvent('add_failed', config, [tracked]);
     }
-  }
-
-  function showStatus(message) {
-    const status = drawer?.querySelector('[data-deco-cart-status]');
-    if (!(status instanceof HTMLElement)) return;
-    status.textContent = message;
-    status.hidden = message === '';
   }
 
   async function fetchConfig(cart) {
     const url = new URL(`${proxyPath}/smart-cart`, window.location.origin);
-    setIdQuery(url, 'cart_product_ids', productIds(cart.items));
+    setIdQuery(url, 'cart_product_ids', productIds(cart?.items));
     setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
     return requestProxyJson(url.toString());
   }
 
-  function setIdQuery(url, key, ids) {
-    const values = numericIds(ids, 20);
-    if (values.length > 0) url.searchParams.set(key, values.join(','));
+  async function fetchNativeCartSection() {
+    const url = new URL(cartRoute(''), window.location.origin);
+    url.searchParams.set('section_id', 'mini_cart');
+    const response = await fetch(url.toString(), {credentials: 'same-origin', headers: {Accept: 'text/html'}});
+    if (!response.ok) return null;
+    const documentNode = new DOMParser().parseFromString(await response.text(), 'text/html');
+    return documentNode.querySelector('#t4s-mini_cart');
   }
 
-  function restoreThemeCart() {
-    enabled = false;
-    document.removeEventListener('click', handleCartLink, true);
-    document.removeEventListener('submit', handleAddForm, true);
-    document.removeEventListener('deco-personalization:cart-updated', handleExternalCartUpdate);
-    document.documentElement.classList.remove('deco-smart-cart-open');
-    impressionKey = '';
-    if (drawer instanceof HTMLDialogElement) drawer.remove();
-    drawer = null;
-  }
-
-  function publishRecommendationEvent(action, config, products) {
-    if (root?.dataset?.designMode === 'true') return;
-    const publish = window.Shopify?.analytics?.publish;
-    if (typeof publish !== 'function') return;
-    const payload = {
-      component_uuid: '',
-      strategy_uuid: String(config?.recommendations?.strategy?.uuid || ''),
-      strategy_version_uuid: String(config?.recommendations?.strategy?.version_uuid || ''),
-      placement: 'smart_cart',
-      products: Array.isArray(products) ? products.slice(0, 50).map((product, index) => ({
-        product_id: numericId(product?.shopify_product_id),
-        variant_id: numericId(product?.selected_variant_id),
-        rank: boundedRank(product?.rank, index + 1),
-        rule_id: String(product?.rule_id || ''),
-      })).filter((product) => product.product_id) : [],
-    };
-    try {
-      const result = publish.call(window.Shopify.analytics, `deco_personalization:${action}`, payload);
-      if (result && typeof result.catch === 'function') result.catch(() => {});
-    } catch {
-      // Analytics never blocks Smart Cart behavior or native-cart fallback.
+  function refreshNativeCart(remote, cart) {
+    const current = document.querySelector('#t4s-mini_cart');
+    if (current instanceof HTMLElement && remote instanceof HTMLElement) {
+      for (const selector of ['[data-cart-items]', '.t4s-drawer__bottom']) {
+        const from = remote.querySelector(selector); const to = current.querySelector(selector);
+        if (from instanceof HTMLElement && to instanceof HTMLElement) to.replaceChildren(...[...from.childNodes].map(node => node.cloneNode(true)));
+      }
     }
+    document.querySelectorAll('[data-cart-count], .t4s-pr-count').forEach((node) => { node.textContent = String(cart?.item_count ?? ''); });
   }
 
-  async function requestShopifyJson(url, options = {}) {
-    const response = await fetch(url, {
-      credentials: 'same-origin',
-      ...options,
-      headers: {Accept: 'application/json', ...(options.headers || {})},
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Request failed');
-    return payload;
-  }
-
-  async function requestProxyJson(url, options = {}) {
-    const payload = await requestShopifyJson(url, options);
-    if (!payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) throw new Error('Request failed');
-    return payload.data;
-  }
-
-  function productIds(items) {
-    return Array.isArray(items)
-      ? [...new Set(items.slice(0, 100).map((item) => numericId(item?.product_id)).filter(Boolean))]
-      : [];
-  }
-
-  function recentProducts() {
-    try {
-      const values = JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]');
-      return Array.isArray(values) ? [...new Set(values.slice(0, 20).map(numericId).filter(Boolean))] : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function numericId(value) {
-    const normalized = String(value || '').trim();
-    return /^\d+$/.test(normalized) ? normalized : '';
-  }
-
-  function resourceId(value, resource) {
-    const normalized = String(value || '').trim();
-    const match = normalized.match(new RegExp(`^gid://shopify/${resource}/(\\d+)$`));
-    return match ? match[1] : numericId(normalized);
+  function isOwnMutation(mutation) {
+    const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+    return Boolean(target?.closest(HOST_SELECTOR));
   }
 
   function nextRecommendation(items, cart) {
@@ -459,129 +261,55 @@
       const productId = resourceId(product?.shopify_product_id, 'Product');
       const variants = Array.isArray(product?.variants) ? product.variants : [];
       const selectedId = resourceId(product?.selected_variant_gid, 'ProductVariant');
-      const variant = variants.find((item) => resourceId(item?.shopify_variant_id, 'ProductVariant') === selectedId && item?.available_for_sale === true)
-        || variants.find((item) => resourceId(item?.shopify_variant_id, 'ProductVariant') && item?.available_for_sale === true);
+      const variant = variants.find(item => resourceId(item?.shopify_variant_id, 'ProductVariant') === selectedId && item?.available_for_sale === true)
+        || variants.find(item => resourceId(item?.shopify_variant_id, 'ProductVariant') && item?.available_for_sale === true);
       if (productId && !cartProducts.has(productId) && variant) return {product, variant};
     }
     return null;
   }
 
-  function eventProduct(product, variant) {
-    return {
-      ...product,
-      selected_variant_id: resourceId(variant?.shopify_variant_id, 'ProductVariant'),
-      rule_id: String(product?.rule_id || ''),
-    };
-  }
-
   function recommendationPricing(product, config) {
     const originalAmount = decimalAmount(product?.pricing?.original_amount);
     const discountedAmount = decimalAmount(product?.pricing?.discounted_amount);
-    const currency = /^[A-Z]{3}$/.test(String(product?.pricing?.currency || ''))
-      ? String(product.pricing.currency)
-      : '';
+    const currency = /^[A-Z]{3}$/.test(String(product?.pricing?.currency || '')) ? String(product.pricing.currency) : '';
     const percentage = Number(product?.pricing?.discount_percentage ?? config?.recommendations?.discount?.percentage);
-    const discount = config?.recommendations?.discount;
-    const validDiscount = discount && typeof discount === 'object'
-      && Number.isFinite(percentage) && percentage > 0 && percentage < 100
-      && Number.isFinite(discountedAmount) && discountedAmount >= 0
-      && Number.isFinite(originalAmount) && discountedAmount < originalAmount;
-    return {
-      original: majorMoney(originalAmount, currency),
-      discounted: validDiscount ? majorMoney(discountedAmount, currency) : '',
-      percentage: validDiscount ? percentage : null,
-    };
+    const valid = config?.recommendations?.discount && Number.isFinite(percentage) && percentage > 0 && percentage < 100
+      && Number.isFinite(discountedAmount) && discountedAmount >= 0 && Number.isFinite(originalAmount) && discountedAmount < originalAmount;
+    return {original: majorMoney(originalAmount, currency), discounted: valid ? majorMoney(discountedAmount, currency) : '', percentage: valid ? percentage : null};
   }
 
   function activeDiscountCode(config) {
-    const discount = config?.recommendations?.discount;
-    const code = String(discount?.code || '').trim();
-    return discount && typeof discount === 'object' && /^[A-Za-z0-9_-]{1,80}$/.test(code) ? code : '';
+    const code = String(config?.recommendations?.discount?.code || '').trim();
+    return /^[A-Za-z0-9_-]{1,80}$/.test(code) ? code : '';
   }
-
   function cartDiscountCodes(cart) {
-    return Array.isArray(cart?.cart_level_discount_applications)
-      ? [...new Set(cart.cart_level_discount_applications
-        .filter((discount) => discount?.type === 'discount_code')
-        .map((discount) => String(discount?.title || '').trim())
-        .filter((code) => /^[A-Za-z0-9_-]{1,80}$/.test(code)))]
-      : [];
+    return Array.isArray(cart?.cart_level_discount_applications) ? [...new Set(cart.cart_level_discount_applications
+      .filter(discount => discount?.type === 'discount_code').map(discount => String(discount?.title || '').trim())
+      .filter(code => /^[A-Za-z0-9_-]{1,80}$/.test(code)))] : [];
   }
+  function cartHasDiscountCode(cart, code) { return cartDiscountCodes(cart).some(current => current.toLowerCase() === String(code).toLowerCase()); }
+  function setIdQuery(url, key, ids) { const values = numericIds(ids, 20); if (values.length) url.searchParams.set(key, values.join(',')); }
+  function productIds(items) { return Array.isArray(items) ? [...new Set(items.slice(0, 100).map(item => numericId(item?.product_id)).filter(Boolean))] : []; }
+  function recentProducts() { try { const values = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(values) ? numericIds(values.slice(0, 20), 20) : []; } catch { return []; } }
+  function numericIds(values, limit) { return [...new Set((Array.isArray(values) ? values : []).map(numericId).filter(Boolean))].slice(0, limit); }
+  function numericId(value) { const normalized = String(value || '').trim(); return /^\d+$/.test(normalized) ? normalized : ''; }
+  function resourceId(value, resource) { const normalized = String(value || '').trim(); const match = normalized.match(new RegExp(`^gid://shopify/${resource}/(\\d+)$`)); return match ? match[1] : numericId(normalized); }
+  function boundedQuantity(value) { const quantity = Number(value); return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999 ? quantity : 1; }
+  function cartRoute(path) { const base = String(window.Shopify?.routes?.root || '/'); return `${base.endsWith('/') ? base : `${base}/`}${String(path || '').replace(/^\//, '')}`; }
+  function normalizeProxyPath(value) { const normalized = String(value || '').trim().replace(/\/$/, ''); return PROXY_PATTERN.test(normalized) ? normalized : ''; }
+  function safeProductPath(value) { const path = String(value || '').split('?')[0]; return /^\/products\/[A-Za-z0-9_-]+$/.test(path) ? path : '#'; }
+  function safeImageUrl(value) { try { const url = new URL(String(value || '').trim(), window.location.origin); return url.protocol === 'https:' ? url.toString() : ''; } catch { return ''; } }
+  function decimalAmount(value) { if (value === null || value === undefined || value === '') return Number.NaN; const amount = Number(value); return Number.isFinite(amount) ? amount : Number.NaN; }
+  function majorMoney(value, currency) { const amount = decimalAmount(value); if (!Number.isFinite(amount) || amount < 0 || !/^[A-Z]{3}$/.test(currency)) return ''; try { return new Intl.NumberFormat(document.documentElement.lang || undefined, {style: 'currency', currency, currencyDisplay: 'name', minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount); } catch { return `${currency} ${amount.toFixed(2)}`; } }
 
-  function cartHasDiscountCode(cart, code) {
-    return cartDiscountCodes(cart).some((current) => current.toLowerCase() === String(code).toLowerCase());
+  function eventProduct(product, variant) { return {...product, selected_variant_id: resourceId(variant?.shopify_variant_id, 'ProductVariant'), rule_id: String(product?.rule_id || '')}; }
+  function publishRecommendationEvent(action, config, products) {
+    if (root?.dataset?.designMode === 'true') return;
+    const publish = window.Shopify?.analytics?.publish;
+    if (typeof publish !== 'function') return;
+    const payload = {component_uuid: '', strategy_uuid: String(config?.recommendations?.strategy?.uuid || ''), strategy_version_uuid: String(config?.recommendations?.strategy?.version_uuid || ''), placement: 'smart_cart', products: (Array.isArray(products) ? products : []).slice(0, 50).map((product, index) => ({product_id: numericId(product?.shopify_product_id), variant_id: numericId(product?.selected_variant_id), rank: Number(product?.rank) || index + 1, rule_id: String(product?.rule_id || '')})).filter(product => product.product_id)};
+    try { const result = publish.call(window.Shopify.analytics, `deco_personalization:${action}`, payload); if (result?.catch) result.catch(() => {}); } catch { /* analytics never blocks the native cart */ }
   }
-
-  function boundedQuantity(value) {
-    const quantity = Number(value);
-    return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999 ? quantity : 1;
-  }
-
-  function cartRoute(path) {
-    const root = String(window.Shopify?.routes?.root || '/');
-    return `${root.endsWith('/') ? root : `${root}/`}${String(path || '').replace(/^\//, '')}`;
-  }
-
-  function isCartLink(link) {
-    if (!(link instanceof HTMLAnchorElement)) return false;
-    try {
-      const target = new URL(link.href, window.location.origin);
-      const expected = new URL(cartRoute('cart'), window.location.origin);
-      return target.origin === window.location.origin
-        && target.pathname.replace(/\/$/, '') === expected.pathname.replace(/\/$/, '');
-    } catch {
-      return false;
-    }
-  }
-
-  function boundedRank(value, fallback) {
-    const rank = Number(value);
-    return Number.isInteger(rank) && rank >= 1 && rank <= 100 ? rank : fallback;
-  }
-
-  function normalizeProxyPath(value) {
-    const normalized = String(value || '').trim().replace(/\/$/, '');
-    return PROXY_PATTERN.test(normalized) ? normalized : '';
-  }
-
-  function safeProductPath(value) {
-    const path = String(value || '').split('?')[0];
-    return /^\/products\/[A-Za-z0-9_-]+$/.test(path) ? path : '#';
-  }
-
-  function safeImageUrl(value) {
-    try {
-      const normalized = String(value || '').trim();
-      if (!normalized) return '';
-      const url = new URL(normalized, window.location.origin);
-      return url.protocol === 'https:' ? url.toString() : '';
-    } catch {
-      return '';
-    }
-  }
-
-  function money(cents, currency) {
-    const amount = Number(cents) / 100;
-    const code = /^[A-Z]{3}$/.test(String(currency || '')) ? String(currency) : 'USD';
-    return Number.isFinite(amount) ? new Intl.NumberFormat(undefined, {style: 'currency', currency: code}).format(amount) : '';
-  }
-
-  function majorMoney(value, currency) {
-    const amount = decimalAmount(value);
-    const code = /^[A-Z]{3}$/.test(String(currency || '')) ? String(currency) : '';
-    if (!Number.isFinite(amount) || amount < 0 || !code) return '';
-    try {
-      return new Intl.NumberFormat(document.documentElement.lang || undefined, {
-        style: 'currency', currency: code, currencyDisplay: 'name', minimumFractionDigits: 2, maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${code} ${amount.toFixed(2)}`;
-    }
-  }
-
-  function decimalAmount(value) {
-    if (value === null || value === undefined || value === '') return Number.NaN;
-    const amount = Number(value);
-    return Number.isFinite(amount) ? amount : Number.NaN;
-  }
+  async function requestShopifyJson(url, options = {}) { const response = await fetch(url, {credentials: 'same-origin', ...options, headers: {Accept: 'application/json', ...(options.headers || {})}}); const payload = await response.json().catch(() => ({})); if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Request failed'); return payload; }
+  async function requestProxyJson(url) { const payload = await requestShopifyJson(url); if (!payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) throw new Error('Request failed'); return payload.data; }
 })();

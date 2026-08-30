@@ -79,7 +79,7 @@ class PersonalizationConfigurationTest extends TestCase
         ]);
         $configuration = $service->configuration($store, $actor);
 
-        $this->assertFalse($strategy->enabled);
+        $this->assertTrue($strategy->enabled);
         $this->assertSame(PersonalizationAlgorithm::SimilarProducts, $strategy->algorithm);
         $this->assertSame('50.00', $strategy->rules->firstWhere('type', 'minimum_price')->value['amount']);
         $this->assertSame($productOne->id, $strategy->productOverrides->firstWhere('type', 'pinned')->product_id);
@@ -88,9 +88,9 @@ class PersonalizationConfigurationTest extends TestCase
         $this->assertSame(PersonalizationPlacement::ProductPage, $component->placement);
         $this->assertSame('grid', $style->layout);
         $this->assertTrue($style->show_vendor);
-        $this->assertFalse($smartCart->enabled);
+        $this->assertTrue($smartCart->enabled);
         $this->assertSame(PersonalizationSmartCartCompatibilityStatus::Unchecked, $smartCart->compatibility_status);
-        $this->assertSame('shopify_default', $smartCart->fallback_mode);
+        $this->assertSame('native_cart', $smartCart->fallback_mode);
         $this->assertCount(1, $configuration['strategies']);
         $this->assertCount(1, $configuration['components']);
         $this->assertSame($smartCart->id, $configuration['smart_cart']->id);
@@ -98,7 +98,7 @@ class PersonalizationConfigurationTest extends TestCase
         $this->assertDatabaseCount('personalization_strategy_product_overrides', 2);
         $this->assertDatabaseCount('personalization_component_styles', 1);
         $this->assertDatabaseHas('audit_logs', [
-            'action' => 'personalization_smart_cart_draft_saved',
+            'action' => 'personalization_smart_cart_configuration_saved',
             'store_id' => $store->id,
             'user_id' => $actor->id,
         ]);

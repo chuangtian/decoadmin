@@ -2,8 +2,6 @@
 
 namespace App\Services\Personalization;
 
-use App\Enums\PersonalizationSmartCartCompatibilityStatus;
-use App\Exceptions\PersonalizationException;
 use App\Models\PersonalizationSmartCartSetting;
 use App\Models\Store;
 
@@ -24,22 +22,15 @@ class PersonalizationSmartCartService
             ->with('strategy')
             ->first();
         if (! $setting || ! $setting->enabled) {
-            return ['enabled' => false, 'fallback_mode' => 'shopify_default'];
+            return ['enabled' => false, 'fallback_mode' => 'native_cart'];
         }
-        if ($setting->compatibility_status !== PersonalizationSmartCartCompatibilityStatus::Compatible
-            || ! $setting->preview_confirmed_at
-            || ! $setting->strategy
-            || ! $setting->strategy->enabled) {
-            throw new PersonalizationException(
-                'SMART_CART_SAFETY_GATE_FAILED',
-                'Smart Cart 安全门禁未通过。',
-                409,
-            );
+        if (! $setting->strategy || ! $setting->strategy->enabled) {
+            return ['enabled' => false, 'fallback_mode' => 'native_cart'];
         }
 
         return [
             'enabled' => true,
-            'fallback_mode' => 'shopify_default',
+            'fallback_mode' => 'native_cart',
             'heading' => trim((string) data_get($setting->settings, 'heading', '购物车推荐')),
             'recommendations' => $this->recommendations->recommend($store, $setting->strategy, [
                 ...$context,

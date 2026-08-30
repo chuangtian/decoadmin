@@ -4,7 +4,6 @@ namespace App\Services\Personalization;
 
 use App\Enums\PersonalizationComponentStatus;
 use App\Enums\PersonalizationPlacement;
-use App\Enums\PersonalizationSmartCartCompatibilityStatus;
 use App\Exceptions\PersonalizationException;
 use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventProduct;
@@ -179,7 +178,7 @@ class PersonalizationEventIngestionService
                 ->where('organization_id', $store->organization_id)
                 ->where('store_id', $store->id)
                 ->where('enabled', true)
-                ->where('compatibility_status', PersonalizationSmartCartCompatibilityStatus::Compatible->value)
+                ->where('fallback_mode', 'native_cart')
                 ->whereHas('strategy', fn ($query) => $query->where('uuid', $strategyUuid)->where('enabled', true))
                 ->with('strategy.publishedVersion')
                 ->first();

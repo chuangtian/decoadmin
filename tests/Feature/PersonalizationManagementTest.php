@@ -112,7 +112,7 @@ class PersonalizationManagementTest extends TestCase
 
         $this->actingAs($admin)->post("{$base}/components/{$component->uuid}/activate")
             ->assertRedirect()
-            ->assertSessionHas('error', '手动推荐策略至少需要选择一个手动推荐商品。');
+            ->assertSessionHas('error', '手动推荐策略至少需要一个商品或集合。');
         $this->assertSame(PersonalizationComponentStatus::Draft, $component->fresh()->status);
 
         $this->actingAs($admin)->put("{$base}/strategies/{$strategy->uuid}/products", [
@@ -150,11 +150,11 @@ class PersonalizationManagementTest extends TestCase
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => $strategy->uuid,
             'heading' => 'Cart recommendations',
-        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 草稿已保存，仍保持关闭。');
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已保存，并用于原生购物车抽屉。');
         $smartCart = PersonalizationSmartCartSetting::query()->sole();
-        $this->assertFalse($smartCart->enabled);
+        $this->assertTrue($smartCart->enabled);
         $this->assertSame('unchecked', $smartCart->compatibility_status->value);
-        $this->assertSame('shopify_default', $smartCart->fallback_mode);
+        $this->assertSame('native_cart', $smartCart->fallback_mode);
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'personalization_component_activated',
             'store_id' => $store->id,

@@ -673,21 +673,9 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.checkout.update');
-        Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCartDraft'])
+        Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCart'])
             ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
             ->name('personalization.smart-cart.update');
-        Route::post('/smart-cart/compatibility', [PersonalizationController::class, 'recordSmartCartCompatibility'])
-            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
-            ->name('personalization.smart-cart.compatibility');
-        Route::post('/smart-cart/preview-confirmation', [PersonalizationController::class, 'confirmSmartCartPreview'])
-            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
-            ->name('personalization.smart-cart.preview-confirmation');
-        Route::post('/smart-cart/activate', [PersonalizationController::class, 'activateSmartCart'])
-            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:10,1'])
-            ->name('personalization.smart-cart.activate');
-        Route::post('/smart-cart/restore', [PersonalizationController::class, 'restoreShopifyCart'])
-            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
-            ->name('personalization.smart-cart.restore');
     });
 
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')

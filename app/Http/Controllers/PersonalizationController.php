@@ -352,7 +352,7 @@ class PersonalizationController extends Controller
         }
     }
 
-    public function saveSmartCartDraft(Request $request, Organization $organization, Store $store): RedirectResponse
+    public function saveSmartCart(Request $request, Organization $organization, Store $store): RedirectResponse
     {
         $this->assertUserScope($request, $organization, $store, 'personalization.smart_cart.manage');
         $values = $request->validate([
@@ -365,7 +365,9 @@ class PersonalizationController extends Controller
 
         return $this->run(fn () => $this->configuration->saveSmartCartDraft($store, $request->user(), $strategy, [
             'heading' => trim((string) ($values['heading'] ?? '')),
-        ]), 'Smart Cart 草稿已保存，仍保持关闭。');
+        ]), $strategy
+            ? 'Smart Cart 策略已保存，并用于原生购物车抽屉。'
+            : 'Smart Cart 策略已清除；原生购物车不显示推荐。');
     }
 
     public function saveCheckout(Request $request, Organization $organization, Store $store): RedirectResponse
@@ -385,61 +387,6 @@ class PersonalizationController extends Controller
             fn () => $this->checkout->save($store, $request->user(), $values),
             'Checkout 策略已绑定。Shopify Checkout Editor 中添加区块后会自动使用该策略。',
         );
-    }
-
-    public function recordSmartCartCompatibility(
-        Request $request,
-        Organization $organization,
-        Store $store,
-    ): RedirectResponse {
-        $this->assertUserScope($request, $organization, $store, 'personalization.smart_cart.manage');
-        $values = $request->validate([
-            'theme_id' => ['required', 'string', 'max:64', 'regex:/^\d+$/'],
-            'theme_name' => ['required', 'string', 'max:120', 'regex:/\S/u'],
-            'checks' => ['required', 'array', 'min:1', 'max:20'],
-            'checks.*.key' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
-            'checks.*.label' => ['required', 'string', 'max:120'],
-            'checks.*.passed' => ['required', 'boolean'],
-            'checks.*.details' => ['nullable', 'string', 'max:240'],
-        ]);
-
-        return $this->run(fn () => $this->configuration->recordSmartCartCompatibility(
-            $store,
-            $request->user(),
-            $values['theme_id'],
-            $values['theme_name'],
-            $values['checks'],
-        ), 'Smart Cart 兼容性检查已记录；仍保持关闭。');
-    }
-
-    public function confirmSmartCartPreview(
-        Request $request,
-        Organization $organization,
-        Store $store,
-    ): RedirectResponse {
-        $this->assertUserScope($request, $organization, $store, 'personalization.smart_cart.manage');
-
-        return $this->run(fn () => $this->configuration->confirmSmartCartPreview($store, $request->user()), '桌面和移动端预览已确认；Smart Cart 仍保持关闭。');
-    }
-
-    public function activateSmartCart(
-        Request $request,
-        Organization $organization,
-        Store $store,
-    ): RedirectResponse {
-        $this->assertUserScope($request, $organization, $store, 'personalization.smart_cart.manage');
-
-        return $this->run(fn () => $this->configuration->activateSmartCart($store, $request->user()), 'Smart Cart 已人工启用。');
-    }
-
-    public function restoreShopifyCart(
-        Request $request,
-        Organization $organization,
-        Store $store,
-    ): RedirectResponse {
-        $this->assertUserScope($request, $organization, $store, 'personalization.smart_cart.manage');
-
-        return $this->run(fn () => $this->configuration->restoreShopifyCart($store, $request->user()), '已恢复 Shopify 默认购物车。');
     }
 
     private function assertUserScope(Request $request, Organization $organization, Store $store, string $permission): void

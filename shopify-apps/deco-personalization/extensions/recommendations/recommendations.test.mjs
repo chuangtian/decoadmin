@@ -55,20 +55,24 @@ test('Smart Cart is an App Embed that remains governed by the app-data proxy pat
   assert.match(smartCartLiquid, /data-deco-smart-cart-root/);
 });
 
-test('Smart Cart defaults off, reports compatibility and restores the native cart on failure', () => {
-  assert.match(smartCartJavascript, /config\.enabled !== true/);
+test('Smart Cart embeds inside the native drawer without replacing or intercepting it', () => {
+  assert.match(smartCartJavascript, /config\?\.enabled === true/);
   assert.match(smartCartJavascript, /DecoPersonalizationSmartCart/);
   assert.match(smartCartJavascript, /compatibility/);
-  assert.match(smartCartJavascript, /restoreThemeCart/);
-  assert.match(smartCartJavascript, /window\.location\.assign\(cartRoute\('cart'\)\)/);
+  assert.match(smartCartJavascript, /mode: 'native_cart_embed'/);
+  assert.match(smartCartJavascript, /data-personalization-id="00007"/);
+  assert.match(smartCartJavascript, /MutationObserver/);
+  assert.match(smartCartJavascript, /fetchNativeCartSection/);
+  assert.match(smartCartJavascript, /section_id/);
   assert.match(smartCartJavascript, /cartRoute\('cart\.js'\)/);
-  assert.match(smartCartJavascript, /cartRoute\('cart\/change\.js'\)/);
   assert.match(smartCartJavascript, /cartRoute\('cart\/add\.js'\)/);
   assert.match(smartCartJavascript, /window\.Shopify\?\.routes\?\.root/);
   assert.match(smartCartJavascript, /window\.location\.origin/);
+  assert.doesNotMatch(smartCartJavascript, /HTMLDialogElement|showModal\(|window\.location\.assign|preventDefault\(\)/);
+  assert.doesNotMatch(smartCartStylesheet, /dialog|backdrop|deco-smart-cart__panel/);
   assert.doesNotMatch(smartCartJavascript, /https?:\/\//);
   assert.doesNotMatch(smartCartJavascript, /innerHTML|eval\(|new Function/);
-  assert.match(smartCartJavascript, /setIdQuery\(url, 'cart_product_ids', productIds\(cart\.items\)\)/);
+  assert.match(smartCartJavascript, /setIdQuery\(url, 'cart_product_ids', productIds\(cart\?\.items\)\)/);
   assert.doesNotMatch(smartCartJavascript, /cart_product_ids\[\]/);
 });
 
@@ -81,7 +85,7 @@ test('Smart Cart context stays anonymous and bounded', () => {
 });
 
 test('Smart Cart publishes structured custom events only after the drawer is visible', () => {
-  assert.match(smartCartJavascript, /render\(cart, config, true\)/);
+  assert.match(smartCartJavascript, /render\(host, cart, config, true\)/);
   assert.match(smartCartJavascript, /Shopify\?\.analytics\?\.publish/);
   assert.match(smartCartJavascript, /placement: 'smart_cart'/);
   assert.match(smartCartJavascript, /strategy_version_uuid/);
@@ -91,16 +95,16 @@ test('Smart Cart publishes structured custom events only after the drawer is vis
 });
 
 test('Smart Cart renders one sequential product with image, safe wrapping, quantity and discount pricing', () => {
-  assert.match(smartCartJavascript, /const recommendation = nextRecommendation\(config\?\.recommendations\?\.items, cart\)/);
-  assert.match(smartCartJavascript, /list\.append\(createRecommendation\(recommendation\.product, recommendation\.variant, config\)\)/);
+  assert.match(smartCartJavascript, /nextRecommendation\(config\?\.recommendations\?\.items, cart\)/);
+  assert.match(smartCartJavascript, /createRecommendation\(recommendation\.product, recommendation\.variant, config, status\)/);
   assert.doesNotMatch(smartCartJavascript, /recommendationItems\.slice\(0, 8\)/);
   assert.match(smartCartJavascript, /selected_variant_gid/);
   assert.match(smartCartJavascript, /minimum_purchase_quantity/);
-  assert.match(smartCartJavascript, /deco-smart-cart__recommendation-image/);
-  assert.match(smartCartJavascript, /deco-smart-cart__recommendation-prices/);
+  assert.match(smartCartJavascript, /deco-native-cart-recommendation__image/);
+  assert.match(smartCartJavascript, /deco-native-cart-recommendation__prices/);
   assert.match(smartCartJavascript, /document\.createElement\('s'\)/);
   assert.match(smartCartJavascript, /cartProducts\.has\(productId\)/);
-  assert.match(smartCartStylesheet, /grid-template-columns: 88px minmax\(0, 1fr\) auto/);
+  assert.match(smartCartStylesheet, /grid-template-columns: 88px minmax\(0,1fr\) auto/);
   assert.match(smartCartStylesheet, /overflow-wrap: anywhere/);
 });
 

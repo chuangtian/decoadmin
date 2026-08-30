@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\PersonalizationSmartCartCompatibilityStatus;
 use App\Models\Organization;
 use App\Models\PersonalizationSmartCartSetting;
 use App\Models\Product;
@@ -33,153 +32,151 @@ class PersonalizationSmartCartTest extends TestCase
         ]);
     }
 
-    public function test_smart_cart_requires_compatibility_preview_and_manual_activation_then_restores_native_cart(): void
+    public function test_selecting_a_custom_strategy_immediately_enables_native_cart_recommendations(): void
     {
         [$admin, $organization, $store] = $this->context('store-admin');
-        $this->product($organization, $store, 701, 'Smart Cart Bike');
+        $cartProduct = $this->product($organization, $store, 700, 'Cart Bike');
+        $recommended = $this->product($organization, $store, 701, 'Smart Cart Accessory');
         $service = app(PersonalizationConfigurationService::class);
+        $ruleId = (string) Str::uuid();
         $strategy = $service->createStrategy($store, $admin, [
-            'name' => 'Smart Cart manual',
+            'name' => 'Custom native cart strategy',
             'algorithm' => 'manual',
-            'settings' => ['discount' => [
-                'enabled' => true,
-                'reference' => 'gid://shopify/DiscountCodeNode/123',
-                'title' => 'Ten percent off',
-                'summary' => '10% off',
-                'code' => 'SMART10',
-                'status' => 'active',
-                'percentage' => 10,
-                'validated_at' => now()->toIso8601String(),
-            ]],
+            'item_limit' => 24,
+            'settings' => [
+                'recommendation_rule' => [
+                    'mode' => 'custom',
+                    'preset' => 'manual',
+                    'custom' => [
+                        'rules' => [[
+                            'id' => $ruleId,
+                            'name' => 'Bike accessory rule',
+                            'priority' => 1,
+                            'match' => 'all',
+                            'conditions' => [[
+                                'id' => (string) Str::uuid(),
+                                'field' => 'cart_product_ids',
+                                'operator' => 'contains_any',
+                                'values' => [(string) $cartProduct->shopify_product_id],
+                            ]],
+                            'exit_on_match' => true,
+                            'action' => [
+                                'type' => 'manual',
+                                'products' => [[
+                                    'shopify_product_id' => (string) $recommended->shopify_product_id,
+                                    'minimum_quantity' => 2,
+                                ]],
+                                'filters' => [],
+                            ],
+                        ]],
+                        'fallback' => ['enabled' => false, 'action' => ['type' => 'manual', 'products' => [], 'filters' => []]],
+                    ],
+                ],
+                'discount' => [
+                    'enabled' => true,
+                    'reference' => 'gid://shopify/DiscountCodeNode/123',
+                    'title' => 'Ten percent off',
+                    'summary' => '10% off',
+                    'code' => 'SMART10',
+                    'status' => 'active',
+                    'percentage' => 10,
+                    'validated_at' => now()->toIso8601String(),
+                ],
+            ],
         ]);
+        $base = route('personalization.index', [$organization, $store], false);
+
+        $this->actingAs($admin)->put("{$base}/smart-cart", [
+            'strategy_uuid' => $strategy->uuid,
+            'heading' => 'Chosen with care',
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已保存，并用于原生购物车抽屉。');
+
+        $setting = PersonalizationSmartCartSetting::query()->sole();
+        $this->assertTrue($setting->enabled);
+        $this->assertSame('native_cart', $setting->fallback_mode);
+        $this->assertSame('native_cart_embed', data_get($setting->compatibility_details, 'mode'));
+        $this->assertTrue($strategy->fresh()->enabled);
+        $this->assertSame('enabled', $strategy->fresh()->status->value);
+
+        $this->getJson($this->signedSmartCartUrl($store, [
+            'cart_product_ids' => (string) $cartProduct->shopify_product_id,
+        ]))->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.enabled', true)
+            ->assertJsonPath('data.fallback_mode', 'native_cart')
+            ->assertJsonPath('data.heading', 'Chosen with care')
+            ->assertJsonPath('data.recommendations.items.0.shopify_product_id', (string) $recommended->shopify_product_id)
+            ->assertJsonPath('data.recommendations.items.0.minimum_purchase_quantity', 2)
+            ->assertJsonPath('data.recommendations.items.0.rule_id', $ruleId)
+            ->assertJsonPath('data.recommendations.items.0.pricing.original_amount', '100.00')
+            ->assertJsonPath('data.recommendations.items.0.pricing.discounted_amount', '90.00')
+            ->assertJsonPath('data.recommendations.discount.code', 'SMART10')
+            ->assertJsonMissingPath('data.customer');
+
+        $this->getJson($this->signedSmartCartUrl($store))
+            ->assertOk()
+            ->assertJsonPath('data.enabled', true)
+            ->assertJsonCount(0, 'data.recommendations.items');
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'personalization_smart_cart_configuration_saved',
+            'store_id' => $store->id,
+            'user_id' => $admin->id,
+        ]);
+    }
+
+    public function test_clearing_selection_hides_recommendations_and_old_activation_routes_are_removed(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $product = $this->product($organization, $store, 801, 'Manual accessory');
+        $service = app(PersonalizationConfigurationService::class);
+        $strategy = $service->createStrategy($store, $admin, ['name' => 'Manual', 'algorithm' => 'manual']);
         $service->replaceProductOverrides($store, $strategy, $admin, [[
-            'shopify_product_id' => 'gid://shopify/Product/701',
+            'shopify_product_id' => 'gid://shopify/Product/'.$product->shopify_product_id,
             'type' => 'manual',
         ]]);
         $base = route('personalization.index', [$organization, $store], false);
 
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => $strategy->uuid,
-            'heading' => 'Complete the set',
-        ])->assertRedirect()->assertSessionHas('success');
+            'heading' => 'Recommended',
+        ])->assertRedirect();
+        $this->actingAs($admin)->put("{$base}/smart-cart", [
+            'strategy_uuid' => null,
+            'heading' => 'Recommended',
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已清除；原生购物车不显示推荐。');
 
-        $this->getJson($this->signedSmartCartUrl($store))
-            ->assertOk()
-            ->assertJsonPath('data.enabled', false)
-            ->assertJsonPath('data.fallback_mode', 'shopify_default')
-            ->assertJsonMissingPath('data.recommendations');
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/activate")
-            ->assertRedirect()
-            ->assertSessionHas('error', 'Smart Cart 需要最近 7 天内通过兼容性检查。');
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/compatibility", [
-            'theme_id' => '123456789',
-            'theme_name' => 'Dawn Personalization Test',
-            'checks' => $this->checks(false),
-        ])->assertRedirect()->assertSessionHas('success');
         $setting = PersonalizationSmartCartSetting::query()->sole();
         $this->assertFalse($setting->enabled);
-        $this->assertSame(PersonalizationSmartCartCompatibilityStatus::Incompatible, $setting->compatibility_status);
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/preview-confirmation")
-            ->assertRedirect()
-            ->assertSessionHas('error', '必须先完成指定测试主题的兼容性检查。');
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/compatibility", [
-            'theme_id' => '123456789',
-            'theme_name' => 'Dawn Personalization Test',
-            'checks' => $this->checks(true),
-        ])->assertRedirect()->assertSessionHas('success');
-        $setting = $setting->fresh();
-        $this->assertFalse($setting->enabled);
-        $this->assertSame(PersonalizationSmartCartCompatibilityStatus::Compatible, $setting->compatibility_status);
-        $this->assertNull($setting->preview_confirmed_at);
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/preview-confirmation")
-            ->assertRedirect()->assertSessionHas('success');
-        $this->assertFalse($setting->fresh()->enabled);
-        $this->assertNotNull($setting->fresh()->preview_confirmed_at);
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/activate")
-            ->assertRedirect()->assertSessionHas('success', 'Smart Cart 已人工启用。');
-        $setting = $setting->fresh();
-        $this->assertTrue($setting->enabled);
-        $this->assertNotNull($setting->enabled_at);
-        $this->assertNull($setting->disabled_at);
-        $this->assertTrue($strategy->fresh()->enabled);
-
-        // Theme App Extensions use one comma-separated value so Shopify App
-        // Proxy signs the same key shape that Laravel verifies.
-        $this->getJson($this->signedSmartCartUrl($store, ['cart_product_ids' => '999,998']))
-            ->assertOk()
-            ->assertHeader('Cache-Control', 'no-store, private')
-            ->assertJsonPath('data.enabled', true)
-            ->assertJsonPath('data.fallback_mode', 'shopify_default')
-            ->assertJsonPath('data.heading', 'Complete the set')
-            ->assertJsonPath('data.recommendations.items.0.shopify_product_id', '701')
-            ->assertJsonPath('data.recommendations.items.0.minimum_purchase_quantity', 1)
-            ->assertJsonPath('data.recommendations.items.0.pricing.original_amount', '100.00')
-            ->assertJsonPath('data.recommendations.items.0.pricing.discounted_amount', '90.00')
-            ->assertJsonPath('data.recommendations.discount.code', 'SMART10')
-            ->assertJsonMissingPath('data.customer');
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/restore")
-            ->assertRedirect()->assertSessionHas('success', '已恢复 Shopify 默认购物车。');
-        $setting = $setting->fresh();
-        $this->assertFalse($setting->enabled);
-        $this->assertNull($setting->enabled_at);
-        $this->assertNotNull($setting->disabled_at);
-
+        $this->assertNull($setting->strategy_id);
         $this->getJson($this->signedSmartCartUrl($store))
             ->assertOk()
             ->assertJsonPath('data.enabled', false)
+            ->assertJsonPath('data.fallback_mode', 'native_cart')
             ->assertJsonMissingPath('data.recommendations');
-        foreach ([
-            'personalization_smart_cart_compatibility_recorded',
-            'personalization_smart_cart_preview_confirmed',
-            'personalization_smart_cart_activated',
-            'personalization_smart_cart_restored',
-        ] as $action) {
-            $this->assertDatabaseHas('audit_logs', [
-                'action' => $action,
-                'store_id' => $store->id,
-                'user_id' => $admin->id,
-            ]);
+
+        foreach (['compatibility', 'preview-confirmation', 'activate', 'restore'] as $route) {
+            $this->actingAs($admin)->post("{$base}/smart-cart/{$route}")->assertNotFound();
         }
     }
 
-    public function test_stale_compatibility_and_operator_permission_cannot_enable_smart_cart(): void
+    public function test_invalid_or_unauthorized_smart_cart_binding_is_rejected(): void
     {
         [$admin, $organization, $store] = $this->context('store-admin');
-        $strategy = app(PersonalizationConfigurationService::class)->createStrategy($store, $admin, [
-            'name' => 'New arrivals',
-            'algorithm' => 'new_arrivals',
+        $service = app(PersonalizationConfigurationService::class);
+        $emptyCustom = $service->createStrategy($store, $admin, [
+            'name' => 'Empty custom',
+            'algorithm' => 'manual',
+            'settings' => ['recommendation_rule' => [
+                'mode' => 'custom', 'preset' => 'manual',
+                'custom' => ['rules' => [], 'fallback' => ['enabled' => false, 'action' => ['type' => 'manual', 'products' => [], 'filters' => []]]],
+            ]],
         ]);
         $base = route('personalization.index', [$organization, $store], false);
         $this->actingAs($admin)->put("{$base}/smart-cart", [
-            'strategy_uuid' => $strategy->uuid,
-            'heading' => 'New arrivals',
-        ])->assertRedirect();
-        $this->actingAs($admin)->post("{$base}/smart-cart/compatibility", [
-            'theme_id' => '987654321',
-            'theme_name' => 'Dawn Test Copy',
-            'checks' => [$this->checks(true)[0]],
-        ])->assertRedirect()->assertSessionHas('error', '兼容性检查缺少必填项目。');
-        $this->actingAs($admin)->post("{$base}/smart-cart/compatibility", [
-            'theme_id' => '987654321',
-            'theme_name' => 'Dawn Test Copy',
-            'checks' => $this->checks(true),
-        ])->assertRedirect();
-        $this->actingAs($admin)->post("{$base}/smart-cart/preview-confirmation")->assertRedirect();
-        PersonalizationSmartCartSetting::query()->sole()->forceFill([
-            'compatibility_checked_at' => now()->subDays(8),
-        ])->save();
-
-        $this->actingAs($admin)->post("{$base}/smart-cart/activate")
-            ->assertRedirect()
-            ->assertSessionHas('error', 'Smart Cart 需要最近 7 天内通过兼容性检查。');
-        $this->assertFalse(PersonalizationSmartCartSetting::query()->sole()->enabled);
+            'strategy_uuid' => $emptyCustom->uuid,
+            'heading' => 'Invalid',
+        ])->assertRedirect()->assertSessionHas('error', '自定义规则至少需要一个行动商品或备用商品。');
 
         [$operator, $operatorOrganization, $operatorStore] = $this->context('operator');
         $operatorBase = route('personalization.index', [$operatorOrganization, $operatorStore], false);
@@ -187,20 +184,6 @@ class PersonalizationSmartCartTest extends TestCase
             'strategy_uuid' => null,
             'heading' => 'Forbidden',
         ])->assertForbidden();
-        $this->actingAs($operator)->post("{$operatorBase}/smart-cart/activate")->assertForbidden();
-    }
-
-    /** @return list<array{key: string, label: string, passed: bool, details: ?string}> */
-    private function checks(bool $passed): array
-    {
-        return [
-            ['key' => 'unpublished_copy', 'label' => 'Unpublished test copy', 'passed' => true, 'details' => null],
-            ['key' => 'app_embed_loaded', 'label' => 'App Embed loaded', 'passed' => true, 'details' => null],
-            ['key' => 'browser_dialog', 'label' => 'Browser dialog support', 'passed' => true, 'details' => null],
-            ['key' => 'cart_link', 'label' => 'Theme cart link detected', 'passed' => true, 'details' => null],
-            ['key' => 'cart_routes', 'label' => 'Shopify cart routes available', 'passed' => true, 'details' => null],
-            ['key' => 'cart_behaviour_verified', 'label' => 'Cart behaviour verified', 'passed' => $passed, 'details' => null],
-        ];
     }
 
     /** @return array{User, Organization, Store} */
@@ -225,7 +208,7 @@ class PersonalizationSmartCartTest extends TestCase
         $role = Role::query()->whereBelongsTo($organization)->where('slug', $roleSlug)->sole();
         $user->roles()->attach($role, [
             'organization_id' => $organization->id,
-            'store_id' => in_array($roleSlug, ['store-admin', 'operator'], true) ? $store->id : null,
+            'store_id' => $store->id,
         ]);
 
         return [$user, $organization, $store];

@@ -7,7 +7,6 @@ use App\Enums\PersonalizationComponentStatus;
 use App\Enums\PersonalizationPlacement;
 use App\Enums\PersonalizationProductOverrideType;
 use App\Enums\PersonalizationRuleType;
-use App\Enums\PersonalizationSmartCartCompatibilityStatus;
 use App\Enums\PersonalizationStrategyStatus;
 use App\Enums\PersonalizationStrategyVersionStatus;
 use App\Exceptions\PersonalizationException;
@@ -576,15 +575,12 @@ class PersonalizationStrategyWorkflowService
                 'component_uuid' => $smartCart->uuid,
                 'name' => 'Smart Cart',
                 'placement' => PersonalizationPlacement::SmartCart->value,
-                'status' => $smartCart->compatibility_status === PersonalizationSmartCartCompatibilityStatus::Incompatible
-                    ? 'configuration_error'
-                    : ($smartCart->enabled ? 'live' : 'configured_not_enabled'),
+                'status' => $smartCart->enabled ? 'live' : 'configured_not_enabled',
             ]);
         }
         $status = $strategy->deleted_at
             ? PersonalizationStrategyStatus::Archived->value
             : ($components->contains(fn (PersonalizationRecommendationComponent $component): bool => $component->configuration_status !== 'valid')
-                || $smartCart?->compatibility_status === PersonalizationSmartCartCompatibilityStatus::Incompatible
                 ? PersonalizationStrategyStatus::ConfigurationError->value
                 : ($smartCart?->enabled ? PersonalizationStrategyStatus::Enabled->value : $strategy->status->value));
         $draft = $strategy->versions->first(fn (PersonalizationStrategyVersion $version): bool => $version->status === PersonalizationStrategyVersionStatus::Draft);

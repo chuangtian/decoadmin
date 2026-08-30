@@ -112,6 +112,75 @@ class PersonalizationCheckoutTest extends TestCase
         $this->assertTrue($checkout->storefront($store)['enabled']);
     }
 
+    public function test_checkout_binds_and_executes_a_custom_rule_strategy(): void
+    {
+        [$admin, $organization, $store] = $this->context('Checkout Custom');
+        $cartProduct = $this->product($organization, $store, 171);
+        $recommendation = $this->product($organization, $store, 172);
+        $workflow = app(PersonalizationStrategyWorkflowService::class);
+        $created = $workflow->createDraft($store, $admin, (string) Str::uuid());
+        $strategy = PersonalizationRecommendationStrategy::query()->sole();
+        $draft = $created['draft'];
+        $draft['name'] = 'Checkout custom rule';
+        $draft['configuration']['recommendation_rule'] = [
+            'mode' => 'custom',
+            'preset' => 'manual',
+            'custom' => [
+                'rules' => [[
+                    'id' => (string) Str::uuid(),
+                    'name' => 'Cart product rule',
+                    'priority' => 1,
+                    'match' => 'all',
+                    'conditions' => [[
+                        'id' => (string) Str::uuid(),
+                        'field' => 'cart_product_ids',
+                        'operator' => 'contains_any',
+                        'values' => [(string) $cartProduct->shopify_product_id],
+                    ]],
+                    'exit_on_match' => true,
+                    'action' => [
+                        'type' => 'manual',
+                        'products' => [[
+                            'shopify_product_id' => (string) $recommendation->shopify_product_id,
+                            'minimum_quantity' => 2,
+                        ]],
+                        'filters' => [],
+                    ],
+                ]],
+                'fallback' => ['enabled' => false, 'action' => ['type' => 'manual', 'products' => [], 'filters' => []]],
+            ],
+        ];
+        $saved = $workflow->autosave($store, $strategy, $admin, [
+            'idempotency_key' => (string) Str::uuid(),
+            'lock_version' => $draft['lock_version'],
+            'draft' => $draft,
+        ]);
+        $checkout = app(PersonalizationCheckoutService::class);
+
+        $setting = $checkout->save($store, $admin, [
+            'strategy_uuid' => $strategy->uuid,
+            'trust_items' => $checkout->defaultTrustItems(),
+        ]);
+        $result = $checkout->recommendations($store, [
+            'cart_product_ids' => [(string) $cartProduct->shopify_product_id],
+            'cart_lines' => [[
+                'product_id' => (string) $cartProduct->shopify_product_id,
+                'variant_id' => (string) ($cartProduct->variants->first()->shopify_variant_id),
+                'quantity' => 1,
+            ]],
+            'market' => 'us',
+            'currency' => 'USD',
+            'language' => 'en',
+        ]);
+
+        $this->assertSame('active', $setting->component->status->value);
+        $this->assertSame($saved['draft']['uuid'], $setting->component->strategyVersion()->value('uuid'));
+        $this->assertSame([(string) $recommendation->shopify_product_id], collect($result['items'])->pluck('shopify_product_id')->all());
+        $this->assertSame(2, data_get($result, 'items.0.minimum_purchase_quantity'));
+        $this->assertSame('custom_rule', data_get($result, 'items.0.reason_code'));
+        $this->assertSame('checkout', data_get($result, 'context.surface'));
+    }
+
     public function test_checkout_rejects_cross_store_strategy_and_permanent_denied_store(): void
     {
         [$admin, $organization, $store] = $this->context('Checkout Scope A');

@@ -164,19 +164,9 @@ class PersonalizationEventIngestionTest extends TestCase
             'shopify_product_id' => 'gid://shopify/Product/1001',
             'type' => 'manual',
         ]]);
-        $service->saveSmartCartDraft($store, $admin, $strategy, ['heading' => 'Recommended']);
-        $checks = collect([
-            'unpublished_copy', 'app_embed_loaded', 'browser_dialog',
-            'cart_link', 'cart_routes', 'cart_behaviour_verified',
-        ])->map(fn (string $key): array => [
-            'key' => $key,
-            'label' => $key,
-            'passed' => true,
-            'details' => null,
-        ])->all();
-        $service->recordSmartCartCompatibility($store, $admin, '111222333', 'Dawn test copy', $checks);
-        $service->confirmSmartCartPreview($store, $admin);
-        $service->activateSmartCart($store, $admin);
+        $setting = $service->saveSmartCartDraft($store, $admin, $strategy, ['heading' => 'Recommended']);
+        $this->assertTrue($setting->enabled);
+        $this->assertSame('native_cart', $setting->fallback_mode);
         $source = $this->source($organization, $store);
 
         $this->event($source, [
