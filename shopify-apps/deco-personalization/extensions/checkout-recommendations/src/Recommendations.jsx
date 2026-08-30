@@ -33,6 +33,7 @@ function Recommendations() {
   const [configurationLoaded, setConfigurationLoaded] = useState(false);
   const [recommendationsLoaded, setRecommendationsLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastCandidate, setLastCandidate] = useState(null);
   const [dismissed, setDismissed] = useState(() => new Set());
   const [shown, setShown] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
@@ -61,6 +62,7 @@ function Recommendations() {
     setRecommendationsLoaded(false);
     setConfiguration(null);
     setCandidates([]);
+    setLastCandidate(null);
     fetchConfiguration(shopify, configurationMetafields)
       .then((value) => { if (active) setConfiguration(value); })
       .catch(() => { if (active) setConfiguration(null); })
@@ -93,6 +95,11 @@ function Recommendations() {
   const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
     : null, [candidates, configuration, dismissed, lineSignature]);
+  const displayedCandidate = current ?? ((busy || refreshing) ? lastCandidate : null);
+
+  useEffect(() => {
+    if (current) setLastCandidate(current);
+  }, [current]);
 
   useEffect(() => {
     if (!configuration || !current || impressionRef.current === current.variant_id) return;
@@ -155,7 +162,7 @@ function Recommendations() {
     }
   }
 
-  if (!configurationLoaded || !recommendationsLoaded || !configuration || !current) return null;
+  if (!configurationLoaded || !recommendationsLoaded || !configuration || !displayedCandidate) return null;
 
   return (
     <s-section>
@@ -165,25 +172,30 @@ function Recommendations() {
             <s-heading>{configuration.component.heading}</s-heading>
           </s-stack>
           {error ? <s-banner tone="critical">{error}</s-banner> : null}
-          <s-grid key={current.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
-            {current.image_url
-              ? <s-image src={current.image_url} alt={current.image_alt || current.title} aspectRatio="1" />
+          <s-grid key={displayedCandidate.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
+            {displayedCandidate.image_url
+              ? <s-image src={displayedCandidate.image_url} alt={displayedCandidate.image_alt || displayedCandidate.title} aspectRatio="1" />
               : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}
             <s-stack gap="small-200">
-              <s-heading>{current.title}</s-heading>
-              {current.variant_title && current.variant_title !== 'Default Title'
-                ? <s-text type="small">{current.variant_title}</s-text>
+              <s-heading>{displayedCandidate.title}</s-heading>
+              {displayedCandidate.variant_title && displayedCandidate.variant_title !== 'Default Title'
+                ? <s-text type="small">{displayedCandidate.variant_title}</s-text>
                 : null}
-              {current.discount?.percentage && current.discounted_amount
+              {displayedCandidate.discount?.percentage && displayedCandidate.discounted_amount
                 ? <s-stack gap="small-100">
-                    <s-text tone="neutral">Original {current.currency} {current.amount}</s-text>
-                    <s-text tone="success">{current.discount.percentage}% off</s-text>
-                    <s-text>Now {current.currency} {current.discounted_amount}</s-text>
-                    {current.discount.code ? <s-text tone="success">Code {current.discount.code}</s-text> : null}
+                    <s-text tone="neutral">Original {displayedCandidate.currency} {displayedCandidate.amount}</s-text>
+                    <s-text tone="success">{displayedCandidate.discount.percentage}% off</s-text>
+                    <s-text>Now {displayedCandidate.currency} {displayedCandidate.discounted_amount}</s-text>
+                    {displayedCandidate.discount.code ? <s-text tone="success">Code {displayedCandidate.discount.code}</s-text> : null}
                   </s-stack>
-                : <s-text>{current.currency} {current.amount}</s-text>}
+                : <s-text>{displayedCandidate.currency} {displayedCandidate.amount}</s-text>}
             </s-stack>
-            <s-button variant="primary" disabled={busy || !canAdd} loading={busy} onClick={addCurrent}>
+            <s-button
+              variant="primary"
+              disabled={busy || refreshing || !canAdd || !current}
+              loading={busy || (refreshing && !current)}
+              onClick={addCurrent}
+            >
               {configuration.component.button_label}
             </s-button>
           </s-grid>
