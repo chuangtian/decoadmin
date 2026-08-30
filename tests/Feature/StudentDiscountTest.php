@@ -24,6 +24,7 @@ use App\Models\User;
 use App\Services\StudentDiscount\GeminiStudentIdRecognitionService;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
 use App\Services\StudentDiscount\StudentDiscountCodeService;
+use App\Services\StudentDiscount\StudentDiscountEmailTemplateService;
 use App\Services\StudentDiscount\StudentDiscountEvidenceCleanupService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -1593,6 +1594,70 @@ class StudentDiscountTest extends TestCase
         $this->actingAs($admin)
             ->put(route('student-discounts.email-templates.update', [$organization, $store]), $unsafeUrl)
             ->assertSessionHasErrors('branding.shop_url');
+    }
+
+    public function test_email_rich_content_blocks_are_store_scoped_safely_rendered_and_keep_system_blocks(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $campaign = $this->campaign($organization, $store);
+        $payload = [
+            'branding' => ['primary_color' => '#123456', 'shop_url' => 'https://'.$store->shopify_domain],
+            'approval' => [
+                'subject' => '{{ store_name }} approved',
+                'body' => 'Safe fallback body',
+                'content_blocks' => [
+                    ['type' => 'heading', 'text' => 'Centered <script>alert(1)</script>', 'align' => 'center', 'font_size' => 36, 'bold' => true, 'color' => '#112233'],
+                    ['type' => 'paragraph', 'text' => 'Use {{ discount_code }} now.', 'align' => 'right', 'font_size' => 18, 'italic' => true, 'color' => '#334455'],
+                    ['type' => 'discount_code'],
+                    ['type' => 'button', 'text' => 'SHOP NOW', 'url' => 'https://'.$store->shopify_domain.'/collections/all', 'width' => 'auto', 'font_size' => 20, 'bold' => true, 'color' => '#FFFFFF', 'background_color' => '#123456'],
+                ],
+            ],
+            'rejection' => [
+                'subject' => '{{ store_name }} update',
+                'body' => 'Reason: {{ rejection_reason }}',
+                'content_blocks' => [
+                    ['type' => 'heading', 'text' => 'Request update', 'font_size' => 30, 'bold' => true, 'color' => '#111111'],
+                    ['type' => 'paragraph', 'text' => 'Reason: {{ rejection_reason }}', 'font_size' => 17, 'color' => '#404040'],
+                ],
+            ],
+        ];
+
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $payload)
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $stored = $campaign->fresh()->email_templates;
+        $this->assertSame('center', data_get($stored, 'templates.approval.content_blocks.0.align'));
+        $this->assertSame(36, data_get($stored, 'templates.approval.content_blocks.0.font_size'));
+        $this->assertSame('button', data_get($stored, 'templates.approval.content_blocks.3.type'));
+        $rendered = app(StudentDiscountEmailTemplateService::class)->render('approval', $stored, [
+            'store_name' => $store->name,
+            'store_url' => 'https://'.$store->shopify_domain,
+            'discount_code' => 'STUDENT-RICH',
+        ]);
+        $html = (new StudentDiscountTemplatePreviewMail($rendered))->render();
+        $this->assertStringContainsString('text-align:center', $html);
+        $this->assertStringContainsString('font-size:36px', $html);
+        $this->assertStringContainsString('STUDENT-RICH', $html);
+        $this->assertStringContainsString('href="https://'.$store->shopify_domain.'/collections/all"', $html);
+        $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $html);
+        $this->assertStringNotContainsString('<script>alert(1)</script>', $html);
+
+        $withoutCode = $payload;
+        $withoutCode['approval']['content_blocks'] = array_values(array_filter(
+            $withoutCode['approval']['content_blocks'],
+            fn (array $block): bool => $block['type'] !== 'discount_code',
+        ));
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $withoutCode)
+            ->assertSessionHasErrors('approval.content_blocks');
+
+        $unsafeButton = $payload;
+        $unsafeButton['approval']['content_blocks'][3]['url'] = 'javascript:alert(1)';
+        $this->actingAs($admin)
+            ->put(route('student-discounts.email-templates.update', [$organization, $store]), $unsafeButton)
+            ->assertSessionHasErrors('approval.content_blocks.3.url');
     }
 
     public function test_operator_cannot_manage_or_test_student_discount_email_templates(): void
