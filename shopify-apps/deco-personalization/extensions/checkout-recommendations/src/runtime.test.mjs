@@ -5,6 +5,7 @@ import {
   EVENTS,
   configurationEndpoint,
   eventPayload,
+  formatMoney,
   normalizeConfiguration,
   normalizeServiceRecommendations,
   selectNextCandidate,
@@ -90,6 +91,13 @@ test('the final candidate is no longer rendered after its cart line appears', ()
   assert.equal(selectNextCandidate([candidate], lines), null);
 });
 
+test('checkout prices are localized and invalid money never renders as a discount price', () => {
+  assert.equal(formatMoney('1699', 'USD', 'zh-CN'), '1,699.00美元');
+  assert.equal(formatMoney('1599', 'USD', 'en-US'), '1,599.00 US dollars');
+  assert.equal(formatMoney('invalid', 'USD', 'en-US'), '');
+  assert.equal(formatMoney('1599', 'not-a-currency', 'en-US'), '');
+});
+
 test('candidate row advances without unmounting during background revalidation', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /const \[advancing, setAdvancing\] = useState\(false\)/);
@@ -108,6 +116,10 @@ test('candidate row advances without unmounting during background revalidation',
   assert.match(source, /loading=\{busy \|\| advancing \|\| \(refreshing && !current\)\}/);
   assert.match(source, /<s-box paddingInline="large-200">/);
   assert.match(source, /<s-stack alignItems="center">/);
+  assert.match(source, /<s-stack gap="small-200" minInlineSize="0">/);
+  assert.match(source, /<s-text type="redundant">\{formatMoney\(displayedCandidate\.amount/);
+  assert.match(source, /<s-text type="strong">\{formatMoney\(displayedCandidate\.discounted_amount/);
+  assert.match(source, /Number\(displayedCandidate\.discounted_amount\) < Number\(displayedCandidate\.amount\)/);
   assert.match(source, /fetchRecommendations\(shopify/);
   assert.match(source, /quantity: current\.minimum_purchase_quantity/);
   assert.match(source, /useCartLines\(\)/);

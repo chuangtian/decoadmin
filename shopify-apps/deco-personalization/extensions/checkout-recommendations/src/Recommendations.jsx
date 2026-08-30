@@ -15,6 +15,7 @@ import {
   eventPayload,
   fetchConfiguration,
   fetchRecommendations,
+  formatMoney,
   selectNextCandidate,
 } from './runtime.mjs';
 
@@ -53,6 +54,7 @@ function Recommendations() {
   const applyDiscountCodeChange = useApplyDiscountCodeChange();
   const canAdd = instructions.lines.canAddCartLine;
   const canUpdateDiscountCodes = instructions.discounts?.canUpdateDiscountCodes === true;
+  const language = shopify.localization?.language?.value?.isoCode ?? '';
   const lineSignature = JSON.stringify((Array.isArray(lines) ? lines : []).map((line) => [
     line?.merchandise?.product?.id,
     line?.merchandise?.id,
@@ -127,7 +129,7 @@ function Recommendations() {
     return fetchRecommendations(shopify, activeConfiguration, activeLines, {
       market: shopify.localization?.market?.value?.handle ?? '',
       currency: shopify.cost?.totalAmount?.value?.currencyCode ?? '',
-      language: shopify.localization?.language?.value?.isoCode ?? '',
+      language,
     });
   }
 
@@ -187,19 +189,20 @@ function Recommendations() {
             {displayedCandidate.image_url
               ? <s-image src={displayedCandidate.image_url} alt={displayedCandidate.image_alt || displayedCandidate.title} aspectRatio="1" />
               : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}
-            <s-stack gap="small-200">
+            <s-stack gap="small-200" minInlineSize="0">
               <s-heading>{displayedCandidate.title}</s-heading>
               {displayedCandidate.variant_title && displayedCandidate.variant_title !== 'Default Title'
                 ? <s-text type="small">{displayedCandidate.variant_title}</s-text>
                 : null}
-              {displayedCandidate.discount?.percentage && displayedCandidate.discounted_amount
+              {displayedCandidate.discount?.percentage
+                && displayedCandidate.discounted_amount
+                && Number(displayedCandidate.discounted_amount) < Number(displayedCandidate.amount)
                 ? <s-stack gap="small-100">
-                    <s-text tone="neutral">Original {displayedCandidate.currency} {displayedCandidate.amount}</s-text>
-                    <s-text tone="success">{displayedCandidate.discount.percentage}% off</s-text>
-                    <s-text>Now {displayedCandidate.currency} {displayedCandidate.discounted_amount}</s-text>
-                    {displayedCandidate.discount.code ? <s-text tone="success">Code {displayedCandidate.discount.code}</s-text> : null}
+                    <s-text type="small" tone="success">{displayedCandidate.discount.percentage}% off</s-text>
+                    <s-text type="redundant">{formatMoney(displayedCandidate.amount, displayedCandidate.currency, language)}</s-text>
+                    <s-text type="strong">{formatMoney(displayedCandidate.discounted_amount, displayedCandidate.currency, language)}</s-text>
                   </s-stack>
-                : <s-text>{displayedCandidate.currency} {displayedCandidate.amount}</s-text>}
+                : <s-text>{formatMoney(displayedCandidate.amount, displayedCandidate.currency, language)}</s-text>}
             </s-stack>
             <s-button
               variant="primary"

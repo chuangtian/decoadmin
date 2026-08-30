@@ -149,6 +149,23 @@ export function eventPayload(configuration, products) {
   };
 }
 
+export function formatMoney(amount, currency, locale = '') {
+  const normalizedAmount = Number(amount);
+  const normalizedCurrency = String(currency ?? '').trim().toUpperCase();
+  if (!Number.isFinite(normalizedAmount) || normalizedAmount < 0 || !/^[A-Z]{3}$/.test(normalizedCurrency)) return '';
+  try {
+    return new Intl.NumberFormat(locale || undefined, {
+      style: 'currency',
+      currency: normalizedCurrency,
+      currencyDisplay: 'name',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(normalizedAmount);
+  } catch {
+    return `${normalizedCurrency} ${normalizedAmount.toFixed(2)}`;
+  }
+}
+
 function gid(value, resource) {
   const normalized = String(value ?? '').trim();
   return new RegExp(`^gid://shopify/${resource}/\\d+$`).test(normalized) ? normalized : '';
