@@ -100,7 +100,9 @@ function App() {
         <s-stack direction="block" gap="base">
           <s-stack direction="inline" gap="base" alignItems="center">
             <ConnectionBadge status={connection.status} />
-            <s-text type="strong">{runtime.shopDomain || '未知店铺'}</s-text>
+            <s-text key={runtime.shopDomain || 'unknown-shop'} type="strong">
+              {runtime.shopDomain || '未知店铺'}
+            </s-text>
           </s-stack>
 
           {connection.status === 'checking' && (
@@ -156,12 +158,12 @@ function App() {
 
 function ConnectionBadge({status}) {
   if (status === 'connected') {
-    return <s-badge tone="success">已连接</s-badge>;
+    return <s-badge key="connected" tone="success">已连接</s-badge>;
   }
   if (status === 'error') {
-    return <s-badge tone="warning">待确认</s-badge>;
+    return <s-badge key="error" tone="warning">待确认</s-badge>;
   }
-  return <s-badge tone="info">检查中</s-badge>;
+  return <s-badge key="checking" tone="info">检查中</s-badge>;
 }
 
 function buildUrl(origin, path, params) {

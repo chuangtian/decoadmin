@@ -17,3 +17,10 @@ test('App Home does not modify themes or contain another environment', () => {
   assert.doesNotMatch(source, /trycloudflare|https:\/\/admin\.decomkt\.com/);
   assert.doesNotMatch(source, /myshopify\.com/);
 });
+
+test('App Home remounts status text when async connection state changes', () => {
+  assert.match(source, /key=\{runtime\.shopDomain \|\| 'unknown-shop'\}/);
+  assert.match(source, /key="connected" tone="success">已连接/);
+  assert.match(source, /key="error" tone="warning">待确认/);
+  assert.match(source, /key="checking" tone="info">检查中/);
+});
