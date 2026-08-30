@@ -41,6 +41,16 @@ class PersonalizationSmartCartTest extends TestCase
         $strategy = $service->createStrategy($store, $admin, [
             'name' => 'Smart Cart manual',
             'algorithm' => 'manual',
+            'settings' => ['discount' => [
+                'enabled' => true,
+                'reference' => 'gid://shopify/DiscountCodeNode/123',
+                'title' => 'Ten percent off',
+                'summary' => '10% off',
+                'code' => 'SMART10',
+                'status' => 'active',
+                'percentage' => 10,
+                'validated_at' => now()->toIso8601String(),
+            ]],
         ]);
         $service->replaceProductOverrides($store, $strategy, $admin, [[
             'shopify_product_id' => 'gid://shopify/Product/701',
@@ -106,6 +116,10 @@ class PersonalizationSmartCartTest extends TestCase
             ->assertJsonPath('data.fallback_mode', 'shopify_default')
             ->assertJsonPath('data.heading', 'Complete the set')
             ->assertJsonPath('data.recommendations.items.0.shopify_product_id', '701')
+            ->assertJsonPath('data.recommendations.items.0.minimum_purchase_quantity', 1)
+            ->assertJsonPath('data.recommendations.items.0.pricing.original_amount', '100.00')
+            ->assertJsonPath('data.recommendations.items.0.pricing.discounted_amount', '90.00')
+            ->assertJsonPath('data.recommendations.discount.code', 'SMART10')
             ->assertJsonMissingPath('data.customer');
 
         $this->actingAs($admin)->post("{$base}/smart-cart/restore")

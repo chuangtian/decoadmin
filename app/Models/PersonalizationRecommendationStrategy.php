@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -44,6 +45,11 @@ class PersonalizationRecommendationStrategy extends Model
     public function components(): HasMany
     {
         return $this->hasMany(PersonalizationRecommendationComponent::class, 'strategy_id')->orderBy('position');
+    }
+
+    public function smartCartSetting(): HasOne
+    {
+        return $this->hasOne(PersonalizationSmartCartSetting::class, 'strategy_id');
     }
 
     public function versions(): HasMany

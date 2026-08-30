@@ -58,10 +58,11 @@ test('Smart Cart defaults off, reports compatibility and restores the native car
   assert.match(smartCartJavascript, /DecoPersonalizationSmartCart/);
   assert.match(smartCartJavascript, /compatibility/);
   assert.match(smartCartJavascript, /restoreThemeCart/);
-  assert.match(smartCartJavascript, /window\.location\.assign\('\/cart'\)/);
-  assert.match(smartCartJavascript, /\/cart\.js/);
-  assert.match(smartCartJavascript, /\/cart\/change\.js/);
-  assert.match(smartCartJavascript, /\/cart\/add\.js/);
+  assert.match(smartCartJavascript, /window\.location\.assign\(cartRoute\('cart'\)\)/);
+  assert.match(smartCartJavascript, /cartRoute\('cart\.js'\)/);
+  assert.match(smartCartJavascript, /cartRoute\('cart\/change\.js'\)/);
+  assert.match(smartCartJavascript, /cartRoute\('cart\/add\.js'\)/);
+  assert.match(smartCartJavascript, /window\.Shopify\?\.routes\?\.root/);
   assert.match(smartCartJavascript, /window\.location\.origin/);
   assert.doesNotMatch(smartCartJavascript, /https?:\/\//);
   assert.doesNotMatch(smartCartJavascript, /innerHTML|eval\(|new Function/);
@@ -79,5 +80,30 @@ test('Smart Cart publishes structured custom events only after the drawer is vis
   assert.match(smartCartJavascript, /render\(cart, config, true\)/);
   assert.match(smartCartJavascript, /Shopify\?\.analytics\?\.publish/);
   assert.match(smartCartJavascript, /placement: 'smart_cart'/);
+  assert.match(smartCartJavascript, /strategy_version_uuid/);
+  assert.match(smartCartJavascript, /rule_id/);
+  assert.match(smartCartJavascript, /nextImpressionKey !== impressionKey/);
   assert.match(smartCartJavascript, /deco_personalization:\$\{action\}/);
+});
+
+test('Smart Cart renders one sequential product with image, safe wrapping, quantity and discount pricing', () => {
+  assert.match(smartCartJavascript, /const recommendation = nextRecommendation\(config\?\.recommendations\?\.items, cart\)/);
+  assert.match(smartCartJavascript, /list\.append\(createRecommendation\(recommendation\.product, recommendation\.variant, config\)\)/);
+  assert.doesNotMatch(smartCartJavascript, /recommendationItems\.slice\(0, 8\)/);
+  assert.match(smartCartJavascript, /selected_variant_gid/);
+  assert.match(smartCartJavascript, /minimum_purchase_quantity/);
+  assert.match(smartCartJavascript, /deco-smart-cart__recommendation-image/);
+  assert.match(smartCartJavascript, /deco-smart-cart__recommendation-prices/);
+  assert.match(smartCartJavascript, /document\.createElement\('s'\)/);
+  assert.match(smartCartJavascript, /cartProducts\.has\(productId\)/);
+  assert.match(smartCartStylesheet, /grid-template-columns: 88px minmax\(0, 1fr\) auto/);
+  assert.match(smartCartStylesheet, /overflow-wrap: anywhere/);
+});
+
+test('Smart Cart applies an active strategy discount without blocking a successful add', () => {
+  assert.match(smartCartJavascript, /cartRoute\('cart\/update\.js'\)/);
+  assert.match(smartCartJavascript, /JSON\.stringify\(\{discount:/);
+  assert.match(smartCartJavascript, /Item added\. Apply discount code/);
+  assert.match(smartCartJavascript, /button\.disabled = true/);
+  assert.match(smartCartJavascript, /publishRecommendationEvent\('add_failed'/);
 });

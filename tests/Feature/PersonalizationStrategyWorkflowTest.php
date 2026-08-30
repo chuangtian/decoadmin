@@ -8,6 +8,7 @@ use App\Models\PersonalizationEvent;
 use App\Models\PersonalizationEventSource;
 use App\Models\PersonalizationRecommendationComponent;
 use App\Models\PersonalizationRecommendationStrategy;
+use App\Models\PersonalizationSmartCartSetting;
 use App\Models\PersonalizationStrategyVersion;
 use App\Models\Product;
 use App\Models\ProductCollection;
@@ -138,6 +139,20 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         $service = app(PersonalizationStrategyWorkflowService::class);
         $live = $this->publishedStrategy($service, $store, $actor, 'Live', '301', 'cart_page');
         $componentId = $live->components()->sole()->id;
+        $smartCart = PersonalizationSmartCartSetting::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'strategy_id' => $live->id,
+            'enabled' => true,
+            'compatibility_status' => 'compatible',
+            'compatibility_checked_at' => now(),
+            'preview_confirmed_at' => now(),
+            'enabled_at' => now(),
+            'fallback_mode' => 'shopify_default',
+            'updated_by' => $actor->id,
+        ]);
+        $summary = collect($service->listing($store, $actor))->firstWhere('uuid', $live->uuid);
+        $this->assertSame('live', collect($summary['used_in'])->firstWhere('placement', 'smart_cart')['status']);
         $key = (string) Str::uuid();
 
         $deleted = $service->deleteStrategy($store, $live->uuid, $actor, $key);
@@ -146,6 +161,8 @@ class PersonalizationStrategyWorkflowTest extends TestCase
         $this->assertSame(1, $deleted['detached_component_count']);
         $this->assertDatabaseMissing('personalization_recommendation_strategies', ['id' => $live->id]);
         $this->assertDatabaseMissing('personalization_recommendation_components', ['id' => $componentId]);
+        $this->assertNull($smartCart->fresh()->strategy_id);
+        $this->assertFalse($smartCart->fresh()->enabled);
         $this->assertDatabaseHas('personalization_strategy_deletions', [
             'store_id' => $store->id,
             'strategy_uuid' => $live->uuid,

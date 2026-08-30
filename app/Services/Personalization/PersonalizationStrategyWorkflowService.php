@@ -7,6 +7,7 @@ use App\Enums\PersonalizationComponentStatus;
 use App\Enums\PersonalizationPlacement;
 use App\Enums\PersonalizationProductOverrideType;
 use App\Enums\PersonalizationRuleType;
+use App\Enums\PersonalizationSmartCartCompatibilityStatus;
 use App\Enums\PersonalizationStrategyStatus;
 use App\Enums\PersonalizationStrategyVersionStatus;
 use App\Exceptions\PersonalizationException;
@@ -14,6 +15,7 @@ use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\PersonalizationRecommendationComponent;
 use App\Models\PersonalizationRecommendationStrategy;
+use App\Models\PersonalizationSmartCartSetting;
 use App\Models\PersonalizationStrategyProductOverride;
 use App\Models\PersonalizationStrategyRule;
 use App\Models\PersonalizationStrategyVersion;
@@ -38,7 +40,7 @@ class PersonalizationStrategyWorkflowService
         $query = PersonalizationRecommendationStrategy::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
-            ->with(['publishedVersion', 'versions' => fn ($query) => $query->limit(2), 'components'])
+            ->with(['publishedVersion', 'versions' => fn ($query) => $query->limit(2), 'components', 'smartCartSetting'])
             ->withoutTrashed()
             ->when($search !== '', fn ($query) => $query->where('name', 'like', '%'.addcslashes($search, '%_\\').'%'))
             ->orderByDesc('updated_at')
@@ -133,7 +135,7 @@ class PersonalizationStrategyWorkflowService
         }
 
         return [
-            'strategy' => $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions'])),
+            'strategy' => $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions', 'smartCartSetting'])),
             'draft' => $this->versionPayload($version),
             'versions' => $this->versions($store, $strategy, $actor),
         ];
@@ -296,7 +298,7 @@ class PersonalizationStrategyWorkflowService
             return $draft;
         });
 
-        return ['strategy' => $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions'])), 'published_version' => $this->versionPayload($published)];
+        return ['strategy' => $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions', 'smartCartSetting'])), 'published_version' => $this->versionPayload($published)];
     }
 
     /** @return array<string, mixed> */
@@ -355,7 +357,7 @@ class PersonalizationStrategyWorkflowService
         });
         $this->audit($store, $actor, $strategy, 'personalization_strategy_disabled', []);
 
-        return $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions']));
+        return $this->summary($strategy->fresh(['publishedVersion', 'components', 'versions', 'smartCartSetting']));
     }
 
     /** @return array{deleted: bool, already_deleted: bool, detached_component_count: int} */
@@ -397,11 +399,18 @@ class PersonalizationStrategyWorkflowService
                 ->lockForUpdate()
                 ->get();
             $componentCount = $components->count();
+            $smartCart = PersonalizationSmartCartSetting::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('strategy_id', $strategy->id)
+                ->lockForUpdate()
+                ->first();
 
             $this->audit($store, $actor, $strategy, 'personalization_strategy_deleted', [
                 'strategy_uuid' => $strategy->uuid,
                 'strategy_name' => $strategy->name,
                 'detached_component_count' => $componentCount,
+                'smart_cart_detached' => (bool) $smartCart,
                 'irreversible' => true,
             ]);
             DB::table('personalization_strategy_deletions')->insert([
@@ -424,6 +433,17 @@ class PersonalizationStrategyWorkflowService
             foreach ($components as $component) {
                 $component->style()->delete();
                 $component->forceDelete();
+            }
+            if ($smartCart) {
+                $smartCart->forceFill([
+                    'strategy_id' => null,
+                    'enabled' => false,
+                    'enabled_at' => null,
+                    'disabled_at' => now(),
+                    'preview_confirmed_at' => null,
+                    'fallback_mode' => 'shopify_default',
+                    'updated_by' => $actor->id,
+                ])->save();
             }
             $strategy->forceFill([
                 'enabled' => false,
@@ -547,12 +567,26 @@ class PersonalizationStrategyWorkflowService
                 PersonalizationComponentStatus::Draft => 'configured_not_enabled',
                 default => 'disabled',
             },
-        ])->values()->all();
+        ])->values();
+        $smartCart = $strategy->relationLoaded('smartCartSetting')
+            ? $strategy->smartCartSetting
+            : $strategy->smartCartSetting()->first();
+        if ($smartCart) {
+            $usages->push([
+                'component_uuid' => $smartCart->uuid,
+                'name' => 'Smart Cart',
+                'placement' => PersonalizationPlacement::SmartCart->value,
+                'status' => $smartCart->compatibility_status === PersonalizationSmartCartCompatibilityStatus::Incompatible
+                    ? 'configuration_error'
+                    : ($smartCart->enabled ? 'live' : 'configured_not_enabled'),
+            ]);
+        }
         $status = $strategy->deleted_at
             ? PersonalizationStrategyStatus::Archived->value
             : ($components->contains(fn (PersonalizationRecommendationComponent $component): bool => $component->configuration_status !== 'valid')
+                || $smartCart?->compatibility_status === PersonalizationSmartCartCompatibilityStatus::Incompatible
                 ? PersonalizationStrategyStatus::ConfigurationError->value
-                : $strategy->status->value);
+                : ($smartCart?->enabled ? PersonalizationStrategyStatus::Enabled->value : $strategy->status->value));
         $draft = $strategy->versions->first(fn (PersonalizationStrategyVersion $version): bool => $version->status === PersonalizationStrategyVersionStatus::Draft);
         $recommendationRule = data_get($draft?->configuration, 'recommendation_rule')
             ?? data_get($strategy->settings, 'recommendation_rule')
@@ -571,7 +605,7 @@ class PersonalizationStrategyWorkflowService
             'recommendation_mode' => $recommendationRule['mode'] ?? 'preset',
             'custom_rule_count' => count($recommendationRule['custom']['rules'] ?? []),
             'item_limit' => $draft?->item_limit ?? $strategy->item_limit,
-            'used_in' => $usages,
+            'used_in' => $usages->all(),
             'created_at' => $strategy->created_at?->toIso8601String(),
             'updated_at' => ($draft?->updated_at ?? $strategy->updated_at)?->toIso8601String(),
             'published_version' => $strategy->publishedVersion ? [

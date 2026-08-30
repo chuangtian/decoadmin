@@ -68,6 +68,16 @@
   cursor: pointer;
 }
 
+.deco-smart-cart__status:not(:empty) {
+  margin: 12px 0 0;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .deco-smart-cart__line {
   display: grid;
   grid-template-columns: 80px minmax(0, 1fr) auto;
@@ -127,6 +137,7 @@
 .deco-smart-cart__recommendation-heading {
   margin-top: 24px;
   font-size: 16px;
+  text-align: center;
 }
 
 .deco-smart-cart__recommendations {
@@ -136,24 +147,77 @@
 }
 
 .deco-smart-cart__recommendation {
-  display: flex;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 10px 12px;
 }
 
+.deco-smart-cart__recommendation-image {
+  display: block;
+  width: 88px;
+  height: 88px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  object-fit: cover;
+}
+
+.deco-smart-cart__recommendation-details {
+  min-width: 0;
+}
+
 .deco-smart-cart__recommendation a {
+  display: block;
   color: #111827;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   text-decoration: none;
 }
 
 .deco-smart-cart__recommendation button {
+  min-width: 64px;
   padding: 5px 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.deco-smart-cart__recommendation-variant,
+.deco-smart-cart__recommendation-offer,
+.deco-smart-cart__recommendation-price {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.deco-smart-cart__recommendation-variant {
+  color: #64748b;
+}
+
+.deco-smart-cart__recommendation-offer {
+  color: #15803d;
+  font-weight: 650;
+}
+
+.deco-smart-cart__recommendation-prices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.deco-smart-cart__recommendation-prices s {
+  color: #64748b;
+}
+
+.deco-smart-cart__recommendation-prices strong {
+  color: #111827;
 }
 
 .deco-smart-cart__footer {
@@ -193,6 +257,21 @@
 @media (max-width: 520px) {
   .deco-smart-cart__panel {
     width: 100%;
+  }
+
+  .deco-smart-cart__recommendation {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .deco-smart-cart__recommendation-image {
+    width: 72px;
+    height: 72px;
+  }
+
+  .deco-smart-cart__recommendation button {
+    min-width: 56px;
+    padding-inline: 9px;
   }
 }
 
