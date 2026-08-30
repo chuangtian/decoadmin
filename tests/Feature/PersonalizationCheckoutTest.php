@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Models\User;
 use App\Services\Personalization\PersonalizationCheckoutService;
 use App\Services\Personalization\PersonalizationConfigurationService;
+use App\Services\Personalization\PersonalizationStrategyWorkflowService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -66,6 +67,49 @@ class PersonalizationCheckoutTest extends TestCase
             'store_id' => $store->id,
             'user_id' => $admin->id,
         ]);
+    }
+
+    public function test_strategy_autosave_keeps_checkout_binding_and_updates_its_version(): void
+    {
+        [$admin, $organization, $store] = $this->context('Checkout Autosave');
+        $product = $this->product($organization, $store, 151);
+        $strategy = $this->checkoutStrategy($store, $admin, $product);
+        $checkout = app(PersonalizationCheckoutService::class);
+        $setting = $checkout->save($store, $admin, [
+            'strategy_uuid' => $strategy->uuid,
+            'trust_items' => $checkout->defaultTrustItems(),
+        ]);
+        $componentId = $setting->component_id;
+
+        $workflow = app(PersonalizationStrategyWorkflowService::class);
+        $editor = $workflow->editor($store, $strategy->fresh(), $admin);
+        $draft = $editor['draft'];
+        $draft['configuration']['placements'] = [];
+        $draft['configuration']['discount'] = [
+            'enabled' => true,
+            'reference' => 'gid://shopify/DiscountCodeNode/151',
+            'title' => '九折优惠',
+            'summary' => '10% off',
+            'code' => 'DECO10',
+            'status' => 'active',
+            'percentage' => 10,
+            'validated_at' => now()->toIso8601String(),
+        ];
+        $saved = $workflow->autosave($store, $strategy->fresh(), $admin, [
+            'idempotency_key' => (string) Str::uuid(),
+            'lock_version' => $draft['lock_version'],
+            'draft' => $draft,
+        ]);
+
+        $component = $setting->fresh()->component;
+        $this->assertNotNull($component);
+        $this->assertSame($componentId, $component->id);
+        $this->assertSame('active', $component->status->value);
+        $this->assertSame(
+            $saved['draft']['uuid'],
+            $component->strategyVersion()->value('uuid'),
+        );
+        $this->assertTrue($checkout->storefront($store)['enabled']);
     }
 
     public function test_checkout_rejects_cross_store_strategy_and_permanent_denied_store(): void

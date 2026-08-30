@@ -188,10 +188,17 @@ class PersonalizationStrategyWorkflowService
             // Saving this compact form updates the strategy configuration. It
             // never creates a page binding; components remain the sole control
             // over whether a placement is visible to shoppers.
-            $this->applySnapshot($store, $lockedStrategy, $draft, $actor, false);
+            $this->applySnapshot($store, $lockedStrategy, $draft, $actor, false, false);
             $hasLiveComponent = $lockedStrategy->components()
                 ->where('status', PersonalizationComponentStatus::Active->value)
                 ->exists();
+            $lockedStrategy->components()
+                ->where('status', PersonalizationComponentStatus::Active->value)
+                ->update([
+                    'strategy_version_id' => $draft->id,
+                    'updated_by' => $actor->id,
+                    'updated_at' => now(),
+                ]);
             $settings = is_array($lockedStrategy->settings) ? $lockedStrategy->settings : [];
             $settings['discount'] = $normalized['configuration']['discount'];
             $settings['recommendation_rule'] = $normalized['configuration']['recommendation_rule'];
@@ -264,7 +271,7 @@ class PersonalizationStrategyWorkflowService
             if ($previous) {
                 $previous->forceFill(['status' => PersonalizationStrategyVersionStatus::Superseded])->save();
             }
-            $this->applySnapshot($store, $lockedStrategy, $draft, $actor, $confirmReplacements);
+            $this->applySnapshot($store, $lockedStrategy, $draft, $actor, $confirmReplacements, true);
             $draft->forceFill([
                 'status' => PersonalizationStrategyVersionStatus::Published,
                 'published_by' => $actor->id,
@@ -1261,6 +1268,7 @@ class PersonalizationStrategyWorkflowService
         PersonalizationStrategyVersion $version,
         User $actor,
         bool $replaceConflicts,
+        bool $syncPlacements,
     ): void {
         $configuration = $version->configuration;
         $strategy->rules()->delete();
@@ -1308,6 +1316,15 @@ class PersonalizationStrategyWorkflowService
             ?? $this->defaultConfiguration()['recommendation_rule'];
         $settings['discount'] = $configuration['discount'] ?? ['enabled' => false, 'reference' => null];
         $strategy->forceFill(['settings' => $settings])->save();
+
+        // The compact strategy editor does not own page or extension bindings.
+        // Autosave may change rules, products, or discounts, but only the
+        // placement-specific configuration flow may create, disable, or delete
+        // components. This keeps a live Checkout binding intact when the
+        // merchant edits its strategy after selecting it in global settings.
+        if (! $syncPlacements) {
+            return;
+        }
 
         $configuredPlacements = [];
         foreach ($configuration['placements'] ?? [] as $placement) {
