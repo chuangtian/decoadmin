@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {configurationEndpoint, normalizeConfiguration} from './runtime.mjs';
 
@@ -23,4 +24,11 @@ test('trust configuration remains off and bounded without valid enabled items', 
   }))});
   assert.equal(value.trust_items.length, 5);
   assert.equal(value.trust_items[0].title, 'Trust 5');
+});
+
+test('trust block uses supported checkout section and grid components', async () => {
+  const source = await readFile(new URL('./TrustBadges.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<s-section>/);
+  assert.match(source, /<s-grid/);
+  assert.match(source, /accessibilityLabel="Checkout trust information"/);
 });

@@ -29,14 +29,20 @@ function TrustBadges() {
   if (!configuration) return null;
 
   return (
-    <s-grid gridTemplateColumns={`repeat(${Math.min(configuration.trust_items.length, 3)}, 1fr)`} gap="base">
-      {configuration.trust_items.map((item) => (
-        <s-stack key={item.key} alignItems="center" gap="small-200">
-          <s-icon type={item.icon} size="large" tone="neutral" />
-          <s-heading>{item.title}</s-heading>
-          {item.description ? <s-text type="small">{item.description}</s-text> : null}
-        </s-stack>
-      ))}
-    </s-grid>
+    <s-section>
+      <s-grid
+        accessibilityLabel="Checkout trust information"
+        gridTemplateColumns={`repeat(${Math.min(configuration.trust_items.length, 3)}, 1fr)`}
+        gap="base"
+      >
+        {configuration.trust_items.map((item) => (
+          <s-stack key={item.key} alignItems="center" gap="small-200">
+            <s-icon type={item.icon} size="large" tone="neutral" />
+            <s-heading>{item.title}</s-heading>
+            {item.description ? <s-text type="small">{item.description}</s-text> : null}
+          </s-stack>
+        ))}
+      </s-grid>
+    </s-section>
   );
 }
