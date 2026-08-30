@@ -33,6 +33,7 @@ function Recommendations() {
   const [configurationLoaded, setConfigurationLoaded] = useState(false);
   const [recommendationsLoaded, setRecommendationsLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
   const [lastCandidate, setLastCandidate] = useState(null);
   const [dismissed, setDismissed] = useState(() => new Set());
   const [shown, setShown] = useState(() => new Set());
@@ -62,6 +63,7 @@ function Recommendations() {
     setRecommendationsLoaded(false);
     setConfiguration(null);
     setCandidates([]);
+    setAdvancing(false);
     setLastCandidate(null);
     fetchConfiguration(shopify, configurationMetafields)
       .then((value) => { if (active) setConfiguration(value); })
@@ -89,13 +91,14 @@ function Recommendations() {
         if (generation !== requestGeneration.current) return;
         setRecommendationsLoaded(true);
         setRefreshing(false);
+        setAdvancing(false);
       });
   }, [configuration, lineSignature]);
 
   const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
     : null, [candidates, configuration, dismissed, lineSignature]);
-  const displayedCandidate = current ?? ((busy || refreshing) ? lastCandidate : null);
+  const displayedCandidate = current ?? ((busy || refreshing || advancing) ? lastCandidate : null);
 
   useEffect(() => {
     if (current) setLastCandidate(current);
@@ -109,10 +112,10 @@ function Recommendations() {
   }, [configuration, current]);
 
   useEffect(() => {
-    if (!recommendationsLoaded || refreshing || !configuration || current || completionRef.current) return;
+    if (!recommendationsLoaded || refreshing || advancing || !configuration || current || completionRef.current) return;
     completionRef.current = true;
     publish(EVENTS.sequenceCompleted, eventPayload(configuration, candidates.filter((candidate) => shown.has(candidate.variant_id))));
-  }, [candidates, configuration, current, recommendationsLoaded, refreshing, shown]);
+  }, [advancing, candidates, configuration, current, recommendationsLoaded, refreshing, shown]);
 
   async function refreshRecommendations(activeConfiguration, activeLines) {
     return fetchRecommendations(shopify, activeConfiguration, activeLines, {
@@ -126,6 +129,7 @@ function Recommendations() {
     if (!configuration || !current || busyRef.current || !canAdd) return;
     busyRef.current = true;
     setBusy(true);
+    setAdvancing(true);
     setError('');
     publish(EVENTS.click, eventPayload(configuration, [current]));
     try {
@@ -154,6 +158,7 @@ function Recommendations() {
       publish(EVENTS.addSuccess, eventPayload(configuration, [current]));
       setDismissed((previous) => new Set([...previous, current.variant_id]));
     } catch {
+      setAdvancing(false);
       setError('This item could not be added. Please try again.');
       publish(EVENTS.addFailed, eventPayload(configuration, [current]));
     } finally {
@@ -192,8 +197,8 @@ function Recommendations() {
             </s-stack>
             <s-button
               variant="primary"
-              disabled={busy || refreshing || !canAdd || !current}
-              loading={busy || (refreshing && !current)}
+              disabled={busy || refreshing || advancing || !canAdd || !current}
+              loading={busy || advancing || (refreshing && !current)}
               onClick={addCurrent}
             >
               {configuration.component.button_label}

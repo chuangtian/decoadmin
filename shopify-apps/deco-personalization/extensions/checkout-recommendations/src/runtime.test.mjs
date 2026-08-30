@@ -75,13 +75,15 @@ test('cached candidates advance immediately when the Shopify cart line updates',
 
 test('candidate row advances without unmounting during background revalidation', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
+  assert.match(source, /const \[advancing, setAdvancing\] = useState\(false\)/);
   assert.match(source, /const \[lastCandidate, setLastCandidate\] = useState\(null\)/);
-  assert.match(source, /const displayedCandidate = current \?\? \(\(busy \|\| refreshing\) \? lastCandidate : null\)/);
+  assert.match(source, /const displayedCandidate = current \?\? \(\(busy \|\| refreshing \|\| advancing\) \? lastCandidate : null\)/);
+  assert.match(source, /setBusy\(true\);\s*setAdvancing\(true\);/);
   assert.match(source, /<s-grid key=\{displayedCandidate\.variant_id\}/);
   assert.match(source, /const \[refreshing, setRefreshing\] = useState\(false\)/);
   assert.match(source, /setRefreshing\(true\);/);
   assert.match(source, /if \(!configurationLoaded \|\| !recommendationsLoaded \|\| !configuration \|\| !displayedCandidate\) return null/);
-  assert.match(source, /loading=\{busy \|\| \(refreshing && !current\)\}/);
+  assert.match(source, /loading=\{busy \|\| advancing \|\| \(refreshing && !current\)\}/);
   assert.match(source, /<s-box paddingInline="large-200">/);
   assert.match(source, /<s-stack alignItems="center">/);
   assert.match(source, /fetchRecommendations\(shopify/);
