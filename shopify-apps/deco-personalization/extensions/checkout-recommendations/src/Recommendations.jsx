@@ -84,9 +84,14 @@ function Recommendations() {
       .then((items) => {
         if (generation !== requestGeneration.current) return;
         setCandidates(items);
+        setLastCandidate(selectNextCandidate(items, lines, dismissed));
         completionRef.current = false;
       })
-      .catch(() => { if (generation === requestGeneration.current) setCandidates([]); })
+      .catch(() => {
+        if (generation !== requestGeneration.current) return;
+        setCandidates([]);
+        setLastCandidate(null);
+      })
       .finally(() => {
         if (generation !== requestGeneration.current) return;
         setRecommendationsLoaded(true);
@@ -98,11 +103,7 @@ function Recommendations() {
   const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
     : null, [candidates, configuration, dismissed, lineSignature]);
-  const displayedCandidate = current ?? ((busy || refreshing || advancing) ? lastCandidate : null);
-
-  useEffect(() => {
-    if (current) setLastCandidate(current);
-  }, [current]);
+  const displayedCandidate = current ?? lastCandidate;
 
   useEffect(() => {
     if (!configuration || !current || impressionRef.current === current.variant_id) return;
