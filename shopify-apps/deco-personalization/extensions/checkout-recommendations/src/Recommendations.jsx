@@ -30,7 +30,9 @@ export default function extension() {
 function Recommendations() {
   const [configuration, setConfiguration] = useState(null);
   const [candidates, setCandidates] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const [configurationLoaded, setConfigurationLoaded] = useState(false);
+  const [recommendationsLoaded, setRecommendationsLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [dismissed, setDismissed] = useState(() => new Set());
   const [shown, setShown] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
@@ -55,18 +57,25 @@ function Recommendations() {
 
   useEffect(() => {
     let active = true;
-    setLoaded(false);
+    setConfigurationLoaded(false);
+    setRecommendationsLoaded(false);
+    setConfiguration(null);
+    setCandidates([]);
     fetchConfiguration(shopify, configurationMetafields)
       .then((value) => { if (active) setConfiguration(value); })
       .catch(() => { if (active) setConfiguration(null); })
-      .finally(() => { if (active) setLoaded(true); });
+      .finally(() => { if (active) setConfigurationLoaded(true); });
     return () => { active = false; };
   }, [configurationMetafields]);
 
   useEffect(() => {
-    if (!configuration) { setCandidates([]); return; }
+    if (!configuration) {
+      requestGeneration.current += 1;
+      setRefreshing(false);
+      return;
+    }
     const generation = ++requestGeneration.current;
-    setLoaded(false);
+    setRefreshing(true);
     refreshRecommendations(configuration, lines)
       .then((items) => {
         if (generation !== requestGeneration.current) return;
@@ -74,7 +83,11 @@ function Recommendations() {
         completionRef.current = false;
       })
       .catch(() => { if (generation === requestGeneration.current) setCandidates([]); })
-      .finally(() => { if (generation === requestGeneration.current) setLoaded(true); });
+      .finally(() => {
+        if (generation !== requestGeneration.current) return;
+        setRecommendationsLoaded(true);
+        setRefreshing(false);
+      });
   }, [configuration, lineSignature]);
 
   const current = useMemo(() => configuration
@@ -89,10 +102,10 @@ function Recommendations() {
   }, [configuration, current]);
 
   useEffect(() => {
-    if (!loaded || !configuration || current || completionRef.current) return;
+    if (!recommendationsLoaded || refreshing || !configuration || current || completionRef.current) return;
     completionRef.current = true;
     publish(EVENTS.sequenceCompleted, eventPayload(configuration, candidates.filter((candidate) => shown.has(candidate.variant_id))));
-  }, [candidates, configuration, current, loaded, shown]);
+  }, [candidates, configuration, current, recommendationsLoaded, refreshing, shown]);
 
   async function refreshRecommendations(activeConfiguration, activeLines) {
     return fetchRecommendations(shopify, activeConfiguration, activeLines, {
@@ -142,36 +155,40 @@ function Recommendations() {
     }
   }
 
-  if (!configuration || !loaded || !current) return null;
+  if (!configurationLoaded || !recommendationsLoaded || !configuration || !current) return null;
 
   return (
     <s-section>
-      <s-stack gap="base">
-        <s-heading>{configuration.component.heading}</s-heading>
-        {error ? <s-banner tone="critical">{error}</s-banner> : null}
-        <s-grid key={current.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
-          {current.image_url
-            ? <s-image src={current.image_url} alt={current.image_alt || current.title} aspectRatio="1" />
-            : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}
-          <s-stack gap="small-200">
-            <s-heading>{current.title}</s-heading>
-            {current.variant_title && current.variant_title !== 'Default Title'
-              ? <s-text type="small">{current.variant_title}</s-text>
-              : null}
-            {current.discount?.percentage && current.discounted_amount
-              ? <s-stack gap="small-100">
-                  <s-text tone="neutral">Original {current.currency} {current.amount}</s-text>
-                  <s-text tone="success">{current.discount.percentage}% off</s-text>
-                  <s-text>Now {current.currency} {current.discounted_amount}</s-text>
-                  {current.discount.code ? <s-text tone="success">Code {current.discount.code}</s-text> : null}
-                </s-stack>
-              : <s-text>{current.currency} {current.amount}</s-text>}
+      <s-box paddingInline="large-200">
+        <s-stack gap="base">
+          <s-stack alignItems="center">
+            <s-heading>{configuration.component.heading}</s-heading>
           </s-stack>
-          <s-button variant="primary" disabled={busy || !canAdd} loading={busy} onClick={addCurrent}>
-            {configuration.component.button_label}
-          </s-button>
-        </s-grid>
-      </s-stack>
+          {error ? <s-banner tone="critical">{error}</s-banner> : null}
+          <s-grid key={current.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
+            {current.image_url
+              ? <s-image src={current.image_url} alt={current.image_alt || current.title} aspectRatio="1" />
+              : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}
+            <s-stack gap="small-200">
+              <s-heading>{current.title}</s-heading>
+              {current.variant_title && current.variant_title !== 'Default Title'
+                ? <s-text type="small">{current.variant_title}</s-text>
+                : null}
+              {current.discount?.percentage && current.discounted_amount
+                ? <s-stack gap="small-100">
+                    <s-text tone="neutral">Original {current.currency} {current.amount}</s-text>
+                    <s-text tone="success">{current.discount.percentage}% off</s-text>
+                    <s-text>Now {current.currency} {current.discounted_amount}</s-text>
+                    {current.discount.code ? <s-text tone="success">Code {current.discount.code}</s-text> : null}
+                  </s-stack>
+                : <s-text>{current.currency} {current.amount}</s-text>}
+            </s-stack>
+            <s-button variant="primary" disabled={busy || !canAdd} loading={busy} onClick={addCurrent}>
+              {configuration.component.button_label}
+            </s-button>
+          </s-grid>
+        </s-stack>
+      </s-box>
     </s-section>
   );
 }

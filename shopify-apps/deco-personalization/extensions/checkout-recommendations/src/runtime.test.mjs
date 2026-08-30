@@ -52,9 +52,35 @@ test('sequential selection continues beyond three products until every eligible 
   assert.equal(selectNextCandidate(candidates, [], dismissed), null);
 });
 
-test('candidate row remounts and reacts to Shopify cart and instruction changes', async () => {
+test('cached candidates advance immediately when the Shopify cart line updates', () => {
+  const candidates = [{
+    product_id: 'gid://shopify/Product/1',
+    variant_id: 'gid://shopify/ProductVariant/101',
+    available: true,
+  }, {
+    product_id: 'gid://shopify/Product/2',
+    variant_id: 'gid://shopify/ProductVariant/102',
+    available: true,
+  }];
+  const lines = [{
+    quantity: 1,
+    merchandise: {
+      id: candidates[0].variant_id,
+      product: {id: candidates[0].product_id},
+    },
+  }];
+
+  assert.equal(selectNextCandidate(candidates, lines)?.variant_id, candidates[1].variant_id);
+});
+
+test('candidate row advances without unmounting during background revalidation', async () => {
   const source = await readFile(new URL('./Recommendations.jsx', import.meta.url), 'utf8');
   assert.match(source, /<s-grid key=\{current\.variant_id\}/);
+  assert.match(source, /const \[refreshing, setRefreshing\] = useState\(false\)/);
+  assert.match(source, /setRefreshing\(true\);/);
+  assert.match(source, /if \(!configurationLoaded \|\| !recommendationsLoaded \|\| !configuration \|\| !current\) return null/);
+  assert.match(source, /<s-box paddingInline="large-200">/);
+  assert.match(source, /<s-stack alignItems="center">/);
   assert.match(source, /fetchRecommendations\(shopify/);
   assert.match(source, /quantity: current\.minimum_purchase_quantity/);
   assert.match(source, /useCartLines\(\)/);
@@ -62,6 +88,7 @@ test('candidate row remounts and reacts to Shopify cart and instruction changes'
   assert.match(source, /useDiscountCodes\(\)/);
   assert.match(source, /useApplyCartLinesChange\(\)/);
   assert.match(source, /useApplyDiscountCodeChange\(\)/);
+  assert.doesNotMatch(source, /setRecommendationsLoaded\(false\);\s*refreshRecommendations/);
   assert.doesNotMatch(source, /shopify\.lines\.value/);
 });
 
