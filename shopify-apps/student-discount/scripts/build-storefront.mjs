@@ -8,7 +8,7 @@ const sourcePath = path.join(appRoot, 'scripts/student-discount-storefront.js');
 const assetsPath = path.join(appRoot, 'extensions/student-discount-block/assets');
 const source = await readFile(sourcePath, 'utf8');
 const result = await minify(source, {
-  compress: {passes: 3, toplevel: true},
+  compress: {passes: 3, toplevel: true, unsafe: true, unsafe_arrows: true},
   mangle: {toplevel: true},
   format: {comments: false},
 });
