@@ -6,6 +6,7 @@ use App\Exceptions\StudentDiscountException;
 use App\Models\StudentDiscountClaim;
 use App\Services\StudentDiscount\StudentDiscountClaimService;
 use App\Services\StudentDiscount\StudentDiscountCodeService;
+use App\Services\StudentDiscount\StudentDiscountEmailTemplateService;
 use App\Services\StudentDiscount\StudentDiscountPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,7 @@ class PublicStudentDiscountController extends Controller
     public function __construct(
         private StudentDiscountClaimService $claims,
         private StudentDiscountCodeService $codes,
+        private StudentDiscountEmailTemplateService $emailTemplates,
         private StudentDiscountPresenter $presenter,
     ) {}
 
@@ -83,6 +85,7 @@ class PublicStudentDiscountController extends Controller
             'environment' => (string) config('student_discount.environment'),
             'shop' => $store->shopify_domain,
             'campaign_enabled' => (bool) $campaign?->enabled,
+            'support_page_url' => $campaign ? $this->emailTemplates->supportPageUrl($campaign, $store) : null,
             'proxy_path' => $proxyPath,
             'claim_endpoint' => rtrim($proxyPath, '/').'/claims',
         ]]);

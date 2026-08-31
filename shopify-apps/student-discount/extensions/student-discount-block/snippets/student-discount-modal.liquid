@@ -35,6 +35,10 @@ Renders the student discount verification dialog for an app block.
           <p>{{ 'student_discount.modal.id_method_help' | t }}</p>
         </div>
       </div>
+      <div class="student-discount-dialog__support" data-sd-support hidden>
+        <a class="student-discount-dialog__support-link" data-sd-support-link>{{ 'student_discount.modal.contact_us' | t }}</a>
+        <p>{{ 'student_discount.modal.support_prompt' | t }}</p>
+      </div>
     </div>
 
     <div data-sd-view="email" hidden>
