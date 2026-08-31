@@ -182,6 +182,38 @@ class StudentDiscountTest extends TestCase
         $this->assertDatabaseCount('student_discount_claims', 0);
     }
 
+    public function test_public_campaign_info_exposes_only_the_current_store_safe_support_page_url(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        $campaign = $this->campaign($organization, $store, [
+            'enabled' => true,
+            'email_templates' => [
+                'branding' => ['support_url' => 'https://support.example.com/student-discount'],
+            ],
+        ]);
+        config([
+            'student_discount.active.client_secret' => 'proxy-shared-secret',
+            'student_discount.active.proxy_path' => '/apps/student-discount',
+        ]);
+        $url = fn (): string => $this->signedProxyUrl(
+            route('student-discounts.public.info'),
+            $store->shopify_domain,
+        );
+
+        $this->getJson($url())
+            ->assertOk()
+            ->assertJsonPath('data.support_page_url', 'https://support.example.com/student-discount')
+            ->assertJsonMissingPath('data.email_templates');
+
+        $campaign->forceFill([
+            'email_templates' => ['branding' => ['support_url' => 'javascript:alert(1)']],
+        ])->save();
+
+        $this->getJson($url())
+            ->assertOk()
+            ->assertJsonPath('data.support_page_url', null);
+    }
+
     public function test_submission_rate_limit_runs_after_verified_store_resolution_and_isolated_by_store_and_ip(): void
     {
         [, $organization, $store] = $this->context('store-admin');

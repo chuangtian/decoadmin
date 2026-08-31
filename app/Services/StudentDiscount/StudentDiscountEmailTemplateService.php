@@ -84,6 +84,27 @@ class StudentDiscountEmailTemplateService
         ];
     }
 
+    public function supportPageUrl(StudentDiscountCampaign $campaign, Store $store): ?string
+    {
+        abort_unless(
+            $campaign->organization_id === $store->organization_id && $campaign->store_id === $store->id,
+            403,
+        );
+
+        $url = trim((string) data_get(
+            $this->normalizedConfiguration($campaign->email_templates),
+            'branding.support_url',
+            '',
+        ));
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false || ! in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        return $url;
+    }
+
     /** @param array<string, mixed> $configuration */
     public function update(Organization $organization, Store $store, StudentDiscountCampaign $campaign, array $configuration, User $actor): StudentDiscountCampaign
     {
