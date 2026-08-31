@@ -29,6 +29,8 @@
       "email_method_help": "Use an eligible education email address to receive a code immediately.",
       "id_method": "Verify with student ID",
       "id_method_help": "Upload one student ID image for automatic or manual review.",
+      "contact_us": "Contact Us",
+      "support_prompt": "Still haven't received your discount code or having trouble getting verified?",
       "email_title": "Get student discount",
       "email_lead": "Enter the email address provided by your educational institution.",
       "school_email": "School email address",

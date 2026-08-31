@@ -4,7 +4,7 @@
   const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   const PUBLIC_LOCALE = 'en-US';
-  const INITIALIZER_VERSION = '3';
+  const INITIALIZER_VERSION = '4';
   const INVALID_RESPONSE_MESSAGE = 'The student discount service returned an invalid response. Please try again later.';
   const REVIEW_SUBMITTED_MESSAGE = 'Your request has been submitted. We will email you when the review is complete.';
   const STATUS_LABELS = {
@@ -66,6 +66,7 @@
     const openIdButton = dialog.querySelector('[data-sd-open-id]');
     const selectEmailButton = dialog.querySelector('[data-sd-select-email]');
     const selectIdButton = dialog.querySelector('[data-sd-select-id]');
+    const supportLink = dialog.querySelector('[data-sd-support-link]');
     const studentIdForm = dialog.querySelector('[data-sd-id-form]');
     const studentIdInput = studentIdForm.querySelector('input[name="studentId"]');
     const preview = dialog.querySelector('[data-sd-id-preview]');
@@ -227,6 +228,10 @@
             throw new Error(payload.message || 'Student discount is currently unavailable.');
           }
           campaign = payload;
+          if (payload.support_page_url && supportLink) {
+            supportLink.href = payload.support_page_url;
+            supportLink.parentElement.hidden = false;
+          }
         } catch (error) {
           showSubmission(
             'Student discount unavailable',
