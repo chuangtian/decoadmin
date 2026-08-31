@@ -49,6 +49,7 @@ class PersonalizationCheckoutExtensionController extends Controller
                 'cart_lines' => $request->input('cart_lines', []),
                 'current_product_id' => $request->input('current_product_id'),
                 'order_product_ids' => $request->input('order_product_ids', []),
+                'cart_subtotal_amount' => $request->input('cart_subtotal_amount'),
                 'market' => $request->input('market', ''),
                 'currency' => $request->input('currency', ''),
                 'language' => $request->input('language', ''),

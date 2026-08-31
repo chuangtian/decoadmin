@@ -5,6 +5,7 @@ import {
   EVENTS,
   configurationEndpoint,
   eventPayload,
+  fetchRecommendations,
   formatMoney,
   normalizeConfiguration,
   normalizeServiceRecommendations,
@@ -33,6 +34,27 @@ test('configuration uses one backend strategy binding without merchant collectio
     component: configuration.component,
     recommendations_url: 'https://test.example/admin',
   }), null);
+});
+
+test('checkout recommendation requests include a bounded cart subtotal for free-shipping upsells', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (_endpoint, options) => {
+    requestBody = JSON.parse(options.body);
+    return {ok: true, json: async () => ({data: {enabled: true, items: []}})};
+  };
+  try {
+    await fetchRecommendations({sessionToken: {get: async () => 'token'}}, configuration, [], {
+      cartSubtotal: '75.25',
+      market: 'us',
+      currency: 'USD',
+      language: 'en',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestBody.cart_subtotal_amount, 75.25);
+  assert.equal('customer' in requestBody, false);
 });
 
 test('sequential selection continues beyond three products until every eligible candidate is exhausted', () => {
@@ -72,6 +94,24 @@ test('cached candidates advance immediately when the Shopify cart line updates',
   }];
 
   assert.equal(selectNextCandidate(candidates, lines)?.variant_id, candidates[1].variant_id);
+});
+
+test('same-product upsell may offer a different variant of a product already in cart', () => {
+  const candidate = {
+    product_id: 'gid://shopify/Product/1',
+    variant_id: 'gid://shopify/ProductVariant/102',
+    reason_code: 'same_product_upsell',
+    available: true,
+  };
+  const lines = [{
+    quantity: 1,
+    merchandise: {
+      id: 'gid://shopify/ProductVariant/101',
+      product: {id: candidate.product_id},
+    },
+  }];
+
+  assert.equal(selectNextCandidate([candidate], lines)?.variant_id, candidate.variant_id);
 });
 
 test('the final candidate is no longer rendered after its cart line appears', () => {

@@ -473,11 +473,19 @@ class PersonalizationController extends Controller
     {
         return match ($algorithm) {
             PersonalizationAlgorithm::Manual => '手动推荐',
+            PersonalizationAlgorithm::NextLlm => 'Next LLM（智能混合）',
+            PersonalizationAlgorithm::FreeShippingUpsell => '免费送货追加销售',
+            PersonalizationAlgorithm::SimilarProducts => '类似产品',
+            PersonalizationAlgorithm::SubstituteProducts => '替代产品',
             PersonalizationAlgorithm::BestSeller => '畅销商品',
-            PersonalizationAlgorithm::NewArrivals => '新品',
+            PersonalizationAlgorithm::NewArrivals => '新品上市',
             PersonalizationAlgorithm::FrequentlyBoughtTogether => '经常一起购买',
+            PersonalizationAlgorithm::FrequentlyViewedTogether => '经常一起查看',
+            PersonalizationAlgorithm::ComplementaryProducts => '互补产品',
             PersonalizationAlgorithm::RecentlyViewed => '最近浏览',
-            PersonalizationAlgorithm::SimilarProducts => '相似商品',
+            PersonalizationAlgorithm::CompleteTheLook => '完成造型',
+            PersonalizationAlgorithm::SameProductUpsell => '同款产品追加销售',
+            PersonalizationAlgorithm::AllProducts => '所有产品',
         };
     }
 

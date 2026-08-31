@@ -67,7 +67,7 @@ class PersonalizationManagementTest extends TestCase
                 ->where('permissions.manage', true)
                 ->where('permissions.manageSmartCart', false)
                 ->where('analytics.impressions', 0)
-                ->has('options.algorithms', 6)
+                ->has('options.algorithms', 14)
                 ->has('options.placements', 5));
 
         $preview = $this->actingAs($operator)

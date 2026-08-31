@@ -127,10 +127,11 @@ class PersonalizationRecommendationService
         }
         $excludeCart = $this->booleanRule($strategy, PersonalizationRuleType::ExcludeCartProducts, true);
         $excludePurchased = $this->booleanRule($strategy, PersonalizationRuleType::ExcludePurchasedProducts, true);
+        $allowsSameProduct = $strategy->algorithm === PersonalizationAlgorithm::SameProductUpsell;
         $contextExcluded = array_values(array_unique([
-            ...($excludeCart ? $normalizedContext['cart_product_ids'] : []),
+            ...($excludeCart && ! $allowsSameProduct ? $normalizedContext['cart_product_ids'] : []),
             ...($excludePurchased ? $normalizedContext['purchased_product_ids'] : []),
-            ...($normalizedContext['seed_product_id'] === null ? [] : [$normalizedContext['seed_product_id']]),
+            ...($allowsSameProduct || $normalizedContext['seed_product_id'] === null ? [] : [$normalizedContext['seed_product_id']]),
         ]));
 
         $debugOrderedIds = array_values(array_unique([...$pinned, ...array_keys($ranked)]));
@@ -257,11 +258,23 @@ class PersonalizationRecommendationService
             ? $settings['recommendation_rule']
             : null;
         if (($recommendationRule['mode'] ?? null) !== 'custom') {
+            $variantGids = [];
+            if ($strategy->algorithm === PersonalizationAlgorithm::SameProductUpsell) {
+                $variantGids = $this->sameProductUpsellVariantGids($store, $context);
+                $scores = $this->rankedScores(array_keys($variantGids));
+            } elseif ($strategy->algorithm === PersonalizationAlgorithm::FreeShippingUpsell) {
+                $freeShipping = $this->freeShippingUpsellSelection($store, $strategy, $context);
+                $scores = $freeShipping['scores'];
+                $variantGids = $freeShipping['variant_gids'];
+            } else {
+                $scores = $this->algorithmProductIds($store, $strategy, $context);
+            }
+
             return [
-                'scores' => $this->algorithmProductIds($store, $strategy, $context),
+                'scores' => $scores,
                 'minimum_quantities' => [],
                 'reason_codes' => [],
-                'variant_gids' => [],
+                'variant_gids' => $variantGids,
                 'rule_ids' => [],
                 'diagnostics' => [],
             ];
@@ -600,12 +613,297 @@ class PersonalizationRecommendationService
     ): array {
         return match ($strategy->algorithm) {
             PersonalizationAlgorithm::Manual => $this->manualIds($store, $strategy),
+            PersonalizationAlgorithm::NextLlm => $this->nextLlmIds($store, $context),
+            PersonalizationAlgorithm::FreeShippingUpsell => $this->freeShippingUpsellSelection($store, $strategy, $context)['scores'],
+            PersonalizationAlgorithm::SimilarProducts => $this->similarProductIds($store, $context['seed_product_id']),
+            PersonalizationAlgorithm::SubstituteProducts => $this->relatedProductIds($store, $context, 'substitute'),
             PersonalizationAlgorithm::BestSeller => $this->bestSellerIds($store),
             PersonalizationAlgorithm::NewArrivals => $this->newArrivalIds($store),
             PersonalizationAlgorithm::FrequentlyBoughtTogether => $this->frequentlyBoughtTogetherIds($store, $context),
+            PersonalizationAlgorithm::FrequentlyViewedTogether => $this->frequentlyViewedTogetherIds($store, $context),
+            PersonalizationAlgorithm::ComplementaryProducts => $this->complementaryProductIds($store, $context),
             PersonalizationAlgorithm::RecentlyViewed => $this->recentlyViewedIds($context),
-            PersonalizationAlgorithm::SimilarProducts => $this->similarProductIds($store, $context['seed_product_id']),
+            PersonalizationAlgorithm::CompleteTheLook => $this->completeTheLookIds($store, $context),
+            PersonalizationAlgorithm::SameProductUpsell => $this->rankedScores(array_keys($this->sameProductUpsellVariantGids($store, $context))),
+            PersonalizationAlgorithm::AllProducts => $this->allProductIds($store),
         };
+    }
+
+    /** @return array<string, int> */
+    private function nextLlmIds(Store $store, array $context): array
+    {
+        return $this->blendRankings([
+            [$this->frequentlyBoughtTogetherIds($store, $context), 700],
+            [$this->complementaryProductIds($store, $context), 600],
+            [$this->relatedProductIds($store, $context, 'similar'), 500],
+            [$this->recentlyViewedIds($context), 400],
+            [$this->bestSellerIds($store), 300],
+            [$this->newArrivalIds($store), 200],
+        ]);
+    }
+
+    /**
+     * @return array{scores: array<string, int>, variant_gids: array<string, string>}
+     */
+    private function freeShippingUpsellSelection(
+        Store $store,
+        PersonalizationRecommendationStrategy $strategy,
+        array $context,
+    ): array {
+        $subtotal = $context['cart_subtotal_amount'];
+        if ($subtotal === null) {
+            return ['scores' => $this->bestSellerIds($store), 'variant_gids' => []];
+        }
+        $threshold = data_get($strategy->settings, 'recommendation_rule.settings.free_shipping_threshold', 100);
+        $threshold = is_numeric($threshold) ? min(1000000, max(0.01, (float) $threshold)) : 100.0;
+        $gap = round($threshold - $subtotal, 2);
+        if ($gap <= 0) {
+            return ['scores' => [], 'variant_gids' => []];
+        }
+
+        $scores = [];
+        $variantGids = [];
+        $products = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('status', 'active')
+            ->whereNotNull('published_at_shopify')
+            ->with(['variants' => fn ($query) => $query
+                ->where('available_for_sale', true)
+                ->orderBy('price')
+                ->orderBy('id')])
+            ->whereHas('variants', fn ($query) => $query->where('available_for_sale', true))
+            ->orderByDesc('published_at_shopify')
+            ->limit(200)
+            ->get();
+
+        foreach ($products as $product) {
+            $variants = $product->variants->filter(fn ($variant): bool => is_numeric($variant->price));
+            $variant = $variants->first(fn ($candidate): bool => (float) $candidate->price >= $gap)
+                ?? $variants->last();
+            if (! $variant) {
+                continue;
+            }
+            $price = (float) $variant->price;
+            $distance = (int) round(abs($price - $gap) * 100);
+            $scores[(string) $product->shopify_product_id] = max(1, ($price >= $gap ? 2_000_000 : 1_000_000) - $distance);
+            $variantGids[(string) $product->shopify_product_id] = 'gid://shopify/ProductVariant/'.$variant->shopify_variant_id;
+        }
+        arsort($scores, SORT_NUMERIC);
+
+        return [
+            'scores' => array_slice($scores, 0, 100, true),
+            'variant_gids' => array_intersect_key($variantGids, array_slice($scores, 0, 100, true)),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function sameProductUpsellVariantGids(Store $store, array $context): array
+    {
+        $productIds = array_values(array_unique([
+            ...$context['cart_product_ids'],
+            ...($context['seed_product_id'] === null ? [] : [$context['seed_product_id']]),
+        ]));
+        if ($productIds === []) {
+            return [];
+        }
+        $currentVariants = collect($context['cart_lines'])
+            ->filter(fn (array $line): bool => $line['variant_id'] !== null)
+            ->mapWithKeys(fn (array $line): array => [$line['product_id'] => $line['variant_id']])
+            ->all();
+        $products = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', $productIds)
+            ->where('status', 'active')
+            ->whereNotNull('published_at_shopify')
+            ->with(['variants' => fn ($query) => $query
+                ->where('available_for_sale', true)
+                ->orderBy('price')
+                ->orderBy('id')])
+            ->get()
+            ->keyBy(fn (Product $product): string => (string) $product->shopify_product_id);
+
+        $result = [];
+        foreach ($productIds as $productId) {
+            $product = $products->get($productId);
+            if (! $product instanceof Product) {
+                continue;
+            }
+            $variants = $product->variants->filter(fn ($variant): bool => is_numeric($variant->price))->values();
+            $currentVariantId = $currentVariants[$productId] ?? null;
+            $base = $variants->first(fn ($variant): bool => (string) $variant->shopify_variant_id === (string) $currentVariantId)
+                ?? $variants->first();
+            if (! $base) {
+                continue;
+            }
+            $upgrade = $variants->first(fn ($variant): bool => (float) $variant->price > (float) $base->price + 0.009);
+            if ($upgrade) {
+                $result[$productId] = 'gid://shopify/ProductVariant/'.$upgrade->shopify_variant_id;
+            }
+        }
+
+        return $result;
+    }
+
+    /** @return array<string, int|float> */
+    private function complementaryProductIds(Store $store, array $context): array
+    {
+        return $this->blendRankings([
+            [$this->frequentlyBoughtTogetherIds($store, $context), 700],
+            [$this->relatedProductIds($store, $context, 'complementary'), 500],
+            [$this->bestSellerIds($store), 100],
+        ]);
+    }
+
+    /** @return array<string, int> */
+    private function frequentlyViewedTogetherIds(Store $store, array $context): array
+    {
+        $seedIds = array_values(array_unique([
+            ...$context['cart_product_ids'],
+            ...($context['seed_product_id'] === null ? [] : [$context['seed_product_id']]),
+        ]));
+        $rankings = [];
+        foreach (array_slice($seedIds, 0, 10) as $seedId) {
+            $scores = [];
+            foreach ($this->orderSignals->frequentlyViewedTogether($store, $seedId, 100) as $signal) {
+                $scores[$signal['shopify_product_id']] = ($signal['support_sessions'] * 1000) + $signal['views'];
+            }
+            if ($scores !== []) {
+                $rankings[] = [$scores, 1000];
+            }
+        }
+
+        return $rankings === []
+            ? $this->relatedProductIds($store, $context, 'similar')
+            : $this->blendRankings($rankings);
+    }
+
+    /** @return array<string, int> */
+    private function allProductIds(Store $store): array
+    {
+        $ids = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('status', 'active')
+            ->whereNotNull('published_at_shopify')
+            ->whereHas('variants', fn ($query) => $query->where('available_for_sale', true))
+            ->orderByDesc('published_at_shopify')
+            ->orderByDesc('id')
+            ->limit(100)
+            ->pluck('shopify_product_id')
+            ->map(fn ($id): string => (string) $id)
+            ->all();
+
+        return $this->rankedScores($ids);
+    }
+
+    /** @return array<string, int|float> */
+    private function completeTheLookIds(Store $store, array $context): array
+    {
+        return $this->blendRankings([
+            [$this->relatedProductIds($store, $context, 'complete_the_look'), 700],
+            [$this->frequentlyBoughtTogetherIds($store, $context), 500],
+            [$this->newArrivalIds($store), 100],
+        ]);
+    }
+
+    /** @return array<string, float> */
+    private function relatedProductIds(Store $store, array $context, string $mode): array
+    {
+        $seedIds = array_values(array_unique([
+            ...$context['cart_product_ids'],
+            ...($context['seed_product_id'] === null ? [] : [$context['seed_product_id']]),
+        ]));
+        if ($seedIds === []) {
+            return $this->bestSellerIds($store);
+        }
+        $seeds = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->whereIn('shopify_product_id', array_slice($seedIds, 0, 10))
+            ->with(['collections:id,shopify_collection_id', 'variants:id,product_id,price'])
+            ->get();
+        if ($seeds->isEmpty()) {
+            return [];
+        }
+        $candidates = Product::query()
+            ->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)
+            ->where('status', 'active')
+            ->whereNotNull('published_at_shopify')
+            ->whereNotIn('shopify_product_id', $seedIds)
+            ->with(['collections:id,shopify_collection_id', 'variants:id,product_id,price'])
+            ->whereHas('variants', fn ($query) => $query->where('available_for_sale', true))
+            ->orderByDesc('published_at_shopify')
+            ->limit(200)
+            ->get();
+
+        $scores = [];
+        foreach ($candidates as $candidate) {
+            $candidateTags = array_values($candidate->tags ?? []);
+            $candidateCollections = $candidate->collections->pluck('shopify_collection_id')->map(fn ($id): string => (string) $id)->all();
+            $candidatePrice = (float) ($candidate->variants->pluck('price')->filter()->sort(SORT_NUMERIC)->first() ?? 0);
+            $best = 0.0;
+            foreach ($seeds as $seed) {
+                $commonTags = count(array_intersect(array_values($seed->tags ?? []), $candidateTags));
+                $seedCollections = $seed->collections->pluck('shopify_collection_id')->map(fn ($id): string => (string) $id)->all();
+                $commonCollections = count(array_intersect($seedCollections, $candidateCollections));
+                $sameType = filled($seed->product_type) && $seed->product_type === $candidate->product_type;
+                $differentType = filled($seed->product_type) && filled($candidate->product_type) && ! $sameType;
+                $sameVendor = filled($seed->vendor) && $seed->vendor === $candidate->vendor;
+                $seedPrice = (float) ($seed->variants->pluck('price')->filter()->sort(SORT_NUMERIC)->first() ?? 0);
+                $priceScore = 0;
+                if ($seedPrice > 0 && $candidatePrice > 0) {
+                    $ratio = abs($candidatePrice - $seedPrice) / $seedPrice;
+                    $priceScore = $ratio <= 0.1 ? 4 : ($ratio <= 0.25 ? 2 : ($ratio <= 0.5 ? 1 : 0));
+                }
+                $score = match ($mode) {
+                    'substitute' => ($sameType ? 14 : 0) + min(3, $commonCollections) * 4 + min(5, $commonTags) * 2 + $priceScore + ($sameVendor ? 1 : 0),
+                    'complementary' => ($differentType ? 8 : 0) + min(3, $commonCollections) * 5 + min(5, $commonTags) * 2 + ($candidatePrice > 0 && $candidatePrice < $seedPrice ? 2 : 0),
+                    'complete_the_look' => ($differentType ? 10 : 0) + min(3, $commonCollections) * 6 + min(5, $commonTags) * 3 + ($sameVendor ? 2 : 0),
+                    default => ($sameType ? 4 : 0) + min(3, $commonCollections) * 2 + min(5, $commonTags) + $priceScore / 2 + ($sameVendor ? 3 : 0),
+                };
+                if (($mode === 'substitute' && ! $sameType && $commonCollections === 0 && $commonTags === 0)
+                    || (in_array($mode, ['complementary', 'complete_the_look'], true)
+                        && ! $differentType && $commonCollections === 0 && $commonTags === 0)) {
+                    $score = 0;
+                }
+                $best = max($best, (float) $score);
+            }
+            if ($best > 0) {
+                $scores[(string) $candidate->shopify_product_id] = $best;
+            }
+        }
+        arsort($scores, SORT_NUMERIC);
+
+        return array_slice($scores, 0, 100, true);
+    }
+
+    /** @param list<array{0: array<string, int|float>, 1: int}> $rankings @return array<string, int> */
+    private function blendRankings(array $rankings): array
+    {
+        $scores = [];
+        foreach ($rankings as [$ranking, $weight]) {
+            foreach (array_keys($ranking) as $position => $productId) {
+                $scores[(string) $productId] = ($scores[(string) $productId] ?? 0) + max(1, $weight - $position);
+            }
+        }
+        arsort($scores, SORT_NUMERIC);
+
+        return array_slice($scores, 0, 100, true);
+    }
+
+    /** @param list<string> $productIds @return array<string, int> */
+    private function rankedScores(array $productIds): array
+    {
+        $scores = [];
+        $total = count($productIds);
+        foreach (array_values(array_unique($productIds)) as $position => $productId) {
+            $scores[(string) $productId] = ($total - $position) * 1000;
+        }
+
+        return $scores;
     }
 
     /** @return array<string, int> */
@@ -924,7 +1222,7 @@ class PersonalizationRecommendationService
         $allowed = [
             'seed_product_id', 'current_product_id', 'cart_product_ids', 'cart_lines',
             'purchased_product_ids', 'order_product_ids', 'recently_viewed_product_ids',
-            'surface', 'placement', 'market', 'currency', 'language',
+            'cart_subtotal_amount', 'surface', 'placement', 'market', 'currency', 'language',
         ];
         if (array_diff(array_keys($context), $allowed) !== []) {
             throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '推荐上下文包含不支持的字段。');
@@ -960,6 +1258,7 @@ class PersonalizationRecommendationService
             'purchased_product_ids' => $purchasedProductIds,
             'order_context_available' => array_key_exists('purchased_product_ids', $context) || array_key_exists('order_product_ids', $context),
             'recently_viewed_product_ids' => $this->productIds($context['recently_viewed_product_ids'] ?? [], 50),
+            'cart_subtotal_amount' => $this->contextAmount($context['cart_subtotal_amount'] ?? null),
             'surface' => $surface,
             'placement' => $placement,
             'market' => $this->contextText($context['market'] ?? '', 80),
@@ -1012,6 +1311,22 @@ class PersonalizationRecommendationService
         }
 
         return $value;
+    }
+
+    private function contextAmount(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (! is_numeric($value)) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '购物车小计格式无效。');
+        }
+        $amount = (float) $value;
+        if (! is_finite($amount) || $amount < 0 || $amount > 1_000_000) {
+            throw new PersonalizationException('INVALID_RECOMMENDATION_CONTEXT', '购物车小计超出允许范围。');
+        }
+
+        return round($amount, 2);
     }
 
     private function booleanRule(

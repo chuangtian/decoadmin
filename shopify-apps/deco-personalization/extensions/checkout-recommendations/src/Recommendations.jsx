@@ -129,6 +129,7 @@ function Recommendations() {
     return fetchRecommendations(shopify, activeConfiguration, activeLines, {
       market: shopify.localization?.market?.value?.handle ?? '',
       currency: shopify.cost?.totalAmount?.value?.currencyCode ?? '',
+      cartSubtotal: shopify.cost?.subtotalAmount?.value?.amount ?? shopify.cost?.totalAmount?.value?.amount ?? null,
       language,
     });
   }

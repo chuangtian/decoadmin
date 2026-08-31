@@ -26,8 +26,12 @@ test('storefront runtime uses only same-origin signed App Proxy and cart routes'
   assert.doesNotMatch(javascript, /https?:\/\//);
   assert.doesNotMatch(javascript, /innerHTML|eval\(|new Function/);
   assert.match(javascript, /minimum_purchase_quantity/);
+  assert.match(javascript, /selected_variant_gid/);
+  assert.match(javascript, /resourceId\(product\?\.selected_variant_gid, 'ProductVariant'\)/);
   assert.match(javascript, /quantity: boundedNumber/);
   assert.match(javascript, /setIdQuery\(url, 'cart_product_ids', cartProductIds\)/);
+  assert.match(javascript, /cart_subtotal_amount/);
+  assert.match(liquid, /data-cart-subtotal-cents/);
   assert.doesNotMatch(javascript, /cart_product_ids\[\]/);
 });
 
@@ -161,6 +165,7 @@ test('Smart Cart renders one sequential product with theme typography and requir
   assert.match(smartCartJavascript, /nextRecommendation\(config\?\.recommendations\?\.items, cart\)/);
   assert.match(smartCartJavascript, /recommendationCard\(recommendation\.product, recommendation\.variant, config\)/);
   assert.match(smartCartJavascript, /selected_variant_gid/);
+  assert.match(smartCartJavascript, /reason_code === 'same_product_upsell'/);
   assert.match(smartCartJavascript, /minimum_purchase_quantity/);
   assert.match(smartCartJavascript, /deco-native-cart-recommendation__image/);
   assert.match(smartCartJavascript, /deco-native-cart-recommendation__prices/);
@@ -185,6 +190,7 @@ test('Smart Cart keeps anonymous bounded context and hides verification response
   assert.match(smartCartJavascript, /slice\(0, 20\)/);
   assert.match(smartCartJavascript, /slice\(0, 100\)/);
   assert.match(smartCartJavascript, /recently_viewed_product_ids/);
+  assert.match(smartCartJavascript, /cart_subtotal_amount/);
   assert.doesNotMatch(smartCartJavascript, /customer|email|phone|logged_in_customer_id/i);
   assert.match(smartCartJavascript, /isVerificationResponse\(response\.status, type, raw\)/);
   assert.match(smartCartJavascript, /connection needs to be verified/);

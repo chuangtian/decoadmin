@@ -3,7 +3,7 @@ import { Head, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-type Algorithm = 'manual' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'recently_viewed' | 'similar_products';
+type Algorithm = 'manual' | 'next_llm' | 'free_shipping_upsell' | 'similar_products' | 'substitute_products' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'frequently_viewed_together' | 'complementary_products' | 'recently_viewed' | 'complete_the_look' | 'same_product_upsell' | 'all_products';
 type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart' | 'checkout';
 type StrategyStatus = 'draft' | 'enabled' | 'disabled' | 'configuration_error';
 type TopTab = 'overview' | 'strategies' | 'analytics';

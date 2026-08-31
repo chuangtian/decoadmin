@@ -52,6 +52,7 @@ export async function fetchRecommendations(api, configuration, lines, context = 
     headers: {Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json'},
     body: JSON.stringify({
       cart_lines: cartLines(lines),
+      cart_subtotal_amount: boundedNumber(context.cartSubtotal, 0, 1000000, null),
       market: string(context.market, 80),
       currency: string(context.currency, 3),
       language: string(context.language, 20),
@@ -109,6 +110,7 @@ export function normalizeServiceRecommendations(value) {
         ? String(product?.pricing?.currency ?? product?.price?.currency)
         : '',
       minimum_purchase_quantity: boundedInteger(product?.minimum_purchase_quantity, 1, 999, 1),
+      reason_code: string(product?.reason_code, 64),
       rule_id: uuid(product?.rule_id) ? product.rule_id : '',
       strategy_version_uuid: strategyVersionUuid,
       discount: value?.discount && typeof value.discount === 'object' ? {
@@ -131,7 +133,7 @@ export function selectNextCandidate(candidates, lines, dismissed = new Set()) {
   return candidates.find((candidate) => candidate.available
     && !dismissed.has(candidate.variant_id)
     && !cartVariants.has(candidate.variant_id)
-    && !cartProducts.has(candidate.product_id)) ?? null;
+    && (candidate.reason_code === 'same_product_upsell' || !cartProducts.has(candidate.product_id))) ?? null;
 }
 
 export function eventPayload(configuration, products) {

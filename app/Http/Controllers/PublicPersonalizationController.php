@@ -34,6 +34,7 @@ class PublicPersonalizationController extends Controller
             'cart_product_ids' => $this->ids($request->query('cart_product_ids', [])),
             'purchased_product_ids' => $this->ids($request->query('purchased_product_ids', [])),
             'recently_viewed_product_ids' => $this->ids($request->query('recently_viewed_product_ids', [])),
+            'cart_subtotal_amount' => $request->query('cart_subtotal_amount'),
             'market' => $request->query('market', ''),
             'currency' => $request->query('currency', ''),
             'language' => $request->query('language', ''),
@@ -72,6 +73,7 @@ class PublicPersonalizationController extends Controller
                 'seed_product_id' => null,
                 'cart_product_ids' => $this->ids($request->query('cart_product_ids', [])),
                 'recently_viewed_product_ids' => $this->ids($request->query('recently_viewed_product_ids', [])),
+                'cart_subtotal_amount' => $request->query('cart_subtotal_amount'),
             ]);
         } catch (PersonalizationException $exception) {
             return response()->json(['error' => [

@@ -10,6 +10,7 @@ const CHECKOUT_RECOMMENDATION_CLICK = 'deco_personalization:checkout_recommendat
 const CHECKOUT_RECOMMENDATION_ADD_SUCCESS = 'deco_personalization:checkout_recommendation_add_success';
 const CHECKOUT_RECOMMENDATION_ADD_FAILED = 'deco_personalization:checkout_recommendation_add_failed';
 const CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED = 'deco_personalization:checkout_recommendation_sequence_completed';
+const PRODUCT_VIEWED = 'product_viewed';
 const CHECKOUT_COMPLETED = 'checkout_completed';
 
 register(async ({analytics, browser, settings}) => {
@@ -44,6 +45,25 @@ register(async ({analytics, browser, settings}) => {
         placement: string(customData.placement, 24),
         products: products(customData.products),
       });
+    });
+  });
+
+  analytics.subscribe(PRODUCT_VIEWED, (event) => {
+    const variant = event?.data?.productVariant;
+    const productId = shopifyId(variant?.product?.id, 'Product');
+    if (!productId) return;
+    void send(endpoint, {
+      event_id: string(event?.id, 191),
+      event_name: PRODUCT_VIEWED,
+      client_id: string(event?.clientId, 512),
+      session_id: sessionId,
+      occurred_at: string(event?.timestamp, 64),
+      products: [{
+        product_id: productId,
+        variant_id: shopifyId(variant?.id, 'ProductVariant'),
+        rank: 1,
+        rule_id: '',
+      }],
     });
   });
 
@@ -96,6 +116,13 @@ function products(value) {
 function numericId(value) {
   const normalized = string(value, 64);
   return /^\d+$/.test(normalized) ? normalized : '';
+}
+
+function shopifyId(value, resource) {
+  const normalized = string(value, 128);
+  if (/^\d+$/.test(normalized)) return normalized;
+  const match = normalized.match(new RegExp(`^gid://shopify/${resource}/(\\d+)$`));
+  return match?.[1] ?? '';
 }
 
 function boundedRank(value, fallback) {

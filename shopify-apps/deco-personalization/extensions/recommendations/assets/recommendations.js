@@ -20,6 +20,7 @@
     const proxyPath = normalizeProxyPath(element.dataset.proxyPath);
     const productId = numericId(element.dataset.productId);
     const cartProductIds = numericIds(String(element.dataset.cartProductIds || '').split(','), 20);
+    const cartSubtotalCents = Number(element.dataset.cartSubtotalCents);
     const designMode = element.dataset.designMode === 'true';
 
     if (content instanceof HTMLElement) {
@@ -37,6 +38,9 @@
     if (productId) url.searchParams.set('seed_product_id', productId);
     setIdQuery(url, 'cart_product_ids', cartProductIds);
     setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
+    if (Number.isFinite(cartSubtotalCents) && cartSubtotalCents >= 0) {
+      url.searchParams.set('cart_subtotal_amount', (cartSubtotalCents / 100).toFixed(2));
+    }
 
     try {
       const response = await fetch(url.toString(), {
@@ -147,9 +151,11 @@
     }
     card.append(link);
 
-    const variant = Array.isArray(product?.variants)
-      ? product.variants.find((item) => item?.available_for_sale === true && numericId(item?.shopify_variant_id))
-      : null;
+    const selectedVariantId = resourceId(product?.selected_variant_gid, 'ProductVariant');
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    const variant = variants.find((item) => item?.available_for_sale === true
+      && numericId(item?.shopify_variant_id) === selectedVariantId)
+      ?? variants.find((item) => item?.available_for_sale === true && numericId(item?.shopify_variant_id));
     if (style.show_add_to_cart !== false && variant) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -264,6 +270,12 @@
     return /^\d+$/.test(normalized) ? normalized : '';
   }
 
+  function resourceId(value, resource) {
+    const normalized = String(value || '').trim();
+    const match = normalized.match(new RegExp(`^gid://shopify/${resource}/(\\d+)$`));
+    return match?.[1] ?? numericId(normalized);
+  }
+
   function normalizeProxyPath(value) {
     const normalized = String(value || '').trim().replace(/\/$/, '');
     return PROXY_PATTERN.test(normalized) ? normalized : '';
@@ -314,12 +326,16 @@
 
   async function refreshAllRecommendations() {
     let cartProductIds = [];
+    let cartSubtotalCents = null;
     let cartLoaded = false;
     try {
       const response = await fetch('/cart.js', {credentials: 'same-origin', headers: {Accept: 'application/json'}});
       if (response.ok) {
         const cart = await response.json();
         cartProductIds = numericIds((Array.isArray(cart?.items) ? cart.items : []).map((item) => item?.product_id), 50);
+        cartSubtotalCents = Number.isFinite(Number(cart?.total_price)) && Number(cart.total_price) >= 0
+          ? Number(cart.total_price)
+          : null;
         cartLoaded = true;
       }
     } catch {
@@ -328,6 +344,7 @@
     document.querySelectorAll(ROOT_SELECTOR).forEach((element) => {
       if (!(element instanceof HTMLElement)) return;
       if (cartLoaded) element.dataset.cartProductIds = cartProductIds.join(',');
+      if (cartSubtotalCents !== null) element.dataset.cartSubtotalCents = String(cartSubtotalCents);
       void loadRecommendations(element);
     });
   }
