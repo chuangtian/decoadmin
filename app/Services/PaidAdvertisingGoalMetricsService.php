@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\FeishuBitableRecord;
+use App\Models\FeishuBitableTable;
 use App\Models\Organization;
 use App\Models\PaidAdvertisingGoalBoard;
 use App\Models\PaidAdvertisingGoalField;
@@ -14,6 +16,8 @@ use Throwable;
 
 class PaidAdvertisingGoalMetricsService
 {
+    private const OVERALL_SOURCE_TABLE = 'MF数据表';
+
     private const DATE_FIELD = '日期';
 
     private const DAILY_SALES_FIELD = '总销售额';
@@ -77,16 +81,27 @@ class PaidAdvertisingGoalMetricsService
     ): array {
         $this->assertScope($organization, $store, $boardId);
         $sourceKey = $boardId === null ? 'overall' : 'board:'.$boardId;
-        $availableFields = PaidAdvertisingGoalField::query()
-            ->forOrganization($organization)
-            ->forStore($store)
-            ->where('source_key', $sourceKey)
-            ->whereIn('name', self::REQUIRED_FIELDS)
-            ->pluck('name')
-            ->unique()
-            ->all();
+        $overallSourceTable = $boardId === null
+            ? $this->overallSourceTable($organization, $store)
+            : null;
+        $availableFields = $overallSourceTable instanceof FeishuBitableTable
+            ? $overallSourceTable->fields()
+                ->whereIn('name', self::REQUIRED_FIELDS)
+                ->pluck('name')
+                ->unique()
+                ->all()
+            : PaidAdvertisingGoalField::query()
+                ->forOrganization($organization)
+                ->forStore($store)
+                ->where('source_key', $sourceKey)
+                ->whereIn('name', self::REQUIRED_FIELDS)
+                ->pluck('name')
+                ->unique()
+                ->all();
         $missingFields = array_values(array_diff(self::REQUIRED_FIELDS, $availableFields));
-        $rows = $this->datedRows($organization, $store, $sourceKey, $period);
+        $rows = $overallSourceTable instanceof FeishuBitableTable
+            ? $this->datedArchiveRows($overallSourceTable, $period)
+            : $this->datedRows($organization, $store, $sourceKey, $period);
         $yesterday = CarbonImmutable::now($period['timezone'])->subDay()->toDateString();
         $cutoffDate = min($period['date_to'], $yesterday);
         $eligibleRows = $rows
@@ -122,7 +137,7 @@ class PaidAdvertisingGoalMetricsService
             : null;
         $values = [
             'daily_sales' => $dailySales !== null ? round($dailySales, 2) : null,
-            'refunds' => $refunds !== null ? round(-abs($refunds), 2) : null,
+            'refunds' => $refunds !== null && abs($refunds) > 0 ? round(-abs($refunds), 2) : null,
             'monthly_sales' => $monthlySales !== null ? round($monthlySales, 2) : null,
             'completion_rate' => $completionRate,
         ];
@@ -187,6 +202,53 @@ class PaidAdvertisingGoalMetricsService
                 && $row['date'] >= $period['date_from']
                 && $row['date'] <= $period['date_to'])
             ->values();
+    }
+
+    /**
+     * @param  array{date_from: string, date_to: string, timezone: string}  $period
+     * @return Collection<int, array{date: string, fields: array<string, mixed>, synced_at: string|null}>
+     */
+    private function datedArchiveRows(FeishuBitableTable $table, array $period): Collection
+    {
+        return $table->records()
+            ->select(['id', 'feishu_bitable_table_id', 'fields_encrypted', 'synced_at'])
+            ->orderByDesc('id')
+            ->limit(self::MAX_RECORDS)
+            ->get()
+            ->map(function (FeishuBitableRecord $record): ?array {
+                $fields = $record->fields_encrypted;
+                if (! is_array($fields)) {
+                    return null;
+                }
+
+                $date = $this->date($fields[self::DATE_FIELD] ?? null);
+                if ($date === null) {
+                    return null;
+                }
+
+                return [
+                    'date' => $date,
+                    'fields' => $fields,
+                    'synced_at' => $record->synced_at?->toIso8601String(),
+                ];
+            })
+            ->filter(fn (?array $row): bool => $row !== null
+                && $row['date'] >= $period['date_from']
+                && $row['date'] <= $period['date_to'])
+            ->values();
+    }
+
+    private function overallSourceTable(Organization $organization, Store $store): ?FeishuBitableTable
+    {
+        return FeishuBitableTable::query()
+            ->forOrganization($organization)
+            ->forStore($store)
+            ->where('name', self::OVERALL_SOURCE_TABLE)
+            ->whereHas('fields', fn ($query) => $query->where('name', self::DATE_FIELD))
+            ->whereHas('records')
+            ->orderByDesc('synced_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     private function date(mixed $value): ?string
@@ -313,7 +375,11 @@ class PaidAdvertisingGoalMetricsService
 
         return [
             'schema' => 'paid-advertising-goal-metrics-v1',
-            'available' => $asOfDate !== null && ! in_array(null, $values, true),
+            'available' => $asOfDate !== null && ! in_array(null, [
+                $values['daily_sales'],
+                $values['monthly_sales'],
+                $values['completion_rate'],
+            ], true),
             'source' => 'feishu',
             'currency' => $store->currency ?: 'USD',
             'as_of_date' => $asOfDate,
