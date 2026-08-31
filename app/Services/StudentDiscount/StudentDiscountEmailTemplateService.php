@@ -45,7 +45,7 @@ class StudentDiscountEmailTemplateService
             'preheader' => 'There is an update on your student discount request.',
             'heading' => 'We could not verify your student status',
             'body' => "We could not approve your student discount request.\n\nReason: {{ rejection_reason }}",
-            'cta_label' => 'VISIT STORE',
+            'cta_label' => 'RESUBMIT VERIFICATION',
             'footer_note' => 'You may submit a new request with a different student ID image.',
         ],
     ];
@@ -147,10 +147,19 @@ class StudentDiscountEmailTemplateService
         foreach (['subject', 'preheader', 'heading', 'body', 'cta_label', 'footer_note'] as $field) {
             $rendered[$field] = $this->replaceVariables((string) ($template[$field] ?? ''), $context);
         }
+        $ctaUrl = $this->safeSystemUrl((string) ($context['cta_url'] ?? ''));
+        $rejectionCtaAssigned = false;
         $rendered['content_blocks'] = collect($template['content_blocks'] ?? [])
-            ->map(function (array $block) use ($context): array {
+            ->map(function (array $block) use ($context, $ctaUrl, $type, &$rejectionCtaAssigned): array {
                 if (array_key_exists('text', $block)) {
                     $block['text'] = $this->replaceVariables((string) $block['text'], $context);
+                }
+                if ($type === 'rejection'
+                    && ($block['type'] ?? '') === 'button'
+                    && ! $rejectionCtaAssigned
+                    && $ctaUrl !== '') {
+                    $block['url'] = $ctaUrl;
+                    $rejectionCtaAssigned = true;
                 }
 
                 return $block;
@@ -171,6 +180,18 @@ class StudentDiscountEmailTemplateService
             'expires_at' => (string) ($context['expires_at'] ?? ''),
             'usage_limit' => (string) ($context['usage_limit'] ?? ''),
         ];
+    }
+
+    private function safeSystemUrl(string $url): string
+    {
+        $url = trim($url);
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        return $url !== ''
+            && filter_var($url, FILTER_VALIDATE_URL) !== false
+            && in_array($scheme, ['http', 'https'], true)
+                ? $url
+                : '';
     }
 
     /**
