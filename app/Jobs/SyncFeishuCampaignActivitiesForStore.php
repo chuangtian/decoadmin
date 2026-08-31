@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Store;
 use App\Services\CampaignThemeRefreshService;
 use App\Services\Feishu\CampaignActivitySyncService;
+use App\Services\Feishu\CampaignPlanningDocumentSyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,12 +31,21 @@ class SyncFeishuCampaignActivitiesForStore implements ShouldQueue
 
     public function handle(
         CampaignActivitySyncService $sync,
+        CampaignPlanningDocumentSyncService $planningDocuments,
         CampaignThemeRefreshService $refresh,
     ): void {
         $store = Store::query()->findOrFail($this->storeId);
         $refresh->markRunning($store);
         $result = $sync->syncStore($store);
-        $refresh->markCompleted($store, $this->actorId, $result);
+        $planningResult = $planningDocuments->syncStore($store);
+        $refresh->markCompleted($store, $this->actorId, [
+            ...$result,
+            'planning_documents' => $planningResult['documents'],
+            'planning_inserted' => $planningResult['inserted'],
+            'planning_updated' => $planningResult['updated'],
+            'planning_unchanged' => $planningResult['unchanged'],
+            'planning_failed' => $planningResult['failed'],
+        ]);
     }
 
     public function tries(): int

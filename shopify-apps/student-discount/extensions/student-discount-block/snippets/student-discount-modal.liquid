@@ -35,6 +35,10 @@ Renders the student discount verification dialog for an app block.
           <p>{{ 'student_discount.modal.id_method_help' | t }}</p>
         </div>
       </div>
+      <div class="student-discount-dialog__support" data-sd-support hidden>
+        <a class="student-discount-dialog__support-link" data-sd-support-link>{{ 'student_discount.modal.contact_us' | t }}</a>
+        <p>{{ 'student_discount.modal.support_prompt' | t }}</p>
+      </div>
     </div>
 
     <div data-sd-view="email" hidden>
@@ -99,7 +103,9 @@ Renders the student discount verification dialog for an app block.
       <div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div>
       <h2 data-sd-success-title>{{ 'student_discount.modal.submitted' | t }}</h2>
       <p class="student-discount-dialog__lead" data-sd-success-message></p>
-      <button type="button" class="student-discount-dialog__primary" data-sd-done>{{ 'student_discount.modal.done' | t }}</button>
+      <div class="student-discount-dialog__success-actions">
+        <button type="button" class="student-discount-dialog__primary" data-sd-done>{{ 'student_discount.modal.done' | t }}</button>
+      </div>
     </div>
 
     <div class="student-discount-dialog__code-result" data-sd-view="code" hidden>

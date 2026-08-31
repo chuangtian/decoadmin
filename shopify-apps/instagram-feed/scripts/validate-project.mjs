@@ -16,18 +16,25 @@ const expectedScopes = 'read_products';
 // 每套配置对应的后端 origin。local 的隧道地址会变，改的时候三处（application_url、
 // webhook uri、redirect_urls）加上 Laravel 的 config/instagram_feed.php 必须同步。
 const configurations = new Map([
-  ['shopify.app.toml', 'https://wendy-interim-classic-segment.trycloudflare.com'],
+  // 当前选中配置指向 test，避免漏写 --config 时把配置推到失效的隧道地址。
+  ['shopify.app.toml', 'https://testadmin.decomkt.com'],
+  // local 已停用，保留隧道地址仅为记录历史配置。
   ['shopify.app.local.toml', 'https://wendy-interim-classic-segment.trycloudflare.com'],
   ['shopify.app.test.toml', 'https://testadmin.decomkt.com'],
   ['shopify.app.production.toml', 'https://admin.decomkt.com'],
 ]);
 
-// local 必须有 client_id 才能开发。
-const requiresClientId = new Set(['shopify.app.toml', 'shopify.app.local.toml']);
+// local 与 test 共用同一个 Shopify App（隧道已废弃，local 不再单独维护），
+// 当前选中配置也指向同一个 App，这三份必须声明同一个 client_id。
+const requiresSharedClientId = new Set([
+  'shopify.app.toml',
+  'shopify.app.local.toml',
+  'shopify.app.test.toml',
+]);
 
-// 本地开发 App 的 client_id。测试与生产要么还没创建（留空），要么必须是另一个 App，
-// 绝不能等于这个值 —— 那意味着某个环境被指向了本地开发 App。
-const localClientId = 'd3446448682d2950aa75cea4a399d50f';
+// local 与 test 共用的 client_id。生产必须是 Dev Dashboard 里另一个独立 App，
+// 绝不能等于这个值 —— 那意味着生产被指向了测试用的 App。
+const sharedClientId = 'd3446448682d2950aa75cea4a399d50f';
 
 // Remix / Prisma / Node 后端的残留物。任何一个存在都说明后端又被搬回来了。
 const forbiddenPaths = [
@@ -88,27 +95,27 @@ for (const [fileName, origin] of configurations) {
   check(!/client_secret|access_token/i.test(contents), `${fileName} contains a private credential field`);
 
   const clientId = /client_id\s*=\s*"(.*)"/.exec(contents)?.[1] ?? '';
-  if (requiresClientId.has(fileName)) {
-    check(clientId === localClientId, `${fileName} must declare the local development client_id`);
+  if (requiresSharedClientId.has(fileName)) {
+    check(clientId === sharedClientId, `${fileName} must declare the shared local/test client_id`);
   } else {
-    // 空表示 Dev Dashboard 里还没建这个 App，`config link` 之后会填上。
+    // 空表示 Dev Dashboard 里还没建这个 App，创建后填入即可。
     check(
       clientId === '' || /^[0-9a-f]{32}$/.test(clientId),
       `${fileName} client_id must be empty or a 32-character Shopify client id`,
     );
-    check(clientId !== localClientId, `${fileName} must not point at the local development app`);
+    check(clientId !== sharedClientId, `${fileName} must not point at the shared local/test app`);
     check(!/trycloudflare\.com|localhost|127\.0\.0\.1/i.test(contents), `${fileName} contains a forbidden local URL`);
   }
 }
 
-// 三套配置必须是三个不同的 App。
+// 除 local/test 共用的那一个之外，其余环境必须各自绑定不同的 App。
 const linkedClientIds = [...configurations.keys()]
-  .filter((fileName) => !requiresClientId.has(fileName))
+  .filter((fileName) => !requiresSharedClientId.has(fileName))
   .map((fileName) => /client_id\s*=\s*"(.*)"/.exec(readFileSync(join(projectRoot, fileName), 'utf8'))?.[1] ?? '')
   .filter(Boolean);
 check(
   new Set(linkedClientIds).size === linkedClientIds.length,
-  'Test and production must be linked to different Shopify apps',
+  'Each remaining environment must be linked to a different Shopify app',
 );
 
 for (const path of forbiddenPaths) {

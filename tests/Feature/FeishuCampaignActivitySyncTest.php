@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Services\Feishu\CampaignActivitySyncService;
+use App\Services\Feishu\CampaignPlanningDocumentSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -152,6 +153,40 @@ class FeishuCampaignActivitySyncTest extends TestCase
                 ->forStore($secondStore)
                 ->exists(),
         );
+    }
+
+    public function test_campaign_command_automatically_syncs_planning_documents_for_the_same_store(): void
+    {
+        $activities = \Mockery::mock(CampaignActivitySyncService::class);
+        $activities->shouldReceive('syncConfiguredStores')->once()->with(2)->andReturn([
+            'stores' => 1,
+            'inserted' => 0,
+            'updated' => 13,
+            'skipped' => 0,
+            'archived_tables' => 3,
+            'archived_fields' => 37,
+            'archived_records' => 19,
+            'failed' => 0,
+            'failures' => [],
+        ]);
+        app()->instance(CampaignActivitySyncService::class, $activities);
+
+        $planningDocuments = \Mockery::mock(CampaignPlanningDocumentSyncService::class);
+        $planningDocuments->shouldReceive('syncConfiguredStores')->once()->with(2)->andReturn([
+            'stores' => 1,
+            'documents' => 13,
+            'inserted' => 13,
+            'updated' => 0,
+            'unchanged' => 0,
+            'failed' => 0,
+            'failures' => [],
+        ]);
+        app()->instance(CampaignPlanningDocumentSyncService::class, $planningDocuments);
+
+        $this->artisan('feishu:sync-campaign-activities', ['--store' => 2])
+            ->expectsOutputToContain('活动新增 0，更新 13')
+            ->expectsOutputToContain('飞书策划书自动同步完成：店铺 1，文档 13，新增 13')
+            ->assertSuccessful();
     }
 
     public function test_app_token_only_archives_every_table_without_requiring_a_table_id(): void

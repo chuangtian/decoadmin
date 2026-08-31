@@ -81,7 +81,14 @@ class CampaignThemeRefreshService
         ]);
     }
 
-    /** @param array{inserted: int, updated: int, skipped: int, records: int, archived_tables?: int, archived_fields?: int, archived_records?: int} $result */
+    /**
+     * @param array{
+     *     inserted: int, updated: int, skipped: int, records: int,
+     *     archived_tables?: int, archived_fields?: int, archived_records?: int,
+     *     planning_documents?: int, planning_inserted?: int, planning_updated?: int,
+     *     planning_unchanged?: int, planning_failed?: int
+     * } $result
+     */
     public function markCompleted(Store $store, ?int $actorId, array $result): void
     {
         $finishedAt = now()->toIso8601String();
@@ -101,6 +108,16 @@ class CampaignThemeRefreshService
                 $result['updated'],
                 $result['skipped'],
             );
+        if ((int) ($result['planning_documents'] ?? 0) > 0) {
+            $message .= sprintf(
+                ' 策划书同步 %d 份：新增 %d，更新 %d，无变化 %d，失败 %d。',
+                (int) $result['planning_documents'],
+                (int) ($result['planning_inserted'] ?? 0),
+                (int) ($result['planning_updated'] ?? 0),
+                (int) ($result['planning_unchanged'] ?? 0),
+                (int) ($result['planning_failed'] ?? 0),
+            );
+        }
         $this->putStatus($store, [
             ...$this->status($store),
             'status' => 'completed',
@@ -126,6 +143,11 @@ class CampaignThemeRefreshService
                 'archived_tables' => (int) ($result['archived_tables'] ?? 0),
                 'archived_fields' => (int) ($result['archived_fields'] ?? 0),
                 'archived_records' => (int) ($result['archived_records'] ?? 0),
+                'planning_documents' => (int) ($result['planning_documents'] ?? 0),
+                'planning_inserted' => (int) ($result['planning_inserted'] ?? 0),
+                'planning_updated' => (int) ($result['planning_updated'] ?? 0),
+                'planning_unchanged' => (int) ($result['planning_unchanged'] ?? 0),
+                'planning_failed' => (int) ($result['planning_failed'] ?? 0),
             ],
         ]);
     }

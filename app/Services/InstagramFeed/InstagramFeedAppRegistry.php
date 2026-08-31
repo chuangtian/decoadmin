@@ -36,7 +36,16 @@ class InstagramFeedAppRegistry
             );
         }
 
-        return compact('clientId', 'clientSecret', 'handle', 'name', 'appUrl');
+        // 键名必须与上面的 @return 声明以及全部调用点保持一致（snake_case）。
+        // 不要用 compact()：它以变量名为键，会返回 camelCase，导致 configuredApp()、
+        // clientSecret() 与 token exchange 全部读不到 client_id / client_secret / app_url。
+        return [
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'handle' => $handle,
+            'name' => $name,
+            'app_url' => $appUrl,
+        ];
     }
 
     public function clientSecret(): string

@@ -1,6 +1,8 @@
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
+import {runtimeFromIdToken} from './runtime.mjs';
+
 const CONNECTION_PATH = '/api/shopify-app/instagram-feed/connection';
 const BOOTSTRAP_PATH = '/api/shopify-app/instagram-feed/bootstrap';
 const MANAGEMENT_PATH = '/shopify-app/instagram-feed';
@@ -11,6 +13,9 @@ const THEME_BLOCK_HANDLE = 'instagram_videos';
  *
  * 这里只做两件事：确认店铺已接入 DecoAdmin，并调 bootstrap 建立本 App 的
  * Shopify 会话（DecoAdmin 后台发布前台数据要用它）。真正的内容管理在 DecoAdmin。
+ *
+ * 店铺域名与后端地址来自 session token（见 runtime.mjs）：
+ * `admin.app.home.render` 的 API 对象没有 `config`，不能从那里读。
  *
  * @typedef {{
  *   status: 'checking' | 'connected' | 'error',
@@ -25,9 +30,12 @@ export default async () => {
 };
 
 function App() {
-  const shopDomain = String(shopify?.config?.shop || '').trim();
-  const clientId = String(shopify?.config?.apiKey || '').trim();
-  const appOrigin = getAppOrigin(shopify?.config?.appOrigins);
+  const [runtime, setRuntime] = useState({
+    appOrigin: '',
+    clientId: '',
+    environment: '',
+    shopDomain: '',
+  });
   const [connection, setConnection] = useState({
     status: 'checking',
     message: '',
@@ -36,31 +44,33 @@ function App() {
   });
 
   useEffect(() => {
-    if (!appOrigin || !shopDomain) {
-      setConnection({
-        status: 'error',
-        message: '无法读取当前应用环境，请重新打开应用。',
-        storeName: '',
-        environment: '',
-      });
-      return undefined;
-    }
-
     const controller = new AbortController();
-    const url = buildUrl(appOrigin, CONNECTION_PATH, {shop: shopDomain});
+    let cancelled = false;
 
-    requestJson(url, {signal: controller.signal})
-      .then(async (connectionPayload) => {
+    resolveRuntime()
+      .then(async (resolvedRuntime) => {
+        if (cancelled) return;
+        setRuntime(resolvedRuntime);
+
+        const url = buildUrl(resolvedRuntime.appOrigin, CONNECTION_PATH, {
+          shop: resolvedRuntime.shopDomain,
+        });
+        const connectionPayload = await authenticatedRequestJson(url, {
+          signal: controller.signal,
+        });
         if (connectionPayload.connected !== true) {
           throw new Error('该 Shopify 店铺尚未连接 DecoAdmin。');
         }
 
-        const bootstrapUrl = buildUrl(appOrigin, BOOTSTRAP_PATH, {shop: shopDomain});
-        const payload = await requestJson(bootstrapUrl, {
+        const bootstrapUrl = buildUrl(resolvedRuntime.appOrigin, BOOTSTRAP_PATH, {
+          shop: resolvedRuntime.shopDomain,
+        });
+        const payload = await authenticatedRequestJson(bootstrapUrl, {
           method: 'POST',
           signal: controller.signal,
         });
 
+        if (cancelled) return;
         setConnection({
           status: 'connected',
           message: '',
@@ -69,7 +79,7 @@ function App() {
         });
       })
       .catch((error) => {
-        if (error?.name === 'AbortError') return;
+        if (cancelled || error?.name === 'AbortError') return;
         setConnection({
           status: 'error',
           message: publicMessage(error instanceof Error ? error.message : ''),
@@ -78,8 +88,13 @@ function App() {
         });
       });
 
-    return () => controller.abort();
-  }, [appOrigin, shopDomain]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, []);
+
+  const {appOrigin, clientId, shopDomain} = runtime;
 
   const managementUrl = appOrigin
     ? buildUrl(appOrigin, MANAGEMENT_PATH, {shop: shopDomain, source: 'shopify'})
@@ -87,7 +102,7 @@ function App() {
   const themeEditorUrl = buildThemeEditorUrl(shopDomain, clientId);
 
   return (
-    <s-page heading="Deco Instagram 内容" inlineSize="base">
+    <s-page heading="Instagram Feed (Deco)" inlineSize="base">
       <s-section heading="连接状态">
         <s-stack direction="block" gap="base">
           <s-stack direction="inline" gap="base" alignItems="center">
@@ -163,21 +178,6 @@ function ConnectionBadge({status}) {
   return <s-badge tone="info">检查中</s-badge>;
 }
 
-function getAppOrigin(origins) {
-  const values = Array.isArray(origins) ? origins : [origins];
-
-  for (const value of values) {
-    if (!value) continue;
-    try {
-      return new URL(value).origin;
-    } catch {
-      continue;
-    }
-  }
-
-  return '';
-}
-
 function buildUrl(origin, path, params) {
   if (!origin) return '';
   const url = new URL(path, `${origin}/`);
@@ -208,10 +208,18 @@ function publicMessage(message) {
   return value;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit} [options]
+ */
 async function requestJson(url, options = {}) {
+  const optionHeaders = Reflect.get(options, 'headers');
   const response = await fetch(url, {
     ...options,
-    headers: {Accept: 'application/json'},
+    headers: {
+      Accept: 'application/json',
+      ...(optionHeaders || {}),
+    },
   });
   const payload = await response.json().catch(() => ({}));
 
@@ -220,4 +228,51 @@ async function requestJson(url, options = {}) {
   }
 
   return payload.data || {};
+}
+
+async function resolveRuntime() {
+  const token = await getIdToken();
+  if (!token) {
+    throw new Error('无法读取 Shopify 登录身份，请重新打开应用。');
+  }
+
+  return runtimeFromIdToken(token);
+}
+
+/**
+ * 后端 `shopify.id-token` 中间件要求 Authorization: Bearer <session token>。
+ * token 有效期很短，所以每次请求都重新获取。
+ *
+ * @param {string} url
+ * @param {RequestInit} [options]
+ */
+async function authenticatedRequestJson(url, options = {}) {
+  const token = await getIdToken();
+  if (!token) {
+    throw new Error('无法读取 Shopify 登录身份，请重新打开应用。');
+  }
+
+  const optionHeaders = Reflect.get(options, 'headers');
+  return requestJson(url, {
+    ...options,
+    headers: {
+      ...(optionHeaders || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+async function getIdToken() {
+  const auth = Reflect.get(shopify, 'auth');
+  const extensionIdToken = auth && Reflect.get(auth, 'idToken');
+  if (typeof extensionIdToken === 'function') {
+    return extensionIdToken.call(auth);
+  }
+
+  const appBridgeIdToken = Reflect.get(shopify, 'idToken');
+  if (typeof appBridgeIdToken === 'function') {
+    return appBridgeIdToken.call(shopify);
+  }
+
+  return null;
 }

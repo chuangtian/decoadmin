@@ -9,53 +9,69 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('meta_ad_insight_entities', function (Blueprint $table): void {
-            $table->id();
-            $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('store_id')->constrained()->cascadeOnDelete();
-            $table->string('level', 16);
-            $table->string('entity_id', 64);
-            $table->string('account_name', 255)->nullable();
-            $table->string('meta_campaign_id', 64)->nullable();
-            $table->string('campaign_name', 500)->nullable();
-            $table->string('meta_ad_set_id', 64)->nullable();
-            $table->string('ad_set_name', 500)->nullable();
-            $table->string('meta_ad_id', 64)->nullable();
-            $table->string('ad_name', 500)->nullable();
-            $table->timestamps();
+        if (! Schema::hasTable('meta_ad_insight_entities')) {
+            Schema::create('meta_ad_insight_entities', function (Blueprint $table): void {
+                $table->id();
+                $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
+                $table->foreignId('store_id')->constrained()->cascadeOnDelete();
+                $table->string('level', 16);
+                $table->string('entity_id', 64);
+                $table->string('account_name', 255)->nullable();
+                $table->string('meta_campaign_id', 64)->nullable();
+                $table->string('campaign_name', 500)->nullable();
+                $table->string('meta_ad_set_id', 64)->nullable();
+                $table->string('ad_set_name', 500)->nullable();
+                $table->string('meta_ad_id', 64)->nullable();
+                $table->string('ad_name', 500)->nullable();
+                $table->timestamps();
 
-            $table->unique(
-                ['organization_id', 'store_id', 'level', 'entity_id'],
-                'meta_insight_entities_scope_entity_unique',
-            );
-            $table->index(
-                ['organization_id', 'store_id', 'meta_ad_id'],
-                'meta_insight_entities_scope_ad_index',
-            );
-        });
+                $table->unique(
+                    ['organization_id', 'store_id', 'level', 'entity_id'],
+                    'meta_insight_entities_scope_entity_unique',
+                );
+                $table->index(
+                    ['organization_id', 'store_id', 'meta_ad_id'],
+                    'meta_insight_entities_scope_ad_index',
+                );
+            });
+        }
 
         $this->backfillEntities();
         DB::table('meta_ad_insights')->where('granularity', 'hour')->delete();
 
-        Schema::table('meta_ad_insights', function (Blueprint $table): void {
-            $table->dropIndex('meta_insights_scope_hour_level_index');
-            $table->dropUnique('meta_insights_scope_entity_window_unique');
-            $table->unique(
-                ['organization_id', 'store_id', 'level', 'entity_id', 'date_start', 'date_stop', 'granularity'],
-                'meta_insights_scope_entity_granularity_unique',
-            );
-        });
+        $hasOldWindowUnique = Schema::hasIndex('meta_ad_insights', 'meta_insights_scope_entity_window_unique');
+        $hasOldHourIndex = Schema::hasIndex('meta_ad_insights', 'meta_insights_scope_hour_level_index');
+        $hasNewGranularityUnique = Schema::hasIndex('meta_ad_insights', 'meta_insights_scope_entity_granularity_unique');
+        if ($hasOldWindowUnique || $hasOldHourIndex || ! $hasNewGranularityUnique) {
+            Schema::table('meta_ad_insights', function (Blueprint $table) use ($hasNewGranularityUnique, $hasOldHourIndex, $hasOldWindowUnique): void {
+                if ($hasOldHourIndex) {
+                    $table->dropIndex('meta_insights_scope_hour_level_index');
+                }
+                if ($hasOldWindowUnique) {
+                    $table->dropUnique('meta_insights_scope_entity_window_unique');
+                }
+                if (! $hasNewGranularityUnique) {
+                    $table->unique(
+                        ['organization_id', 'store_id', 'level', 'entity_id', 'date_start', 'date_stop', 'granularity'],
+                        'meta_insights_scope_entity_granularity_unique',
+                    );
+                }
+            });
+        }
 
-        Schema::table('meta_ad_insights', function (Blueprint $table): void {
-            $table->dropColumn([
-                'account_name', 'campaign_name', 'ad_set_name', 'ad_name',
-                'hourly_range', 'hour_start_at', 'hour_end_at',
-                'unique_clicks', 'ctr', 'unique_ctr', 'cpc', 'cpm', 'cpp',
-                'leads', 'landing_page_views', 'cost_per_purchase', 'purchase_roas',
-                'outbound_clicks', 'actions', 'action_values', 'cost_per_action_type',
-                'purchase_roas_breakdown', 'website_purchase_roas', 'raw_payload',
-            ]);
-        });
+        $obsoleteColumns = collect([
+            'account_name', 'campaign_name', 'ad_set_name', 'ad_name',
+            'hourly_range', 'hour_start_at', 'hour_end_at',
+            'unique_clicks', 'ctr', 'unique_ctr', 'cpc', 'cpm', 'cpp',
+            'leads', 'landing_page_views', 'cost_per_purchase', 'purchase_roas',
+            'outbound_clicks', 'actions', 'action_values', 'cost_per_action_type',
+            'purchase_roas_breakdown', 'website_purchase_roas', 'raw_payload',
+        ])->filter(fn (string $column): bool => Schema::hasColumn('meta_ad_insights', $column))->all();
+        if ($obsoleteColumns !== []) {
+            Schema::table('meta_ad_insights', function (Blueprint $table) use ($obsoleteColumns): void {
+                $table->dropColumn($obsoleteColumns);
+            });
+        }
 
         if (DB::getDriverName() === 'mysql') {
             DB::statement('ALTER TABLE meta_ad_insights FORCE');
@@ -127,6 +143,10 @@ return new class extends Migration
 
     private function backfillEntities(): void
     {
+        if (! Schema::hasColumn('meta_ad_insights', 'account_name')) {
+            return;
+        }
+
         if (DB::getDriverName() === 'mysql') {
             DB::statement(<<<'SQL'
                 INSERT INTO meta_ad_insight_entities
@@ -139,6 +159,15 @@ return new class extends Migration
                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 FROM meta_ad_insights
                 GROUP BY organization_id, store_id, level, entity_id
+                ON DUPLICATE KEY UPDATE
+                    account_name = VALUES(account_name),
+                    meta_campaign_id = VALUES(meta_campaign_id),
+                    campaign_name = VALUES(campaign_name),
+                    meta_ad_set_id = VALUES(meta_ad_set_id),
+                    ad_set_name = VALUES(ad_set_name),
+                    meta_ad_id = VALUES(meta_ad_id),
+                    ad_name = VALUES(ad_name),
+                    updated_at = VALUES(updated_at)
                 SQL);
 
             return;

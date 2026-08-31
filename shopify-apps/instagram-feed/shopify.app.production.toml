@@ -2,7 +2,7 @@
 # 该 App 尚未创建，所以 client_id 留空；创建后用 `npm run config:link:production` 写入。
 # 留空而不是预填，是为了避免误把生产配置指向其他环境的 App。
 client_id = ""
-name = "Deco-Instagram-内容"
+name = "Instagram Feed (Deco)"
 handle = "deco-instagram-feed"
 application_url = "https://admin.decomkt.com/shopify-app/instagram-feed"
 embedded = true

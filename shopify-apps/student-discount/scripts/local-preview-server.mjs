@@ -50,7 +50,7 @@ const html = String.raw`<!doctype html>
           style="--sd-background:#111111;--sd-text:#ffffff;--sd-radius:0px;--sd-max-width:720px"
         ><span class="student-discount-app__text">Verify your student status and get a student discount</span></button>
 
-        <div id="student-discount-dialog-local" class="student-discount-dialog" data-student-discount-dialog hidden>
+        <div id="student-discount-dialog-local" class="student-discount-dialog" data-student-discount-dialog data-student-discount-version="2" hidden>
           <button type="button" class="student-discount-dialog__backdrop" data-sd-close aria-label="Close student discount dialog"></button>
           <div class="student-discount-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="student-discount-title-local">
             <button type="button" class="student-discount-dialog__close" data-sd-close aria-label="Close">×</button>
@@ -82,14 +82,14 @@ const html = String.raw`<!doctype html>
                   <label><span>Full name</span><input type="text" name="fullName" autocomplete="name" minlength="2" maxlength="120" required></label>
                   <label><span>Email address</span><input type="email" name="email" autocomplete="email" maxlength="254" required></label>
                   <label class="student-discount-dialog__file"><span>Student ID photo</span><span class="student-discount-dialog__upload"><input type="file" name="studentId" accept="image/jpeg,image/png,image/webp" required><span class="student-discount-dialog__upload-placeholder" data-sd-upload-placeholder><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M16 36h-4a8 8 0 0 1-.7-16A13 13 0 0 1 36 18a9 9 0 0 1 0 18h-4M24 14v24m-8-16 8-8 8 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Upload a clear photo of your student ID</strong></span><img data-sd-id-preview alt="Student ID preview" width="620" height="240" hidden><span class="student-discount-dialog__file-name" data-sd-file-name hidden></span><button type="button" class="student-discount-dialog__clear-file" data-sd-clear-file aria-label="Remove selected student ID photo" hidden>×</button></span><small>JPG, PNG or WebP, up to 5MB. The image is deleted 30 days after review.</small></label>
-                  <label class="student-discount-dialog__consent"><input type="checkbox" name="privacyConsent" value="agreed" required><span>I agree to the Privacy Policy and Terms of Service. I understand my image may be analyzed automatically to determine whether it appears to be a student ID, and my information will only be used to review my application and deliver the student discount.</span></label>
+                  <label class="student-discount-dialog__consent"><input type="checkbox" name="privacyConsent" value="agreed" required><span>I agree to the Privacy Policy and Terms of Service. My information will only be used to verify my eligibility for the student discount.</span></label>
                   <label class="student-discount-dialog__honeypot" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
                   <p class="student-discount-dialog__error" data-sd-id-error hidden></p><button type="submit" class="student-discount-dialog__primary">Submit for review</button>
                 </form>
               </section>
             </div>
 
-            <div data-sd-view="success" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><h2 data-sd-success-title>Submitted</h2><p class="student-discount-dialog__lead" data-sd-success-message></p><button type="button" class="student-discount-dialog__primary" data-sd-done>Done</button></div>
+            <div data-sd-view="success" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><h2 data-sd-success-title>Submitted</h2><p class="student-discount-dialog__lead" data-sd-success-message></p><div class="student-discount-dialog__success-actions"><button type="button" class="student-discount-dialog__primary" data-sd-done>Done</button></div></div>
             <div class="student-discount-dialog__code-result" data-sd-view="code" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><p class="student-discount-dialog__eyebrow">Student discount approved</p><h2>Your discount code is ready</h2><div class="student-discount-dialog__code-card"><span>Your code</span><strong data-sd-code></strong><button type="button" class="student-discount-dialog__copy" data-sd-copy>Copy code</button></div><p class="student-discount-dialog__code-status" data-sd-code-status hidden></p><p class="student-discount-dialog__code-expiry" data-sd-code-expiry hidden></p><p class="student-discount-dialog__terms-note" data-sd-code-terms hidden></p><p class="student-discount-dialog__copy-feedback" data-sd-copy-feedback aria-live="polite"></p><p class="student-discount-dialog__delivery" data-sd-code-message role="status"></p><p class="student-discount-dialog__checkout-note">Enter this code at checkout to apply your student discount.</p><button type="button" class="student-discount-dialog__primary" data-sd-code-done>Continue shopping</button></div>
           </div>
         </div>
@@ -124,7 +124,13 @@ const previewServer = createServer((request, response) => {
     return;
   }
   response.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"});
-  response.end(html);
+  const responseHtml = url.searchParams.get("view") === "success"
+    ? html
+      .replace('data-student-discount-version="2" hidden', 'data-student-discount-version="2"')
+      .replace('<div data-sd-view="method">', '<div data-sd-view="method" hidden>')
+      .replace('<div data-sd-view="success" hidden>', '<div data-sd-view="success">')
+    : html;
+  response.end(responseHtml);
 });
 
 const sendJson = (response, status, payload) => {
