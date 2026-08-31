@@ -26,6 +26,7 @@ use App\Services\StudentDiscount\StudentDiscountClaimService;
 use App\Services\StudentDiscount\StudentDiscountCodeService;
 use App\Services\StudentDiscount\StudentDiscountEmailTemplateService;
 use App\Services\StudentDiscount\StudentDiscountEvidenceCleanupService;
+use App\Services\StudentDiscount\StudentDiscountMailDeliveryService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -212,6 +213,114 @@ class StudentDiscountTest extends TestCase
         $this->getJson($url())
             ->assertOk()
             ->assertJsonPath('data.support_page_url', null);
+    }
+
+    public function test_rejection_email_links_to_the_reusable_store_verification_page(): void
+    {
+        Storage::fake('local');
+        Mail::fake();
+        $this->configureDeliveringMailTransport();
+        [, $organization, $store] = $this->context('store-admin');
+        $this->campaign($organization, $store, [
+            'enabled' => true,
+            'email_templates' => [
+                'rejection' => [
+                    'content_blocks' => [[
+                        'type' => 'button',
+                        'text' => 'VISIT STORE',
+                        'url' => 'https://old.example.com',
+                        'align' => 'center',
+                        'font_size' => 18,
+                        'bold' => true,
+                        'italic' => false,
+                        'underline' => false,
+                        'color' => '#FFFFFF',
+                        'background_color' => '#111111',
+                        'width' => 'full',
+                    ]],
+                ],
+            ],
+        ]);
+        $this->setting('student_ai', 'gemini_api_key', 'test-gemini-key', true, null);
+        $this->setting('student_ai', 'gemini_model', 'gemini-2.5-pro', false, null);
+        $this->setting('student_ai', 'auto_approval_threshold', 80, false, null);
+        config([
+            'student_discount.active.client_secret' => 'proxy-shared-secret',
+            'student_discount.active.proxy_path' => '/apps/student-discount',
+        ]);
+        $rejected = $this->claim($organization, $store, 'standalone-retry', [
+            'name' => 'Retry Student',
+            'email' => 'retry-student@example.com',
+            'normalized_email' => 'retry-student@example.com',
+            'status' => 'rejected',
+            'review_method' => 'manual',
+            'reviewed_at' => now(),
+            'rejection_reason' => 'Please upload a clearer student ID image.',
+        ]);
+
+        app(StudentDiscountMailDeliveryService::class)->send($rejected, null);
+        Mail::assertSent(StudentDiscountDecisionMail::class, function (StudentDiscountDecisionMail $mail): bool {
+            $html = $mail->render();
+
+            return str_contains($html, 'VISIT STORE')
+                && str_contains($html, 'https://student-test.myshopify.com/apps/student-discount/verify')
+                && ! str_contains($html, 'https://old.example.com')
+                && ! str_contains($html, '?token=');
+        });
+
+        $pageUrl = $this->signedProxyUrl(
+            route('student-discounts.public.retry'),
+            $store->shopify_domain,
+        );
+        $this->get($pageUrl)
+            ->assertOk()
+            ->assertHeader('X-Robots-Tag', 'noindex, nofollow')
+            ->assertSee('Verify with Student ID')
+            ->assertSee('name="email"', false)
+            ->assertSee('action="/apps/student-discount/verify/claims"', false)
+            ->assertDontSee('retry_token')
+            ->assertDontSee('Verify Again');
+
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                    'is_student_id' => false,
+                    'institution_name' => 'Example University',
+                    'confidence' => 30,
+                    'review_notes' => 'The image looks like a student ID but needs manual review.',
+                ], JSON_THROW_ON_ERROR)]]]]],
+            ]),
+        ]);
+
+        $this->post($this->signedProxyUrl(
+            route('student-discounts.public.retry.store'),
+            $store->shopify_domain,
+        ), [
+            'full_name' => 'Updated Retry Student',
+            'email' => 'updated-retry@example.com',
+            'privacy_consent' => 'true',
+            'evidence' => UploadedFile::fake()->create('updated-student-id.jpg', 64, 'image/jpeg'),
+            'website' => '',
+        ])->assertOk()
+            ->assertSee('Submitted for review')
+            ->assertSee('Done')
+            ->assertDontSee('Verify Again');
+
+        $newClaim = StudentDiscountClaim::query()->where('id', '!=', $rejected->id)->sole();
+        $this->assertSame('rejected', $rejected->status);
+        $this->assertNull($rejected->superseded_by_claim_id);
+        $this->assertSame('Updated Retry Student', $newClaim->name);
+        $this->assertSame('updated-retry@example.com', $newClaim->normalized_email);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'student_discount_claim_submitted',
+            'subject_id' => $newClaim->id,
+            'store_id' => $store->id,
+        ]);
+
+        $this->get($pageUrl)
+            ->assertOk()
+            ->assertSee('name="evidence"', false)
+            ->assertSee('name="email"', false);
     }
 
     public function test_submission_rate_limit_runs_after_verified_store_resolution_and_isolated_by_store_and_ip(): void
