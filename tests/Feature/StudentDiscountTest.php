@@ -274,10 +274,13 @@ class StudentDiscountTest extends TestCase
         );
         $this->get($pageUrl)
             ->assertOk()
+            ->assertHeader('Content-Type', 'application/liquid; charset=UTF-8')
             ->assertHeader('X-Robots-Tag', 'noindex, nofollow')
             ->assertSee('Verify with Student ID')
+            ->assertSee('student-verification-page')
             ->assertSee('name="email"', false)
             ->assertSee('action="/apps/student-discount/verify/claims"', false)
+            ->assertDontSee('<!doctype html>', false)
             ->assertDontSee('retry_token')
             ->assertDontSee('Verify Again');
 
