@@ -217,10 +217,8 @@ class PublicStudentDiscountController extends Controller
         }
 
         return response()->view('student-discounts.retry', [
-            'storeName' => $store->name,
             'storeUrl' => 'https://'.$store->shopify_domain,
             'formAction' => '/'.trim((string) config('student_discount.active.proxy_path'), '/').'/verify/claims',
-            'logoUrl' => (string) ($branding['logo_url'] ?? ''),
             'primaryColor' => $primaryColor,
             'state' => 'error',
             'message' => 'Student discount verification is currently unavailable.',
@@ -229,7 +227,7 @@ class PublicStudentDiscountController extends Controller
             'submittedEmail' => '',
             ...$data,
         ], 200, [
-            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Type' => 'application/liquid; charset=UTF-8',
             'Cache-Control' => 'no-store, private',
             'Pragma' => 'no-cache',
             'X-Robots-Tag' => 'noindex, nofollow',
