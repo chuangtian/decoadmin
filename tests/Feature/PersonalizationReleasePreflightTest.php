@@ -30,9 +30,25 @@ class PersonalizationReleasePreflightTest extends TestCase
         ]);
 
         $this->artisan('personalization:release-check')
-            ->expectsOutputToContain('Personalization environment must be test.')
-            ->expectsOutputToContain('Test Client Secret is not configured.')
+            ->expectsOutputToContain('Personalization environment must be test or production.')
+            ->expectsOutputToContain('Active Client Secret is not configured.')
             ->assertFailed();
+    }
+
+    public function test_release_check_accepts_the_exact_production_contract(): void
+    {
+        $this->validConfig();
+        config([
+            'personalization.environment' => 'production',
+            'personalization.active.name' => 'Deco 个性化推荐',
+            'personalization.active.handle' => 'deco-personalization',
+            'personalization.active.app_url' => 'https://admin.decomkt.com',
+            'personalization.active_proxy_path' => '/apps/deco-personalization',
+        ]);
+
+        $this->artisan('personalization:release-check')
+            ->expectsOutput('Personalization Production backend release check passed.')
+            ->assertSuccessful();
     }
 
     private function validConfig(): void

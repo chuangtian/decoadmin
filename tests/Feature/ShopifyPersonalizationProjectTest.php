@@ -6,7 +6,7 @@ use Tests\TestCase;
 
 class ShopifyPersonalizationProjectTest extends TestCase
 {
-    public function test_personalization_project_is_test_first_and_has_no_runnable_local_or_production_config(): void
+    public function test_personalization_project_keeps_local_disabled_and_production_release_guarded(): void
     {
         $root = base_path('shopify-apps/deco-personalization');
         $required = [
@@ -36,6 +36,10 @@ class ShopifyPersonalizationProjectTest extends TestCase
             'scripts/test-environment-guard.mjs',
             'scripts/run-test-shopify-action.mjs',
             'scripts/release-safety.test.mjs',
+            'scripts/production-config-contract.mjs',
+            'scripts/production-environment-guard.mjs',
+            'scripts/run-production-shopify-action.mjs',
+            'scripts/production-release-safety.test.mjs',
         ];
 
         foreach ($required as $file) {
@@ -49,11 +53,21 @@ class ShopifyPersonalizationProjectTest extends TestCase
         $this->assertArrayNotHasKey('deploy:local', $package['scripts']);
         $this->assertArrayNotHasKey('deploy:production', $package['scripts']);
 
-        foreach (['shopify.app.local.toml', 'shopify.app.production.toml'] as $file) {
-            $contents = (string) file_get_contents("{$root}/{$file}");
+        $local = (string) file_get_contents("{$root}/shopify.app.local.toml");
+        $this->assertDoesNotMatchRegularExpression(
+            '/^\s*(client_id|application_url|name|handle|scopes|redirect_urls|url|uri)\s*=/m',
+            $local,
+        );
+
+        $production = (string) file_get_contents("{$root}/shopify.app.production.toml");
+        if (preg_match('/^\s*client_id\s*=\s*"[a-f0-9]{32}"\s*$/mi', $production) === 1) {
+            $this->assertStringContainsString('name = "Deco 个性化推荐"', $production);
+            $this->assertStringContainsString('handle = "deco-personalization"', $production);
+            $this->assertStringContainsString('application_url = "https://admin.decomkt.com/shopify-app/personalization"', $production);
+        } else {
             $this->assertDoesNotMatchRegularExpression(
                 '/^\s*(client_id|application_url|name|handle|scopes|redirect_urls|url|uri)\s*=/m',
-                $contents,
+                $production,
             );
         }
     }
@@ -75,6 +89,8 @@ class ShopifyPersonalizationProjectTest extends TestCase
             $releaseSafety = in_array($relative, [
                 'scripts/test-environment-guard.mjs',
                 'scripts/release-safety.test.mjs',
+                'scripts/production-environment-guard.mjs',
+                'scripts/production-release-safety.test.mjs',
             ], true);
 
             $contents = (string) file_get_contents($file->getPathname());

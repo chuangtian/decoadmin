@@ -38,7 +38,7 @@ export async function validateTestConfig({requireRunnable = false} = {}) {
   check(config.includes('url = "https://testadmin.decomkt.com/api/shopify-app/personalization/proxy"'), 'Unexpected Test App Proxy target');
   check(config.includes('prefix = "apps"'), 'Unexpected Test App Proxy prefix');
   check(config.includes('subpath = "deco-personalization-test"'), 'Unexpected Test App Proxy subpath');
-  check(runtime.includes(`const TEST_CLIENT_ID = '${clientId}';`), 'App Home runtime must pin the same Test Client ID');
+  check(runtime.includes(`['${clientId}', {`), 'App Home runtime must pin the same Test Client ID');
   check(!/trycloudflare\.com|https:\/\/admin\.decomkt\.com/i.test(config), 'Test configuration contains a Local or Production URL');
 
   return {runnable: true, clientId};

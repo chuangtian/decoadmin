@@ -157,7 +157,7 @@ export function formatMoney(amount, currency, locale = '') {
     return new Intl.NumberFormat(locale || undefined, {
       style: 'currency',
       currency: normalizedCurrency,
-      currencyDisplay: 'name',
+      currencyDisplay: 'narrowSymbol',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(normalizedAmount);

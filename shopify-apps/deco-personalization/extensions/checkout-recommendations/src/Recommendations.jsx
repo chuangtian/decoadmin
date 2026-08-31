@@ -185,7 +185,7 @@ function Recommendations() {
             <s-heading>{configuration.component.heading}</s-heading>
           </s-stack>
           {error ? <s-banner tone="critical">{error}</s-banner> : null}
-          <s-grid key={displayedCandidate.variant_id} gridTemplateColumns="64px 1fr auto" gap="base" alignItems="center">
+          <s-grid key={displayedCandidate.variant_id} gridTemplateColumns="96px 1fr auto" gap="base" alignItems="center">
             {displayedCandidate.image_url
               ? <s-image src={displayedCandidate.image_url} alt={displayedCandidate.image_alt || displayedCandidate.title} aspectRatio="1" />
               : <s-box><s-icon type="image" size="large" tone="neutral" /></s-box>}
@@ -199,13 +199,16 @@ function Recommendations() {
                 && Number(displayedCandidate.discounted_amount) < Number(displayedCandidate.amount)
                 ? <s-stack gap="small-100">
                     <s-text type="small" tone="success">{displayedCandidate.discount.percentage}% off</s-text>
-                    <s-text type="redundant">{formatMoney(displayedCandidate.amount, displayedCandidate.currency, language)}</s-text>
-                    <s-text type="strong">{formatMoney(displayedCandidate.discounted_amount, displayedCandidate.currency, language)}</s-text>
+                    <s-stack direction="inline" gap="small-200" alignItems="center">
+                      <s-text type="strong">{formatMoney(displayedCandidate.discounted_amount, displayedCandidate.currency, language)}</s-text>
+                      <s-text type="redundant">{formatMoney(displayedCandidate.amount, displayedCandidate.currency, language)}</s-text>
+                    </s-stack>
                   </s-stack>
                 : <s-text>{formatMoney(displayedCandidate.amount, displayedCandidate.currency, language)}</s-text>}
             </s-stack>
             <s-button
               variant="primary"
+              inlineSize="fit-content"
               disabled={busy || refreshing || advancing || !canAdd || !current}
               loading={busy || advancing || (refreshing && !current)}
               onClick={addCurrent}

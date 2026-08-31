@@ -1,9 +1,9 @@
 .deco-native-cart-recommendation,
 .deco-native-cart-recommendation * { box-sizing: border-box; }
-.deco-native-cart-recommendation { width: 100%; margin: 22px 0 4px; padding: 20px 0 4px; border-top: 1px solid rgba(148,163,184,.28); color: inherit; font: inherit; }
+.deco-native-cart-recommendation { width: 100%; margin: 22px 0 4px; padding: 20px 0 4px; border-top: 0; color: var(--deco-native-text-color,currentColor); font-family: var(--deco-native-font-family,inherit); font-size: inherit; font-style: inherit; }
 .deco-native-cart-recommendation[hidden] { display: none !important; }
 .deco-native-cart-recommendation__heading { margin: 0 0 16px; color: inherit; font: inherit; font-size: 18px; font-weight: 700; line-height: 1.3; text-align: center; }
-.deco-native-cart-recommendation__status:not([hidden]) { margin: 0 0 12px; border-radius: 8px; background: rgba(245,158,11,.14); color: #fbbf24; padding: 9px 11px; font-size: 12px; line-height: 1.45; }
+.deco-native-cart-recommendation__status { display: none !important; }
 .deco-native-cart-recommendation__card { display: grid; grid-template-columns: 88px minmax(0,1fr) auto; align-items: center; gap: 14px; min-width: 0; }
 .deco-native-cart-recommendation__image { display: block; width: 88px; height: 88px; border: 1px solid rgba(148,163,184,.32); border-radius: 2px; background: #fff; object-fit: cover; }
 .deco-native-cart-recommendation__details { min-width: 0; }
@@ -15,13 +15,17 @@
 .deco-native-cart-recommendation__variant,
 .deco-native-cart-recommendation__minimum { opacity: .72; }
 .deco-native-cart-recommendation__offer { color: #f2cb04; font-weight: 650; }
-.deco-native-cart-recommendation__prices { display: flex; flex-wrap: wrap; gap: 3px 8px; margin-top: 4px; font-size: 12px; line-height: 1.35; }
+.deco-native-cart-recommendation__prices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; margin-top: 4px; font-size: 12px; line-height: 1.35; }
 .deco-native-cart-recommendation__prices s { opacity: .65; }
 .deco-native-cart-recommendation__prices strong { color: inherit; }
-.deco-native-cart-recommendation__card > button { min-width: 66px; min-height: 44px; border: 1px solid var(--accent-color,#f2cb04); border-radius: var(--btn-radius,6px); background: transparent; color: inherit; padding: 8px 13px; font: inherit; font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer; white-space: nowrap; }
+.deco-native-cart-recommendation__card > button { min-width: 66px; min-height: 44px; border: 1px solid var(--accent-color,#f2cb04); border-radius: 8px; background: var(--accent-color,#f2cb04) !important; color: #111 !important; padding: 8px 13px; font: inherit; font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer; white-space: nowrap; }
 .deco-native-cart-recommendation__card > button:hover,
-.deco-native-cart-recommendation__card > button:focus-visible { background: var(--accent-color,#f2cb04); color: #111; }
+.deco-native-cart-recommendation__card > button:focus-visible,
+.deco-native-cart-recommendation__card > button:active { background: var(--accent-color,#f2cb04) !important; color: #111 !important; }
 .deco-native-cart-recommendation__card > button:disabled { cursor: wait; opacity: .6; }
+[data-deco-cart-locked="true"] { cursor: wait !important; }
+[data-deco-cart-locked="true"] :is(a, button, input, select, textarea) { pointer-events: none !important; cursor: wait !important; }
+.deco-native-cart-removing { display: inline-block; margin-inline-start: 8px; color: inherit; font: inherit; font-size: 12px; font-weight: 650; }
 @media (max-width: 520px) {
   .deco-native-cart-recommendation { margin-top: 18px; padding-top: 16px; }
   .deco-native-cart-recommendation__card { grid-template-columns: 72px minmax(0,1fr) auto; gap: 10px; }

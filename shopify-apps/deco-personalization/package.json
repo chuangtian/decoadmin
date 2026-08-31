@@ -17,7 +17,9 @@
     "typecheck:checkout": "tsc --project extensions/checkout-trust-badges/tsconfig.json && tsc --project extensions/checkout-recommendations/tsconfig.json",
     "validate:test": "node scripts/run-test-shopify-action.mjs validate",
     "build:test": "node scripts/run-test-shopify-action.mjs build",
-    "deploy:test": "node scripts/run-test-shopify-action.mjs deploy"
+    "deploy:test": "node scripts/run-test-shopify-action.mjs deploy",
+    "validate:production": "node scripts/run-production-shopify-action.mjs validate",
+    "build:production": "node scripts/run-production-shopify-action.mjs build"
   },
   "dependencies": {},
   "devDependencies": {

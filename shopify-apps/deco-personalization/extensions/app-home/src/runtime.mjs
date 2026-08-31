@@ -1,18 +1,27 @@
-const TEST_APP_ORIGIN = 'https://testadmin.decomkt.com';
-const TEST_CLIENT_ID = '2157d17bf0b595f9a52cc3bf18b5b616';
+const APP_CONFIG_BY_CLIENT_ID = new Map([
+  ['2157d17bf0b595f9a52cc3bf18b5b616', {
+    appOrigin: 'https://testadmin.decomkt.com',
+    environment: 'test',
+  }],
+  ['b4dca5d161757cb26e0e805642a3b775', {
+    appOrigin: 'https://admin.decomkt.com',
+    environment: 'production',
+  }],
+]);
 const DENIED_SHOPS = new Set(['macfoxebike.myshopify.com']);
 
 /**
- * Decode only enough context to route the request to the fixed Test origin.
+ * Decode only enough context to route the request to an approved fixed origin.
  * The Laravel backend still verifies the token signature, audience and claims.
  */
 export function runtimeFromIdToken(token) {
   const claims = decodeIdTokenClaims(token);
-  const clientId = audiences(claims.aud).find((audience) => audience === TEST_CLIENT_ID);
+  const clientId = audiences(claims.aud).find((audience) => APP_CONFIG_BY_CLIENT_ID.has(audience));
+  const appConfig = APP_CONFIG_BY_CLIENT_ID.get(clientId);
   const shopDomain = shopDomainFromDestination(claims.dest);
 
-  if (!clientId) {
-    throw new Error('无法识别当前个性化推荐测试应用，请联系 DecoAdmin 管理员。');
+  if (!appConfig) {
+    throw new Error('无法识别当前个性化推荐应用，请联系 DecoAdmin 管理员。');
   }
   if (!shopDomain) {
     throw new Error('无法读取当前 Shopify 店铺，请重新打开应用。');
@@ -22,9 +31,9 @@ export function runtimeFromIdToken(token) {
   }
 
   return {
-    appOrigin: TEST_APP_ORIGIN,
+    appOrigin: appConfig.appOrigin,
     clientId,
-    environment: 'test',
+    environment: appConfig.environment,
     shopDomain,
   };
 }

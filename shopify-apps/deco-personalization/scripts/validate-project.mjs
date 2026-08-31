@@ -2,6 +2,8 @@ import {readFile, readdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
+import {validateProductionConfig} from './production-config-contract.mjs';
+
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const requiredFiles = [
   'AGENTS.md',
@@ -42,6 +44,10 @@ const requiredFiles = [
   'scripts/test-environment-guard.mjs',
   'scripts/run-test-shopify-action.mjs',
   'scripts/release-safety.test.mjs',
+  'scripts/production-config-contract.mjs',
+  'scripts/production-environment-guard.mjs',
+  'scripts/run-production-shopify-action.mjs',
+  'scripts/production-release-safety.test.mjs',
 ];
 const failures = [];
 
@@ -59,19 +65,20 @@ check(typeof scripts.test === 'string', 'test script is required');
 check(typeof scripts['validate:test'] === 'string', 'validate:test script is required');
 check(typeof scripts['build:test'] === 'string', 'build:test script is required');
 check(typeof scripts['deploy:test'] === 'string', 'deploy:test script is required');
+check(typeof scripts['validate:production'] === 'string', 'validate:production script is required');
+check(typeof scripts['build:production'] === 'string', 'build:production script is required');
+check(scripts['deploy:production'] === undefined, 'deploy:production npm script remains forbidden; use the guarded one-shot wrapper');
 
 for (const [name, command] of Object.entries(scripts)) {
   check(!/local/i.test(name), `Local script is forbidden: ${name}`);
   check(!/--config\s+local\b/i.test(String(command)), `Local Shopify config command is forbidden: ${name}`);
-  check(!/deploy:production|--config\s+production\b/i.test(`${name} ${command}`), `Production deploy command is forbidden: ${name}`);
   check(!/shopify\s+app\s+dev\b/i.test(String(command)), `Shopify Local dev command is forbidden: ${name}`);
 }
 
 const localConfig = await read('shopify.app.local.toml');
-const productionConfig = await read('shopify.app.production.toml');
 const nonRunnablePattern = /^\s*(client_id|application_url|embedded|name|handle|scopes|redirect_urls|url|uri|prefix|subpath)\s*=/m;
 check(!nonRunnablePattern.test(localConfig), 'Local placeholder contains runnable Shopify configuration');
-check(!nonRunnablePattern.test(productionConfig), 'Production placeholder contains runnable Shopify configuration');
+await validateProductionConfig().catch((error) => failures.push(error.message));
 
 const files = await walk(appRoot);
 for (const absolutePath of files) {
@@ -82,6 +89,8 @@ for (const absolutePath of files) {
   const isReleaseSafety = [
     'scripts/test-environment-guard.mjs',
     'scripts/release-safety.test.mjs',
+    'scripts/production-environment-guard.mjs',
+    'scripts/production-release-safety.test.mjs',
   ].includes(relativePath);
 
   check(!/trycloudflare\.com/i.test(contents), `Temporary Cloudflare URL is forbidden: ${relativePath}`);

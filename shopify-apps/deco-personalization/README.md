@@ -7,7 +7,7 @@
 - 本机/worktree 仅用于代码、Docker 测试、离线构建和发布前校验，不是 Local Shopify App 环境。
 - `shopify.app.local.toml` 仅为不可运行的结构占位，不得配置或发布。
 - Test 是第一个真实运行环境，商家可见名称为 `Deco 个性化推荐测试`，技术 handle 为 `deco-personalization-test`。
-- Production 在当前授权中不可创建、配置、发布、安装或部署；正式显示名称预留为 `Deco 个性化推荐`。
+- Production 使用独立 Shopify App，正式显示名称为 `Deco 个性化推荐`，技术 handle 为 `deco-personalization`；与 Test 配置、凭证和发布流程完全隔离。
 
 ## 工程模式
 
@@ -29,7 +29,7 @@ App Home / Theme App Extension / Web Pixel
 
 `extensions/app-home` 复用 Student Discount 的身份模式：从 Shopify 获取 ID token，动态解析 shop，固定请求 Test DecoAdmin 源站，再由后端校验签名、audience、Organization、Store 与 RBAC。前端解析不代替后端验签。
 
-App Home 不包含 Shopify 凭证，也不连接 Local 或 Production。永久禁止店铺会在发出任何后端请求前被拒绝。
+App Home 不包含 Shopify Secret；它按 Shopify Client ID 选择固定的 Test 或 Production DecoAdmin 源站。永久禁止店铺会在发出任何后端请求前被拒绝。
 
 ## Theme App Extension
 

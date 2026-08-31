@@ -92,8 +92,8 @@ test('the final candidate is no longer rendered after its cart line appears', ()
 });
 
 test('checkout prices are localized and invalid money never renders as a discount price', () => {
-  assert.equal(formatMoney('1699', 'USD', 'zh-CN'), '1,699.00美元');
-  assert.equal(formatMoney('1599', 'USD', 'en-US'), '1,599.00 US dollars');
+  assert.equal(formatMoney('1699', 'USD', 'zh-CN'), '$1,699.00');
+  assert.equal(formatMoney('1599', 'USD', 'en-US'), '$1,599.00');
   assert.equal(formatMoney('invalid', 'USD', 'en-US'), '');
   assert.equal(formatMoney('1599', 'not-a-currency', 'en-US'), '');
 });
@@ -107,6 +107,7 @@ test('candidate row advances without unmounting during background revalidation',
   assert.match(source, /const displayedCandidate = current \?\? retainedCandidate/);
   assert.match(source, /setBusy\(true\);\s*setAdvancing\(true\);/);
   assert.match(source, /<s-grid key=\{displayedCandidate\.variant_id\}/);
+  assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
   assert.match(source, /const \[refreshing, setRefreshing\] = useState\(false\)/);
   assert.match(source, /const configurationUrl = configurationEndpoint\(configurationMetafields\)/);
   assert.match(source, /}, \[configurationUrl\]\);/);
@@ -114,11 +115,13 @@ test('candidate row advances without unmounting during background revalidation',
   assert.match(source, /setRefreshing\(true\);/);
   assert.match(source, /if \(!configurationLoaded \|\| !recommendationsLoaded \|\| !configuration \|\| !displayedCandidate\) return null/);
   assert.match(source, /loading=\{busy \|\| advancing \|\| \(refreshing && !current\)\}/);
+  assert.match(source, /inlineSize="fit-content"/);
   assert.match(source, /<s-box paddingInline="large-200">/);
   assert.match(source, /<s-stack alignItems="center">/);
   assert.match(source, /<s-stack gap="small-200" minInlineSize="0">/);
-  assert.match(source, /<s-text type="redundant">\{formatMoney\(displayedCandidate\.amount/);
+  assert.match(source, /<s-stack direction="inline" gap="small-200" alignItems="center">/);
   assert.match(source, /<s-text type="strong">\{formatMoney\(displayedCandidate\.discounted_amount/);
+  assert.match(source, /<s-text type="redundant">\{formatMoney\(displayedCandidate\.amount/);
   assert.match(source, /Number\(displayedCandidate\.discounted_amount\) < Number\(displayedCandidate\.amount\)/);
   assert.match(source, /fetchRecommendations\(shopify/);
   assert.match(source, /quantity: current\.minimum_purchase_quantity/);

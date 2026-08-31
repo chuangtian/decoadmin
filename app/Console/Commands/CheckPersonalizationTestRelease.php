@@ -10,7 +10,7 @@ class CheckPersonalizationTestRelease extends Command
 {
     protected $signature = 'personalization:release-check';
 
-    protected $description = 'Verify the deployed DecoAdmin Test backend before publishing the Personalization Test App';
+    protected $description = 'Verify the active DecoAdmin backend before publishing the matching Personalization App';
 
     public function handle(): int
     {
@@ -22,6 +22,24 @@ class CheckPersonalizationTestRelease extends Command
         };
 
         $environment = (string) config('personalization.environment');
+        $contracts = [
+            'test' => [
+                'label' => 'Test',
+                'name' => 'Deco 个性化推荐测试',
+                'handle' => 'deco-personalization-test',
+                'origin' => 'https://testadmin.decomkt.com',
+                'proxy_path' => '/apps/deco-personalization-test',
+            ],
+            'production' => [
+                'label' => 'Production',
+                'name' => 'Deco 个性化推荐',
+                'handle' => 'deco-personalization',
+                'origin' => 'https://admin.decomkt.com',
+                'proxy_path' => '/apps/deco-personalization',
+            ],
+        ];
+        $contract = $contracts[$environment] ?? null;
+        $label = (string) ($contract['label'] ?? 'Active');
         $clientId = trim((string) config('personalization.active.client_id'));
         $secretConfigured = (string) config('personalization.active.client_secret') !== '';
         $scopes = array_values((array) config('personalization.required_scopes', []));
@@ -29,13 +47,15 @@ class CheckPersonalizationTestRelease extends Command
         $expectedScopes = ['read_customer_events', 'read_discounts', 'write_app_proxy', 'write_discounts', 'write_pixels'];
         $retention = (array) config('personalization.retention', []);
 
-        $check($environment === 'test', 'Personalization environment must be test.');
-        $check(preg_match('/^[a-f0-9]{32}$/i', $clientId) === 1, 'Test Client ID is missing or invalid.');
-        $check($secretConfigured, 'Test Client Secret is not configured.');
-        $check((string) config('personalization.active.name') === 'Deco 个性化推荐测试', 'Unexpected Test app display name.');
-        $check((string) config('personalization.active.handle') === 'deco-personalization-test', 'Unexpected Test app handle.');
-        $check((string) config('personalization.active.app_url') === 'https://testadmin.decomkt.com', 'Unexpected Test backend origin.');
-        $check((string) config('personalization.active_proxy_path') === '/apps/deco-personalization-test', 'Unexpected Test App Proxy path.');
+        $check($contract !== null, 'Personalization environment must be test or production.');
+        $check(preg_match('/^[a-f0-9]{32}$/i', $clientId) === 1, "{$label} Client ID is missing or invalid.");
+        $check($secretConfigured, "{$label} Client Secret is not configured.");
+        if ($contract !== null) {
+            $check((string) config('personalization.active.name') === $contract['name'], "Unexpected {$label} app display name.");
+            $check((string) config('personalization.active.handle') === $contract['handle'], "Unexpected {$label} app handle.");
+            $check((string) config('personalization.active.app_url') === $contract['origin'], "Unexpected {$label} backend origin.");
+            $check((string) config('personalization.active_proxy_path') === $contract['proxy_path'], "Unexpected {$label} App Proxy path.");
+        }
         $check($scopes === $expectedScopes, 'Personalization scopes exceed or omit the approved P0 minimum.');
         $check(in_array('macfoxebike.myshopify.com', (array) config('personalization.denied_shop_domains', []), true), 'Permanent denied shop guard is missing.');
 
@@ -76,7 +96,7 @@ class CheckPersonalizationTestRelease extends Command
             return self::FAILURE;
         }
 
-        $this->info('Personalization Test backend release check passed.');
+        $this->info("Personalization {$label} backend release check passed.");
         $this->line('Client ID: configured; Client Secret: configured; secrets were not displayed.');
         $this->line('Scopes: '.implode(', ', $scopes).'.');
 

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {decodeIdTokenClaims, runtimeFromIdToken} from './runtime.mjs';
 
 const TEST_CLIENT_ID = '2157d17bf0b595f9a52cc3bf18b5b616';
+const PRODUCTION_CLIENT_ID = 'b4dca5d161757cb26e0e805642a3b775';
 
 test('resolves a dynamic shop and client id only to the fixed Test backend', () => {
   const token = tokenFor({
@@ -28,10 +29,24 @@ test('supports an audience list while retaining the first valid Shopify client i
   assert.equal(runtimeFromIdToken(token).clientId, TEST_CLIENT_ID);
 });
 
+test('routes the separate Production client only to the fixed Production backend', () => {
+  const token = tokenFor({
+    aud: PRODUCTION_CLIENT_ID,
+    dest: 'https://production-store.myshopify.com',
+  });
+
+  assert.deepEqual(runtimeFromIdToken(token), {
+    appOrigin: 'https://admin.decomkt.com',
+    clientId: PRODUCTION_CLIENT_ID,
+    environment: 'production',
+    shopDomain: 'production-store.myshopify.com',
+  });
+});
+
 test('rejects invalid clients, invalid shop destinations and malformed tokens', () => {
   assert.throws(
     () => runtimeFromIdToken(tokenFor({aud: 'unknown-client', dest: 'https://shop.myshopify.com'})),
-    /无法识别当前个性化推荐测试应用/,
+    /无法识别当前个性化推荐应用/,
   );
   assert.throws(
     () => runtimeFromIdToken(tokenFor({aud: TEST_CLIENT_ID, dest: 'https://attacker.example.com'})),
