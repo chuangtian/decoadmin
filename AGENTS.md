@@ -7,7 +7,7 @@
 
 ## Environment URLs
 
-- Local development (temporary Cloudflare tunnel): `https://verified-lonely-fairfield-cached.trycloudflare.com`
+- Local development (temporary Cloudflare tunnel): `https://build-albuquerque-timber-scott.trycloudflare.com`
 - Test environment: `https://testadmin.decomkt.com`
 - Production environment: `https://admin.decomkt.com`
 
