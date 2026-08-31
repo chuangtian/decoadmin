@@ -63,7 +63,8 @@
     const emailSubmit = emailForm.querySelector('button[type="submit"]');
     const emailError = dialog.querySelector('[data-sd-email-error]');
     const alternative = dialog.querySelector('[data-sd-alternative]');
-    const openIdButton = dialog.querySelector('[data-sd-open-id]');
+    const openIdButtons = [...dialog.querySelectorAll('[data-sd-open-id]')];
+    const openIdButton = openIdButtons[0];
     const selectEmailButton = dialog.querySelector('[data-sd-select-email]');
     const selectIdButton = dialog.querySelector('[data-sd-select-id]');
     const supportLink = dialog.querySelector('[data-sd-support-link]');
@@ -256,7 +257,7 @@
       window.setTimeout(() => emailInput.focus(), 0);
     });
     selectIdButton.addEventListener('click', openStudentId);
-    openIdButton.addEventListener('click', openStudentId);
+    openIdButtons.forEach((button) => button.addEventListener('click', openStudentId));
     dialog.querySelectorAll('[data-sd-back-method]').forEach((button) => {
       button.addEventListener('click', () => {
         showView('method');

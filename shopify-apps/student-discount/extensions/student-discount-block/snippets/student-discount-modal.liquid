@@ -103,7 +103,10 @@ Renders the student discount verification dialog for an app block.
       <div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div>
       <h2 data-sd-success-title>{{ 'student_discount.modal.submitted' | t }}</h2>
       <p class="student-discount-dialog__lead" data-sd-success-message></p>
-      <button type="button" class="student-discount-dialog__primary" data-sd-done>{{ 'student_discount.modal.done' | t }}</button>
+      <div class="student-discount-dialog__success-actions">
+        <button type="button" class="student-discount-dialog__primary" data-sd-open-id>{{ 'student_discount.modal.verify_again' | t }}</button>
+        <button type="button" class="student-discount-dialog__primary" data-sd-done>{{ 'student_discount.modal.done' | t }}</button>
+      </div>
     </div>
 
     <div class="student-discount-dialog__code-result" data-sd-view="code" hidden>

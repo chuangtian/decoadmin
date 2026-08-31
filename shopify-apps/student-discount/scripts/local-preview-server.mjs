@@ -50,7 +50,7 @@ const html = String.raw`<!doctype html>
           style="--sd-background:#111111;--sd-text:#ffffff;--sd-radius:0px;--sd-max-width:720px"
         ><span class="student-discount-app__text">Verify your student status and get a student discount</span></button>
 
-        <div id="student-discount-dialog-local" class="student-discount-dialog" data-student-discount-dialog hidden>
+        <div id="student-discount-dialog-local" class="student-discount-dialog" data-student-discount-dialog data-student-discount-version="2" hidden>
           <button type="button" class="student-discount-dialog__backdrop" data-sd-close aria-label="Close student discount dialog"></button>
           <div class="student-discount-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="student-discount-title-local">
             <button type="button" class="student-discount-dialog__close" data-sd-close aria-label="Close">×</button>
@@ -89,7 +89,7 @@ const html = String.raw`<!doctype html>
               </section>
             </div>
 
-            <div data-sd-view="success" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><h2 data-sd-success-title>Submitted</h2><p class="student-discount-dialog__lead" data-sd-success-message></p><button type="button" class="student-discount-dialog__primary" data-sd-done>Done</button></div>
+            <div data-sd-view="success" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><h2 data-sd-success-title>Submitted</h2><p class="student-discount-dialog__lead" data-sd-success-message></p><div class="student-discount-dialog__success-actions"><button type="button" class="student-discount-dialog__primary" data-sd-open-id>Verify Again</button><button type="button" class="student-discount-dialog__primary" data-sd-done>Done</button></div></div>
             <div class="student-discount-dialog__code-result" data-sd-view="code" hidden><div class="student-discount-dialog__success-icon" aria-hidden="true">✓</div><p class="student-discount-dialog__eyebrow">Student discount approved</p><h2>Your discount code is ready</h2><div class="student-discount-dialog__code-card"><span>Your code</span><strong data-sd-code></strong><button type="button" class="student-discount-dialog__copy" data-sd-copy>Copy code</button></div><p class="student-discount-dialog__code-status" data-sd-code-status hidden></p><p class="student-discount-dialog__code-expiry" data-sd-code-expiry hidden></p><p class="student-discount-dialog__terms-note" data-sd-code-terms hidden></p><p class="student-discount-dialog__copy-feedback" data-sd-copy-feedback aria-live="polite"></p><p class="student-discount-dialog__delivery" data-sd-code-message role="status"></p><p class="student-discount-dialog__checkout-note">Enter this code at checkout to apply your student discount.</p><button type="button" class="student-discount-dialog__primary" data-sd-code-done>Continue shopping</button></div>
           </div>
         </div>
@@ -124,7 +124,13 @@ const previewServer = createServer((request, response) => {
     return;
   }
   response.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"});
-  response.end(html);
+  const responseHtml = url.searchParams.get("view") === "success"
+    ? html
+      .replace('data-student-discount-version="2" hidden', 'data-student-discount-version="2"')
+      .replace('<div data-sd-view="method">', '<div data-sd-view="method" hidden>')
+      .replace('<div data-sd-view="success" hidden>', '<div data-sd-view="success">')
+    : html;
+  response.end(responseHtml);
 });
 
 const sendJson = (response, status, payload) => {
