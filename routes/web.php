@@ -106,6 +106,11 @@ Route::prefix('/api/shopify-app/student-discounts/proxy')
     ->group(function (): void {
         Route::get('/', [PublicStudentDiscountController::class, 'info'])
             ->name('student-discounts.public.info');
+        Route::get('/verify', [PublicStudentDiscountController::class, 'retryPage'])
+            ->name('student-discounts.public.retry');
+        Route::post('/verify/claims', [PublicStudentDiscountController::class, 'retryStore'])
+            ->middleware('throttle:student-discount-submissions')
+            ->name('student-discounts.public.retry.store');
         Route::post('/', [PublicStudentDiscountController::class, 'store'])
             ->middleware('throttle:student-discount-submissions');
         Route::post('/claims', [PublicStudentDiscountController::class, 'store'])

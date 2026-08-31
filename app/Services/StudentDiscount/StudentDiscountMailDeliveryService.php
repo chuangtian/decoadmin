@@ -43,6 +43,7 @@ class StudentDiscountMailDeliveryService
         $rendered = $this->templates->render($code ? 'approval' : 'rejection', $campaign?->email_templates, [
             'store_name' => (string) ($store?->name ?: config('app.name')),
             'store_url' => $store?->shopify_domain ? 'https://'.$store->shopify_domain : '',
+            'cta_url' => ! $code && $store ? $this->verificationPageUrl($store) : null,
             'applicant_email' => $claim->email,
             'discount_code' => $code?->code,
             'expires_at' => $code?->expires_at?->toIso8601String(),
@@ -96,6 +97,13 @@ class StudentDiscountMailDeliveryService
         $mailer = trim((string) config('mail.default'));
 
         return $mailer !== '' && $this->mailerDelivers($mailer, []);
+    }
+
+    private function verificationPageUrl(Store $store): string
+    {
+        $proxyPath = '/'.trim((string) config('student_discount.active.proxy_path'), '/');
+
+        return 'https://'.$store->shopify_domain.$proxyPath.'/verify';
     }
 
     /** @param list<string> $visited */
