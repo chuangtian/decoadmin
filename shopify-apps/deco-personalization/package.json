@@ -1,0 +1,27 @@
+{
+  "name": "deco-personalization",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "workspaces": [
+    "extensions/*"
+  ],
+  "scripts": {
+    "check": "npm run check:project && npm run check:test-contract && npm run check:storefront && npm test && npm run typecheck:app-home && npm run typecheck:checkout",
+    "check:project": "node scripts/validate-project.mjs",
+    "check:test-contract": "node scripts/test-config-contract.mjs",
+    "check:storefront": "node --check extensions/recommendations/assets/recommendations.js && node --check extensions/recommendations/assets/smart-cart.js && node --check extensions/web-pixel/src/index.js",
+    "test": "node --test",
+    "test:app-home": "node --test extensions/app-home/src/runtime.test.mjs",
+    "typecheck:app-home": "tsc --project extensions/app-home/tsconfig.json",
+    "typecheck:checkout": "tsc --project extensions/checkout-trust-badges/tsconfig.json && tsc --project extensions/checkout-recommendations/tsconfig.json",
+    "validate:test": "node scripts/run-test-shopify-action.mjs validate",
+    "build:test": "node scripts/run-test-shopify-action.mjs build",
+    "deploy:test": "node scripts/run-test-shopify-action.mjs deploy"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "author": "tianchuang"
+}

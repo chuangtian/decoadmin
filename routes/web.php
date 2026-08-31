@@ -30,7 +30,12 @@ use App\Http\Controllers\PaidAdvertisingChannelController;
 use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\PersonalizationCheckoutExtensionController;
+use App\Http\Controllers\PersonalizationController;
+use App\Http\Controllers\PersonalizationEventController;
+use App\Http\Controllers\PersonalizationStrategyWorkflowController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
@@ -41,6 +46,8 @@ use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyInstagramFeedAppController;
 use App\Http\Controllers\ShopifyInstagramFeedWebhookController;
 use App\Http\Controllers\ShopifyOAuthController;
+use App\Http\Controllers\ShopifyPersonalizationAppController;
+use App\Http\Controllers\ShopifyPersonalizationWebhookController;
 use App\Http\Controllers\ShopifyStudentDiscountAppController;
 use App\Http\Controllers\ShopifyStudentDiscountWebhookController;
 use App\Http\Controllers\ShopifyWebhookController;
@@ -132,6 +139,61 @@ Route::prefix('/api/shopify-app/instagram-feed')->group(function (): void {
         ->middleware(['shopify.id-token:instagram_feed', 'throttle:20,1'])
         ->name('instagram-feed.shopify-app.bootstrap');
 });
+
+Route::get('/shopify-app/personalization', [ShopifyPersonalizationAppController::class, 'management'])
+    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->name('personalization.shopify-app.management');
+
+Route::post('/api/shopify-app/personalization/webhooks', ShopifyPersonalizationWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.shopify-app.webhooks');
+
+Route::post('/api/shopify-app/personalization/events/{source}', PersonalizationEventController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.events.receive');
+Route::options('/api/shopify-app/personalization/events/{source}', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.events.options');
+
+Route::prefix('/api/shopify-app/personalization')->group(function (): void {
+    Route::get('/connection', [ShopifyPersonalizationAppController::class, 'connection'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:60,1'])
+        ->name('personalization.shopify-app.connection');
+    Route::post('/bootstrap', [ShopifyPersonalizationAppController::class, 'bootstrap'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
+        ->name('personalization.shopify-app.bootstrap');
+});
+
+Route::get('/api/shopify-app/personalization/checkout/configuration', PersonalizationCheckoutExtensionController::class)
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.configuration');
+Route::options('/api/shopify-app/personalization/checkout/configuration', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.configuration.options');
+Route::post('/api/shopify-app/personalization/checkout/recommendations', [PersonalizationCheckoutExtensionController::class, 'recommendations'])
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.recommendations');
+Route::options('/api/shopify-app/personalization/checkout/recommendations', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.recommendations.options');
+
+Route::prefix('/api/shopify-app/personalization/proxy')
+    ->middleware(['shopify.app-proxy:personalization,personalization_store', 'throttle:personalization-public'])
+    ->group(function (): void {
+        Route::get('/recommendations/{component}', [PublicPersonalizationController::class, 'recommendations'])
+            ->name('personalization.public.recommendations');
+        Route::get('/smart-cart', [PublicPersonalizationController::class, 'smartCart'])
+            ->name('personalization.public.smart-cart');
+    });
 
 // Meta 侧的公开回调：OAuth 靠一次性 state，合规回调靠 signed_request 验签。
 Route::prefix('/instagram-feed')->group(function (): void {
@@ -421,6 +483,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
 
     Route::get('/app-center', [AppController::class, 'index'])->middleware('permission:apps.view')->name('app-center.index');
+    Route::get('/app-center/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('app-center.show');
     Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.view')->name('app-installations.index');
     Route::get('/app-configurations', [ApplicationCenterController::class, 'configurations'])->middleware('permission:apps.configure')->name('app-configurations.index');
     Route::get('/app-logs', [ApplicationCenterController::class, 'logs'])->middleware('permission:audit.view')->name('app-logs.index');
@@ -529,6 +592,90 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');
+    });
+
+Route::prefix('/organizations/{organization}/stores/{store}/personalization')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [PersonalizationController::class, 'index'])
+            ->middleware('permission:personalization.view')
+            ->name('personalization.index');
+        Route::post('/strategies', [PersonalizationController::class, 'storeStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.store');
+        Route::post('/strategy-workflow/drafts', [PersonalizationStrategyWorkflowController::class, 'createDraft'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategy-workflow.drafts.create');
+        Route::get('/strategy-workflow/{strategy}', [PersonalizationStrategyWorkflowController::class, 'editor'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.editor');
+        Route::patch('/strategy-workflow/{strategy}/draft', [PersonalizationStrategyWorkflowController::class, 'autosave'])
+            ->middleware(['permission:personalization.manage', 'throttle:120,1'])
+            ->name('personalization.strategy-workflow.autosave');
+        Route::post('/strategy-workflow/{strategy}/publish', [PersonalizationStrategyWorkflowController::class, 'publish'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.publish');
+        Route::post('/strategy-workflow/{strategy}/duplicate', [PersonalizationStrategyWorkflowController::class, 'duplicate'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.duplicate');
+        Route::post('/strategy-workflow/{strategy}/disable', [PersonalizationStrategyWorkflowController::class, 'disable'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.disable');
+        Route::delete('/strategy-workflow/{strategyUuid}', [PersonalizationStrategyWorkflowController::class, 'destroy'])
+            ->whereUuid('strategyUuid')
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.destroy');
+        Route::post('/strategy-workflow/{strategy}/versions/{version}/restore', [PersonalizationStrategyWorkflowController::class, 'restoreVersion'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.versions.restore');
+        Route::post('/strategy-workflow/{strategy}/preview', [PersonalizationStrategyWorkflowController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.preview');
+        Route::put('/global-settings', [PersonalizationStrategyWorkflowController::class, 'saveGlobalSettings'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.global-settings.update');
+        Route::get('/discounts', [PersonalizationStrategyWorkflowController::class, 'discounts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.discounts.index');
+        Route::post('/discounts', [PersonalizationStrategyWorkflowController::class, 'createDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.store');
+        Route::patch('/discounts', [PersonalizationStrategyWorkflowController::class, 'updateDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.update');
+        Route::put('/strategies/{strategy}', [PersonalizationController::class, 'updateStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.update');
+        Route::put('/strategies/{strategy}/rules', [PersonalizationController::class, 'updateRules'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.rules.update');
+        Route::put('/strategies/{strategy}/products', [PersonalizationController::class, 'updateProducts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.products.update');
+        Route::post('/components', [PersonalizationController::class, 'storeComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.store');
+        Route::put('/components/{component}', [PersonalizationController::class, 'updateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.update');
+        Route::put('/components/{component}/style', [PersonalizationController::class, 'updateStyle'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.style.update');
+        Route::post('/components/{component}/activate', [PersonalizationController::class, 'activateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.activate');
+        Route::post('/components/{component}/disable', [PersonalizationController::class, 'disableComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.disable');
+        Route::get('/components/{component}/preview', [PersonalizationController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.components.preview');
+        Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.checkout.update');
+        Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCart'])
+            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
+            ->name('personalization.smart-cart.update');
     });
 
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')

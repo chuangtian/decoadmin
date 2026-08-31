@@ -1,0 +1,19 @@
+api_version = "2026-07"
+
+[[extensions]]
+name = "Deco Checkout 信任信息"
+handle = "checkout-trust-badges"
+uid = "d15df412-201d-49ea-a22b-9e54032dd680fe8f3b21"
+type = "ui_extension"
+
+[extensions.capabilities]
+network_access = true
+
+[[extensions.metafields]]
+namespace = "$app:deco_personalization"
+key = "checkout_configuration_url"
+
+[[extensions.targeting]]
+target = "purchase.checkout.block.render"
+module = "./src/TrustBadges.jsx"
+default_placement = "WALLETS1"

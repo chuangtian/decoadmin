@@ -1,0 +1,5 @@
+# Permanently disabled Local Shopify App placeholder.
+#
+# Repository structure requires this filename. It must never contain a Client
+# ID, Client Secret, application URL, redirect URL, webhook, App Proxy, store,
+# or deployable Shopify configuration.

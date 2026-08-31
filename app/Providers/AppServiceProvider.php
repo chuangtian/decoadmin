@@ -16,6 +16,7 @@ use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
 use App\Services\AppCenter\AppConfigurationCatalog;
 use App\Services\AppCenter\GenericAppConfigurationProvider;
+use App\Services\AppCenter\PersonalizationAppConfigurationProvider;
 use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
 use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
@@ -50,6 +51,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(CurrentStore::class);
         $this->app->tag([
             StudentDiscountAppConfigurationProvider::class,
+            PersonalizationAppConfigurationProvider::class,
             GenericAppConfigurationProvider::class,
         ], 'app-center.configuration-providers');
         $this->app->singleton(AppConfigurationCatalog::class, fn ($app) => new AppConfigurationCatalog(
@@ -84,6 +86,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('personalization-public', function (Request $request) {
+            $store = $request->attributes->get('personalization_store');
+            if (! $store instanceof Store) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)->by('personalization-public:'.hash_hmac(
+                'sha256',
+                $store->id.'|'.(string) $request->ip(),
+                (string) config('app.key'),
+            ));
+        });
         RateLimiter::for('student-discount-public', function (Request $request) {
             $key = $this->studentDiscountRateLimitKey($request);
 

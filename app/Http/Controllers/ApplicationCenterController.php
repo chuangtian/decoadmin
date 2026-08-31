@@ -64,7 +64,8 @@ class ApplicationCenterController extends Controller
                 $query->where('action', 'like', 'shopify_app_%')
                     ->orWhere('action', 'like', 'shopify_connection_%')
                     ->orWhere('action', 'like', 'store_business_credential_%')
-                    ->orWhere('action', 'like', 'student_discount_%');
+                    ->orWhere('action', 'like', 'student_discount_%')
+                    ->orWhere('action', 'like', 'personalization_%');
             })
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                 $query->where('action', 'like', "%{$search}%")
@@ -120,6 +121,27 @@ class ApplicationCenterController extends Controller
             'student_discount_claim_resubmitted' => '学生优惠申请已重新提交',
             'student_discount_claim_approved' => '学生优惠申请已通过',
             'student_discount_claim_rejected' => '学生优惠申请已拒绝',
+            'personalization_shopify_app_bootstrapped' => '个性化推荐应用连接成功',
+            'personalization_shopify_app_uninstalled' => '个性化推荐应用已卸载',
+            'personalization_shopify_app_scopes_updated' => '个性化推荐应用权限已更新',
+            'personalization_strategy_created' => '个性化推荐策略已创建',
+            'personalization_strategy_rules_replaced' => '个性化推荐规则已更新',
+            'personalization_strategy_products_replaced' => '个性化推荐商品已更新',
+            'personalization_strategy_updated' => '个性化推荐策略已更新',
+            'personalization_component_created' => '个性化推荐组件已创建',
+            'personalization_component_updated' => '个性化推荐组件已更新',
+            'personalization_component_style_updated' => '个性化推荐样式已更新',
+            'personalization_component_activated' => '个性化推荐组件已启用',
+            'personalization_component_disabled' => '个性化推荐组件已停用',
+            'personalization_smart_cart_draft_saved' => 'Smart Cart 草稿已保存',
+            'personalization_smart_cart_compatibility_recorded' => 'Smart Cart 兼容性已检查',
+            'personalization_smart_cart_preview_confirmed' => 'Smart Cart 预览已确认',
+            'personalization_smart_cart_activated' => 'Smart Cart 已启用',
+            'personalization_smart_cart_restored' => '已恢复 Shopify 默认购物车',
+            'personalization_customer_data_request_received' => '已处理客户数据请求（无客户数据）',
+            'personalization_customer_redact_received' => '已处理客户清除请求（无客户数据）',
+            'personalization_shop_redact_received' => '已接收店铺清除请求',
+            'personalization_online_data_purged' => '个性化推荐在线数据已清理',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }

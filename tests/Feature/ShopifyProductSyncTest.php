@@ -68,12 +68,14 @@ class ShopifyProductSyncTest extends TestCase
     public function test_product_sync_parses_graphql_and_saves_products_and_variants(): void
     {
         [, $organization, $store, $installation] = $this->context('store-admin');
-        Http::fake(['*' => Http::response($this->productsPayload([
-            $this->productNode(101, 'Macfox X1', [
-                $this->variantNode(201, 'Black', 'X1-BLK', '1299.00', 301),
-                $this->variantNode(202, 'White', null, '1399.50', 302),
-            ]),
-        ]))]);
+        Http::fakeSequence()
+            ->push($this->productsPayload([
+                $this->productNode(101, 'Macfox X1', [
+                    $this->variantNode(201, 'Black', 'X1-BLK', '1299.00', 301),
+                    $this->variantNode(202, 'White', null, '1399.50', 302),
+                ]),
+            ]))
+            ->push($this->collectionsPayload([]));
 
         $syncJob = $this->syncJob($organization, $store, $installation);
         $result = app(SyncProcessor::class)->process($syncJob->id);
@@ -94,14 +96,21 @@ class ShopifyProductSyncTest extends TestCase
             'status' => 'active',
             'vendor' => 'Macfox',
             'product_type' => 'Ebike',
+            'featured_image_url' => 'https://cdn.shopify.com/macfox-x1.jpg',
         ]);
         $product = Product::query()->sole();
         $this->assertNotNull($product->synced_at);
+        $this->assertSame(['Ebike', 'Featured'], $product->tags);
+        $this->assertSame('2026-01-02T03:04:05+00:00', $product->created_at_shopify?->toIso8601String());
+        $this->assertSame('2026-01-03T03:04:05+00:00', $product->published_at_shopify?->toIso8601String());
         $this->assertDatabaseHas('product_variants', [
             'product_id' => $product->id,
             'shopify_variant_id' => 201,
             'sku' => 'X1-BLK',
             'price' => '1299.0000',
+            'compare_at_price' => '1499.0000',
+            'available_for_sale' => true,
+            'image_url' => 'https://cdn.shopify.com/variant-201.jpg',
             'inventory_item_id' => 301,
         ]);
         $this->assertDatabaseCount('product_variants', 2);
@@ -123,7 +132,8 @@ class ShopifyProductSyncTest extends TestCase
                 $this->productNode(102, 'Macfox X2', [
                     $this->variantNode(203, 'Default', 'X2', '1599.00', 303),
                 ]),
-            ]));
+            ]))
+            ->push($this->collectionsPayload([]));
 
         $syncJob = $this->syncJob($organization, $store, $installation);
         $result = app(SyncProcessor::class)->process($syncJob->id);
@@ -144,6 +154,7 @@ class ShopifyProductSyncTest extends TestCase
         $this->assertNull($requests[0]['after']);
         $this->assertSame('variant-cursor', $requests[1]['after']);
         $this->assertSame('product-cursor', $requests[2]['after']);
+        $this->assertNull($requests[3]['after']);
     }
 
     public function test_repeated_sync_updates_product_and_variant_without_duplicates(): void
@@ -155,11 +166,13 @@ class ShopifyProductSyncTest extends TestCase
                     $this->variantNode(201, 'Default', 'OLD-SKU', '100.00', 301),
                 ]),
             ]))
+            ->push($this->collectionsPayload([]))
             ->push($this->productsPayload([
                 $this->productNode(101, 'New title', [
                     $this->variantNode(201, 'Updated', 'NEW-SKU', '120.50', 301),
                 ]),
-            ]));
+            ]))
+            ->push($this->collectionsPayload([]));
         app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
 
         $result = app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
@@ -183,11 +196,17 @@ class ShopifyProductSyncTest extends TestCase
     {
         [, $organizationA, $storeA, $installationA] = $this->context('store-admin');
         [, $organizationB, $storeB, $installationB] = $this->context('store-admin');
-        Http::fake(['*' => Http::response($this->productsPayload([
-            $this->productNode(101, 'Shared Shopify ID', [
-                $this->variantNode(201, 'Default', null, '99.00', 301),
-            ]),
-        ]))]);
+        Http::fake(function (Request $request) {
+            $query = (string) ($request->data()['query'] ?? '');
+
+            return str_contains($query, 'SyncCollections')
+                ? Http::response($this->collectionsPayload([]))
+                : Http::response($this->productsPayload([
+                    $this->productNode(101, 'Shared Shopify ID', [
+                        $this->variantNode(201, 'Default', null, '99.00', 301),
+                    ]),
+                ]));
+        });
 
         app(SyncProcessor::class)->process($this->syncJob($organizationA, $storeA, $installationA)->id);
         app(SyncProcessor::class)->process($this->syncJob($organizationB, $storeB, $installationB)->id);
@@ -217,6 +236,42 @@ class ShopifyProductSyncTest extends TestCase
         $this->assertNotNull($syncJob->last_error);
         $this->assertDatabaseCount('products', 0);
         $this->assertDatabaseCount('product_variants', 0);
+    }
+
+    public function test_collection_and_membership_connections_are_paginated_and_store_scoped(): void
+    {
+        [, $organization, $store, $installation] = $this->context('store-admin');
+        Http::fakeSequence()
+            ->push($this->productsPayload([
+                $this->productNode(101, 'Macfox X1', [$this->variantNode(201, 'Default', 'X1', '1299', 301)]),
+                $this->productNode(102, 'Macfox X2', [$this->variantNode(202, 'Default', 'X2', '1499', 302)]),
+            ]))
+            ->push($this->collectionsPayload([
+                $this->collectionNode(501, 'Ebike', [101], true, 'membership-cursor'),
+            ]))
+            ->push($this->collectionPayload(
+                $this->collectionNode(501, 'Ebike', [102]),
+            ));
+
+        $result = app(SyncProcessor::class)->process($this->syncJob($organization, $store, $installation)->id);
+
+        $this->assertTrue($result->success);
+        $this->assertSame(1, $result->metadata['collections_count']);
+        $this->assertSame(2, $result->metadata['membership_pages']);
+        $this->assertSame(2, $result->metadata['memberships_count']);
+        $this->assertSame(0, $result->metadata['unresolved_memberships']);
+        $this->assertDatabaseHas('product_collections', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_collection_id' => 501,
+            'handle' => 'ebike',
+        ]);
+        $this->assertDatabaseCount('product_collection_memberships', 2);
+        $this->assertSame(
+            [101, 102],
+            Product::query()->whereHas('collections', fn ($query) => $query
+                ->where('shopify_collection_id', 501))->orderBy('shopify_product_id')->pluck('shopify_product_id')->map(fn ($id) => (int) $id)->all(),
+        );
     }
 
     /** @return array{0: User, 1: Organization, 2: Store, 3: AppInstallation} */
@@ -329,6 +384,50 @@ class ShopifyProductSyncTest extends TestCase
         ];
     }
 
+    /** @param list<array<string, mixed>> $collections */
+    private function collectionsPayload(array $collections, bool $hasNextPage = false, ?string $endCursor = null): array
+    {
+        return [
+            'data' => [
+                'collections' => [
+                    'nodes' => $collections,
+                    'pageInfo' => ['hasNextPage' => $hasNextPage, 'endCursor' => $endCursor],
+                ],
+            ],
+        ];
+    }
+
+    /** @param array<string, mixed> $collection */
+    private function collectionPayload(array $collection): array
+    {
+        return ['data' => ['collection' => $collection]];
+    }
+
+    /** @param list<int> $productIds
+     * @return array<string, mixed>
+     */
+    private function collectionNode(
+        int $id,
+        string $title,
+        array $productIds,
+        bool $hasNextPage = false,
+        ?string $endCursor = null,
+    ): array {
+        return [
+            'id' => "gid://shopify/Collection/{$id}",
+            'title' => $title,
+            'handle' => Str::slug($title),
+            'updatedAt' => '2026-01-04T03:04:05Z',
+            'sortOrder' => 'MANUAL',
+            'products' => [
+                'nodes' => array_map(fn (int $productId): array => [
+                    'id' => "gid://shopify/Product/{$productId}",
+                ], $productIds),
+                'pageInfo' => ['hasNextPage' => $hasNextPage, 'endCursor' => $endCursor],
+            ],
+        ];
+    }
+
     /**
      * @param  list<array<string, mixed>>  $variants
      * @return array<string, mixed>
@@ -348,6 +447,18 @@ class ShopifyProductSyncTest extends TestCase
             'vendor' => 'Macfox',
             'productType' => 'Ebike',
             'description' => 'Product description',
+            'tags' => ['Ebike', 'Featured'],
+            'createdAt' => '2026-01-02T03:04:05Z',
+            'publishedAt' => '2026-01-03T03:04:05Z',
+            'onlineStoreUrl' => 'https://example.myshopify.com/products/'.Str::slug($title),
+            'featuredMedia' => [
+                'alt' => $title,
+                'image' => [
+                    'url' => 'https://cdn.shopify.com/'.Str::slug($title).'.jpg',
+                    'width' => 1200,
+                    'height' => 800,
+                ],
+            ],
             'variants' => [
                 'nodes' => $variants,
                 'pageInfo' => ['hasNextPage' => $hasNextVariants, 'endCursor' => $variantCursor],
@@ -368,6 +479,19 @@ class ShopifyProductSyncTest extends TestCase
             'title' => $title,
             'sku' => $sku,
             'price' => $price,
+            'compareAtPrice' => (string) ((float) $price + 200),
+            'availableForSale' => true,
+            'selectedOptions' => [['name' => 'Color', 'value' => $title]],
+            'media' => [
+                'nodes' => [[
+                    'alt' => $title,
+                    'image' => [
+                        'url' => "https://cdn.shopify.com/variant-{$id}.jpg",
+                        'width' => 900,
+                        'height' => 600,
+                    ],
+                ]],
+            ],
             'inventoryItem' => ['id' => "gid://shopify/InventoryItem/{$inventoryItemId}"],
         ];
     }

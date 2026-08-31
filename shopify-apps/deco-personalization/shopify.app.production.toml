@@ -1,0 +1,7 @@
+# Non-runnable Production placeholder.
+# Merchant-facing name reserved for a future separately authorized process:
+# Deco 个性化推荐
+# Technical handle: deco-personalization
+#
+# Production is outside the current authorization. Do not add a Client ID,
+# URL, webhook, callback, proxy, scope, build, deploy, or installation path.

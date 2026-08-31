@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Organization;
 use App\Models\Permission;
 use App\Models\Store;
+use App\Services\AppCenter\ApplicationCenterNavigationService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,7 @@ class HandleInertiaRequests extends Middleware
         $store = app(CurrentStore::class)->get();
         $permissions = [];
         $availableOrganizations = [];
+        $applicationNavigation = [];
 
         if ($user) {
             [$organization, $store] = $this->resolveContext($request, $organization, $store);
@@ -77,6 +79,11 @@ class HandleInertiaRequests extends Middleware
                 ])
                 ->values()
                 ->all();
+
+            if ($organization && $store) {
+                $applicationNavigation = app(ApplicationCenterNavigationService::class)
+                    ->forStore($organization, $store, $permissions);
+            }
         }
 
         return [
@@ -105,6 +112,7 @@ class HandleInertiaRequests extends Middleware
                 'currency' => $store->currency,
             ] : null,
             'availableOrganizations' => $availableOrganizations,
+            'applicationNavigation' => $applicationNavigation,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

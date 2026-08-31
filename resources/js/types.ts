@@ -356,6 +356,13 @@ export interface FlashMessages {
     info?: string;
 }
 
+export interface ApplicationNavigationItem {
+    app_id: number;
+    name: string;
+    route: string;
+    permission: string;
+}
+
 export interface SharedProps {
     appName: string;
     auth: {
@@ -365,6 +372,7 @@ export interface SharedProps {
     currentOrganization: { id: number; name: string; code: string } | null;
     currentStore: (StoreOption & { organization_id: number }) | null;
     availableOrganizations: OrganizationOption[];
+    applicationNavigation: ApplicationNavigationItem[];
     flash: FlashMessages;
     [key: string]: unknown;
 }

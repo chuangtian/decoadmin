@@ -1,0 +1,117 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import test from 'node:test';
+
+const root = new URL('./', import.meta.url);
+const liquid = await readFile(new URL('blocks/recommendations.liquid', root), 'utf8');
+const javascript = await readFile(new URL('assets/recommendations.js', root), 'utf8');
+const stylesheet = await readFile(new URL('assets/recommendations.css', root), 'utf8');
+const smartCartLiquid = await readFile(new URL('blocks/smart_cart.liquid', root), 'utf8');
+const smartCartJavascript = await readFile(new URL('assets/smart-cart.js', root), 'utf8');
+const smartCartStylesheet = await readFile(new URL('assets/smart-cart.css', root), 'utf8');
+
+test('recommendation block is a section App Block backed by its own app-data proxy path', () => {
+  assert.match(liquid, /"target": "section"/);
+  assert.match(liquid, /deco_personalization\.proxy_path/);
+  assert.match(liquid, /"javascript": "recommendations\.js"/);
+  assert.match(liquid, /"stylesheet": "recommendations\.css"/);
+  assert.match(liquid, /component_uuid/);
+});
+
+test('storefront runtime uses only same-origin signed App Proxy and cart routes', () => {
+  assert.match(javascript, /window\.location\.origin/);
+  assert.match(javascript, /\/recommendations\/\$\{componentUuid\}/);
+  assert.match(javascript, /\/cart\/add\.js/);
+  assert.match(javascript, /shopify:section:load/);
+  assert.doesNotMatch(javascript, /https?:\/\//);
+  assert.doesNotMatch(javascript, /innerHTML|eval\(|new Function/);
+  assert.match(javascript, /minimum_purchase_quantity/);
+  assert.match(javascript, /quantity: boundedNumber/);
+  assert.match(javascript, /setIdQuery\(url, 'cart_product_ids', cartProductIds\)/);
+  assert.doesNotMatch(javascript, /cart_product_ids\[\]/);
+});
+
+test('recently viewed context is anonymous, bounded and contains no customer identity', () => {
+  assert.match(javascript, /slice\(0, 20\)/);
+  assert.match(javascript, /recently_viewed_product_ids/);
+  assert.doesNotMatch(javascript, /customer|email|phone|logged_in_customer_id/i);
+  assert.match(stylesheet, /prefers-reduced-motion/);
+});
+
+test('recommendation block publishes only structured custom analytics events', () => {
+  assert.match(javascript, /Shopify\?\.analytics\?\.publish/);
+  assert.match(javascript, /deco_personalization:\$\{action\}/);
+  assert.match(javascript, /'impression'/);
+  assert.match(javascript, /'click'/);
+  assert.match(javascript, /'add_to_cart'/);
+  assert.match(javascript, /products\.slice\(0, 50\)/);
+});
+
+test('Smart Cart is an App Embed that remains governed by the app-data proxy path', () => {
+  assert.match(smartCartLiquid, /"target": "body"/);
+  assert.match(smartCartLiquid, /deco_personalization\.proxy_path/);
+  assert.match(smartCartLiquid, /"javascript": "smart-cart\.js"/);
+  assert.match(smartCartLiquid, /"stylesheet": "smart-cart\.css"/);
+  assert.match(smartCartLiquid, /data-deco-smart-cart-root/);
+});
+
+test('Smart Cart embeds inside the native drawer without replacing or intercepting it', () => {
+  assert.match(smartCartJavascript, /config\?\.enabled === true/);
+  assert.match(smartCartJavascript, /DecoPersonalizationSmartCart/);
+  assert.match(smartCartJavascript, /compatibility/);
+  assert.match(smartCartJavascript, /mode: 'native_cart_embed'/);
+  assert.match(smartCartJavascript, /data-personalization-id="00007"/);
+  assert.match(smartCartJavascript, /MutationObserver/);
+  assert.match(smartCartJavascript, /fetchNativeCartSection/);
+  assert.match(smartCartJavascript, /section_id/);
+  assert.match(smartCartJavascript, /cartRoute\('cart\.js'\)/);
+  assert.match(smartCartJavascript, /cartRoute\('cart\/add\.js'\)/);
+  assert.match(smartCartJavascript, /window\.Shopify\?\.routes\?\.root/);
+  assert.match(smartCartJavascript, /window\.location\.origin/);
+  assert.doesNotMatch(smartCartJavascript, /HTMLDialogElement|showModal\(|window\.location\.assign|preventDefault\(\)/);
+  assert.doesNotMatch(smartCartStylesheet, /dialog|backdrop|deco-smart-cart__panel/);
+  assert.doesNotMatch(smartCartJavascript, /https?:\/\//);
+  assert.doesNotMatch(smartCartJavascript, /innerHTML|eval\(|new Function/);
+  assert.match(smartCartJavascript, /setIdQuery\(url, 'cart_product_ids', productIds\(cart\?\.items\)\)/);
+  assert.doesNotMatch(smartCartJavascript, /cart_product_ids\[\]/);
+});
+
+test('Smart Cart context stays anonymous and bounded', () => {
+  assert.match(smartCartJavascript, /slice\(0, 20\)/);
+  assert.match(smartCartJavascript, /slice\(0, 100\)/);
+  assert.match(smartCartJavascript, /recently_viewed_product_ids/);
+  assert.doesNotMatch(smartCartJavascript, /customer|email|phone|logged_in_customer_id/i);
+  assert.match(smartCartStylesheet, /prefers-reduced-motion/);
+});
+
+test('Smart Cart publishes structured custom events only after the drawer is visible', () => {
+  assert.match(smartCartJavascript, /render\(host, cart, config, true\)/);
+  assert.match(smartCartJavascript, /Shopify\?\.analytics\?\.publish/);
+  assert.match(smartCartJavascript, /placement: 'smart_cart'/);
+  assert.match(smartCartJavascript, /strategy_version_uuid/);
+  assert.match(smartCartJavascript, /rule_id/);
+  assert.match(smartCartJavascript, /nextImpressionKey !== impressionKey/);
+  assert.match(smartCartJavascript, /deco_personalization:\$\{action\}/);
+});
+
+test('Smart Cart renders one sequential product with image, safe wrapping, quantity and discount pricing', () => {
+  assert.match(smartCartJavascript, /nextRecommendation\(config\?\.recommendations\?\.items, cart\)/);
+  assert.match(smartCartJavascript, /createRecommendation\(recommendation\.product, recommendation\.variant, config, status\)/);
+  assert.doesNotMatch(smartCartJavascript, /recommendationItems\.slice\(0, 8\)/);
+  assert.match(smartCartJavascript, /selected_variant_gid/);
+  assert.match(smartCartJavascript, /minimum_purchase_quantity/);
+  assert.match(smartCartJavascript, /deco-native-cart-recommendation__image/);
+  assert.match(smartCartJavascript, /deco-native-cart-recommendation__prices/);
+  assert.match(smartCartJavascript, /document\.createElement\('s'\)/);
+  assert.match(smartCartJavascript, /cartProducts\.has\(productId\)/);
+  assert.match(smartCartStylesheet, /grid-template-columns: 88px minmax\(0,1fr\) auto/);
+  assert.match(smartCartStylesheet, /overflow-wrap: anywhere/);
+});
+
+test('Smart Cart applies an active strategy discount without blocking a successful add', () => {
+  assert.match(smartCartJavascript, /cartRoute\('cart\/update\.js'\)/);
+  assert.match(smartCartJavascript, /JSON\.stringify\(\{discount:/);
+  assert.match(smartCartJavascript, /Item added\. Apply discount code/);
+  assert.match(smartCartJavascript, /button\.disabled = true/);
+  assert.match(smartCartJavascript, /publishRecommendationEvent\('add_failed'/);
+});

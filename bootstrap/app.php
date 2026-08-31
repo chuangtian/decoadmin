@@ -8,6 +8,7 @@ use App\Http\Middleware\ResolveCurrentStore;
 use App\Http\Middleware\StoreAccessMiddleware;
 use App\Http\Middleware\UseBuiltAssetsForExternalRequests;
 use App\Http\Middleware\VerifyShopifyAppProxy;
+use App\Http\Middleware\VerifyShopifyCheckoutToken;
 use App\Http\Middleware\VerifyShopifyIdToken;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -29,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/shopify-app/webhooks',
             'api/shopify-app/student-discounts/*',
             'api/shopify-app/instagram-feed/*',
+            'api/shopify-app/personalization/*',
             // Meta 的回调不带 CSRF token，靠 signed_request 验签。
             'instagram-feed/meta/*',
         ]);
@@ -47,6 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'store.access' => StoreAccessMiddleware::class,
             'shopify.app-proxy' => VerifyShopifyAppProxy::class,
             'shopify.app-proxy-response' => NormalizeShopifyAppProxyResponse::class,
+            'shopify.checkout-token' => VerifyShopifyCheckoutToken::class,
             'shopify.id-token' => VerifyShopifyIdToken::class,
         ]);
         $middleware->prependToPriorityList(

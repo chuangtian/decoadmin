@@ -1,0 +1,21 @@
+{
+  "recommendations": {
+    "name": "Deco recommendations",
+    "settings": {
+      "component_uuid": "Recommendation component ID",
+      "component_uuid_info": "Copy the component ID from the DecoAdmin recommendation workspace.",
+      "heading_override": "Heading override",
+      "heading_override_info": "Leave blank to use the heading configured in DecoAdmin.",
+      "proxy_path_override": "App Proxy path override",
+      "proxy_path_override_info": "Leave blank unless the store has customized the App Proxy URL."
+    }
+  },
+  "smart_cart": {
+    "name": "Deco Smart Cart",
+    "settings": {
+      "safety_notice": "This App Embed stays inactive until compatibility checks, desktop and mobile preview, and manual activation are completed in DecoAdmin. Disabling it restores the theme cart.",
+      "proxy_path_override": "App Proxy path override",
+      "proxy_path_override_info": "Leave blank unless the store has customized the App Proxy URL."
+    }
+  }
+}

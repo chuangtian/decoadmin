@@ -1,0 +1,6 @@
+# Non-runnable default placeholder.
+#
+# Test is the first runnable environment, but this file must remain unlinked
+# until the existing Test App is read-only verified in the approved Dev
+# Dashboard organization. Never point this file at Local, Cloudflare, or
+# Production.
