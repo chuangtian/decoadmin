@@ -47,19 +47,32 @@ const monthPanels = computed(() => [monthGrid(viewMonth.value), monthGrid(second
 const rangeLabel = computed(() => {
     if (props.period.days === 1 && props.period.from === props.period.to) return props.period.to === toDate(today) ? '今天' : '昨天';
     if ([7, 30, 90].includes(props.period.days) && props.period.to === toDate(today)) return `过去 ${props.period.days} 天`;
-    if (props.period.from && props.period.to) return `${shortDate(props.period.from)} – ${shortDate(props.period.to)}`;
+    if (props.period.from && props.period.to) {
+        const includeYear = rangeNeedsYear(props.period.from, props.period.to, toDate(today));
+        return `${shortDate(props.period.from, includeYear)} – ${shortDate(props.period.to, includeYear)}`;
+    }
     return `过去 ${props.period.days} 天`;
 });
 const comparisonButtonLabel = computed(() => {
     if (!props.comparison || props.comparison.mode === 'none') return '未开启对比';
     if (!props.comparison.period) return props.comparison.label;
-    return `${props.comparison.label} · ${shortDate(props.comparison.period.from)} – ${shortDate(props.comparison.period.to)}`;
+    const includeYear = rangeNeedsYear(props.comparison.period.from, props.comparison.period.to, props.period.from);
+    return `${props.comparison.label} · ${shortDate(props.comparison.period.from, includeYear)} – ${shortDate(props.comparison.period.to, includeYear)}`;
 });
+const statisticsNeedsYear = computed(() => rangeNeedsYear(rangeStart.value, rangeEnd.value, toDate(today)));
+const comparisonNeedsYear = computed(() => rangeNeedsYear(comparisonStart.value, comparisonEnd.value, rangeStart.value));
 const selectionRangeLabel = computed(() => {
     const start = selectionTarget.value === 'comparison' ? comparisonStart.value : rangeStart.value;
     const end = selectionTarget.value === 'comparison' ? comparisonEnd.value : rangeEnd.value;
     if (!start) return '请选择开始日期';
-    return `${shortDate(start)}${end ? ` – ${shortDate(end)}` : ' – 请选择结束日期'}`;
+    const includeYear = selectionTarget.value === 'comparison' ? comparisonNeedsYear.value : statisticsNeedsYear.value;
+    return `${shortDate(start, includeYear)}${end ? ` – ${shortDate(end, includeYear)}` : ' – 请选择结束日期'}`;
+});
+const comparisonPreviewLabel = computed(() => {
+    const preview = comparisonPreview();
+    if (!preview) return '';
+    const includeYear = rangeNeedsYear(preview.from, preview.to, rangeStart.value);
+    return `${shortDate(preview.from, includeYear)} – ${shortDate(preview.to, includeYear)}`;
 });
 const canClearSelection = computed(() => selectionTarget.value === 'comparison'
     ? Boolean(comparisonStart.value || comparisonEnd.value)
@@ -89,7 +102,16 @@ function addMonths(value: Date, months: number) { return new Date(value.getFullY
 function addYears(value: Date, years: number) { const next = new Date(value); next.setFullYear(next.getFullYear() + years); return next; }
 function parseDate(value: string) { const [year, month, day] = value.split('-').map(Number); return new Date(year, month - 1, day); }
 function toDate(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
-function shortDate(value: string) { const date = parseDate(value); return `${date.getMonth() + 1}月${date.getDate()}日`; }
+function shortDate(value: string, includeYear = false) {
+    const date = parseDate(value);
+    return `${includeYear ? `${date.getFullYear()}年` : ''}${date.getMonth() + 1}月${date.getDate()}日`;
+}
+function rangeNeedsYear(start: string, end = '', reference = '') {
+    if (!start) return false;
+    const years = [start, end].filter(Boolean).map((value) => parseDate(value).getFullYear());
+    if (new Set(years).size > 1) return true;
+    return Boolean(reference && years[0] !== parseDate(reference).getFullYear());
+}
 function monthTitle(value: Date) { return `${value.getFullYear()}年 ${value.getMonth() + 1}月`; }
 function rangeDays(start: string, end: string) { return Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / 86400000) + 1; }
 
@@ -256,7 +278,7 @@ function apply() {
                     </div>
                     <button type="button" class="mt-3 w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition" :class="selectionTarget === 'current' ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-slate-600 hover:bg-slate-100'" @click="selectCurrentRange">
                         选择统计日期
-                        <span v-if="rangeStart" class="mt-1 block font-normal">{{ shortDate(rangeStart) }}{{ rangeEnd ? ` – ${shortDate(rangeEnd)}` : ' – 请选择结束日期' }}</span>
+                        <span v-if="rangeStart" class="mt-1 block font-normal">{{ shortDate(rangeStart, statisticsNeedsYear) }}{{ rangeEnd ? ` – ${shortDate(rangeEnd, statisticsNeedsYear)}` : ' – 请选择结束日期' }}</span>
                     </button>
 
                     <div v-if="comparison" class="mt-2 border-t border-slate-200 px-3 pt-4">
@@ -266,7 +288,7 @@ function apply() {
                         </div>
                         <button v-if="comparisonMode === 'custom'" type="button" class="mt-3 w-full rounded-xl px-3 py-2 text-left text-xs font-semibold" :class="selectionTarget === 'comparison' ? 'bg-sky-100 text-sky-700' : 'bg-white text-slate-600'" @click="selectComparisonRange">
                             选择对比日期
-                            <span v-if="comparisonStart && comparisonEnd" class="mt-1 block font-normal">{{ shortDate(comparisonStart) }} – {{ shortDate(comparisonEnd) }}</span>
+                            <span v-if="comparisonStart && comparisonEnd" class="mt-1 block font-normal">{{ shortDate(comparisonStart, comparisonNeedsYear) }} – {{ shortDate(comparisonEnd, comparisonNeedsYear) }}</span>
                         </button>
                     </div>
                 </aside>
@@ -277,7 +299,7 @@ function apply() {
                         <div class="min-w-0 text-center">
                             <p class="text-xs font-semibold" :class="selectionTarget === 'comparison' ? 'text-sky-600' : 'text-emerald-600'">{{ selectionTarget === 'comparison' ? '正在选择对比周期' : '正在选择统计周期' }}</p>
                             <p class="mt-1 truncate text-sm font-semibold text-slate-900">{{ selectionRangeLabel }}</p>
-                            <p v-if="comparisonPreview()" class="mt-1 truncate text-xs font-medium text-sky-600">对比 {{ shortDate(comparisonPreview()!.from) }} – {{ shortDate(comparisonPreview()!.to) }}</p>
+                            <p v-if="comparisonPreviewLabel" class="mt-1 truncate text-xs font-medium text-sky-600">对比 {{ comparisonPreviewLabel }}</p>
                         </div>
                         <button type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" @click="viewMonth = addMonths(viewMonth, 1)">›</button>
                     </div>
