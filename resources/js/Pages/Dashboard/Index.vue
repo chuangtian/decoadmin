@@ -55,7 +55,8 @@ interface DashboardData {
 }
 
 const props = defineProps<{ dashboard: DashboardData }>();
-const defaultMetrics = ['net_sales', 'orders', 'average_order_value', 'refunds'];
+const defaultMetrics = ['total_sales', 'orders', 'average_order_value', 'refunds'];
+const legacyDefaultMetrics = ['net_sales', 'orders', 'average_order_value', 'refunds'];
 const selectedMetrics = ref<string[]>([...defaultMetrics]);
 const activeSlot = ref(0);
 const pickerSlot = ref<number | null>(null);
@@ -77,7 +78,11 @@ onMounted(() => {
     try {
         const saved = JSON.parse(localStorage.getItem(storageKey.value) || '[]');
         const allowed = new Set(props.dashboard.metric_definitions.map((item) => item.key));
-        if (Array.isArray(saved) && saved.length === 4 && saved.every((key) => allowed.has(key))) selectedMetrics.value = saved;
+        if (Array.isArray(saved) && saved.length === 4 && saved.every((key) => allowed.has(key))) {
+            const isLegacyDefault = saved.every((key, index) => key === legacyDefaultMetrics[index]);
+            selectedMetrics.value = isLegacyDefault ? [...defaultMetrics] : saved;
+            if (isLegacyDefault) localStorage.setItem(storageKey.value, JSON.stringify(defaultMetrics));
+        }
     } catch {
         selectedMetrics.value = [...defaultMetrics];
     }
