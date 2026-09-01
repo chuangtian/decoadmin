@@ -7,6 +7,7 @@ use App\Models\AnalyticsSnapshot;
 use App\Models\Organization;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
+use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -124,6 +125,8 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
     public function test_stale_snapshot_is_returned_and_refreshed_by_the_unique_background_job(): void
     {
         [$organization, $store] = $this->context();
+        $analyticsCache = app(AnalyticsCacheVersionService::class);
+        $cacheVersion = $analyticsCache->current((int) $store->getKey());
         Queue::fake();
         Http::preventStrayRequests();
 
@@ -131,16 +134,16 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
             'scope_granted' => true,
             'available' => true,
             'source' => 'shopifyql',
-            'rows' => [['referrer_source' => 'old', 'sessions' => '1']],
+            'rows' => [['day' => '2026-08-01', 'total_sales' => '1']],
             'error' => null,
-        ], now()->subMinute());
+        ], now()->subMinute(), 'catalog:core-sales-timeseries', 3);
 
         $result = app(ShopifyAnalyticsReportService::class)
-            ->report($store, 'acquisition-by-source', '2026-08-01', '2026-08-20');
+            ->report($store, 'core-sales-timeseries', '2026-08-01', '2026-08-20');
 
         $this->assertTrue($result['available']);
         $this->assertTrue($result['storage']['stale']);
-        $this->assertSame('old', $result['rows'][0]['referrer_source']);
+        $this->assertSame('1', $result['rows'][0]['total_sales']);
         Http::assertNothingSent();
         Queue::assertPushed(RefreshShopifyAnalyticsSnapshot::class, function ($job) use ($snapshot): bool {
             return $job->snapshotId === $snapshot->id
@@ -150,9 +153,8 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
 
         Http::fake(fn (Request $request) => Http::response(['data' => ['shopifyqlQuery' => [
             'tableData' => ['columns' => [], 'rows' => [[
-                'referrer_source' => 'new',
-                'referrer_name' => 'Search',
-                'sessions' => '20',
+                'day' => '2026-08-01',
+                'total_sales' => '20',
             ]]],
             'parseErrors' => [],
         ]]]));
@@ -162,8 +164,9 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
 
         Http::assertSentCount(1);
         $snapshot->refresh();
-        $this->assertSame('new', $snapshot->payload['rows'][0]['referrer_source']);
+        $this->assertSame('20', $snapshot->payload['rows'][0]['total_sales']);
         $this->assertTrue($snapshot->expires_at->isFuture());
+        $this->assertSame($cacheVersion + 1, $analyticsCache->current((int) $store->getKey()));
     }
 
     public function test_pending_analytics_overview_persists_missing_scope_error_and_stops_refreshing(): void
@@ -290,6 +293,7 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
         array $payload,
         mixed $expiresAt,
         string $reportKey = 'catalog:acquisition-by-source',
+        int $schemaVersion = 2,
     ): AnalyticsSnapshot {
         return AnalyticsSnapshot::query()->create([
             'organization_id' => $organization->id,
@@ -299,7 +303,7 @@ class ShopifyAnalyticsSnapshotLifecycleTest extends TestCase
             'period_to' => '2026-08-20',
             'timezone' => 'UTC',
             'source' => 'shopifyql',
-            'schema_version' => 2,
+            'schema_version' => $schemaVersion,
             'payload' => $payload,
             'fetched_at' => now()->subHour(),
             'expires_at' => $expiresAt,

@@ -823,6 +823,95 @@ class AnalyticsReportsCenterTest extends TestCase
         $this->assertSame(25.0, $analytics->sales($store, 30)['summary']['net_sales']);
     }
 
+    public function test_sales_marks_new_shopify_period_as_pending_for_automatic_refresh(): void
+    {
+        Cache::flush();
+        Queue::fake();
+        [, , $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders', 'read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+
+        $result = app(AnalyticsQueryService::class)->sales($store->fresh('shopifyConnection'), [
+            'date_from' => '2026-03-04',
+            'date_to' => '2026-03-20',
+            'comparison' => 'custom',
+            'comparison_date_from' => '2025-09-01',
+            'comparison_date_to' => '2025-09-30',
+        ]);
+
+        $this->assertTrue($result['data_source']['pending']);
+        $this->assertFalse($result['data_source']['comparison_pending']);
+        $this->assertSame('Shopify 统计报表正在准备，页面会自动刷新。', $result['data_source']['notice']);
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'store_id' => $store->id,
+            'report_key' => 'catalog:core-sales-timeseries',
+            'period_from' => '2026-03-04 00:00:00',
+            'period_to' => '2026-03-20 00:00:00',
+            'source' => 'pending',
+        ]);
+        Queue::assertPushed(RefreshShopifyAnalyticsSnapshot::class);
+    }
+
+    public function test_sales_marks_new_custom_comparison_as_pending_for_automatic_refresh(): void
+    {
+        Cache::flush();
+        Queue::fake();
+        [, $organization, $store] = $this->context('organization-admin');
+        ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'access_token_encrypted' => 'token',
+            'token_type' => 'offline',
+            'scopes' => ['read_orders', 'read_reports'],
+            'api_version' => '2026-07',
+            'status' => 'connected',
+        ]);
+        AnalyticsSnapshot::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'report_key' => 'catalog:core-sales-timeseries',
+            'period_from' => '2026-03-04',
+            'period_to' => '2026-03-20',
+            'timezone' => 'UTC',
+            'source' => 'shopifyql',
+            'schema_version' => 3,
+            'payload' => [
+                'scope_granted' => true,
+                'available' => true,
+                'source' => 'shopifyql',
+                'rows' => [['day' => '2026-03-04', 'total_sales__totals' => '100', 'orders__totals' => '1']],
+                'error' => null,
+            ],
+            'fetched_at' => now(),
+            'expires_at' => now()->addMinutes(15),
+        ]);
+
+        $result = app(AnalyticsQueryService::class)->sales($store->fresh('shopifyConnection'), [
+            'date_from' => '2026-03-04',
+            'date_to' => '2026-03-20',
+            'comparison' => 'custom',
+            'comparison_date_from' => '2025-09-01',
+            'comparison_date_to' => '2025-09-30',
+        ]);
+
+        $this->assertFalse($result['data_source']['pending']);
+        $this->assertTrue($result['data_source']['comparison_pending']);
+        $this->assertDatabaseHas('analytics_snapshots', [
+            'store_id' => $store->id,
+            'report_key' => 'catalog:core-sales-timeseries',
+            'period_from' => '2025-09-01 00:00:00',
+            'period_to' => '2025-09-30 00:00:00',
+            'source' => 'pending',
+        ]);
+    }
+
     /** @return array{User, Organization, Store} */
     private function context(string $roleSlug): array
     {

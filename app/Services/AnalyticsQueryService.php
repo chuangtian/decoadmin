@@ -240,8 +240,15 @@ class AnalyticsQueryService
         $to = $period['local_end']->toDateString();
         $current = $this->shopifyReports->report($store, 'core-sales-timeseries', $from, $to);
         if (! is_array($current) || ! ($current['available'] ?? false) || ($current['rows'] ?? []) === []) {
+            $currentPending = (bool) data_get($current, 'storage.pending', false)
+                || (bool) data_get($current, 'storage.refreshing', false);
             $result['data_source']['semantic_mode'] = 'decoadmin_custom';
-            $result['data_source']['notice'] = 'Shopify 原生报表当前不可用，暂时显示本地同步数据。';
+            $result['data_source']['storage'] = data_get($current, 'storage');
+            $result['data_source']['pending'] = $currentPending;
+            $result['data_source']['comparison_pending'] = false;
+            $result['data_source']['notice'] = $currentPending
+                ? 'Shopify 统计报表正在准备，页面会自动刷新。'
+                : 'Shopify 原生报表当前不可用，暂时显示本地同步数据。';
 
             return $result;
         }
@@ -266,6 +273,8 @@ class AnalyticsQueryService
         $comparisonMode = (string) ($result['comparison']['mode'] ?? 'previous');
         $comparisonSource = $comparisonMode === 'none' ? null : 'shopifyql';
         $comparisonResolved = false;
+        $comparisonPending = $comparisonMode === 'year'
+            && ((bool) data_get($year, 'storage.pending', false) || (bool) data_get($year, 'storage.refreshing', false));
         if ($comparisonPeriod !== null && $comparisonMode === 'previous') {
             $previousSummary = $this->shopifyComparisonSummary($current['rows'], 'previous_period');
             if ($previousSummary !== null) {
@@ -302,6 +311,8 @@ class AnalyticsQueryService
                 $comparisonPeriod['local_start']->toDateString(),
                 $comparisonPeriod['local_end']->toDateString(),
             );
+            $comparisonPending = (bool) data_get($baseline, 'storage.pending', false)
+                || (bool) data_get($baseline, 'storage.refreshing', false);
             $baselineSummary = ($baseline['available'] ?? false)
                 ? $this->shopifySummary($baseline['rows'] ?? [])
                 : null;
@@ -352,6 +363,8 @@ class AnalyticsQueryService
             'semantic_mode' => 'shopify_native',
             'comparison' => $comparisonMode,
             'comparison_source' => $comparisonSource,
+            'pending' => false,
+            'comparison_pending' => $comparisonPending,
             'traffic_filter' => ['human', 'bot'],
             'snapshot_delay_minutes' => 15,
         ];
