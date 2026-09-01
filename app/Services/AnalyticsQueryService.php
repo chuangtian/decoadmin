@@ -26,7 +26,14 @@ class AnalyticsQueryService
     /** @param int|array<string, mixed> $filters */
     public function sales(Store $store, int|array $filters = 30): array
     {
-        $period = $this->period($store, $filters);
+        $values = is_int($filters) ? ['days' => $filters] : $filters;
+        $period = $this->period($store, $values);
+        $comparisonPeriod = $this->selectedComparisonPeriod($store, $period, $values);
+        $comparisonSignature = [
+            'mode' => (string) ($values['comparison'] ?? 'previous'),
+            'from' => (string) ($values['comparison_date_from'] ?? ''),
+            'to' => (string) ($values['comparison_date_to'] ?? ''),
+        ];
         $version = $this->cacheVersion->current((int) $store->getKey());
         // Keep the response schema version in the cache key so older dashboard
         // payloads cannot be reused after new metrics are introduced.
@@ -39,10 +46,14 @@ class AnalyticsQueryService
             'store',
             $store->getKey(),
             "v{$version}",
-            sha1(json_encode($period)),
+            sha1(json_encode([$period, $comparisonSignature])),
         ]);
 
-        return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildSales($store, $period));
+        return Cache::remember(
+            $key,
+            now()->addMinutes(5),
+            fn (): array => $this->buildSales($store, $period, $values, $comparisonPeriod),
+        );
     }
 
     /**
@@ -73,6 +84,7 @@ class AnalyticsQueryService
         return [
             'schema' => 'operations-overview-v1',
             'period' => $sales['period'],
+            'comparison' => $sales['comparison'],
             'summary' => $sales['summary'],
             'comparisons' => $sales['comparisons'],
             'trend' => $sales['trend'],
@@ -138,14 +150,17 @@ class AnalyticsQueryService
             : $user->stores()->where('stores.organization_id', $organization->id)->where('stores.status', 'active')->orderBy('stores.name')->get();
     }
 
-    /** @param array<string, mixed> $period */
-    private function buildSales(Store $store, array $period): array
+    /**
+     * @param  array<string, mixed>  $period
+     * @param  array<string, mixed>  $filters
+     * @param  array<string, mixed>|null  $comparisonPeriod
+     */
+    private function buildSales(Store $store, array $period, array $filters, ?array $comparisonPeriod): array
     {
         $orders = $this->orders($store, $period);
         $summary = $this->summary(clone $orders);
-        $previousPeriod = $this->comparisonPeriod($period, 'previous');
-        $previousOrders = $this->orders($store, $previousPeriod);
-        $previous = $this->summary(clone $previousOrders);
+        $comparisonOrders = $comparisonPeriod === null ? null : $this->orders($store, $comparisonPeriod);
+        $comparison = $comparisonOrders === null ? null : $this->summary(clone $comparisonOrders);
         $year = $this->comparisonSummary($store, $period, 'year');
         $rankings = $this->productInsights($store, $period);
         $inventory = $this->inventoryInsights($store, $period);
@@ -159,14 +174,19 @@ class AnalyticsQueryService
                 'include_test' => $period['include_test'],
                 'include_cancelled' => $period['include_cancelled'],
             ],
+            'comparison' => $this->comparisonMeta($filters, $period, $comparisonPeriod),
             'summary' => [...$summary, 'sales' => (string) $summary['net_sales']],
             'comparisons' => [
-                'previous' => $this->compare($summary, $previous),
+                'previous' => $comparison === null
+                    ? $this->unavailableComparison($summary)
+                    : $this->compare($summary, $comparison),
                 'year_over_year' => $this->compare($summary, $year),
             ],
             'trend' => $this->trend($orders, $period),
             'comparison_trend' => [
-                'previous' => $this->trend($previousOrders, $previousPeriod),
+                'previous' => $comparisonOrders === null || $comparisonPeriod === null
+                    ? []
+                    : $this->trend($comparisonOrders, $comparisonPeriod),
             ],
             'customers' => $this->customerInsights($store, $period),
             'rankings' => $rankings,
@@ -193,7 +213,7 @@ class AnalyticsQueryService
             ],
         ];
 
-        return $this->applyShopifySales($store, $period, $result);
+        return $this->applyShopifySales($store, $period, $comparisonPeriod, $result);
     }
 
     /**
@@ -203,10 +223,11 @@ class AnalyticsQueryService
      * fallback and for app-only test/cancelled-order filtering.
      *
      * @param  array<string, mixed>  $period
+     * @param  array<string, mixed>|null  $comparisonPeriod
      * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
-    private function applyShopifySales(Store $store, array $period, array $result): array
+    private function applyShopifySales(Store $store, array $period, ?array $comparisonPeriod, array $result): array
     {
         if ($period['include_test'] || ! $period['include_cancelled']) {
             $result['data_source']['semantic_mode'] = 'decoadmin_custom';
@@ -231,30 +252,86 @@ class AnalyticsQueryService
         }
 
         $year = $this->shopifyReports->report($store, 'core-sales-year-comparison', $from, $to);
-        $previousSummary = $this->shopifyComparisonSummary($current['rows'], 'previous_period');
         $yearSummary = ($year['available'] ?? false)
             ? $this->shopifyComparisonSummary($year['rows'] ?? [], 'previous_year')
             : null;
 
+        $localComparison = $result['comparisons']['previous'] ?? [];
+        $localComparisonTrend = $result['comparison_trend']['previous'] ?? [];
         $result['summary'] = [...$currentSummary, 'sales' => (string) $currentSummary['net_sales']];
         $result['trend'] = $this->shopifyTrend($current['rows'], $period);
+        $result['comparisons']['previous'] = $this->unavailableComparison($currentSummary);
+        $result['comparison_trend']['previous'] = [];
 
-        if ($previousSummary !== null) {
+        $comparisonMode = (string) ($result['comparison']['mode'] ?? 'previous');
+        $comparisonSource = $comparisonMode === 'none' ? null : 'shopifyql';
+        $comparisonResolved = false;
+        if ($comparisonPeriod !== null && $comparisonMode === 'previous') {
+            $previousSummary = $this->shopifyComparisonSummary($current['rows'], 'previous_period');
+            if ($previousSummary !== null) {
+                $result['comparisons']['previous'] = $this->shopifyComparison(
+                    $currentSummary,
+                    $previousSummary,
+                    $current['rows'],
+                    'previous_period',
+                );
+                $result['comparison_trend']['previous'] = $this->shopifyComparisonTrend(
+                    $current['rows'],
+                    $comparisonPeriod,
+                    'previous_period',
+                );
+                $comparisonResolved = true;
+            }
+        } elseif ($comparisonPeriod !== null && $comparisonMode === 'year' && $yearSummary !== null) {
             $result['comparisons']['previous'] = $this->shopifyComparison(
                 $currentSummary,
-                $previousSummary,
-                $current['rows'],
-                'previous_period',
+                $yearSummary,
+                $year['rows'] ?? [],
+                'previous_year',
             );
             $result['comparison_trend']['previous'] = $this->shopifyComparisonTrend(
-                $current['rows'],
-                $period,
-                'previous_period',
+                $year['rows'] ?? [],
+                $comparisonPeriod,
+                'previous_year',
             );
-        } else {
-            $result['comparisons']['previous'] = $this->unavailableComparison($currentSummary);
-            $result['comparison_trend']['previous'] = [];
+            $comparisonResolved = true;
+        } elseif ($comparisonPeriod !== null && in_array($comparisonMode, ['custom', 'year_weekday'], true)) {
+            $baseline = $this->shopifyReports->report(
+                $store,
+                'core-sales-timeseries',
+                $comparisonPeriod['local_start']->toDateString(),
+                $comparisonPeriod['local_end']->toDateString(),
+            );
+            $baselineSummary = ($baseline['available'] ?? false)
+                ? $this->shopifySummary($baseline['rows'] ?? [])
+                : null;
+            if ($baselineSummary !== null) {
+                $result['comparisons']['previous'] = $this->compare($currentSummary, $baselineSummary);
+                $result['comparison_trend']['previous'] = $this->shopifyTrend(
+                    $baseline['rows'] ?? [],
+                    $comparisonPeriod,
+                );
+                $comparisonResolved = true;
+            }
         }
+
+        if ($comparisonPeriod !== null && ! $comparisonResolved) {
+            $metrics = [
+                'net_sales', 'gross_sales', 'total_sales', 'orders', 'average_order_value',
+                'refunds', 'discounts', 'taxes', 'shipping',
+            ];
+            $localBaseline = collect($metrics)->mapWithKeys(function (string $metric) use ($localComparison): array {
+                $value = data_get($localComparison, "{$metric}.baseline");
+
+                return is_numeric($value) ? [$metric => (float) $value] : [];
+            })->all();
+            if (count($localBaseline) === count($metrics)) {
+                $result['comparisons']['previous'] = $this->compare($currentSummary, $localBaseline);
+                $result['comparison_trend']['previous'] = $localComparisonTrend;
+                $comparisonSource = 'local_sync';
+            }
+        }
+
         if ($yearSummary !== null) {
             $result['comparisons']['year_over_year'] = $this->shopifyComparison(
                 $currentSummary,
@@ -273,7 +350,8 @@ class AnalyticsQueryService
             'timezone' => $period['timezone'],
             'storage' => $current['storage'] ?? null,
             'semantic_mode' => 'shopify_native',
-            'comparison' => 'previous_period',
+            'comparison' => $comparisonMode,
+            'comparison_source' => $comparisonSource,
             'traffic_filter' => ['human', 'bot'],
             'snapshot_delay_minutes' => 15,
         ];
@@ -747,16 +825,110 @@ class AnalyticsQueryService
     /** @param array<string, mixed> $period */
     private function comparisonSummary(Store $store, array $period, string $type): array
     {
-        return $this->summary($this->orders($store, $this->comparisonPeriod($period, $type)));
+        return $this->summary($this->orders($store, $this->relativeComparisonPeriod($period, $type)));
     }
 
     /** @param array<string, mixed> $period */
-    private function comparisonPeriod(array $period, string $type): array
+    private function relativeComparisonPeriod(array $period, string $type): array
     {
         $localEnd = $type === 'year' ? $period['local_end']->subYear() : $period['local_start']->subDay()->endOfDay();
         $localStart = $type === 'year' ? $period['local_start']->subYear() : $localEnd->subDays($period['calendar_days'] - 1)->startOfDay();
 
         return [...$period, 'local_start' => $localStart, 'local_end' => $localEnd, 'start' => $localStart->utc(), 'end' => $localEnd->utc()];
+    }
+
+    /**
+     * @param  array<string, mixed>  $period
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>|null
+     */
+    private function selectedComparisonPeriod(Store $store, array $period, array $filters): ?array
+    {
+        $mode = (string) ($filters['comparison'] ?? 'previous');
+        if ($mode === 'none') {
+            return null;
+        }
+
+        $timezone = $store->timezone ?: 'UTC';
+        if ($mode === 'custom'
+            && filled($filters['comparison_date_from'] ?? null)
+            && filled($filters['comparison_date_to'] ?? null)) {
+            try {
+                $localStart = CarbonImmutable::createFromFormat(
+                    '!Y-m-d',
+                    (string) $filters['comparison_date_from'],
+                    $timezone,
+                )->startOfDay();
+                $localEnd = CarbonImmutable::createFromFormat(
+                    '!Y-m-d',
+                    (string) $filters['comparison_date_to'],
+                    $timezone,
+                )->endOfDay();
+
+                return $this->makePeriod($period, $localStart, $localEnd);
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if ($mode === 'year') {
+            return $this->makePeriod(
+                $period,
+                $period['local_start']->subYear()->startOfDay(),
+                $period['local_end']->subYear()->endOfDay(),
+            );
+        }
+
+        if ($mode === 'year_weekday') {
+            return $this->makePeriod(
+                $period,
+                $period['local_start']->subDays(364)->startOfDay(),
+                $period['local_end']->subDays(364)->endOfDay(),
+            );
+        }
+
+        return $this->relativeComparisonPeriod($period, 'previous');
+    }
+
+    /** @param array<string, mixed> $period */
+    private function makePeriod(array $period, CarbonImmutable $localStart, CarbonImmutable $localEnd): array
+    {
+        return [
+            ...$period,
+            'days' => min(366, (int) $localStart->diffInDays($localEnd) + 1),
+            'calendar_days' => min(366, (int) $localStart->diffInDays($localEnd) + 1),
+            'local_start' => $localStart,
+            'local_end' => $localEnd,
+            'start' => $localStart->utc(),
+            'end' => $localEnd->utc(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @param  array<string, mixed>  $period
+     * @param  array<string, mixed>|null  $comparisonPeriod
+     */
+    private function comparisonMeta(array $filters, array $period, ?array $comparisonPeriod): array
+    {
+        $mode = (string) ($filters['comparison'] ?? 'previous');
+
+        return [
+            'mode' => $mode,
+            'label' => match ($mode) {
+                'none' => '无对比',
+                'year' => '去年同期',
+                'year_weekday' => '去年同期（匹配星期）',
+                'custom' => '自定义对比',
+                default => $period['days'] === 1 ? '昨天' : '上一周期',
+            },
+            'period' => $comparisonPeriod === null ? null : [
+                'days' => $comparisonPeriod['days'],
+                'from' => $comparisonPeriod['local_start']->toDateString(),
+                'to' => $comparisonPeriod['local_end']->toDateString(),
+                'timezone' => $comparisonPeriod['timezone'],
+            ],
+        ];
     }
 
     /** @param int|array<string, mixed> $filters */

@@ -45,6 +45,7 @@ interface DashboardData {
     };
     analytics: {
         period: { days: number; from: string; to: string; timezone: string; include_test: boolean; include_cancelled: boolean };
+        comparison: { mode: 'none' | 'previous' | 'year' | 'custom'; label: string; period: { days: number; from: string; to: string; timezone: string } | null };
         summary: Record<string, number | string>;
         comparisons: { previous: Record<string, { change_percent: number | null }> };
         trend: Array<{ date: string; label: string; sales: number; orders: number; [key: string]: string | number }>;
@@ -90,7 +91,8 @@ onMounted(() => {
 
 const metricDefinition = (key: string) => props.dashboard.metric_definitions.find((item) => item.key === key) ?? props.dashboard.metric_definitions[0];
 const formatMetric = (key: string, value: string | number) => metricDefinition(key)?.format === 'currency' ? money(value) : number(Number(value || 0));
-const comparison = (key: string) => props.dashboard.analytics.comparisons.previous[key]?.change_percent ?? null;
+const comparisonEnabled = computed(() => props.dashboard.analytics.comparison.mode !== 'none');
+const comparison = (key: string) => comparisonEnabled.value ? (props.dashboard.analytics.comparisons.previous[key]?.change_percent ?? null) : null;
 const comparisonLabel = (key: string) => comparison(key) === null ? '暂无对比' : `${comparison(key)! > 0 ? '+' : ''}${comparison(key)!.toFixed(1)}%`;
 const rangeText = (points: Array<{ date: string }>, fallback: string) => points.length ? `${shortDate(points[0].date)}–${shortDate(points[points.length - 1].date)}` : fallback;
 const shortDate = (value: string) => { const [, month, day] = value.split('-'); return `${Number(month)}月${Number(day)}日`; };
@@ -105,7 +107,7 @@ const chooseMetric = (key: string) => {
     metricSearch.value = '';
 };
 
-const applyPeriod = (filters: { days: number; date_from: string; date_to: string }) => router.get('/dashboard', filters, {
+const applyPeriod = (filters: { days: number; date_from: string; date_to: string; comparison: 'none' | 'previous' | 'year' | 'custom'; comparison_date_from?: string; comparison_date_to?: string }) => router.get('/dashboard', filters, {
     preserveState: true,
     preserveScroll: true,
     replace: true,
@@ -139,13 +141,13 @@ const financialLabel = (status: string | null) => ({
             <section class="relative rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                     <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{{ dashboard.store.name }}</p><h1 class="mt-1 text-xl font-semibold text-slate-950">经营数据概览</h1></div>
-                    <DashboardDateRangePicker :period="dashboard.analytics.period" @apply="applyPeriod" />
+                    <DashboardDateRangePicker :period="dashboard.analytics.period" :comparison="dashboard.analytics.comparison" @apply="applyPeriod" />
                 </div>
                 <div class="grid divide-y divide-slate-100 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
                     <article v-for="(key,index) in selectedMetrics" :key="`${index}-${key}`" role="button" tabindex="0" class="group relative min-h-32 cursor-pointer p-5 text-left transition hover:bg-slate-50" :class="activeSlot === index ? 'bg-emerald-50/50' : ''" @click="activeSlot = index" @keydown.enter="activeSlot = index">
                         <span class="flex items-start justify-between gap-3"><span class="text-sm font-semibold text-slate-500">{{ metricDefinition(key)?.label }}</span><button type="button" class="grid h-8 w-8 place-items-center rounded-xl text-slate-400 opacity-70 transition hover:bg-white hover:text-emerald-700 group-hover:opacity-100" :aria-label="`更换${metricDefinition(key)?.label}`" @click.stop="toggleMetricPicker(index)">✎</button></span>
                         <strong class="mt-4 block text-2xl font-semibold tracking-tight text-slate-950">{{ formatMetric(key, dashboard.analytics.summary[key] ?? 0) }}</strong>
-                        <span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold" :class="comparison(key) === null ? 'text-slate-400' : comparison(key)! >= 0 ? 'text-emerald-700' : 'text-rose-600'">环比 {{ comparisonLabel(key) }}</span>
+                        <span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold" :class="comparison(key) === null ? 'text-slate-400' : comparison(key)! >= 0 ? 'text-emerald-700' : 'text-rose-600'">{{ comparisonEnabled ? '环比' : '对比' }} {{ comparisonEnabled ? comparisonLabel(key) : '未开启' }}</span>
                         <div v-if="pickerSlot === index" class="absolute top-[-6rem] z-40 w-[min(460px,calc(100vw_-_2rem))] cursor-default rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-2xl shadow-slate-900/20" :class="index < 2 ? 'left-[calc(100%+0.75rem)]' : 'right-[calc(100%+0.75rem)]'" @click.stop>
                             <div class="flex shrink-0 items-center justify-between"><div><p class="text-base font-semibold text-slate-900">选择指标</p><p class="mt-1 text-sm text-slate-400">第 {{ index + 1 }} 个指标</p></div><button type="button" class="grid h-10 w-10 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" @click="pickerSlot = null">×</button></div>
                             <input v-model="metricSearch" type="search" placeholder="搜索指标" class="mt-5 w-full shrink-0 rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
@@ -157,7 +159,7 @@ const financialLabel = (status: string | null) => ({
                 </div>
             </section>
 
-            <DashboardMetricChart class="mt-5" :current="dashboard.analytics.trend" :previous="dashboard.analytics.comparison_trend.previous" :metric="selectedMetric.key" :label="selectedMetric.label" :format="selectedMetric.format" :currency="dashboard.store.currency" :value="dashboard.analytics.summary[selectedMetric.key] ?? 0" :current-range="rangeText(dashboard.analytics.trend, '当前周期')" :previous-range="rangeText(dashboard.analytics.comparison_trend.previous, '上一周期')" />
+            <DashboardMetricChart class="mt-5" :current="dashboard.analytics.trend" :previous="dashboard.analytics.comparison_trend.previous" :metric="selectedMetric.key" :label="selectedMetric.label" :format="selectedMetric.format" :currency="dashboard.store.currency" :value="dashboard.analytics.summary[selectedMetric.key] ?? 0" :current-range="rangeText(dashboard.analytics.trend, '当前周期')" :previous-range="rangeText(dashboard.analytics.comparison_trend.previous, dashboard.analytics.comparison.label)" />
 
             <section class="mt-5 grid gap-5 xl:grid-cols-2">
                 <article class="rounded-3xl bg-[#0d1828] p-6 text-white shadow-xl shadow-slate-900/8">

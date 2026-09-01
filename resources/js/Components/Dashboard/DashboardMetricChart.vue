@@ -33,7 +33,7 @@ const formatted = (value: number) => props.format === 'currency'
     <article class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div><p class="text-sm font-semibold text-slate-500">{{ label }}随时间的变化</p><p class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">{{ formatted(Number(value || 0)) }}</p></div>
-            <div class="flex flex-wrap gap-4 text-xs font-semibold text-slate-500"><span class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-emerald-500" />{{ currentRange }}</span><span class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-sky-300" />{{ previousRange }}</span></div>
+            <div class="flex flex-wrap gap-4 text-xs font-semibold text-slate-500"><span class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-emerald-500" />{{ currentRange }}</span><span v-if="previous.length" class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-sky-300" />{{ previousRange }}</span></div>
         </div>
         <div class="mt-6 overflow-x-auto">
             <svg :viewBox="`0 0 ${width} ${height}`" class="min-w-[700px] w-full" role="img" :aria-label="`${label}趋势图`">
