@@ -28,6 +28,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->validateCsrfTokens(except: [
+            'oauth/register',
+            'oauth/token',
+            'oauth/revoke',
+            'mcp/decoadmin',
             'shopify/webhooks/*',
             'shopify/pixels/*',
             'api/student-discounts/*',
@@ -69,10 +73,10 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            fn (Request $request) => $request->is('api/*') || $request->is('mcp/*') || $request->expectsJson(),
         );
         $exceptions->render(function (ModelNotFoundException $exception, Request $request) {
-            if (! $request->is('api/codex/*')) {
+            if (! $request->is('api/codex/*') && ! $request->is('mcp/decoadmin')) {
                 return null;
             }
 
@@ -84,7 +88,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ], 404);
         });
         $exceptions->render(function (NotFoundHttpException $exception, Request $request) {
-            if (! $request->is('api/codex/*')) {
+            if (! $request->is('api/codex/*') && ! $request->is('mcp/decoadmin')) {
                 return null;
             }
 

@@ -9,14 +9,19 @@ class CodexApiTokenResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $status = $this->revoked_at !== null
+        $oauthRefreshToken = $this->relationLoaded('oauthRefreshToken') ? $this->oauthRefreshToken : null;
+        $connectionExpiresAt = $oauthRefreshToken && $oauthRefreshToken->isUsable()
+            ? $oauthRefreshToken->expires_at
+            : $this->expires_at;
+        $status = $this->revoked_at !== null || ($oauthRefreshToken && $oauthRefreshToken->revoked_at !== null)
             ? 'revoked'
-            : ($this->expires_at->isPast() ? 'expired' : 'active');
+            : ($connectionExpiresAt->isPast() ? 'expired' : 'active');
 
         return [
             'id' => $this->id,
             'uuid' => $this->uuid,
             'name' => $this->name,
+            'source' => $this->source,
             'status' => $status,
             'abilities' => $this->abilities,
             'user' => $this->whenLoaded('user', fn (): array => [
@@ -29,7 +34,7 @@ class CodexApiTokenResource extends JsonResource
                 'name' => $this->issuer->name,
             ] : null),
             'last_used_at' => $this->last_used_at?->toIso8601String(),
-            'expires_at' => $this->expires_at->toIso8601String(),
+            'expires_at' => $connectionExpiresAt->toIso8601String(),
             'revoked_at' => $this->revoked_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

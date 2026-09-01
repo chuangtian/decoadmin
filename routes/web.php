@@ -14,6 +14,11 @@ use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
 use App\Http\Controllers\CodexApiTokenController;
+use App\Http\Controllers\CodexOAuthAuthorizationController;
+use App\Http\Controllers\CodexOAuthClientRegistrationController;
+use App\Http\Controllers\CodexOAuthMetadataController;
+use App\Http\Controllers\CodexOAuthTokenController;
+use App\Http\Controllers\CodexRemoteMcpController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
@@ -70,6 +75,27 @@ use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthCheckController::class)->name('health');
+
+Route::get('/.well-known/oauth-protected-resource', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.protected-resource');
+Route::get('/.well-known/oauth-protected-resource/mcp/decoadmin', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1');
+Route::get('/.well-known/oauth-authorization-server', [CodexOAuthMetadataController::class, 'authorizationServer'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.authorization-server');
+Route::post('/oauth/register', CodexOAuthClientRegistrationController::class)
+    ->middleware('throttle:10,1')
+    ->name('codex.oauth.register');
+Route::post('/oauth/token', [CodexOAuthTokenController::class, 'token'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.token');
+Route::post('/oauth/revoke', [CodexOAuthTokenController::class, 'revoke'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.revoke');
+Route::post('/mcp/decoadmin', CodexRemoteMcpController::class)
+    ->middleware(['codex.token', 'throttle:120,1'])
+    ->name('codex.mcp');
 
 Route::get('/', fn () => auth()->check()
     ? redirect()->route('dashboard')
@@ -244,6 +270,12 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::get('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'show'])
+        ->middleware('throttle:60,1')
+        ->name('codex.oauth.authorize');
+    Route::post('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'store'])
+        ->middleware('throttle:30,1');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar'])->name('profile.avatar.update');

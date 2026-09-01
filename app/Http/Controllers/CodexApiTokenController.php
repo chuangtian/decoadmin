@@ -27,7 +27,7 @@ class CodexApiTokenController extends Controller
 
         $tokens = CodexApiToken::query()
             ->where('organization_id', $organization->getKey())
-            ->with(['user:id,name,email', 'issuer:id,name'])
+            ->with(['user:id,name,email', 'issuer:id,name', 'oauthRefreshToken'])
             ->latest()
             ->paginate(20)
             ->withQueryString();
@@ -68,7 +68,7 @@ class CodexApiTokenController extends Controller
         );
 
         return response()->json([
-            'data' => (new CodexApiTokenResource($issued['token']->load(['user:id,name,email', 'issuer:id,name'])))->resolve($request),
+            'data' => (new CodexApiTokenResource($issued['token']->load(['user:id,name,email', 'issuer:id,name', 'oauthRefreshToken'])))->resolve($request),
             'plain_text_token' => $issued['plain_text_token'],
             'idempotent_replay' => $issued['replayed'],
         ], $issued['replayed'] ? 200 : 201);
@@ -84,7 +84,7 @@ class CodexApiTokenController extends Controller
         );
 
         return response()->json([
-            'data' => (new CodexApiTokenResource($revoked['token']->load(['user:id,name,email', 'issuer:id,name'])))->resolve($request),
+            'data' => (new CodexApiTokenResource($revoked['token']->load(['user:id,name,email', 'issuer:id,name', 'oauthRefreshToken'])))->resolve($request),
             'idempotent_replay' => $revoked['replayed'],
         ]);
     }

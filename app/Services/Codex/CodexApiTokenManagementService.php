@@ -4,6 +4,7 @@ namespace App\Services\Codex;
 
 use App\Models\AuditLog;
 use App\Models\CodexApiToken;
+use App\Models\CodexOAuthRefreshToken;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -169,7 +170,22 @@ class CodexApiTokenManagementService
                 return ['token' => $locked, 'replayed' => true];
             }
 
-            $locked->forceFill(['revoked_at' => now()])->save();
+            if ($locked->oauth_refresh_token_id) {
+                $refreshToken = CodexOAuthRefreshToken::query()
+                    ->whereKey($locked->oauth_refresh_token_id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($refreshToken && $refreshToken->revoked_at === null) {
+                    $refreshToken->forceFill(['revoked_at' => now()])->save();
+                    CodexApiToken::query()
+                        ->where('codex_oauth_refresh_token_id', $refreshToken->getKey())
+                        ->whereNull('revoked_at')
+                        ->update(['revoked_at' => now()]);
+                }
+                $locked->refresh();
+            } else {
+                $locked->forceFill(['revoked_at' => now()])->save();
+            }
             AuditLog::query()->create([
                 'organization_id' => $organization->getKey(),
                 'user_id' => $actor->getKey(),
@@ -180,6 +196,7 @@ class CodexApiTokenManagementService
                     'token_uuid' => $locked->uuid,
                     'recipient_user_id' => $locked->user_id,
                     'name' => $locked->name,
+                    'token_source' => $locked->source,
                     'source' => $source,
                 ],
             ]);

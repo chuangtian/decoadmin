@@ -11,6 +11,7 @@ type Token = {
     id: number;
     uuid: string;
     name: string;
+    source: 'manual' | 'oauth';
     status: 'active' | 'expired' | 'revoked';
     abilities: string[];
     user: TokenUser;
@@ -136,7 +137,7 @@ const confirmIssue = async () => {
         } else if (payload.idempotent_replay) {
             toast.warning('该请求已处理，系统没有重复签发令牌。');
         }
-        router.reload({ only: ['tokens'], preserveScroll: true });
+        router.visit(window.location.href, { only: ['tokens'], preserveScroll: true, preserveState: true });
     } catch (error) {
         toast.error(error instanceof Error ? error.message : '授权签发失败。');
     } finally {
@@ -188,7 +189,7 @@ const confirmRevoke = async () => {
 
         revokeTarget.value = null;
         toast.success('授权已撤销，对应插件令牌立即失效。');
-        router.reload({ only: ['tokens'], preserveScroll: true });
+        router.visit(window.location.href, { only: ['tokens'], preserveScroll: true, preserveState: true });
     } catch (error) {
         toast.error(error instanceof Error ? error.message : '撤销授权失败。');
     } finally {
@@ -205,7 +206,7 @@ const confirmRevoke = async () => {
                 <div>
                     <p class="text-sm font-semibold text-emerald-700">访问控制</p>
                     <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Codex 插件授权</h1>
-                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">为组织成员签发独立令牌。令牌能力和用户当前角色权限必须同时满足，撤销角色后不会继续获得写入权限。</p>
+                    <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">员工可在插件安装时登录 DecoAdmin 自动授权；此页同时保留管理员手动令牌作为兼容和应急方式。后台角色变更会立即生效。</p>
                 </div>
                 <Link href="/roles" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">管理角色权限</Link>
             </header>
@@ -307,7 +308,7 @@ const confirmRevoke = async () => {
                         <thead class="bg-slate-50/80 text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-6 py-3.5">用户 / 授权</th><th class="px-6 py-3.5">能力</th><th class="px-6 py-3.5">状态</th><th class="px-6 py-3.5">最近使用</th><th class="px-6 py-3.5">到期时间</th><th class="px-6 py-3.5 text-right">操作</th></tr></thead>
                         <tbody class="divide-y divide-slate-100">
                             <tr v-for="token in tokens.data" :key="token.id" class="align-top">
-                                <td class="px-6 py-4"><p class="font-semibold text-slate-900">{{ token.user.name }}</p><p class="mt-0.5 text-xs text-slate-500">{{ token.user.email }}</p><p class="mt-2 text-sm text-slate-700">{{ token.name }}</p><code class="mt-1 block text-[11px] text-slate-400">{{ token.uuid }}</code></td>
+                                <td class="px-6 py-4"><p class="font-semibold text-slate-900">{{ token.user.name }}</p><p class="mt-0.5 text-xs text-slate-500">{{ token.user.email }}</p><div class="mt-2 flex flex-wrap items-center gap-2"><p class="text-sm text-slate-700">{{ token.name }}</p><span class="rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="token.source === 'oauth' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ token.source === 'oauth' ? '网页登录' : '手动令牌' }}</span></div><code class="mt-1 block text-[11px] text-slate-400">{{ token.uuid }}</code></td>
                                 <td class="max-w-sm px-6 py-4"><div class="flex flex-wrap gap-1.5"><span v-for="slug in token.abilities" :key="slug" class="rounded-md px-2 py-1 text-[11px] font-semibold" :class="abilityMap.get(slug)?.group === 'write' ? 'bg-violet-50 text-violet-700' : 'bg-blue-50 text-blue-700'">{{ abilityMap.get(slug)?.label ?? slug }}</span></div></td>
                                 <td class="px-6 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset" :class="statusClass(token.status)">{{ statusLabel(token.status) }}</span></td>
                                 <td class="whitespace-nowrap px-6 py-4 text-sm text-slate-600">{{ formatDate(token.last_used_at) }}</td>

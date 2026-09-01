@@ -12,21 +12,14 @@ class AuthenticateCodexApiToken
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $plainTextToken = $request->bearerToken();
-        $credentials = $this->credentials($plainTextToken);
-        if ($credentials === null) {
+        $token = CodexApiToken::fromPlainText($request->bearerToken());
+        if (! $token) {
             return $this->unauthorized('缺少或无效的 DecoAdmin Codex 访问令牌。');
         }
 
-        [$uuid, $secret] = $credentials;
-        $token = CodexApiToken::query()
-            ->with(['user', 'organization'])
-            ->where('uuid', $uuid)
-            ->first();
+        $token->loadMissing(['user', 'organization']);
 
-        if (! $token
-            || ! $token->isUsable()
-            || ! hash_equals($token->token_hash, hash('sha256', $secret))
+        if (! $token->isUsable()
             || ! $token->user
             || ! $token->organization
             || $token->user->trashed()
@@ -49,25 +42,21 @@ class AuthenticateCodexApiToken
         return $next($request);
     }
 
-    /** @return array{0: string, 1: string}|null */
-    private function credentials(?string $plainTextToken): ?array
-    {
-        if (! is_string($plainTextToken) || ! str_starts_with($plainTextToken, 'dca_')) {
-            return null;
-        }
-
-        $parts = explode('.', substr($plainTextToken, 4), 2);
-        if (count($parts) !== 2 || ! preg_match('/^[0-9a-f-]{36}$/i', $parts[0]) || strlen($parts[1]) < 40) {
-            return null;
-        }
-
-        return [$parts[0], $parts[1]];
-    }
-
     private function unauthorized(string $message): JsonResponse
     {
-        return response()->json([
+        $response = response()->json([
             'error' => ['code' => 'codex_unauthenticated', 'message' => $message],
         ], 401);
+
+        if (request()->is(ltrim((string) config('codex.mcp_path'), '/'))) {
+            $resourceMetadata = rtrim((string) config('app.url'), '/').'/.well-known/oauth-protected-resource';
+            $scopes = implode(' ', CodexApiToken::SUPPORTED_ABILITIES);
+            $response->headers->set(
+                'WWW-Authenticate',
+                'Bearer resource_metadata="'.$resourceMetadata.'", scope="'.$scopes.'"',
+            );
+        }
+
+        return $response;
     }
 }
