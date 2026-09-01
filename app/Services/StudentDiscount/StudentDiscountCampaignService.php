@@ -24,7 +24,7 @@ class StudentDiscountCampaignService
     public function update(Organization $organization, Store $store, array $values, User $actor): StudentDiscountCampaign
     {
         $this->assertScope($organization, $store);
-        $campaign = $this->getOrCreate($organization, $store, $actor);
+        $campaign = $this->getOrCreate($organization, $store, $actor)->refresh();
         $before = $this->snapshot($campaign);
         $values['education_email_domains'] = collect($values['education_email_domains'] ?? [])
             ->map(fn (string $domain): string => strtolower(trim($domain, " .\t\n\r\0\x0B")))
@@ -44,6 +44,28 @@ class StudentDiscountCampaignService
             'subject_id' => $campaign->id,
             'old_values' => $before,
             'new_values' => $this->snapshot($campaign),
+            'metadata' => ['scope' => 'store'],
+        ]);
+
+        return $campaign;
+    }
+
+    public function setEnabled(Organization $organization, Store $store, bool $enabled, User $actor): StudentDiscountCampaign
+    {
+        $this->assertScope($organization, $store);
+        $campaign = $this->getOrCreate($organization, $store, $actor)->refresh();
+        $beforeEnabled = (bool) $campaign->enabled;
+        $campaign->forceFill(['enabled' => $enabled, 'updated_by' => $actor->id])->save();
+
+        AuditLog::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'user_id' => $actor->id,
+            'action' => 'student_discount_campaign_status_updated',
+            'subject_type' => StudentDiscountCampaign::class,
+            'subject_id' => $campaign->id,
+            'old_values' => ['enabled' => $beforeEnabled],
+            'new_values' => ['enabled' => $campaign->enabled],
             'metadata' => ['scope' => 'store'],
         ]);
 

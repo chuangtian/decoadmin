@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AuthenticateCodexApiToken;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
@@ -10,15 +11,18 @@ use App\Http\Middleware\UseBuiltAssetsForExternalRequests;
 use App\Http\Middleware\VerifyShopifyAppProxy;
 use App\Http\Middleware\VerifyShopifyCheckoutToken;
 use App\Http\Middleware\VerifyShopifyIdToken;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
@@ -43,6 +47,7 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $middleware->alias([
+            'codex.token' => AuthenticateCodexApiToken::class,
             'organization.access' => OrganizationAccessMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'store.context' => ResolveCurrentStore::class,
@@ -66,4 +71,28 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+        $exceptions->render(function (ModelNotFoundException $exception, Request $request) {
+            if (! $request->is('api/codex/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'error' => [
+                    'code' => 'codex_resource_not_found',
+                    'message' => '目标资源不存在或当前用户无权访问。',
+                ],
+            ], 404);
+        });
+        $exceptions->render(function (NotFoundHttpException $exception, Request $request) {
+            if (! $request->is('api/codex/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'error' => [
+                    'code' => 'codex_resource_not_found',
+                    'message' => '目标资源不存在或当前用户无权访问。',
+                ],
+            ], 404);
+        });
     })->create();

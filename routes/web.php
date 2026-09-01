@@ -13,6 +13,7 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
+use App\Http\Controllers\CodexApiTokenController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
@@ -483,6 +484,16 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions'])->middleware('permission:roles.update')->name('roles.permissions.update');
 
     Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:roles.view')->name('permissions.index');
+
+    Route::get('/codex-tokens', [CodexApiTokenController::class, 'index'])
+        ->middleware('permission:codex.tokens.view')
+        ->name('codex-tokens.index');
+    Route::post('/codex-tokens', [CodexApiTokenController::class, 'store'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:10,1'])
+        ->name('codex-tokens.store');
+    Route::delete('/codex-tokens/{codexApiToken}', [CodexApiTokenController::class, 'destroy'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:20,1'])
+        ->name('codex-tokens.destroy');
 
     Route::get('/apps', [AppController::class, 'index'])->middleware('permission:apps.view')->name('apps.index');
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
