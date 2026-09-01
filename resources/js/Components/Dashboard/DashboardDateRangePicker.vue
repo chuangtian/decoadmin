@@ -220,8 +220,8 @@ function apply() {
             <span class="text-slate-400">⌄</span>
         </button>
 
-        <div v-if="open" class="absolute right-0 top-[calc(100%+10px)] z-40 w-[min(1040px,calc(100vw-32px))] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15">
-            <div class="grid lg:grid-cols-[250px_1fr]">
+        <div v-if="open" class="absolute right-0 top-[calc(100%+10px)] z-40 max-h-[calc(100vh-8rem)] w-[calc(100vw-2rem)] max-w-[1040px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 lg:w-[calc(100vw-20rem)]">
+            <div class="grid lg:grid-cols-[220px_minmax(0,1fr)]">
                 <aside class="border-b border-slate-100 bg-slate-50 p-3 lg:border-b-0 lg:border-r">
                     <button v-for="item in [
                         ['today','今天'],['yesterday','昨天'],['month','本月至今'],['quarter','本季度至今'],['bfcm','黑色星期五和网络星期一'],
@@ -248,8 +248,8 @@ function apply() {
                     </div>
                 </aside>
 
-                <div class="p-4 sm:p-6">
-                    <div class="mb-4 flex items-center justify-between gap-3">
+                <div class="p-4 sm:p-5">
+                    <div class="mb-3 flex items-center justify-between gap-3">
                         <button type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" @click="viewMonth = addMonths(viewMonth, -1)">‹</button>
                         <div class="min-w-0 text-center">
                             <p class="text-xs font-semibold" :class="selectionTarget === 'comparison' ? 'text-sky-600' : 'text-emerald-600'">{{ selectionTarget === 'comparison' ? '正在选择对比周期' : '正在选择统计周期' }}</p>
@@ -258,16 +258,16 @@ function apply() {
                         </div>
                         <button type="button" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" @click="viewMonth = addMonths(viewMonth, 1)">›</button>
                     </div>
-                    <div class="mb-3 flex flex-wrap justify-center gap-4 text-xs font-medium text-slate-500">
+                    <div class="mb-2 flex flex-wrap justify-center gap-3 text-xs font-medium text-slate-500">
                         <span class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-slate-950" />统计周期</span>
                         <span v-if="comparisonMode !== 'none'" class="flex items-center gap-2"><i class="h-2.5 w-2.5 rounded-full bg-sky-500" />对比周期</span>
                     </div>
-                    <div class="grid gap-6 md:grid-cols-2">
+                    <div class="grid gap-3 md:grid-cols-2">
                         <div v-for="panel in monthPanels" :key="panel.month.toISOString()">
-                            <h3 class="mb-3 text-center text-sm font-semibold text-slate-900">{{ monthTitle(panel.month) }}</h3>
-                            <div class="grid grid-cols-7 text-center text-xs font-semibold text-slate-400"><span v-for="day in ['一','二','三','四','五','六','日']" :key="day" class="py-2">{{ day }}</span></div>
+                            <h3 class="mb-2 text-center text-sm font-semibold text-slate-900">{{ monthTitle(panel.month) }}</h3>
+                            <div class="grid grid-cols-7 text-center text-xs font-semibold text-slate-400"><span v-for="day in ['一','二','三','四','五','六','日']" :key="day" class="py-1.5">{{ day }}</span></div>
                             <div class="grid grid-cols-7">
-                                <button v-for="day in panel.days" :key="day.value" type="button" class="relative h-10 text-sm transition" :disabled="day.future" :class="[
+                                <button v-for="day in panel.days" :key="day.value" type="button" class="relative h-9 text-sm transition" :disabled="day.future" :class="[
                                     !day.current ? 'text-slate-300' : 'text-slate-700',
                                     day.future ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100',
                                     isComparisonInRange(day.value) ? 'bg-sky-50 text-sky-800' : '',
@@ -278,7 +278,7 @@ function apply() {
                             </div>
                         </div>
                     </div>
-                    <div class="mt-5 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+                    <div class="mt-4 flex items-center justify-end gap-3 border-t border-slate-100 pt-3">
                         <button type="button" class="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600" @click="open = false">取消</button>
                         <button type="button" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40" :disabled="!rangeStart || !rangeEnd || (comparisonMode === 'custom' && (!comparisonStart || !comparisonEnd))" @click="apply">应用</button>
                     </div>
