@@ -12,6 +12,8 @@ use Illuminate\Support\Collection;
 
 class AnalyticsOperatingMetricsService
 {
+    public function __construct(private WholeBikeOrderMetricsService $wholeBikeOrders) {}
+
     /** @var array<string, string> */
     private const CHANNELS = [
         'facebook' => 'Facebook',
@@ -63,6 +65,27 @@ class AnalyticsOperatingMetricsService
         $previousConversionRate = $this->baseline($behaviorMetrics, 'conversion_rate');
         $previousAddToCart = $this->baseline($behaviorMetrics, 'add_to_cart');
         $previousCheckout = $this->baseline($behaviorMetrics, 'checkout');
+        $wholeBike = $this->wholeBikeOrders->forStore(
+            $store,
+            $period,
+            is_array(data_get($overview, 'comparison.period')) ? data_get($overview, 'comparison.period') : null,
+        );
+        $wholeBikeAvailable = (bool) ($wholeBike['available'] ?? false);
+        $wholeBikeCurrentOrders = $wholeBikeAvailable ? (float) data_get($wholeBike, 'current.orders', 0) : null;
+        $wholeBikeBaselineOrders = $wholeBikeAvailable && is_array($wholeBike['comparison'] ?? null)
+            ? (float) data_get($wholeBike, 'comparison.orders', 0)
+            : null;
+        $wholeBikeCurrentAverage = $wholeBikeAvailable ? (float) data_get($wholeBike, 'current.average_order_value', 0) : null;
+        $wholeBikeBaselineAverage = $wholeBikeAvailable && is_array($wholeBike['comparison'] ?? null)
+            ? (float) data_get($wholeBike, 'comparison.average_order_value', 0)
+            : null;
+        $wholeBikeTrend = collect(data_get($wholeBike, 'current.trend', []))->keyBy('date');
+        $wholeBikeConversion = $wholeBikeAvailable && $behaviorAvailable && $sessions > 0
+            ? round((float) $wholeBikeCurrentOrders / $sessions * 100, 2)
+            : null;
+        $wholeBikeBaselineConversion = $wholeBikeBaselineOrders !== null && $previousSessions !== null && $previousSessions > 0
+            ? round($wholeBikeBaselineOrders / $previousSessions * 100, 2)
+            : null;
         $coverageNote = $advertising['available']
             ? sprintf('已同步 %d/%d 个广告渠道', $advertising['available_channels'], count(self::CHANNELS))
             : '未找到该周期的广告平台日级同步记录';
@@ -85,11 +108,13 @@ class AnalyticsOperatingMetricsService
             'schema' => 'analytics-operating-metrics-v1',
             'comparison' => [
                 'mode' => $comparisonMode,
-                'label' => $comparisonMode === 'none' ? '无对比' : '上一等长周期',
-                'period' => $comparisonMode === 'previous' ? [
-                    'from' => $previousFrom->toDateString(),
-                    'to' => $previousTo->toDateString(),
-                ] : null,
+                'label' => (string) data_get($overview, 'comparison.label', $comparisonMode === 'none' ? '无对比' : '上一等长周期'),
+                'period' => data_get($overview, 'comparison.period'),
+            ],
+            'whole_bike' => [
+                'available' => $wholeBikeAvailable,
+                'product_count' => (int) ($wholeBike['product_count'] ?? 0),
+                'product_handles' => $wholeBike['product_handles'] ?? [],
             ],
             'advertising' => [
                 'available' => $advertising['available'],
@@ -105,6 +130,36 @@ class AnalyticsOperatingMetricsService
                 'message' => $behaviorAvailable ? 'ShopifyQL 整站会话漏斗' : $behaviorNote,
             ],
             'metrics' => [
+                'whole_bike_orders' => $this->metric(
+                    $wholeBikeAvailable,
+                    $wholeBikeCurrentOrders,
+                    $wholeBikeBaselineOrders,
+                    '仅统计 5 款整车商品的订单',
+                    $this->trend($dates, fn (string $date): float => (float) data_get($wholeBikeTrend, "{$date}.orders", 0)),
+                    $comparisonMode,
+                ),
+                'whole_bike_average_order_value' => $this->metric(
+                    $wholeBikeAvailable,
+                    $wholeBikeCurrentAverage,
+                    $wholeBikeBaselineAverage,
+                    '整车订单净销售额 ÷ 整车订单数',
+                    $this->trend($dates, fn (string $date): float => (float) data_get($wholeBikeTrend, "{$date}.average_order_value", 0)),
+                    $comparisonMode,
+                ),
+                'whole_bike_conversion_rate' => $this->metric(
+                    $wholeBikeConversion !== null,
+                    $wholeBikeConversion,
+                    $wholeBikeBaselineConversion,
+                    $behaviorAvailable ? '整车订单数 ÷ ShopifyQL 整站会话数' : $behaviorNote,
+                    $this->trend($dates, function (string $date) use ($wholeBikeTrend, $behaviorTrend): float {
+                        $dailySessions = (float) data_get($behaviorTrend, "{$date}.sessions", 0);
+
+                        return $dailySessions > 0
+                            ? (float) data_get($wholeBikeTrend, "{$date}.orders", 0) / $dailySessions * 100
+                            : 0.0;
+                    }),
+                    $comparisonMode,
+                ),
                 'ad_spend' => $this->metric(
                     $advertising['available'],
                     $spend,
@@ -338,7 +393,7 @@ class AnalyticsOperatingMetricsService
         ?array $nativeComparison = null,
     ): array {
         $comparison = null;
-        if ($comparisonMode === 'previous' && $available && $current !== null && $baseline !== null) {
+        if ($comparisonMode !== 'none' && $available && $current !== null && $baseline !== null) {
             $comparison = is_array($nativeComparison)
                 ? $nativeComparison
                 : $this->compare($current, $baseline);
