@@ -220,7 +220,7 @@ function apply() {
             <span class="text-slate-400">⌄</span>
         </button>
 
-        <div v-if="open" class="absolute right-0 top-[calc(100%+10px)] z-40 max-h-[calc(100vh-8rem)] w-[calc(100vw-2rem)] max-w-[1040px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 lg:w-[calc(100vw-20rem)]">
+        <div v-if="open" class="absolute right-0 top-[calc(100%+10px)] z-40 max-h-[calc(100vh-8rem)] w-[calc(100vw-2rem)] max-w-[1040px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 lg:fixed lg:right-4 lg:top-32 lg:max-h-[calc(100vh-9rem)] lg:w-[calc(100vw-20rem)]">
             <div class="grid lg:grid-cols-[220px_minmax(0,1fr)]">
                 <aside class="border-b border-slate-100 bg-slate-50 p-3 lg:border-b-0 lg:border-r">
                     <button v-for="item in [
