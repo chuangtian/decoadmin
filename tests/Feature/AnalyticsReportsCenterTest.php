@@ -148,6 +148,9 @@ class AnalyticsReportsCenterTest extends TestCase
                     ->where('analytics.period.to', '2026-08-20')
                     ->where('analytics.period.timezone', 'America/Los_Angeles')
                     ->where('analytics.period.include_cancelled', true)
+                    ->where('analytics.comparison.mode', 'previous')
+                    ->where('analytics.comparison.period.from', '2026-06-20')
+                    ->where('analytics.comparison.period.to', '2026-07-20')
                     ->where('analytics.summary.total_sales', 1616604.05)
                     ->where('analytics.summary.orders', 1820)
                     ->where('analytics.summary.net_sales', 1502581.39)
@@ -167,6 +170,7 @@ class AnalyticsReportsCenterTest extends TestCase
                     ->where('analytics.customers.average_lifetime_value', null)
                     ->where('analytics.data_source.primary', 'shopifyql')
                     ->where('analytics.trend.0.date', '2026-07-21')
+                    ->where('analytics.comparison_trend.previous.0.date', '2026-06-20')
                     ->has('analytics.trend', 31));
 
             $queries = collect(Http::recorded())->map(

@@ -37,6 +37,7 @@ class DashboardMetricsService
             'analytics_30d' => ['summary' => ['sales' => '0', 'orders' => 0, 'average_order_value' => '0.00'], 'trend' => [], 'top_products' => [], 'low_stock' => []],
             'analytics' => [
                 'period' => ['days' => 30, 'from' => now()->subDays(30)->toDateString(), 'to' => now()->toDateString(), 'timezone' => 'UTC', 'include_test' => false, 'include_cancelled' => true],
+                'comparison' => ['mode' => 'previous', 'label' => '上一周期', 'period' => null],
                 'summary' => [], 'comparisons' => ['previous' => []], 'trend' => [], 'comparison_trend' => ['previous' => []],
             ],
             'metric_definitions' => $this->metricDefinitions(),
