@@ -198,6 +198,10 @@ class PersonalizationRecommendationTest extends TestCase
             'seed_product_id' => 504,
         ]);
         $this->assertNotEmpty($this->ids($fallback));
+        $purchaseFallback = $engine->recommend($store, $strategy('frequently_bought_together'), [
+            'seed_product_id' => 504,
+        ]);
+        $this->assertNotEmpty($this->ids($purchaseFallback));
     }
 
     public function test_rules_pins_exclusions_and_inventory_are_applied_after_ranking(): void

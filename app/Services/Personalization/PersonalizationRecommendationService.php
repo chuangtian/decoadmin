@@ -1016,6 +1016,10 @@ class PersonalizationRecommendationService
         }
         arsort($scores, SORT_NUMERIC);
 
+        if ($scores === []) {
+            return $this->relatedProductIds($store, $context, 'similar');
+        }
+
         return array_slice($scores, 0, 100, true);
     }
 
