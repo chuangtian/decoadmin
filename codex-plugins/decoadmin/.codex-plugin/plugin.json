@@ -1,0 +1,20 @@
+{
+  "name": "decoadmin",
+  "version": "0.2.0",
+  "description": "通过受控工具查询 DecoAdmin，并在二次确认、动态 RBAC、审计和幂等保护下执行有限写操作。",
+  "author": {
+    "name": "DecoMKT"
+  },
+  "keywords": ["decoadmin", "shopify", "analytics", "operations"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DecoAdmin",
+    "shortDescription": "安全查询与受控写入 DecoAdmin",
+    "longDescription": "连接指定环境的 DecoAdmin 后台，查询已授权店铺、经营指标和运行状态，并通过二次确认安全执行刷新、同步及有限配置操作。",
+    "developerName": "DecoMKT",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "用 DecoAdmin 查询我有权限访问的店铺，并用中文概括当前状态。"
+  },
+  "mcpServers": "./.mcp.json"
+}

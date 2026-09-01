@@ -137,6 +137,7 @@ export const menu: MenuItem[] = [
         name: '系统管理',
         icon: 'system',
         children: [
+            { name: 'Codex 插件授权', route: '/codex-tokens', icon: 'apps', permission: 'codex.tokens.view' },
             { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },
