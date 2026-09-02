@@ -177,7 +177,7 @@ const financialLabel = (status: string | null) => ({
         <template v-else>
             <section class="relative rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{{ dashboard.store.name }}</p><h1 class="mt-1 text-xl font-semibold text-slate-950">经营数据概览</h1></div>
+                    <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{{ dashboard.store.name }}</p><h1 class="mt-1 text-xl font-semibold text-slate-950">经营数据概览 Deco</h1></div>
                     <DashboardDateRangePicker :period="dashboard.analytics.period" :comparison="dashboard.analytics.comparison" @apply="applyPeriod" />
                 </div>
                 <div class="grid divide-y divide-slate-100 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
