@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
+use App\Models\StorefrontEvent;
 use App\Models\User;
 use App\Services\AnalyticsCacheVersionService;
 use App\Services\AnalyticsQueryService;
@@ -762,42 +763,170 @@ class AnalyticsReportsCenterTest extends TestCase
         ]);
     }
 
-    public function test_live_view_is_store_scoped_and_does_not_collect_raw_ip_data(): void
+    public function test_live_view_uses_shopify_today_metrics_and_store_scoped_pixel_events(): void
     {
-        [$admin, $organization, $store] = $this->context('organization-admin');
-        $other = $organization->stores()->create([
-            'name' => 'Other Live Store',
-            'shopify_domain' => 'other-live.myshopify.com',
-            'status' => 'active',
-            'currency' => 'USD',
-            'timezone' => 'UTC',
-        ]);
-        $this->order($organization, $store, 'live-visible', now()->subMinute(), ['net_sales' => 50]);
-        $this->order($organization, $other, 'live-hidden', now()->subMinute(), ['net_sales' => 999]);
-        $session = $this->contextSession($organization, $store);
+        Cache::flush();
+        Carbon::setTestNow('2026-09-02 12:00:00 UTC');
 
-        $this->actingAs($admin)->withSession($session)->get(route('analytics.live'))
+        try {
+            [$admin, $organization, $store] = $this->context('organization-admin');
+            $other = $organization->stores()->create([
+                'name' => 'Other Live Store',
+                'shopify_domain' => 'other-live.myshopify.com',
+                'status' => 'active',
+                'currency' => 'USD',
+                'timezone' => 'UTC',
+            ]);
+            ShopifyConnection::query()->create([
+                'store_id' => $store->id,
+                'shop_domain' => $store->shopify_domain,
+                'access_token_encrypted' => 'token',
+                'token_type' => 'offline',
+                'scopes' => ['read_reports'],
+                'api_version' => '2026-07',
+                'status' => 'connected',
+            ]);
+            foreach ([
+                ['page_viewed', 'session-current'],
+                ['product_added_to_cart', 'session-cart'],
+                ['checkout_started', 'session-checkout'],
+                ['checkout_completed', 'session-purchased'],
+            ] as $index => [$eventName, $sessionId]) {
+                StorefrontEvent::query()->create([
+                    'organization_id' => $organization->id,
+                    'store_id' => $store->id,
+                    'event_id' => "live-event-{$index}",
+                    'event_name' => $eventName,
+                    'client_id_hash' => "client-{$index}",
+                    'session_id_hash' => $sessionId,
+                    'occurred_at' => now()->subMinutes(2),
+                    'country_code' => 'US',
+                    'region_code' => 'CA',
+                    'city' => 'Los Angeles',
+                    'received_at' => now(),
+                ]);
+            }
+            StorefrontEvent::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $other->id,
+                'event_id' => 'other-store-event',
+                'event_name' => 'page_viewed',
+                'client_id_hash' => 'other-client',
+                'session_id_hash' => 'other-session',
+                'occurred_at' => now()->subMinute(),
+                'received_at' => now(),
+            ]);
+
+            Http::fake(fn () => Http::response(['data' => [
+                'sales' => ['tableData' => ['rows' => [[
+                    'hour' => '2026-09-02T10:00:00Z',
+                    'total_sales' => '15000.00',
+                    'orders' => '25',
+                    'total_sales__totals' => '35000.00',
+                    'orders__totals' => '61',
+                ], [
+                    'hour' => '2026-09-02T11:00:00Z',
+                    'total_sales' => '20000.00',
+                    'orders' => '36',
+                ]]], 'parseErrors' => []],
+                'sessions' => ['tableData' => ['rows' => [[
+                    'hour' => '2026-09-02T10:00:00Z',
+                    'sessions' => '9000',
+                    'sessions__totals' => '19000',
+                ], [
+                    'hour' => '2026-09-02T11:00:00Z',
+                    'sessions' => '10000',
+                ]]], 'parseErrors' => []],
+                'locations' => ['tableData' => ['rows' => [[
+                    'session_country' => 'United States',
+                    'session_region' => 'California',
+                    'sessions' => '1207',
+                ]]], 'parseErrors' => []],
+                'sources' => ['tableData' => ['rows' => [[
+                    'referrer_source' => 'Social',
+                    'referrer_name' => 'Facebook',
+                    'sessions' => '5000',
+                ]]], 'parseErrors' => []],
+                'customers' => ['tableData' => ['rows' => [[
+                    'new_or_returning_customer' => 'New',
+                    'customers' => '44',
+                ], [
+                    'new_or_returning_customer' => 'Returning',
+                    'customers' => '17',
+                ]]], 'parseErrors' => []],
+                'products' => ['tableData' => ['rows' => [[
+                    'product_title' => 'Macfox X7',
+                    'product_vendor' => 'Macfox Bike',
+                    'total_sales' => '10479.53',
+                ]]], 'parseErrors' => []],
+            ]]));
+
+            $session = $this->contextSession($organization, $store);
+            $this->actingAs($admin)->withSession($session)->get(route('analytics.live'))
+                ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->component('Analytics/Live')
+                ->where('snapshot.schema', 'live-view-v2')
+                ->where('snapshot.store.id', $store->id)
+                ->where('snapshot.period.label', '今日累计')
+                ->where('snapshot.metrics.current_visitors.value', 4)
+                ->where('snapshot.metrics.total_sales.value', 35000)
+                ->where('snapshot.metrics.orders.value', 61)
+                ->where('snapshot.metrics.visits.value', 19000)
+                ->where('snapshot.customer_behavior.active_carts.value', 1)
+                ->where('snapshot.customer_behavior.checking_out.value', 1)
+                ->where('snapshot.customer_behavior.purchased.value', 1)
+                ->where('snapshot.insights.visits_by_location.items.0.label', 'United States · California')
+                ->where('snapshot.insights.new_vs_returning.items.0.label', '新客户')
+                ->where('snapshot.insights.new_vs_returning.items.0.value', 44)
+                ->where('snapshot.insights.sales_by_product.items.0.label', 'Macfox X7 · Macfox Bike')
+                ->where('snapshot.insights.sales_by_product.items.0.value', 10479.53)
+                ->where('snapshot.traffic.status', 'active')
+                ->where('snapshot.shopify.complete', true)
+                ->where('snapshot.privacy.location_precision', 'coarse')
+                ->where('snapshot.privacy.raw_ip_collected', false)
+                ->has('snapshot.locations', 1));
+
+            $this->actingAs($admin)->withSession($session)->get(route('analytics.live.data'))
+                ->assertOk()
+                ->assertJsonPath('store.id', $store->id)
+                ->assertJsonPath('metrics.total_sales.value', 35000)
+                ->assertJsonPath('metrics.orders.value', 61)
+                ->assertJsonPath('privacy.raw_ip_collected', false);
+
+            Http::assertSent(fn (Request $request): bool => str_contains((string) data_get($request->data(), 'query'), 'query ShopifyLiveViewReports')
+                && str_contains((string) data_get($request->data(), 'variables.sales'), 'SINCE 2026-09-02 UNTIL 2026-09-02'));
+        } finally {
+            Carbon::setTestNow();
+            Cache::flush();
+        }
+    }
+
+    public function test_live_view_does_not_present_unsynchronized_local_orders_as_shopify_totals(): void
+    {
+        Cache::flush();
+        [$admin, $organization, $store] = $this->context('organization-admin');
+        $this->order($organization, $store, 'local-only', now()->subMinute(), [
+            'net_sales' => 999,
+            'total_price' => 1099,
+        ]);
+        Http::fake();
+
+        $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
+            ->get(route('analytics.live'))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Analytics/Live')
-            ->where('snapshot.schema', 'live-view-v1')
-            ->where('snapshot.store.id', $store->id)
-            ->where('snapshot.metrics.orders.value', 1)
-            ->where('snapshot.metrics.net_sales.value', 50)
+            ->where('snapshot.schema', 'live-view-v2')
+            ->where('snapshot.metrics.total_sales.available', false)
+            ->where('snapshot.metrics.total_sales.value', 0)
+            ->where('snapshot.metrics.orders.available', false)
+            ->where('snapshot.metrics.orders.value', 0)
             ->where('snapshot.metrics.current_visitors.available', false)
-            ->where('snapshot.insights.visits_by_location.message', 'Web Pixel 尚未收到粗粒度地点。')
-            ->where('snapshot.insights.new_vs_returning.classification', 'shopify_internal')
-            ->where('snapshot.insights.sales_by_product.classification', 'shopify_internal')
-            ->where('snapshot.traffic.reason_code', 'web_pixel_not_connected')
-            ->where('snapshot.privacy.location_precision', 'coarse')
-            ->where('snapshot.privacy.raw_ip_collected', false)
-            ->has('snapshot.locations', 0));
+            ->where('snapshot.traffic.status', 'not_received')
+            ->where('snapshot.traffic.reason_code', 'web_pixel_no_events')
+            ->where('snapshot.shopify.available', false)
+            ->where('snapshot.insights.sales_by_product.available', false));
 
-        $this->actingAs($admin)->withSession($session)->get(route('analytics.live.data'))
-            ->assertOk()
-            ->assertJsonPath('store.id', $store->id)
-            ->assertJsonPath('metrics.orders.value', 1)
-            ->assertJsonPath('insights.sales_by_product.available', false)
-            ->assertJsonPath('privacy.raw_ip_collected', false);
+        Cache::flush();
     }
 
     public function test_viewer_can_view_reports_but_cannot_export(): void
