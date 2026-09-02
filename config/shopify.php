@@ -18,6 +18,7 @@ return [
     'analytics_snapshot_refresh_wait_seconds' => (int) env('SHOPIFY_ANALYTICS_REFRESH_WAIT_SECONDS', 35),
     'analytics_snapshot_retention_days' => (int) env('SHOPIFY_ANALYTICS_SNAPSHOT_RETENTION_DAYS', 365),
     'analytics_snapshot_prune_batch_size' => (int) env('SHOPIFY_ANALYTICS_SNAPSHOT_PRUNE_BATCH_SIZE', 1000),
+    'live_view_cache_seconds' => (int) env('SHOPIFY_LIVE_VIEW_CACHE_SECONDS', 30),
     'scheduled_sync' => [
         'enabled' => (bool) env('SHOPIFY_SCHEDULED_SYNC_ENABLED', true),
         'timezone' => env('SHOPIFY_SCHEDULED_SYNC_TIMEZONE', 'America/New_York'),
