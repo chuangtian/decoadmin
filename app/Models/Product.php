@@ -32,6 +32,11 @@ class Product extends Model
         return $this->hasMany(ProductVariant::class);
     }
 
+    public function reputationMentionMatches(): HasMany
+    {
+        return $this->hasMany(ReputationMentionProductMatch::class);
+    }
+
     public function collections(): BelongsToMany
     {
         return $this->belongsToMany(ProductCollection::class, 'product_collection_memberships')

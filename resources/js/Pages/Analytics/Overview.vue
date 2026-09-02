@@ -44,6 +44,7 @@ interface AnalyticsStorage {
 }
 interface BehaviorInsight {
     available: boolean;
+    comparison_available: boolean;
     source: 'shopifyql';
     metrics: Record<string, { value: number; comparison: ComparisonMetric | null }>;
     trend: { date: string; sessions: number; conversion_rate: number; add_to_cart: number; checkout: number; completed_checkout: number }[];
@@ -77,12 +78,13 @@ const props = defineProps<{
         behavior: BehaviorInsight;
         customers: { available: boolean; source: 'local_sync'; items: CustomerInsight[]; repeat_rate: number; error: null };
         pos: { available: boolean; source: 'shopifyql' | 'local_sync'; locations: PosLocationInsight[]; staff: PosStaffInsight[]; error: string | null };
-        integration: { report_scope_granted: boolean; shopifyql_available: boolean; error: string | null; storage: AnalyticsStorage | null };
+        integration: { report_scope_granted: boolean; shopifyql_available: boolean; error: string | null; storage: AnalyticsStorage | null; comparison_storage: AnalyticsStorage | null };
         generated_at: string;
     };
     performance: {
         schema: 'analytics-operating-metrics-v1';
-        comparison: { mode: 'previous' | 'none'; label: string; period: { from: string; to: string } | null };
+        comparison: { mode: 'previous' | 'year' | 'year_weekday' | 'custom' | 'none'; label: string; period: { from: string; to: string } | null };
+        whole_bike: { available: boolean; product_count: number; product_handles: string[] };
         advertising: { available: boolean; complete: boolean; available_channels: number; expected_channels: number; channels: { key: string; name: string; available: boolean; spend: number }[]; message: string };
         behavior: { available: boolean; source: 'shopifyql'; message: string };
         metrics: Record<string, OperatingMetric>;
@@ -113,8 +115,12 @@ const isCustomPeriod = computed(() => {
     return params.has('date_from') && params.has('date_to');
 });
 const analyticsPeriodKey = computed(() => `${props.store.id}:${props.overview.period.from}:${props.overview.period.to}`);
-const analyticsRefreshing = computed(() => !props.insights.behavior.available && Boolean(
-    props.insights.integration.storage?.pending || props.insights.integration.storage?.refreshing,
+const analyticsRefreshing = computed(() => Boolean(
+    (!props.insights.behavior.available && (props.insights.integration.storage?.pending || props.insights.integration.storage?.refreshing))
+    || (!props.insights.behavior.comparison_available && (
+        props.insights.integration.comparison_storage?.pending
+        || props.insights.integration.comparison_storage?.refreshing
+    )),
 ));
 const analyticsRefreshTimedOut = computed(() => analyticsRefreshing.value
     && analyticsRefreshAttempts.value >= ANALYTICS_REFRESH_MAX_ATTEMPTS
@@ -323,15 +329,19 @@ const cards = computed(() => {
     const checkout = performanceMetric('checkout');
     const addToCartCost = performanceMetric('add_to_cart_cost');
     const checkoutCost = performanceMetric('checkout_cost');
+    const wholeBikeOrders = performanceMetric('whole_bike_orders');
+    const wholeBikeAverage = performanceMetric('whole_bike_average_order_value');
+    const wholeBikeConversion = performanceMetric('whole_bike_conversion_rate');
+    const useWholeBike = props.performance.whole_bike.available;
 
     return [
         { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), available: true, comparison: salesComparison('net_sales'), note: '扣除退款后的商品销售额', trend: salesTrend('net_sales'), color: '#0ea5e9' },
         { key: 'ad_spend', label: '广告花费', value: formatOperating(adSpend, 'money'), available: adSpend.available, comparison: comparisonEnabled.value ? adSpend.comparison : null, note: adSpend.note, trend: adSpend.trend, color: '#8b5cf6' },
         { key: 'roi', label: 'ROI', value: formatOperating(roi, 'ratio'), available: roi.available, comparison: comparisonEnabled.value ? roi.comparison : null, note: roi.note, trend: roi.trend, color: '#f59e0b' },
-        { key: 'orders', label: '订单数', value: number(props.overview.summary.orders), available: true, comparison: salesComparison('orders'), note: '有效 Shopify 订单', trend: salesTrend('orders'), color: '#10b981' },
-        { key: 'average_order_value', label: '平均订单金额', value: money(props.overview.summary.average_order_value), available: true, comparison: salesComparison('average_order_value'), note: 'Shopify 原生平均订单金额', trend: salesTrend('average_order_value'), color: '#14b8a6' },
+        { key: 'orders', label: '订单数', value: useWholeBike ? formatOperating(wholeBikeOrders, 'number') : number(props.overview.summary.orders), available: useWholeBike ? wholeBikeOrders.available : true, comparison: useWholeBike ? wholeBikeOrders.comparison : salesComparison('orders'), note: useWholeBike ? wholeBikeOrders.note : '有效 Shopify 订单', trend: useWholeBike ? wholeBikeOrders.trend : salesTrend('orders'), color: '#10b981' },
+        { key: 'average_order_value', label: '平均订单金额', value: useWholeBike ? formatOperating(wholeBikeAverage, 'money') : money(props.overview.summary.average_order_value), available: useWholeBike ? wholeBikeAverage.available : true, comparison: useWholeBike ? wholeBikeAverage.comparison : salesComparison('average_order_value'), note: useWholeBike ? wholeBikeAverage.note : 'Shopify 原生平均订单金额', trend: useWholeBike ? wholeBikeAverage.trend : salesTrend('average_order_value'), color: '#14b8a6' },
         { key: 'sessions', label: '访问量', value: formatOperating(sessions, 'number', behaviorUnavailableLabel.value), available: sessions.available, comparison: comparisonEnabled.value ? sessions.comparison : null, note: sessions.note, trend: sessions.trend, color: '#6366f1' },
-        { key: 'conversion_rate', label: '转化率', value: formatOperating(conversionRate, 'percent', behaviorUnavailableLabel.value), available: conversionRate.available, comparison: comparisonEnabled.value ? conversionRate.comparison : null, note: conversionRate.note, trend: conversionRate.trend, color: '#06b6d4' },
+        { key: 'conversion_rate', label: '转化率', value: formatOperating(useWholeBike ? wholeBikeConversion : conversionRate, 'percent', behaviorUnavailableLabel.value), available: useWholeBike ? wholeBikeConversion.available : conversionRate.available, comparison: comparisonEnabled.value ? (useWholeBike ? wholeBikeConversion.comparison : conversionRate.comparison) : null, note: useWholeBike ? wholeBikeConversion.note : conversionRate.note, trend: useWholeBike ? wholeBikeConversion.trend : conversionRate.trend, color: '#06b6d4' },
         { key: 'refunds', label: '退款金额', value: money(props.overview.summary.refunds), available: true, comparison: salesComparison('refunds'), note: '统计周期内退款', trend: salesTrend('refunds'), color: '#f43f5e' },
         { key: 'add_to_cart', label: '加购数', value: formatOperating(addToCart, 'number', behaviorUnavailableLabel.value), available: addToCart.available, comparison: comparisonEnabled.value ? addToCart.comparison : null, note: addToCart.note, trend: addToCart.trend, color: '#8b5cf6' },
         { key: 'checkout', label: '结账数', value: formatOperating(checkout, 'number', behaviorUnavailableLabel.value), available: checkout.available, comparison: comparisonEnabled.value ? checkout.comparison : null, note: checkout.note, trend: checkout.trend, color: '#ec4899' },

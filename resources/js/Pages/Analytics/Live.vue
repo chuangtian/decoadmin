@@ -15,11 +15,12 @@ interface LiveLocation { id: string; label: string; latitude: number; longitude:
 interface LiveSnapshot {
     schema: string;
     store: { id: number; name: string; currency: string; timezone: string };
-    period: { minutes: number; from: string; to: string };
-    metrics: { current_visitors: Metric; visits: Metric; orders: Metric; net_sales: Metric };
+    period: { label: string; date: string; from: string; to: string; current_visitors_minutes: number; customer_behavior_minutes: number; map_minutes: number };
+    metrics: { current_visitors: Metric; visits: Metric; orders: Metric; total_sales: Metric };
     customer_behavior: { active_carts: Metric; checking_out: Metric; purchased: Metric };
     insights: { visits_by_location: LiveInsight; visits_by_source: LiveInsight; new_vs_returning: LiveInsight; sales_by_product: LiveInsight };
-    traffic: { available: boolean; reason_code: string | null; message: string };
+    traffic: { available: boolean; receiving: boolean; status: 'active' | 'idle' | 'not_received'; reason_code: string | null; message: string };
+    shopify: { available: boolean; complete: boolean; source: string; date: string | null; fetched_at: string | null };
     locations: LiveLocation[];
     privacy: { location_precision: string; raw_ip_collected: boolean };
     generated_at: string;
@@ -43,7 +44,7 @@ const FONT_SCALE = 0.8;
 
 const metricCards = computed(() => [
     { key: 'current_visitors', label: '当前访客', metric: live.value.metrics.current_visitors, currency: false },
-    { key: 'net_sales', label: '净销售额', metric: live.value.metrics.net_sales, currency: true },
+    { key: 'total_sales', label: '总销售额', metric: live.value.metrics.total_sales, currency: true },
     { key: 'visits', label: '访问', metric: live.value.metrics.visits, currency: false },
     { key: 'orders', label: '订单', metric: live.value.metrics.orders, currency: false },
 ]);
@@ -248,7 +249,7 @@ watch([layer, search], updateLocationLayer);
                     <div>
                         <div class="live-status"><span></span>实时更新</div>
                         <h1>实时视图</h1>
-                        <p>{{ live.store.name }} · 最近 {{ live.period.minutes }} 分钟</p>
+                        <p>{{ live.store.name }} · {{ live.period.label }}（店铺时区）</p>
                     </div>
                     <button type="button" :disabled="isRefreshing" class="refresh-button" @click="refresh">
                         <svg :class="{ spinning: isRefreshing }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span>{{ generatedTime }}</span>
@@ -260,14 +261,14 @@ watch([layer, search], updateLocationLayer);
                         <div class="metric-label"><span>{{ item.label }}</span><em v-if="!item.metric.available">未接入</em></div>
                         <strong>{{ item.metric.available ? (item.currency ? formatCurrency(item.metric.value) : item.metric.value) : '—' }}</strong>
                         <svg v-if="item.metric.trend.length" viewBox="0 0 100 28" preserveAspectRatio="none"><path :d="sparkline(item.metric.trend)" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
-                        <small v-else>{{ item.metric.message ?? '最近 30 分钟' }}</small>
+                        <small v-else>{{ item.metric.message }}</small>
                     </article>
                 </div>
 
                 <section class="overlay-section">
                     <div class="section-heading">
-                        <div><span>客户行为</span><small>实时漏斗</small></div>
-                        <span class="connection-pill" :class="{ connected: live.traffic.available }">{{ live.traffic.available ? 'Web Pixel 已接入' : 'Web Pixel 未接入' }}</span>
+                        <div><span>客户行为</span><small>最近 {{ live.period.customer_behavior_minutes }} 分钟</small></div>
+                        <span class="connection-pill" :class="{ connected: live.traffic.receiving }">{{ live.traffic.status === 'active' ? 'Web Pixel 正在接收' : (live.traffic.status === 'idle' ? 'Web Pixel 近期无事件' : 'Web Pixel 尚无事件') }}</span>
                     </div>
                     <div class="behavior-row">
                         <div v-for="item in behaviorCards" :key="item.label"><strong>{{ item.metric.available ? item.metric.value : '—' }}</strong><span>{{ item.label }}</span></div>
@@ -277,13 +278,14 @@ watch([layer, search], updateLocationLayer);
                 <section v-for="item in insightCards" :key="item.key" class="insight-card">
                     <header>
                         <h2>{{ item.title }}</h2>
-                        <span v-if="item.insight.classification === 'shopify_internal'">Shopify 内部指标</span>
+                        <span v-if="item.insight.classification === 'shopifyql'">Shopify Analytics</span>
+                        <span v-else-if="item.insight.classification === 'web_pixel'">Web Pixel</span>
                         <span v-else-if="!item.insight.available">暂无数据</span>
                     </header>
                     <div v-if="item.insight.items.length" class="insight-list">
                         <div v-for="row in item.insight.items" :key="row.label">
                             <span>{{ row.label }}</span>
-                            <strong>{{ row.value }}</strong>
+                            <strong>{{ item.key === 'sales_by_product' ? formatCurrency(row.value) : row.value }}</strong>
                         </div>
                     </div>
                     <div v-else class="insight-empty">
@@ -294,7 +296,7 @@ watch([layer, search], updateLocationLayer);
 
                 <section class="overlay-section location-section">
                     <div class="section-heading">
-                        <div><span>实时活动地点</span><small>城市级模糊位置</small></div>
+                        <div><span>实时活动地点</span><small>最近 {{ live.period.map_minutes }} 分钟 · 城市级模糊位置</small></div>
                         <div class="layer-switch">
                             <button type="button" :class="{ active: layer === 'orders' }" @click="layer = 'orders'">订单</button>
                             <button type="button" :class="{ active: layer === 'visitors' }" @click="layer = 'visitors'">访客</button>

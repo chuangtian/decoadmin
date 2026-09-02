@@ -58,6 +58,56 @@ class DashboardNotificationFinanceTest extends TestCase
         CarbonImmutable::setTestNow();
     }
 
+    public function test_dashboard_supports_custom_comparison_periods_and_can_disable_comparison(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 12:00:00', 'UTC'));
+
+        try {
+            [$user, $organization, $store] = $this->context('organization-admin');
+            $store->update(['timezone' => 'UTC']);
+            $current = $this->order($organization, $store, 'comparison-current', '200.00');
+            $current->update(['created_at_shopify' => '2026-08-10 12:00:00']);
+            $baseline = $this->order($organization, $store, 'comparison-baseline', '100.00');
+            $baseline->update(['created_at_shopify' => '2026-07-15 12:00:00']);
+
+            $session = $this->contextSession($organization, $store);
+            $this->actingAs($user)->withSession($session)
+                ->get(route('dashboard', [
+                    'date_from' => '2026-08-01',
+                    'date_to' => '2026-08-31',
+                    'comparison' => 'custom',
+                    'comparison_date_from' => '2026-07-01',
+                    'comparison_date_to' => '2026-07-31',
+                ]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('dashboard.analytics.comparison.mode', 'custom')
+                    ->where('dashboard.analytics.comparison.label', '自定义对比')
+                    ->where('dashboard.analytics.comparison.period.from', '2026-07-01')
+                    ->where('dashboard.analytics.comparison.period.to', '2026-07-31')
+                    ->where('dashboard.analytics.summary.total_sales', 200)
+                    ->where('dashboard.analytics.comparisons.previous.total_sales.baseline', 100)
+                    ->where('dashboard.analytics.comparisons.previous.total_sales.change_percent', 100)
+                    ->where('dashboard.analytics.comparison_trend.previous.0.date', '2026-07-01')
+                    ->where('dashboard.analytics.comparison_trend.previous.14.total_sales', 100)
+                    ->has('dashboard.analytics.comparison_trend.previous', 31));
+
+            $this->actingAs($user)->withSession($session)
+                ->get(route('dashboard', [
+                    'date_from' => '2026-08-01',
+                    'date_to' => '2026-08-31',
+                    'comparison' => 'none',
+                ]))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('dashboard.analytics.comparison.mode', 'none')
+                    ->where('dashboard.analytics.comparison.period', null)
+                    ->has('dashboard.analytics.comparison_trend.previous', 0));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_sales_analytics_uses_real_current_store_data(): void
     {
         [$user, $organization, $store] = $this->context('organization-admin');

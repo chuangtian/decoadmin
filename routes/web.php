@@ -23,6 +23,7 @@ use App\Http\Controllers\InstagramFeedMetaCallbackController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
+use App\Http\Controllers\ModelAssetController;
 use App\Http\Controllers\NaturalTrafficController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
@@ -547,6 +548,15 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/inventory/{inventoryItem}', [InventoryController::class, 'show'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
     Route::get('/locations', [ShopifyDataController::class, 'locations'])->middleware('permission:inventory.view')->name('locations.index');
     Route::get('/locations/{location}', [ShopifyDataController::class, 'location'])->whereNumber('location')->middleware('permission:inventory.view')->name('locations.show');
+    Route::get('/model-assets', [ModelAssetController::class, 'index'])->middleware('permission:products.view')->name('model-assets.index');
+    Route::post('/model-assets/folders', [ModelAssetController::class, 'storeFolder'])->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.store');
+    Route::get('/model-assets/folders/{folder}', [ModelAssetController::class, 'showFolder'])->whereUuid('folder')->middleware('permission:products.view')->name('model-assets.folders.show');
+    Route::post('/model-assets/folders/{folder}/images', [ModelAssetController::class, 'upload'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:120,1'])->name('model-assets.images.store');
+    Route::delete('/model-assets/folders/{folder}/images', [ModelAssetController::class, 'clearFolder'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.clear');
+    Route::delete('/model-assets/folders/{folder}', [ModelAssetController::class, 'destroyFolder'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.destroy');
+    Route::get('/model-assets/images/{image}/thumbnail', [ModelAssetController::class, 'thumbnail'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.thumbnail');
+    Route::get('/model-assets/images/{image}', [ModelAssetController::class, 'image'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.content');
+    Route::delete('/model-assets/images/{image}', [ModelAssetController::class, 'destroyImage'])->whereUuid('image')->middleware(['permission:products.update', 'throttle:60,1'])->name('model-assets.images.destroy');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

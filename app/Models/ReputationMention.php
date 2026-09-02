@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 #[Fillable([
     'uuid', 'organization_id', 'store_id', 'origin', 'source', 'canonical_key', 'source_sheets',
     'source_payloads_encrypted', 'url', 'url_hash', 'title', 'content', 'rating',
+    'reviewer_name',
     'week_number', 'published_at', 'model_name', 'order_reference_encrypted',
     'processing_status', 'response_note', 'metrics', 'is_negative', 'is_active', 'synced_at',
 ])]
@@ -34,6 +35,11 @@ class ReputationMention extends Model
     public function risks(): HasMany
     {
         return $this->hasMany(ReputationRisk::class);
+    }
+
+    public function productMatches(): HasMany
+    {
+        return $this->hasMany(ReputationMentionProductMatch::class);
     }
 
     public function getRouteKeyName(): string

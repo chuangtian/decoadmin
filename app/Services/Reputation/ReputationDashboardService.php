@@ -669,6 +669,13 @@ class ReputationDashboardService
     {
         $tab = in_array($filters['tab'] ?? null, ['targets', 'reviews', 'reddit', 'threads'], true) ? $filters['tab'] : 'targets';
         $query = ReputationMention::query()->forOrganization((int) $store->organization_id)->forStore((int) $store->id)
+            ->with(['productMatches' => function ($matches) use ($store): void {
+                $matches->forOrganization((int) $store->organization_id)
+                    ->forStore((int) $store->id)
+                    ->with(['product' => fn ($product) => $product
+                        ->forOrganization((int) $store->organization_id)
+                        ->forStore((int) $store->id)]);
+            }])
             ->where('is_active', true)
             ->where(function (Builder $builder) use ($from, $to, $filters): void {
                 $builder->whereBetween('published_at', [$from->utc(), $to->utc()]);
@@ -685,11 +692,21 @@ class ReputationDashboardService
             ->when(($filters['status'] ?? '') === 'pending', fn (Builder $builder) => $builder->whereNotNull('rating')->where('rating', '<', 4)
                 ->where(fn (Builder $nested) => $nested->whereNull('processing_status')->orWhereNotIn('processing_status', ['已处理', '完成', 'resolved'])))
             ->when(($filters['status'] ?? '') === 'done', fn (Builder $builder) => $builder->whereIn('processing_status', ['已处理', '完成', 'resolved']))
-            ->when(filled($filters['search'] ?? null), function (Builder $builder) use ($filters): void {
+            ->when(filled($filters['search'] ?? null), function (Builder $builder) use ($filters, $store): void {
                 $search = trim((string) $filters['search']);
                 $builder->where(fn (Builder $nested) => $nested->where('title', 'like', "%{$search}%")
                     ->orWhere('content', 'like', "%{$search}%")
-                    ->orWhere('model_name', 'like', "%{$search}%"));
+                    ->orWhere('reviewer_name', 'like', "%{$search}%")
+                    ->orWhere('model_name', 'like', "%{$search}%")
+                    ->orWhereHas('productMatches', fn (Builder $matches) => $matches
+                        ->forOrganization((int) $store->organization_id)
+                        ->forStore((int) $store->id)
+                        ->whereHas('product', fn (Builder $product) => $product
+                            ->forOrganization((int) $store->organization_id)
+                            ->forStore((int) $store->id)
+                            ->where(fn (Builder $fields) => $fields
+                                ->where('title', 'like', "%{$search}%")
+                                ->orWhere('handle', 'like', "%{$search}%")))));
             });
 
         $perPage = min(50, max(10, (int) ($filters['per_page'] ?? 20)));
@@ -699,6 +716,7 @@ class ReputationDashboardService
             'source' => $mention->source,
             'url' => $mention->url,
             'title' => $mention->title,
+            'reviewer_name' => $mention->reviewer_name,
             'content' => $mention->content,
             'rating' => $mention->rating,
             'week_number' => $mention->week_number,
@@ -709,6 +727,20 @@ class ReputationDashboardService
             'metrics' => $mention->metrics ?? [],
             'is_negative' => $mention->is_negative,
             'origin' => $mention->origin ?: 'source',
+            'matched_products' => $mention->productMatches
+                ->filter(fn ($match): bool => $match->product !== null
+                    && (int) $match->organization_id === (int) $store->organization_id
+                    && (int) $match->store_id === (int) $store->id
+                    && (int) $match->product->organization_id === (int) $store->organization_id
+                    && (int) $match->product->store_id === (int) $store->id)
+                ->sortBy(fn ($match): string => ($match->match_role === 'primary' ? '0' : '1').mb_strtolower((string) $match->product->title))
+                ->map(fn ($match): array => [
+                    'title' => (string) $match->product->title,
+                    'handle' => (string) $match->product->handle,
+                    'role' => (string) $match->match_role,
+                ])
+                ->values()
+                ->all(),
             'source_sheets' => collect((array) $mention->source_sheets)
                 ->filter(fn (mixed $sheet): bool => is_string($sheet) && trim($sheet) !== '')
                 ->map(fn (string $sheet): string => $this->displaySheetName($sheet))

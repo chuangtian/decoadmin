@@ -8,7 +8,7 @@ use RuntimeException;
 class ImageOptimizationService
 {
     /** @return array{contents: string, mime_type: string, width: int, height: int} */
-    public function toWebp(string $contents, string $label = '图片'): array
+    public function toWebp(string $contents, string $label = '图片', ?int $maxDimension = null): array
     {
         if (! function_exists('imagecreatefromstring') || ! function_exists('imagewebp')) {
             throw new RuntimeException('服务器未安装支持 WebP 的 GD 图片扩展。');
@@ -38,7 +38,10 @@ class ImageOptimizationService
             throw new RuntimeException("{$label}解码失败。");
         }
 
-        $scale = min(1, $this->maxDimension() / max($width, $height));
+        $dimensionLimit = $maxDimension === null
+            ? $this->maxDimension()
+            : max(160, min(4096, $maxDimension));
+        $scale = min(1, $dimensionLimit / max($width, $height));
         $targetWidth = max(1, (int) round($width * $scale));
         $targetHeight = max(1, (int) round($height * $scale));
         $target = imagecreatetruecolor($targetWidth, $targetHeight);
