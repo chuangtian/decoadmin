@@ -22,3 +22,4 @@ default_placement = "ORDER_SUMMARY2"
 [[extensions.targeting]]
 target = "purchase.thank-you.block.render"
 module = "./src/ThankYouRecommendations.jsx"
+default_placement = "ORDER_SUMMARY2"
