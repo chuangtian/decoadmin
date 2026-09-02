@@ -242,6 +242,7 @@ test('checkout extension exposes a separate thank-you target without checkout mu
   assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
   assert.match(source, /href=\{addUrl\}/);
   assert.match(source, /target="_blank"/);
+  assert.match(source, /shopify\.shop\?\.myshopifyDomain/);
   assert.match(source, /useCartLines\(\)/);
   assert.doesNotMatch(source, /useApplyCartLinesChange/);
   assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
