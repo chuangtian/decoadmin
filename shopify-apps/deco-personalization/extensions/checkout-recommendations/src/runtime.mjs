@@ -151,6 +151,23 @@ export function eventPayload(configuration, products) {
   };
 }
 
+export function cartPermalink(storefrontUrl, candidate) {
+  const variantId = numericId(candidate?.variant_id, 'ProductVariant');
+  const quantity = boundedInteger(candidate?.minimum_purchase_quantity, 1, 999, 1);
+  if (!variantId) return '';
+  try {
+    const storefront = new URL(String(storefrontUrl ?? ''));
+    if (storefront.protocol !== 'https:' || storefront.username || storefront.password) return '';
+    const permalink = new URL(`/cart/${variantId}:${quantity}`, storefront.origin);
+    permalink.searchParams.set('storefront', 'true');
+    const discountCode = string(candidate?.discount?.code, 80);
+    if (discountCode && !discountCode.includes(',')) permalink.searchParams.set('discount', discountCode);
+    return permalink.toString();
+  } catch {
+    return '';
+  }
+}
+
 export function formatMoney(amount, currency, locale = '') {
   const normalizedAmount = Number(amount);
   const normalizedCurrency = String(currency ?? '').trim().toUpperCase();

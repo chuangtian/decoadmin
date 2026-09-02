@@ -10,14 +10,18 @@ This document records the Shopify platform constraints used by the P0 Checkout i
 
 ## Supported targets
 
-Both blocks use Shopify's movable `purchase.checkout.block.render` target:
+The Checkout blocks use Shopify's movable `purchase.checkout.block.render` target:
 
 - Trust badges recommend the legal `WALLETS1` placement, immediately above native accelerated checkout buttons. The placement is unavailable when Shopify doesn't render accelerated checkout.
 - Sequential recommendations recommend `ORDER_SUMMARY2`, immediately below checkout line items in the order summary.
 
-The merchant must add both blocks in the Checkout and accounts editor. The recommendation block is named **Deco 推荐策略**. DecoAdmin exposes one direct Checkout strategy selector; saving it creates or updates the internal Checkout binding and records the strategy as used by Checkout. There is no merchant-facing Checkout master switch, Collection selector, maximum-count field, or component selector.
+The same sequential recommendation card is available through `purchase.thank-you.block.render` on the Thank you page. The merchant controls its position in the Checkout and accounts editor. Because the original order is complete, its Add button opens a new storefront cart in a separate tab with the recommended variant and configured discount; it never mutates the completed order.
+
+The merchant must add the applicable blocks in the Checkout and accounts editor. Both the Checkout and Thank you recommendation blocks are named **Deco 推荐策略**. DecoAdmin exposes one direct Checkout strategy selector; saving it creates or updates the internal Checkout binding and records the strategy as used by Checkout. There is no merchant-facing Checkout master switch, Collection selector, maximum-count field, or component selector.
 
 Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/targets/checkout/block>
+
+Thank you reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/targets/thank-you/block>
 
 ## Rendering and cart changes
 
@@ -70,6 +74,6 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 
 ## Explicit exclusions
 
-- No Post-purchase, Thank you, Order status, Customer Account, Checkout Function, payment customization, generative recommendation, or Production work.
+- No Post-purchase order mutation, Order status, Customer Account, Checkout Function, payment customization, generative recommendation, or Production work.
 - Native Shop Pay, PayPal, Apple Pay, and Google Pay buttons remain entirely owned by Shopify.
 - The permanent production-store denylist remains enforced for every backend and release action.
