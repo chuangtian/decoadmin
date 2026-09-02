@@ -45,6 +45,7 @@ class PersonalizationCheckoutTest extends TestCase
         $this->assertNull($service->configuration($store, $admin));
         $this->assertFalse($service->storefront($store)['enabled']);
         $this->assertFalse(data_get($service->storefront($store), 'thank_you.enabled'));
+        $this->assertFalse(data_get($service->storefront($store), 'order_status.enabled'));
 
         $setting = $service->save($store, $admin, [
             'strategy_uuid' => $strategy->uuid,
@@ -168,6 +169,45 @@ class PersonalizationCheckoutTest extends TestCase
         $this->assertTrue($checkout->storefront($store)['enabled']);
     }
 
+    public function test_order_status_uses_an_independent_strategy_and_excludes_order_products(): void
+    {
+        [$admin, $organization, $store] = $this->context('Order Status A');
+        $purchased = $this->product($organization, $store, 421);
+        $fallback = $this->product($organization, $store, 422);
+        $strategy = $this->checkoutStrategy($store, $admin, $purchased);
+        $service = app(PersonalizationCheckoutService::class);
+
+        $setting = $service->saveOrderStatus($store, $admin, [
+            'strategy_uuid' => $strategy->uuid,
+            'heading' => 'More products for your bike',
+        ]);
+        $payload = $service->storefront($store);
+        $recommendations = $service->recommendations($store, [
+            'surface' => 'order_status',
+            'cart_lines' => [[
+                'product_id' => (string) $purchased->shopify_product_id,
+                'variant_id' => (string) $purchased->variants->first()->shopify_variant_id,
+                'quantity' => 1,
+            ]],
+            'currency' => 'USD',
+            'language' => 'en',
+        ]);
+
+        $this->assertSame(PersonalizationPlacement::OrderStatus, $setting->orderStatusComponent->placement);
+        $this->assertSame('More products for your bike', $setting->orderStatusComponent->heading);
+        $this->assertTrue(data_get($payload, 'order_status.enabled'));
+        $this->assertSame($strategy->uuid, data_get($payload, 'order_status.component.strategy_uuid'));
+        $this->assertSame('order_status', data_get($payload, 'order_status.component.placement'));
+        $this->assertSame('order_status', data_get($recommendations, 'context.surface'));
+        $this->assertSame((string) $fallback->shopify_product_id, data_get($recommendations, 'items.0.shopify_product_id'));
+        $this->assertSame('order_status_all_products_fallback', data_get($recommendations, 'items.0.reason_code'));
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'personalization_order_status_configuration_saved',
+            'store_id' => $store->id,
+            'user_id' => $admin->id,
+        ]);
+    }
+
     public function test_thank_you_configuration_route_is_store_scoped_and_validated(): void
     {
         [$admin, $organization, $store] = $this->context('Thank You Route');
@@ -192,6 +232,36 @@ class PersonalizationCheckoutTest extends TestCase
         $this->actingAs($admin)
             ->from(route('personalization.index', [$organization, $store]))
             ->put(route('personalization.thank-you.update', [$organization, $store]), [
+                'strategy_uuid' => $strategy->uuid,
+                'heading' => str_repeat('a', 121),
+            ])
+            ->assertSessionHasErrors('heading');
+    }
+
+    public function test_order_status_configuration_route_is_store_scoped_and_validated(): void
+    {
+        [$admin, $organization, $store] = $this->context('Order Status Route');
+        $product = $this->product($organization, $store, 461);
+        $strategy = $this->checkoutStrategy($store, $admin, $product);
+
+        $this->actingAs($admin)
+            ->put(route('personalization.order-status.update', [$organization, $store]), [
+                'strategy_uuid' => $strategy->uuid,
+                'heading' => 'Recommended after delivery',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('personalization_recommendation_components', [
+            'store_id' => $store->id,
+            'strategy_id' => $strategy->id,
+            'placement' => PersonalizationPlacement::OrderStatus->value,
+            'heading' => 'Recommended after delivery',
+        ]);
+
+        $this->actingAs($admin)
+            ->from(route('personalization.index', [$organization, $store]))
+            ->put(route('personalization.order-status.update', [$organization, $store]), [
                 'strategy_uuid' => $strategy->uuid,
                 'heading' => str_repeat('a', 121),
             ])

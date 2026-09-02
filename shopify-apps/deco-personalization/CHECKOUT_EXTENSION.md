@@ -17,11 +17,15 @@ The Checkout blocks use Shopify's movable `purchase.checkout.block.render` targe
 
 The same sequential recommendation card is available through `purchase.thank-you.block.render` on the Thank you page and recommends `ORDER_SUMMARY2`, immediately below the completed order's line items. Because the original order is complete, its Add button opens a new storefront cart in a separate tab with the recommended variant and configured discount; it never mutates the completed order.
 
-The merchant must add the applicable blocks in the Checkout and accounts editor. Both the Checkout and Thank you recommendation blocks are named **Deco 推荐策略**. DecoAdmin exposes separate Checkout and Thank you strategy selectors. Saving the Thank you setting creates its own `thank_you` component binding and heading without changing Checkout or Smart Cart. When the selected Thank you strategy has no eligible result, the backend falls back to another available in-stock product while still excluding products in the completed order and explicit strategy exclusions. There is no merchant-facing Checkout master switch, Collection selector, maximum-count field, or component selector.
+The post-purchase/after-sales recommendation uses Shopify's `customer-account.order-status.block.render` target. It reads the completed order lines through the Order Status API, uses a separate DecoAdmin `order_status` component binding, and opens a new storefront cart in a separate tab. It never edits the existing order.
+
+The merchant must add the applicable blocks in the Checkout and accounts editor. The Checkout, Thank you, and Order status recommendation blocks are named **Deco 推荐策略**. DecoAdmin exposes separate Checkout, Thank you, and after-sales strategy selectors. Saving an after-purchase setting creates its own placement component and heading without changing Checkout or Smart Cart. When the selected strategy has no eligible result, the backend falls back to another available in-stock product while still excluding products in the completed order and explicit strategy exclusions. There is no merchant-facing Checkout master switch, Collection selector, maximum-count field, or component selector.
 
 Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/targets/checkout/block>
 
 Thank you reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07/targets/thank-you/block>
+
+Order status reference: <https://shopify.dev/docs/api/customer-account-ui-extensions/2026-07/targets/order-status/block>
 
 ## Rendering and cart changes
 
@@ -45,7 +49,7 @@ Official references:
 - Dynamic recommendations use the Checkout UI Extension `network_access` capability.
 - The recommendation block uses `network_access` with a fresh Session Token for the bounded strategy request. The backend resolves the signed shop, trusted Organization/Store, active strategy version, products, variants, exclusions, and traceability fields. `api_access` remains available for Shopify-supported extension data but is not used to duplicate recommendation logic.
 - The configuration endpoint is read from the declarative Shop app-owned metafield `$app:deco_personalization.checkout_configuration_url`; Checkout UI extensions cannot read AppInstallation-owned app-data metafields. Its definition is deployed from the environment-specific Shopify App TOML with Storefront read access, while the value is written during App Home bootstrap. The extension does not hardcode a Test or Production origin.
-- Both blocks subscribe through Shopify's `useAppMetafields` API. They remain hidden while the Shop metafield is unavailable and reload configuration automatically when Shopify supplies or updates it; they do not poll or fall back to a hardcoded origin.
+- All three recommendation surfaces subscribe through Shopify's `useAppMetafields` API. They remain hidden while the Shop metafield is unavailable and reload configuration automatically when Shopify supplies or updates it; they do not poll or fall back to a hardcoded origin.
 - Every backend call obtains a fresh Shopify Session Token and sends it as a bearer token.
 - DecoAdmin validates the signed token audience, destination, lifetime, and signature, resolves the shop from signed claims, and then resolves the trusted Organization and Store server-side. Shopify's documented Checkout Session Token contract does not define an `iss` claim, so an optional undocumented issuer value is not used as an authorization input.
 - The request never supplies or stores customer email, name, phone, address, payment data, raw Session Token, or arbitrary Organization/Store identifiers.
@@ -74,6 +78,6 @@ Official reference: <https://shopify.dev/docs/api/checkout-ui-extensions/2026-07
 
 ## Explicit exclusions
 
-- No Post-purchase order mutation, Order status, Customer Account, Checkout Function, payment customization, generative recommendation, or Production work.
+- No Post-purchase order mutation, Checkout Function, payment customization, generative recommendation, or Production work.
 - Native Shop Pay, PayPal, Apple Pay, and Google Pay buttons remain entirely owned by Shopify.
 - The permanent production-store denylist remains enforced for every backend and release action.

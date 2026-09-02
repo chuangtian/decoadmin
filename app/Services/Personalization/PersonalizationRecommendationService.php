@@ -137,12 +137,19 @@ class PersonalizationRecommendationService
             array_unique([...$pinned, ...array_keys($selection['scores'])]),
             [...$contextExcluded, ...$ordinaryExcluded],
         ));
-        $thankYouFallback = $normalizedContext['surface'] === PersonalizationPlacement::ThankYou->value
+        $afterPurchaseSurface = in_array($normalizedContext['surface'], [
+            PersonalizationPlacement::ThankYou->value,
+            PersonalizationPlacement::OrderStatus->value,
+        ], true);
+        $afterPurchaseFallbackReason = $normalizedContext['surface'] === PersonalizationPlacement::OrderStatus->value
+            ? 'order_status_all_products_fallback'
+            : 'thank_you_all_products_fallback';
+        $afterPurchaseFallback = $afterPurchaseSurface
             && $primaryEligibleIds === [];
-        if ($thankYouFallback) {
+        if ($afterPurchaseFallback) {
             $selection['scores'] = $this->allProductIds($store);
-            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), 'thank_you_all_products_fallback');
-            $selection['diagnostics'][] = ['code' => 'thank_you_all_products_fallback'];
+            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), $afterPurchaseFallbackReason);
+            $selection['diagnostics'][] = ['code' => $afterPurchaseFallbackReason];
         }
         $ranked = $selection['scores'];
 
@@ -159,7 +166,7 @@ class PersonalizationRecommendationService
             'in_stock_only' => true,
             'limit' => 100,
         ]);
-        $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates($store, $thankYouFallback
+        $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates($store, $afterPurchaseFallback
             ? [
                 'product_ids' => $normalIds,
                 'exclude_product_ids' => [...$contextExcluded, ...$ordinaryExcluded],
@@ -167,17 +174,17 @@ class PersonalizationRecommendationService
                 'limit' => 100,
             ]
             : $this->catalogFilters($strategy, $normalIds, [...$contextExcluded, ...$ordinaryExcluded]));
-        if (! $thankYouFallback) {
+        if (! $afterPurchaseFallback) {
             $normalCandidates = $this->applyPostFilters($store, $strategy, $normalCandidates);
         }
         $candidates = $pinnedCandidates->concat($normalCandidates)->unique('shopify_product_id')->values();
-        if ($normalizedContext['surface'] === PersonalizationPlacement::ThankYou->value
+        if ($afterPurchaseSurface
             && $candidates->isEmpty()
-            && ! $thankYouFallback) {
-            $thankYouFallback = true;
+            && ! $afterPurchaseFallback) {
+            $afterPurchaseFallback = true;
             $selection['scores'] = $this->allProductIds($store);
-            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), 'thank_you_all_products_fallback');
-            $selection['diagnostics'][] = ['code' => 'thank_you_all_products_fallback'];
+            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), $afterPurchaseFallbackReason);
+            $selection['diagnostics'][] = ['code' => $afterPurchaseFallbackReason];
             $ranked = $selection['scores'];
             $debugOrderedIds = array_values(array_unique([...$debugOrderedIds, ...array_keys($ranked)]));
             $normalIds = array_values(array_diff(array_keys($ranked), [
