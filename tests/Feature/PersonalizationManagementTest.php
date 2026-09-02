@@ -12,6 +12,7 @@ use App\Models\ProductVariant;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\Personalization\PersonalizationCheckoutService;
 use App\Services\Personalization\PersonalizationConfigurationService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -49,6 +50,10 @@ class PersonalizationManagementTest extends TestCase
             'placement' => 'product_page',
             'heading' => 'You may also like',
         ]);
+        app(PersonalizationCheckoutService::class)->saveThankYou($store, $operator, [
+            'strategy_uuid' => $strategy->uuid,
+            'heading' => 'Thank you recommendations',
+        ]);
 
         $this->actingAs($operator)
             ->get(route('personalization.index', [$organization, $store]))
@@ -66,9 +71,11 @@ class PersonalizationManagementTest extends TestCase
                 ->where('products.0.available_for_sale', true)
                 ->where('permissions.manage', true)
                 ->where('permissions.manageSmartCart', false)
+                ->where('checkout.thank_you.strategy_uuid', $strategy->uuid)
+                ->where('checkout.thank_you.heading', 'Thank you recommendations')
                 ->where('analytics.impressions', 0)
                 ->has('options.algorithms', 14)
-                ->has('options.placements', 5));
+                ->has('options.placements', 6));
 
         $preview = $this->actingAs($operator)
             ->getJson(route('personalization.components.preview', [$organization, $store, $component], false));

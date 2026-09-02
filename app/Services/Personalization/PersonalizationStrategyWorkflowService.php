@@ -1738,6 +1738,7 @@ class PersonalizationStrategyWorkflowService
             PersonalizationPlacement::CartPage => '购物车推荐',
             PersonalizationPlacement::SmartCart => 'Smart Cart 推荐',
             PersonalizationPlacement::Checkout => 'Checkout 推荐',
+            PersonalizationPlacement::ThankYou => '感谢页面推荐',
         };
     }
 

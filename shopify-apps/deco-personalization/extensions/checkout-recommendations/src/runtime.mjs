@@ -31,6 +31,16 @@ export function configurationEndpoint(entries) {
 }
 
 export async function fetchConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data);
+}
+
+export async function fetchThankYouConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data?.thank_you, 'thank_you');
+}
+
+async function fetchConfigurationPayload(api, entries) {
   const endpoint = configurationEndpoint(entries);
   if (!endpoint) return null;
   const token = await api.sessionToken.get();
@@ -39,8 +49,7 @@ export async function fetchConfiguration(api, entries = api?.appMetafields?.valu
     headers: {Authorization: `Bearer ${token}`, Accept: 'application/json'},
   });
   if (!response.ok) return null;
-  const payload = await response.json();
-  return normalizeConfiguration(payload?.data);
+  return response.json();
 }
 
 export async function fetchRecommendations(api, configuration, lines, context = {}) {
@@ -53,6 +62,7 @@ export async function fetchRecommendations(api, configuration, lines, context = 
     body: JSON.stringify({
       cart_lines: cartLines(lines),
       cart_subtotal_amount: boundedNumber(context.cartSubtotal, 0, 1000000, null),
+      surface: string(context.surface, 40) || 'checkout',
       market: string(context.market, 80),
       currency: string(context.currency, 3),
       language: string(context.language, 20),
@@ -63,17 +73,17 @@ export async function fetchRecommendations(api, configuration, lines, context = 
   return normalizeServiceRecommendations(payload?.data);
 }
 
-export function normalizeConfiguration(value) {
+export function normalizeConfiguration(value, expectedPlacement = 'checkout') {
   const component = value?.component;
   if (!value || value.enabled !== true
     || !component || !uuid(component.uuid) || !uuid(component.strategy_uuid)
-    || component.placement !== 'checkout'
+    || component.placement !== expectedPlacement
     || !safeEndpoint(value?.recommendations_url, RECOMMENDATIONS_PATH)) return null;
   return {
     component: {
       uuid: component.uuid,
       strategy_uuid: component.strategy_uuid,
-      placement: 'checkout',
+      placement: expectedPlacement,
       heading: string(component.heading, 120) || 'Great Value Bundles for You',
       button_label: string(component.button_label, 60) || 'Add',
     },

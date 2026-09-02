@@ -128,6 +128,7 @@ class PersonalizationConfigurationTest extends TestCase
             'cart_page',
             'smart_cart',
             'checkout',
+            'thank_you',
         ], array_column(PersonalizationPlacement::cases(), 'value'));
     }
 

@@ -4,6 +4,7 @@ namespace App\Services\Personalization;
 
 use App\Enums\PersonalizationAlgorithm;
 use App\Enums\PersonalizationComponentStatus;
+use App\Enums\PersonalizationPlacement;
 use App\Enums\PersonalizationProductOverrideType;
 use App\Enums\PersonalizationRuleType;
 use App\Exceptions\PersonalizationException;
@@ -97,7 +98,6 @@ class PersonalizationRecommendationService
         $strategy->loadMissing(['rules', 'productOverrides', 'publishedVersion']);
         $normalizedContext = $this->context($context);
         $selection = $this->ruleProductSelection($store, $strategy, $normalizedContext);
-        $ranked = $selection['scores'];
         $pinned = $strategy->productOverrides
             ->where('type', PersonalizationProductOverrideType::Pinned)
             ->sortBy('position')
@@ -133,6 +133,18 @@ class PersonalizationRecommendationService
             ...($excludePurchased ? $normalizedContext['purchased_product_ids'] : []),
             ...($allowsSameProduct || $normalizedContext['seed_product_id'] === null ? [] : [$normalizedContext['seed_product_id']]),
         ]));
+        $primaryEligibleIds = array_values(array_diff(
+            array_unique([...$pinned, ...array_keys($selection['scores'])]),
+            [...$contextExcluded, ...$ordinaryExcluded],
+        ));
+        $thankYouFallback = $normalizedContext['surface'] === PersonalizationPlacement::ThankYou->value
+            && $primaryEligibleIds === [];
+        if ($thankYouFallback) {
+            $selection['scores'] = $this->allProductIds($store);
+            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), 'thank_you_all_products_fallback');
+            $selection['diagnostics'][] = ['code' => 'thank_you_all_products_fallback'];
+        }
+        $ranked = $selection['scores'];
 
         $debugOrderedIds = array_values(array_unique([...$pinned, ...array_keys($ranked)]));
         $pinnedIds = array_values(array_diff(array_unique($pinned), $contextExcluded));
@@ -147,12 +159,39 @@ class PersonalizationRecommendationService
             'in_stock_only' => true,
             'limit' => 100,
         ]);
-        $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates(
-            $store,
-            $this->catalogFilters($strategy, $normalIds, [...$contextExcluded, ...$ordinaryExcluded]),
-        );
-        $normalCandidates = $this->applyPostFilters($store, $strategy, $normalCandidates);
+        $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates($store, $thankYouFallback
+            ? [
+                'product_ids' => $normalIds,
+                'exclude_product_ids' => [...$contextExcluded, ...$ordinaryExcluded],
+                'in_stock_only' => true,
+                'limit' => 100,
+            ]
+            : $this->catalogFilters($strategy, $normalIds, [...$contextExcluded, ...$ordinaryExcluded]));
+        if (! $thankYouFallback) {
+            $normalCandidates = $this->applyPostFilters($store, $strategy, $normalCandidates);
+        }
         $candidates = $pinnedCandidates->concat($normalCandidates)->unique('shopify_product_id')->values();
+        if ($normalizedContext['surface'] === PersonalizationPlacement::ThankYou->value
+            && $candidates->isEmpty()
+            && ! $thankYouFallback) {
+            $thankYouFallback = true;
+            $selection['scores'] = $this->allProductIds($store);
+            $selection['reason_codes'] = array_fill_keys(array_keys($selection['scores']), 'thank_you_all_products_fallback');
+            $selection['diagnostics'][] = ['code' => 'thank_you_all_products_fallback'];
+            $ranked = $selection['scores'];
+            $debugOrderedIds = array_values(array_unique([...$debugOrderedIds, ...array_keys($ranked)]));
+            $normalIds = array_values(array_diff(array_keys($ranked), [
+                ...$contextExcluded,
+                ...$ordinaryExcluded,
+            ]));
+            $normalCandidates = $normalIds === [] ? collect() : $this->catalog->candidates($store, [
+                'product_ids' => $normalIds,
+                'exclude_product_ids' => [...$contextExcluded, ...$ordinaryExcluded],
+                'in_stock_only' => true,
+                'limit' => 100,
+            ]);
+            $candidates = $normalCandidates->unique('shopify_product_id')->values();
+        }
         $byId = $candidates->keyBy(fn (array $product): string => $product['shopify_product_id']);
         $orderedIds = array_values(array_unique([...$pinnedIds, ...$normalIds]));
         $discount = $this->discountPayload($strategy);

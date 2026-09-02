@@ -157,6 +157,12 @@ class PersonalizationController extends Controller
             'checkout' => [
                 'uuid' => $checkout?->uuid,
                 'strategy_uuid' => $checkout?->component?->strategy?->uuid,
+                'thank_you' => [
+                    'uuid' => $checkout?->thankYouComponent?->uuid,
+                    'strategy_uuid' => $checkout?->thankYouComponent?->strategy?->uuid,
+                    'heading' => $checkout?->thankYouComponent?->heading ?: 'Great Value Bundles for You',
+                    'enabled' => $checkout?->thankYouComponent?->status?->value === 'active',
+                ],
                 'trust_items' => $checkout?->trust_items ?? $this->checkout->defaultTrustItems(),
                 'icon_options' => array_map(fn (string $icon): array => [
                     'value' => $icon,
@@ -389,6 +395,20 @@ class PersonalizationController extends Controller
         );
     }
 
+    public function saveThankYou(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'strategy_uuid' => ['required', 'uuid'],
+            'heading' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        return $this->run(
+            fn () => $this->checkout->saveThankYou($store, $request->user(), $values),
+            '感谢页面推荐设置已保存。Shopify 感谢页面中的“Deco 推荐策略”区块会使用该策略。',
+        );
+    }
+
     private function assertUserScope(Request $request, Organization $organization, Store $store, string $permission): void
     {
         abort_unless($store->organization_id === $organization->id, 403);
@@ -497,6 +517,7 @@ class PersonalizationController extends Controller
             PersonalizationPlacement::CartPage => '购物车页面',
             PersonalizationPlacement::SmartCart => 'Smart Cart',
             PersonalizationPlacement::Checkout => 'Checkout',
+            PersonalizationPlacement::ThankYou => '感谢页面',
         };
     }
 
