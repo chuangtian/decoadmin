@@ -5,8 +5,8 @@ import {useEffect, useMemo, useRef, useState} from 'preact/hooks';
 import {
   cartPermalink,
   configurationEndpoint,
-  fetchConfiguration,
   fetchRecommendations,
+  fetchThankYouConfiguration,
   formatMoney,
   selectNextCandidate,
 } from './runtime.mjs';
@@ -43,7 +43,7 @@ function ThankYouRecommendations() {
     setConfigurationLoaded(false);
     setConfiguration(null);
     setCandidates([]);
-    fetchConfiguration(shopify, configurationMetafields)
+    fetchThankYouConfiguration(shopify, configurationMetafields)
       .then((value) => { if (active) setConfiguration(value); })
       .catch(() => { if (active) setConfiguration(null); })
       .finally(() => { if (active) setConfigurationLoaded(true); });
@@ -61,6 +61,7 @@ function ThankYouRecommendations() {
       market: shopify.localization?.market?.value?.handle ?? '',
       currency: shopify.cost?.totalAmount?.value?.currencyCode ?? '',
       cartSubtotal: shopify.cost?.subtotalAmount?.value?.amount ?? shopify.cost?.totalAmount?.value?.amount ?? null,
+      surface: 'thank_you',
       language,
     })
       .then((items) => { if (generation === requestGeneration.current) setCandidates(items); })

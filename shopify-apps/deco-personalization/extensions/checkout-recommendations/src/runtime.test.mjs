@@ -55,6 +55,7 @@ test('checkout recommendation requests include a bounded cart subtotal for free-
     globalThis.fetch = originalFetch;
   }
   assert.equal(requestBody.cart_subtotal_amount, 75.25);
+  assert.equal(requestBody.surface, 'checkout');
   assert.equal('customer' in requestBody, false);
 });
 
@@ -243,6 +244,8 @@ test('checkout extension exposes a separate thank-you target without checkout mu
   assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
   assert.match(source, /href=\{addUrl\}/);
   assert.match(source, /target="_blank"/);
+  assert.match(source, /fetchThankYouConfiguration\(shopify/);
+  assert.match(source, /surface: 'thank_you'/);
   assert.match(source, /shopify\.shop\?\.myshopifyDomain/);
   assert.match(source, /useCartLines\(\)/);
   assert.doesNotMatch(source, /useApplyCartLinesChange/);

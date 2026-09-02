@@ -688,6 +688,9 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.checkout.update');
+        Route::put('/thank-you', [PersonalizationController::class, 'saveThankYou'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.thank-you.update');
         Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCart'])
             ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
             ->name('personalization.smart-cart.update');
