@@ -71,7 +71,9 @@ function ThankYouRecommendations() {
   const current = useMemo(() => configuration
     ? selectNextCandidate(candidates, lines, dismissed)
     : null, [candidates, configuration, dismissed, lineSignature]);
-  const addUrl = useMemo(() => cartPermalink(shopify.shop?.storefrontUrl, current), [current]);
+  const storefrontUrl = shopify.shop?.storefrontUrl
+    || (shopify.shop?.myshopifyDomain ? `https://${shopify.shop.myshopifyDomain}` : '');
+  const addUrl = useMemo(() => cartPermalink(storefrontUrl, current), [current, storefrontUrl]);
 
   if (!configurationLoaded || !recommendationsLoaded || !configuration || !current || !addUrl) return null;
 
