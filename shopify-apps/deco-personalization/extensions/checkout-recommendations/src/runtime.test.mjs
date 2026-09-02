@@ -239,6 +239,7 @@ test('checkout extension exposes a separate thank-you target without checkout mu
   const source = await readFile(new URL('./ThankYouRecommendations.jsx', import.meta.url), 'utf8');
   assert.match(config, /target = "purchase\.thank-you\.block\.render"/);
   assert.match(config, /module = "\.\/src\/ThankYouRecommendations\.jsx"/);
+  assert.match(config, /target = "purchase\.thank-you\.block\.render"[\s\S]*?default_placement = "ORDER_SUMMARY2"/);
   assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
   assert.match(source, /href=\{addUrl\}/);
   assert.match(source, /target="_blank"/);
