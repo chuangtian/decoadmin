@@ -6,6 +6,7 @@ import {
   cartPermalink,
   configurationEndpoint,
   eventPayload,
+  fetchOrderStatusConfiguration,
   fetchRecommendations,
   formatMoney,
   normalizeConfiguration,
@@ -248,6 +249,44 @@ test('checkout extension exposes a separate thank-you target without checkout mu
   assert.match(source, /surface: 'thank_you'/);
   assert.match(source, /shopify\.shop\?\.myshopifyDomain/);
   assert.match(source, /useCartLines\(\)/);
+  assert.doesNotMatch(source, /useApplyCartLinesChange/);
+  assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
+});
+
+test('order-status extension uses its own backend configuration and never mutates the completed order', async () => {
+  const config = await readFile(new URL('../shopify.extension.toml', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./OrderStatusRecommendations.jsx', import.meta.url), 'utf8');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({data: {order_status: {
+      enabled: true,
+      component: {...configuration.component, placement: 'order_status'},
+      strategy: {version_uuid: 'c3519389-ef0a-4f52-9b30-b600d05e51ef'},
+      recommendations_url: configuration.recommendations_url,
+    }}}),
+  });
+  let orderStatusConfiguration;
+  try {
+    orderStatusConfiguration = await fetchOrderStatusConfiguration({sessionToken: {get: async () => 'token'}}, [{
+      metafield: {
+        namespace: '$app:deco_personalization',
+        key: 'checkout_configuration_url',
+        value: 'https://test.example/api/shopify-app/personalization/checkout/configuration',
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(orderStatusConfiguration.component.placement, 'order_status');
+  assert.match(config, /target = "customer-account\.order-status\.block\.render"/);
+  assert.match(config, /module = "\.\/src\/OrderStatusRecommendations\.jsx"/);
+  assert.match(source, /@shopify\/ui-extensions\/customer-account\/preact/);
+  assert.match(source, /surface: 'order_status'/);
+  assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
+  assert.match(source, /href=\{addUrl\}/);
+  assert.match(source, /target="_blank"/);
   assert.doesNotMatch(source, /useApplyCartLinesChange/);
   assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
 });

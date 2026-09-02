@@ -54,6 +54,10 @@ class PersonalizationManagementTest extends TestCase
             'strategy_uuid' => $strategy->uuid,
             'heading' => 'Thank you recommendations',
         ]);
+        app(PersonalizationCheckoutService::class)->saveOrderStatus($store, $operator, [
+            'strategy_uuid' => $strategy->uuid,
+            'heading' => 'Order status recommendations',
+        ]);
 
         $this->actingAs($operator)
             ->get(route('personalization.index', [$organization, $store]))
@@ -64,8 +68,9 @@ class PersonalizationManagementTest extends TestCase
                 ->where('store.id', $store->id)
                 ->where('strategies.0.uuid', $strategy->uuid)
                 ->where('strategies.0.algorithm', 'manual')
-                ->where('components.0.uuid', $component->uuid)
-                ->where('components.0.status', 'draft')
+                ->where('components', fn ($components): bool => collect($components)->contains(
+                    fn (array $row): bool => $row['uuid'] === $component->uuid && $row['status'] === 'draft',
+                ))
                 ->where('products.0.shopify_product_id', (string) $product->shopify_product_id)
                 ->where('products.0.availability_label', '已启用')
                 ->where('products.0.available_for_sale', true)
@@ -73,9 +78,11 @@ class PersonalizationManagementTest extends TestCase
                 ->where('permissions.manageSmartCart', false)
                 ->where('checkout.thank_you.strategy_uuid', $strategy->uuid)
                 ->where('checkout.thank_you.heading', 'Thank you recommendations')
+                ->where('checkout.order_status.strategy_uuid', $strategy->uuid)
+                ->where('checkout.order_status.heading', 'Order status recommendations')
                 ->where('analytics.impressions', 0)
                 ->has('options.algorithms', 14)
-                ->has('options.placements', 6));
+                ->has('options.placements', 7));
 
         $preview = $this->actingAs($operator)
             ->getJson(route('personalization.components.preview', [$organization, $store, $component], false));

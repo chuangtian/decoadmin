@@ -163,6 +163,12 @@ class PersonalizationController extends Controller
                     'heading' => $checkout?->thankYouComponent?->heading ?: 'Great Value Bundles for You',
                     'enabled' => $checkout?->thankYouComponent?->status?->value === 'active',
                 ],
+                'order_status' => [
+                    'uuid' => $checkout?->orderStatusComponent?->uuid,
+                    'strategy_uuid' => $checkout?->orderStatusComponent?->strategy?->uuid,
+                    'heading' => $checkout?->orderStatusComponent?->heading ?: 'Great Value Bundles for You',
+                    'enabled' => $checkout?->orderStatusComponent?->status?->value === 'active',
+                ],
                 'trust_items' => $checkout?->trust_items ?? $this->checkout->defaultTrustItems(),
                 'icon_options' => array_map(fn (string $icon): array => [
                     'value' => $icon,
@@ -409,6 +415,20 @@ class PersonalizationController extends Controller
         );
     }
 
+    public function saveOrderStatus(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'strategy_uuid' => ['required', 'uuid'],
+            'heading' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        return $this->run(
+            fn () => $this->checkout->saveOrderStatus($store, $request->user(), $values),
+            '售后页面推荐设置已保存。Shopify 订单状态页面中的“Deco 推荐策略”区块会使用该策略。',
+        );
+    }
+
     private function assertUserScope(Request $request, Organization $organization, Store $store, string $permission): void
     {
         abort_unless($store->organization_id === $organization->id, 403);
@@ -518,6 +538,7 @@ class PersonalizationController extends Controller
             PersonalizationPlacement::SmartCart => 'Smart Cart',
             PersonalizationPlacement::Checkout => 'Checkout',
             PersonalizationPlacement::ThankYou => '感谢页面',
+            PersonalizationPlacement::OrderStatus => '售后页面',
         };
     }
 

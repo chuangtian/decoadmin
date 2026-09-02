@@ -40,6 +40,11 @@ export async function fetchThankYouConfiguration(api, entries = api?.appMetafiel
   return normalizeConfiguration(payload?.data?.thank_you, 'thank_you');
 }
 
+export async function fetchOrderStatusConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data?.order_status, 'order_status');
+}
+
 async function fetchConfigurationPayload(api, entries) {
   const endpoint = configurationEndpoint(entries);
   if (!endpoint) return null;

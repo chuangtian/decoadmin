@@ -37,7 +37,7 @@ class PersonalizationCheckoutService
         return PersonalizationCheckoutSetting::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
-            ->with(['component.strategy', 'thankYouComponent.strategy'])
+            ->with(['component.strategy', 'thankYouComponent.strategy', 'orderStatusComponent.strategy'])
             ->first();
     }
 
@@ -142,6 +142,55 @@ class PersonalizationCheckoutService
         return $setting;
     }
 
+    /** @param array<string, mixed> $input */
+    public function saveOrderStatus(Store $store, User $actor, array $input): PersonalizationCheckoutSetting
+    {
+        $this->authorize($store, $actor, 'personalization.manage');
+        $strategy = $this->strategy($store, $input['strategy_uuid'] ?? null);
+        $heading = trim((string) ($input['heading'] ?? '')) ?: 'Great Value Bundles for You';
+        if (mb_strlen($heading) > 120) {
+            throw new PersonalizationException('INVALID_ORDER_STATUS_HEADING', '售后页面推荐标题最多 120 个字符。');
+        }
+
+        $setting = DB::transaction(function () use ($store, $actor, $strategy, $heading): PersonalizationCheckoutSetting {
+            $component = $this->bindPlacementStrategy(
+                $store,
+                $actor,
+                $strategy,
+                PersonalizationPlacement::OrderStatus,
+                '售后页',
+                $heading,
+            );
+
+            return PersonalizationCheckoutSetting::query()->updateOrCreate(
+                ['store_id' => $store->id],
+                [
+                    'organization_id' => $store->organization_id,
+                    'order_status_component_id' => $component->id,
+                    'updated_by' => $actor->id,
+                ],
+            )->load(['component.strategy', 'thankYouComponent.strategy', 'orderStatusComponent.strategy']);
+        });
+
+        AuditLog::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'user_id' => $actor->id,
+            'action' => 'personalization_order_status_configuration_saved',
+            'subject_type' => $setting->getMorphClass(),
+            'subject_id' => $setting->id,
+            'new_values' => [
+                'strategy_uuid' => $strategy->uuid,
+                'component_uuid' => $setting->orderStatusComponent?->uuid,
+                'placement' => PersonalizationPlacement::OrderStatus->value,
+                'heading' => $heading,
+                'fallback' => 'all_products',
+            ],
+        ]);
+
+        return $setting;
+    }
+
     /** @return array<string, mixed> */
     public function storefront(Store $store): array
     {
@@ -150,8 +199,10 @@ class PersonalizationCheckoutService
             ? $this->activeComponent($setting->component, PersonalizationPlacement::Checkout)
             : null;
         $thankYouComponent = $this->activeComponent($setting?->thankYouComponent, PersonalizationPlacement::ThankYou);
+        $orderStatusComponent = $this->activeComponent($setting?->orderStatusComponent, PersonalizationPlacement::OrderStatus);
         $checkout = $this->componentPayload($checkoutComponent, PersonalizationPlacement::Checkout);
         $thankYou = $this->componentPayload($thankYouComponent, PersonalizationPlacement::ThankYou);
+        $orderStatus = $this->componentPayload($orderStatusComponent, PersonalizationPlacement::OrderStatus);
 
         return [
             'enabled' => $checkout !== null,
@@ -169,19 +220,29 @@ class PersonalizationCheckoutService
                 'strategy' => $thankYou['strategy'] ?? null,
                 'recommendations_url' => url('/api/shopify-app/personalization/checkout/recommendations'),
             ],
+            'order_status' => [
+                'enabled' => $orderStatus !== null,
+                'component' => $orderStatus['component'] ?? null,
+                'strategy' => $orderStatus['strategy'] ?? null,
+                'recommendations_url' => url('/api/shopify-app/personalization/checkout/recommendations'),
+            ],
         ];
     }
 
     /** @param array<string, mixed> $context @return array<string, mixed> */
     public function recommendations(Store $store, array $context): array
     {
-        $placement = ($context['surface'] ?? null) === PersonalizationPlacement::ThankYou->value
-            ? PersonalizationPlacement::ThankYou
-            : PersonalizationPlacement::Checkout;
+        $placement = match ($context['surface'] ?? null) {
+            PersonalizationPlacement::ThankYou->value => PersonalizationPlacement::ThankYou,
+            PersonalizationPlacement::OrderStatus->value => PersonalizationPlacement::OrderStatus,
+            default => PersonalizationPlacement::Checkout,
+        };
         $setting = $this->setting($store);
-        $component = $placement === PersonalizationPlacement::ThankYou
-            ? $this->activeComponent($setting?->thankYouComponent, $placement)
-            : ($setting?->enabled ? $this->activeComponent($setting->component, $placement) : null);
+        $component = match ($placement) {
+            PersonalizationPlacement::ThankYou => $this->activeComponent($setting?->thankYouComponent, $placement),
+            PersonalizationPlacement::OrderStatus => $this->activeComponent($setting?->orderStatusComponent, $placement),
+            default => $setting?->enabled ? $this->activeComponent($setting->component, $placement) : null,
+        };
         if (! $component) {
             return ['enabled' => false, 'items' => [], 'debug' => ['diagnostics' => [['code' => $placement->value.'_not_enabled']]]];
         }
@@ -208,6 +269,8 @@ class PersonalizationCheckoutService
                 'component.strategyVersion',
                 'thankYouComponent.strategy.publishedVersion',
                 'thankYouComponent.strategyVersion',
+                'orderStatusComponent.strategy.publishedVersion',
+                'orderStatusComponent.strategyVersion',
             ])->first();
     }
 
@@ -339,7 +402,11 @@ class PersonalizationCheckoutService
         string $namePrefix,
         string $heading,
     ): PersonalizationRecommendationComponent {
-        $relation = $placement === PersonalizationPlacement::ThankYou ? 'thankYouComponent' : 'component';
+        $relation = match ($placement) {
+            PersonalizationPlacement::ThankYou => 'thankYouComponent',
+            PersonalizationPlacement::OrderStatus => 'orderStatusComponent',
+            default => 'component',
+        };
         $setting = PersonalizationCheckoutSetting::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
