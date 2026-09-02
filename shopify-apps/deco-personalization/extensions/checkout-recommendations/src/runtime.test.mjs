@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   EVENTS,
+  cartPermalink,
   configurationEndpoint,
   eventPayload,
   fetchRecommendations,
@@ -221,4 +222,27 @@ test('configuration endpoint refuses non-HTTPS and arbitrary paths', () => {
   assert.equal(configurationEndpoint(entry('https://test.example/api/shopify-app/personalization/checkout/configuration')), 'https://test.example/api/shopify-app/personalization/checkout/configuration');
   assert.equal(configurationEndpoint(entry('http://test.example/api/shopify-app/personalization/checkout/configuration')), '');
   assert.equal(configurationEndpoint(entry('https://test.example/admin')), '');
+});
+
+test('thank-you recommendation creates a safe storefront cart permalink with the offer discount', () => {
+  assert.equal(cartPermalink('https://shop.example', {
+    variant_id: 'gid://shopify/ProductVariant/50144896450808',
+    minimum_purchase_quantity: 2,
+    discount: {code: 'DECO10'},
+  }), 'https://shop.example/cart/50144896450808:2?storefront=true&discount=DECO10');
+  assert.equal(cartPermalink('http://shop.example', {variant_id: 'gid://shopify/ProductVariant/1'}), '');
+  assert.equal(cartPermalink('https://shop.example', {variant_id: 'invalid'}), '');
+});
+
+test('checkout extension exposes a separate thank-you target without checkout mutation APIs', async () => {
+  const config = await readFile(new URL('../shopify.extension.toml', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./ThankYouRecommendations.jsx', import.meta.url), 'utf8');
+  assert.match(config, /target = "purchase\.thank-you\.block\.render"/);
+  assert.match(config, /module = "\.\/src\/ThankYouRecommendations\.jsx"/);
+  assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
+  assert.match(source, /href=\{addUrl\}/);
+  assert.match(source, /target="_blank"/);
+  assert.match(source, /useCartLines\(\)/);
+  assert.doesNotMatch(source, /useApplyCartLinesChange/);
+  assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
 });
