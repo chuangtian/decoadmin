@@ -840,7 +840,23 @@ class AnalyticsReportsCenterTest extends TestCase
                 'locations' => ['tableData' => ['rows' => [[
                     'session_country' => 'United States',
                     'session_region' => 'California',
+                    'session_city' => 'Los Angeles',
                     'sessions' => '1207',
+                ], [
+                    'session_country' => 'United States',
+                    'session_region' => 'Oregon',
+                    'session_city' => 'Boardman',
+                    'sessions' => '1000',
+                ], [
+                    'session_country' => 'Sweden',
+                    'session_region' => 'Norrbotten County',
+                    'session_city' => 'Luleå',
+                    'sessions' => '900',
+                ], [
+                    'session_country' => 'Ireland',
+                    'session_region' => 'Leinster',
+                    'session_city' => 'Dublin',
+                    'sessions' => '800',
                 ]]], 'parseErrors' => []],
                 'sources' => ['tableData' => ['rows' => [[
                     'referrer_source' => 'Social',
@@ -875,7 +891,9 @@ class AnalyticsReportsCenterTest extends TestCase
                 ->where('snapshot.customer_behavior.active_carts.value', 1)
                 ->where('snapshot.customer_behavior.checking_out.value', 1)
                 ->where('snapshot.customer_behavior.purchased.value', 1)
-                ->where('snapshot.insights.visits_by_location.items.0.label', 'United States · California')
+                ->where('snapshot.insights.visits_by_location.items.0.label', 'United States · California · Los Angeles')
+                ->where('snapshot.insights.visits_by_location.items.2.label', 'Sweden · Norrbotten County · Luleå')
+                ->has('snapshot.insights.visits_by_location.items', 3)
                 ->where('snapshot.insights.new_vs_returning.items.0.label', '新客户')
                 ->where('snapshot.insights.new_vs_returning.items.0.value', 44)
                 ->where('snapshot.insights.sales_by_product.items.0.label', 'Macfox X7 · Macfox Bike')

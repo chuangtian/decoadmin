@@ -191,10 +191,11 @@ class LiveViewService
                 $label = implode(' · ', array_filter([
                     $row['session_country'] ?? null,
                     $row['session_region'] ?? null,
+                    $row['session_city'] ?? null,
                 ]));
 
                 return ['label' => $label ?: '未知地点', 'value' => (int) round((float) ($row['sessions'] ?? 0))];
-            })->filter(fn (array $item): bool => $item['value'] > 0)->take(30)->values()->all();
+            })->filter(fn (array $item): bool => $item['value'] > 0)->take(3)->values()->all();
 
             return $this->availableInsight($items, 'shopifyql');
         }
@@ -204,7 +205,7 @@ class LiveViewService
             return $this->availableInsight(collect($locations)->map(fn (array $location): array => [
                 'label' => $location['label'],
                 'value' => $location['visitors'],
-            ])->all(), 'web_pixel');
+            ])->take(3)->values()->all(), 'web_pixel');
         }
 
         return $this->unavailableInsight($this->reportError($shopify, 'locations'), 'shopifyql');
