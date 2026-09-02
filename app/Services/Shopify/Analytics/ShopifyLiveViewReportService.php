@@ -68,7 +68,7 @@ class ShopifyLiveViewReportService
             $payload = $this->client->query($connection, self::QUERY, [
                 'sales' => "FROM sales SHOW total_sales, orders TIMESERIES hour WITH TOTALS {$range} ORDER BY hour",
                 'sessions' => "FROM sessions SHOW sessions WHERE human_or_bot_session IN ('human', 'bot') TIMESERIES hour WITH TOTALS {$range} ORDER BY hour",
-                'locations' => "FROM sessions SHOW sessions WHERE human_or_bot_session IN ('human', 'bot') GROUP BY session_country, session_region {$range} ORDER BY sessions DESC LIMIT 30",
+                'locations' => "FROM sessions SHOW sessions WHERE human_or_bot_session IN ('human', 'bot') GROUP BY session_country, session_region, session_city {$range} ORDER BY sessions DESC LIMIT 3",
                 'sources' => "FROM sessions SHOW sessions WHERE human_or_bot_session IN ('human', 'bot') GROUP BY referrer_source, referrer_name {$range} ORDER BY sessions DESC LIMIT 8",
                 'customers' => "FROM sales SHOW customers WHERE new_or_returning_customer IS NOT NULL GROUP BY new_or_returning_customer WITH TOTALS {$range} ORDER BY new_or_returning_customer ASC LIMIT 2",
                 'products' => "FROM sales SHOW total_sales WHERE product_title IS NOT NULL GROUP BY product_title, product_vendor WITH TOTALS {$range} ORDER BY total_sales DESC LIMIT 10",
