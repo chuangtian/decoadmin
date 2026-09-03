@@ -2,8 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\App;
-use App\Models\AppInstallation;
 use App\Models\OAuthState;
 use App\Models\Organization;
 use App\Models\Product;
@@ -11,6 +9,7 @@ use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\Shopify\ShopifyOAuthService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -27,17 +26,17 @@ class DiscountManagementTest extends TestCase
     {
         parent::setUp();
         config([
-            'discount_manager.environment' => 'test',
-            'discount_manager.active.client_id' => 'discount-manager-client',
-            'discount_manager.active.client_secret' => 'discount-manager-secret',
-            'discount_manager.active.name' => 'Deco 折扣管理测试',
-            'discount_manager.active.handle' => 'deco-discount-manager-test',
-            'discount_manager.required_scopes' => ['read_discounts', 'write_discounts', 'read_products'],
+            'inertia.ssr.enabled' => false,
+            'shopify.client_id' => 'existing-commerce-client',
+            'shopify.client_secret' => 'existing-commerce-secret',
+            'shopify.app_handle' => 'existing-commerce-test',
+            'shopify.requested_scopes' => ['read_products', 'read_orders'],
+            'shopify.redirect_uri' => 'https://testadmin.decomkt.com/shopify/oauth/callback',
             'shopify.api_version' => '2026-07',
         ]);
     }
 
-    public function test_discount_page_reads_only_the_current_store_installation_and_products(): void
+    public function test_discount_page_reuses_only_the_current_store_connection_and_products(): void
     {
         [$actor, $organization, $store] = $this->context('store-admin');
         $product = $this->product($store, '101', 'X1 Bike');
@@ -59,6 +58,7 @@ class DiscountManagementTest extends TestCase
                 ->where('discounts.data.0.product_ids.0', '101')
                 ->where('discounts.data.0.editable', true)
                 ->where('permissions.manage', true));
+        $this->assertDatabaseCount('app_installations', 0);
 
         Http::assertSent(fn ($request): bool => $request->hasHeader('X-Shopify-Access-Token', 'current-store-token')
             && $request->url() === "https://{$store->shopify_domain}/admin/api/2026-07/graphql.json"
@@ -95,6 +95,7 @@ class DiscountManagementTest extends TestCase
         Http::assertSentCount(2);
         Http::assertSent(fn ($request): bool => str_contains((string) $request['query'], 'DiscountManagerBasicCreate')
             && data_get($request->data(), 'variables.input.context.all') === 'ALL'
+            && data_get($request->data(), 'variables.input.startsAt') === '2026-09-03T15:00:00+00:00'
             && data_get($request->data(), 'variables.input.customerGets.items.products.productsToAdd.0') === 'gid://shopify/Product/101');
     }
 
@@ -122,13 +123,17 @@ class DiscountManagementTest extends TestCase
 
     public function test_connect_authorization_is_bound_to_the_current_store(): void
     {
-        [$actor, $organization, $store] = $this->context('store-admin');
+        [$actor, $organization, $store] = $this->context('super-admin');
         $otherStore = $organization->stores()->create([
             'name' => 'Other Store', 'shopify_domain' => 'other-oauth.myshopify.com', 'status' => 'active',
         ]);
+        $connection = $this->installation($store, 'current-token');
+        $connection->update(['scopes' => ['read_products', 'read_orders', 'read_all_orders']]);
+        $otherConnection = $this->installation($otherStore, 'untouched-token');
+        $before = $otherConnection->refresh()->getRawOriginal();
 
         $response = $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
-            ->post(route('discounts.connect'));
+            ->post(route('discounts.connect'), ['store_id' => $store->id]);
 
         $response->assertRedirectContains("https://{$store->shopify_domain}/admin/oauth/authorize");
         $this->assertStringNotContainsString($otherStore->shopify_domain, (string) $response->headers->get('Location'));
@@ -136,7 +141,83 @@ class DiscountManagementTest extends TestCase
         $this->assertSame($store->id, $state->store_id);
         $this->assertSame($organization->id, $state->organization_id);
         $this->assertSame($actor->id, $state->user_id);
-        $this->assertSame(['read_discounts', 'write_discounts', 'read_products'], $state->scopes);
+        $this->assertEqualsCanonicalizing(['read_products', 'read_orders', 'read_all_orders', 'read_discounts', 'write_discounts'], $state->scopes);
+        $this->assertSame('existing-commerce-client', $state->app->client_id);
+        $this->assertSame('https://testadmin.decomkt.com/shopify/oauth/callback', $state->redirect_uri);
+        $this->assertSame($before, $otherConnection->fresh()->getRawOriginal());
+        $this->assertSame(['read_products', 'read_orders', 'read_all_orders'], $connection->fresh()->scopes);
+        $normal = app(ShopifyOAuthService::class)->begin($organization, $actor, $otherStore);
+        $this->assertSame(['read_products', 'read_orders'], $normal['state_record']->scopes);
+    }
+
+    public function test_missing_discount_scopes_do_not_invalidate_the_existing_connection(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $this->product($store, '101', 'X1');
+        $connection = $this->installation($store, 'existing-token');
+        $connection->update(['scopes' => ['read_products', 'read_orders']]);
+        $before = $connection->refresh()->getRawOriginal();
+        Http::fake();
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->get(route('discounts.index'))->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Discounts/Index')
+                ->where('connection.ready', false)->where('connection.code', 'SHOPIFY_DISCOUNT_SCOPE_REQUIRED'));
+        $this->postJson(route('discounts.store'), $this->writePayload((string) Str::uuid(), ['101']))
+            ->assertStatus(409)->assertJsonPath('error.code', 'SHOPIFY_DISCOUNT_SCOPE_REQUIRED');
+        $this->assertSame($before, $connection->fresh()->getRawOriginal());
+        Http::assertNothingSent();
+    }
+
+    public function test_read_permission_allows_listing_but_not_writing(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $product = $this->product($store, '101', 'X1');
+        $this->installation($store, 'read-only-token')->update(['scopes' => ['read_products', 'read_discounts']]);
+        Http::fake(["https://{$store->shopify_domain}/*" => Http::response($this->listPayload($product))]);
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->get(route('discounts.index'))->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Discounts/Index')
+                ->where('connection.ready', true)->where('connection.can_write', false));
+        $this->postJson(route('discounts.store'), $this->writePayload((string) Str::uuid(), ['101']))->assertStatus(409);
+        Http::assertSentCount(1);
+    }
+
+    public function test_stale_store_form_cannot_write_or_authorize_a_different_store(): void
+    {
+        [$actor, $organization, $store] = $this->context('super-admin');
+        $this->product($store, '101', 'X1');
+        $this->installation($store, 'current-token');
+        Http::fake();
+        $payload = $this->writePayload((string) Str::uuid(), ['101']);
+        $payload['store_id'] = $store->id + 1;
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->postJson(route('discounts.store'), $payload)->assertStatus(409);
+        $this->postJson(route('discounts.connect'), ['store_id' => $store->id + 1])->assertStatus(409);
+        $this->assertDatabaseCount('oauth_states', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_discount_operator_without_app_install_permission_cannot_reauthorize(): void
+    {
+        [$actor, $organization, $store] = $this->context('operator');
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->post(route('discounts.connect'), ['store_id' => $store->id])->assertForbidden();
+        $this->assertDatabaseCount('oauth_states', 0);
+    }
+
+    public function test_invalid_connection_identity_or_expiry_is_blocked_without_network_access(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $connection = $this->installation($store, 'current-token');
+        Http::fake();
+        foreach ([['shop_domain' => 'different.myshopify.com'], ['shop_domain' => $store->shopify_domain, 'access_token_expires_at' => now()->subMinute()]] as $attributes) {
+            $connection->update($attributes);
+            $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+                ->get(route('discounts.index'))->assertOk()
+                ->assertInertia(fn (Assert $page) => $page->component('Discounts/Index')
+                    ->where('connection.ready', false)->where('connection.code', 'SHOPIFY_CONNECTION_REQUIRED'));
+        }
+        Http::assertNothingSent();
     }
 
     /** @return array{User, Organization, Store} */
@@ -166,38 +247,15 @@ class DiscountManagementTest extends TestCase
         return [$user];
     }
 
-    private function installation(Store $store, string $token): AppInstallation
+    private function installation(Store $store, string $token): ShopifyConnection
     {
-        $connection = ShopifyConnection::query()->firstOrCreate(['store_id' => $store->id], [
+        return ShopifyConnection::query()->create([
+            'store_id' => $store->id,
             'shop_domain' => $store->shopify_domain,
-            'access_token_encrypted' => 'commerce-token-'.$store->id,
-            'scopes' => ['read_products'],
+            'access_token_encrypted' => $token,
+            'scopes' => ['read_products', 'read_discounts', 'write_discounts'],
             'api_version' => '2026-07',
             'status' => 'connected',
-            'installed_at' => now(),
-        ]);
-        $app = App::query()->firstOrCreate(['handle' => 'deco-discount-manager-test'], [
-            'organization_id' => null,
-            'name' => 'Deco 折扣管理测试',
-            'client_id' => 'discount-manager-client',
-            'client_secret_encrypted' => 'discount-manager-secret',
-            'distribution' => 'custom',
-            'status' => 'active',
-            'scopes' => ['read_discounts', 'read_products', 'write_discounts'],
-            'webhook_api_version' => '2026-07',
-        ]);
-
-        return AppInstallation::query()->create([
-            'app_id' => $app->id,
-            'store_id' => $store->id,
-            'shopify_connection_id' => $connection->id,
-            'status' => 'active',
-            'granted_scopes' => ['read_discounts', 'write_discounts', 'read_products'],
-            'access_token_encrypted' => $token,
-            'refresh_token_encrypted' => 'refresh-'.$store->id,
-            'token_type' => 'offline',
-            'access_token_expires_at' => now()->addHour(),
-            'refresh_token_expires_at' => now()->addDays(30),
             'installed_at' => now(),
         ]);
     }
@@ -267,6 +325,7 @@ class DiscountManagementTest extends TestCase
     {
         return [
             'idempotency_key' => $key,
+            'store_id' => Store::query()->firstOrFail()->id,
             'kind' => 'product_amount',
             'title' => '劳动节九折',
             'code' => 'LABOR10',

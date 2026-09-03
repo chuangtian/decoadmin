@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\DiscountManagerException;
 use App\Models\Product;
 use App\Models\Store;
+use App\Services\Discounts\DiscountShopifyConnectionService;
 use App\Services\Discounts\ShopifyDiscountService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
@@ -21,6 +22,7 @@ class DiscountController extends Controller
         private CurrentOrganization $currentOrganization,
         private CurrentStore $currentStore,
         private ShopifyDiscountService $discounts,
+        private DiscountShopifyConnectionService $connections,
     ) {}
 
     public function index(Request $request): Response
@@ -31,11 +33,15 @@ class DiscountController extends Controller
         ]);
         $store = $this->scopedStore($request, 'discounts.view');
         $listing = ['data' => [], 'next_cursor' => null];
-        $connection = ['ready' => true, 'code' => null, 'message' => null];
+        $connection = ['ready' => false, 'can_write' => false, 'code' => null, 'message' => null];
         try {
             $listing = $this->discounts->listing($store, $filters['status'] ?? null, $filters['cursor'] ?? null);
+            $connection['ready'] = true;
+            $this->connections->forStore($store, write: true);
+            $connection['can_write'] = true;
         } catch (DiscountManagerException $exception) {
-            $connection = ['ready' => false, 'code' => $exception->errorCode, 'message' => $exception->getMessage()];
+            $connection['code'] = $exception->errorCode;
+            $connection['message'] = $exception->getMessage();
         }
 
         return Inertia::render('Discounts/Index', [
@@ -61,6 +67,7 @@ class DiscountController extends Controller
                     'image' => $product->featured_image_url,
                 ])->all(),
             'permissions' => [
+                'connect' => $request->user()->can('connect', $store),
                 'manage' => $request->user()->hasPermission(
                     'discounts.manage',
                     $this->currentOrganization->require(),
@@ -102,6 +109,7 @@ class DiscountController extends Controller
     private function validated(Request $request, Store $store): array
     {
         $values = $request->validate([
+            'store_id' => ['required', 'integer'],
             'idempotency_key' => ['required', 'uuid'],
             'kind' => ['required', Rule::in(['product_amount', 'order_amount', 'bxgy', 'free_shipping'])],
             'title' => ['required', 'string', 'max:120', 'regex:/\S/u'],
@@ -129,6 +137,7 @@ class DiscountController extends Controller
             'gets_percentage' => ['nullable', 'required_if:kind,bxgy', 'numeric', 'min:0.01', 'max:100'],
             'uses_per_order_limit' => ['nullable', 'integer', 'min:1', 'max:1000'],
         ]);
+        abort_unless((int) $values['store_id'] === (int) $store->id, 409, '当前店铺已切换，请刷新折扣页面后重试。');
         if (($values['value_type'] ?? null) === 'percentage' && (float) ($values['value'] ?? 0) > 100) {
             abort(422, '百分比折扣不能超过 100%。');
         }
