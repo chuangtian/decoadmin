@@ -536,7 +536,7 @@ class NaturalTrafficDashboardService
         $main = $mainRaw->map(fn (array $row): array => $this->kolRow($row));
         $clicksAvailable = $mainRaw->contains(fn (array $row): bool => $this->hasAny($row['fields'], ['clicks', '点击', '点击数']));
         $period = $this->latestAvailablePeriod($period, $main, ['views', 'likes', 'comments', 'clicks']);
-        $current = $this->within($main, $period['date_from'], $period['date_to']);
+        $current = $this->sortRowsByDate($this->within($main, $period['date_from'], $period['date_to']));
         $previous = $this->within($main, $period['compare_from'], $period['compare_to']);
         $totals = $this->kolTotals($current);
         $previousTotals = $this->kolTotals($previous);
@@ -582,7 +582,8 @@ class NaturalTrafficDashboardService
         $viral = $records->filter(fn (array $row): bool => str_contains($row['table_name'], '爆款')
             && $this->hasAny($row['fields'], ['浏览', '浏览量'])
             && $this->hasAny($row['fields'], ['红人title', '红人']))
-            ->map(fn (array $row): array => $this->kolRow($row))->sortByDesc('views')->values()->all();
+            ->map(fn (array $row): array => $this->kolRow($row));
+        $viral = $this->sortRowsByDate($viral)->all();
 
         return [
             'schema' => 'natural-traffic-influencer-operations-v1',
@@ -615,7 +616,7 @@ class NaturalTrafficDashboardService
             ])->take(500)->values()->all(),
             'model_summary' => $yearly,
             'viral_content' => $viral,
-            'details' => $current->sortByDesc('date')->take(1000)->values()->all(),
+            'details' => $current->take(1000)->values()->all(),
             'resources' => $main->groupBy(fn (array $row): string => $row['influencer'].'|'.$row['platform'])
                 ->map(function (Collection $rows): array {
                     $latest = $rows->sortByDesc('date')->first();
@@ -623,10 +624,11 @@ class NaturalTrafficDashboardService
                     return [
                         'influencer' => $latest['influencer'], 'platform' => $latest['platform'],
                         'type' => $latest['type'], 'average_views' => round($rows->avg('average_views') ?? 0, 2),
+                        'date' => $latest['date'],
                         'fee' => $latest['fee'], 'engagement_rate' => round($rows->avg('engagement_rate') ?? 0, 2),
                         'views' => round($rows->sum('views'), 2), 'collaborations' => $rows->count(), 'link' => $latest['link'],
                     ];
-                })->sortByDesc('views')->values()->all(),
+                })->sortByDesc('date')->values()->all(),
             'columns' => $this->columns($mainRaw->all()),
         ];
     }
@@ -800,14 +802,18 @@ class NaturalTrafficDashboardService
         $records = [];
 
         foreach ($tables as $table) {
-            foreach ($table->records as $record) {
+            $sourceColumns = $table->fields->pluck('name')->filter()->values()->all();
+            foreach ($table->records as $sourceOrder => $record) {
+                $fields = is_array($record->fields_encrypted) ? $record->fields_encrypted : [];
                 $records[] = [
                     'table_id' => (int) $table->id,
                     'source_table_key' => (string) $table->source_table_id,
                     'table_name' => (string) ($table->name ?? ''),
                     'source_section' => (string) $table->source_section,
                     'record_id' => (string) $record->source_record_id,
-                    'fields' => is_array($record->fields_encrypted) ? $record->fields_encrypted : [],
+                    'source_order' => (int) $sourceOrder,
+                    'columns' => $sourceColumns !== [] ? $sourceColumns : array_keys($fields),
+                    'fields' => $fields,
                     'synced_at' => $record->synced_at?->toIso8601String(),
                 ];
             }
@@ -878,6 +884,7 @@ class NaturalTrafficDashboardService
 
         return [
             'record_id' => $row['record_id'], 'table_name' => $row['table_name'],
+            'source_order' => $row['source_order'] ?? PHP_INT_MAX,
             'synced_at' => $row['synced_at'],
             'source_section' => $row['source_section'],
             'source_table_key' => $row['source_table_key'],
@@ -967,6 +974,7 @@ class NaturalTrafficDashboardService
 
         return [
             'record_id' => $row['record_id'], 'table_name' => $row['table_name'],
+            'source_order' => $row['source_order'] ?? PHP_INT_MAX,
             'influencer' => $this->text($this->pick($fields, ['红人title', '红人', 'influencer', '达人'])),
             'platform' => $this->text($this->pick($fields, ['平台', 'platform'])),
             'type' => $this->text($this->pick($fields, ['合作类型', '类型'])),
@@ -982,7 +990,7 @@ class NaturalTrafficDashboardService
             'link' => $this->link($this->pick($fields, ['合作链接', '链接', 'URL'])),
             'commission_link' => $this->link($this->pick($fields, ['佣金链接'])),
             'copy' => $this->text($this->pick($fields, ['文案', '内容'])),
-            'source_fields' => $this->sanitizeFields($fields),
+            'source_fields' => $this->displayKolSourceFields($fields),
         ];
     }
 
@@ -1370,10 +1378,40 @@ class NaturalTrafficDashboardService
             ->map(fn (mixed $value): mixed => is_string($value) ? mb_substr($value, 0, 2000) : $value)->all();
     }
 
+    /** @param array<string, mixed> $fields @return array<string, mixed> */
+    private function displayKolSourceFields(array $fields): array
+    {
+        $fields = $this->sanitizeFields($fields);
+
+        foreach ($fields as $key => $value) {
+            if (in_array(mb_strtolower(trim((string) $key)), ['发布日期', '合作日期', '日期', '发布时间'], true)) {
+                $fields[$key] = $this->date($value) ?? $value;
+            }
+        }
+
+        return $fields;
+    }
+
+    /** @param Collection<int, array<string, mixed>> $rows @return Collection<int, array<string, mixed>> */
+    private function sortRowsByDate(Collection $rows): Collection
+    {
+        return $rows->sort(function (array $left, array $right): int {
+            $byDate = ((string) ($right['date'] ?? '')) <=> ((string) ($left['date'] ?? ''));
+
+            return $byDate !== 0
+                ? $byDate
+                : ((int) ($left['source_order'] ?? PHP_INT_MAX)) <=> ((int) ($right['source_order'] ?? PHP_INT_MAX));
+        })->values();
+    }
+
     /** @param list<array<string, mixed>> $records @return list<string> */
     private function columns(array $records): array
     {
-        return collect($records)->flatMap(fn (array $row): array => array_keys($this->sanitizeFields($row['fields'] ?? [])))
+        return collect($records)->flatMap(function (array $row): array {
+            $columns = is_array($row['columns'] ?? null) ? $row['columns'] : array_keys($row['fields'] ?? []);
+
+            return array_keys($this->sanitizeFields(array_fill_keys($columns, null)));
+        })
             ->unique()->take(100)->values()->all();
     }
 

@@ -16,12 +16,14 @@ const props = withDefaults(defineProps<{
     selectParam?: string;
     selectValue?: string;
     selectOptions?: string[];
+    compact?: boolean;
 }>(), {
     accent: 'blue',
     selectLabel: '',
     selectParam: '',
     selectValue: '',
     selectOptions: () => [],
+    compact: false,
 });
 
 const emit = defineEmits<{ tab: [key: string] }>();
@@ -69,24 +71,25 @@ function formatDateTime(value: string | null): string {
 </script>
 
 <template>
-    <section class="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-col gap-6 px-6 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+    <section class="overflow-hidden border border-slate-200 bg-white shadow-sm" :class="compact ? 'rounded-[22px]' : 'rounded-[28px]'">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between" :class="compact ? 'gap-3 px-5 py-4 lg:px-6' : 'gap-6 px-6 py-6 lg:px-8'">
             <div class="min-w-0">
-                <div class="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em]" :class="accentClasses[accent].text">
+                <div class="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em]" :class="[accentClasses[accent].text, compact ? 'mb-1' : 'mb-2']">
                     <span class="h-2 w-2 rounded-full" :class="accentClasses[accent].dot"></span>
                     Organic channel
                 </div>
-                <h1 class="text-3xl font-black tracking-tight text-slate-950">{{ dashboard.title }}</h1>
-                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{{ store.name }} · {{ dashboard.description }}</p>
+                <h1 class="font-black tracking-tight text-slate-950" :class="compact ? 'text-2xl' : 'text-3xl'">{{ dashboard.title }}</h1>
+                <p class="max-w-3xl text-sm text-slate-500" :class="compact ? 'mt-1 leading-5' : 'mt-2 leading-6'">{{ store.name }} · {{ dashboard.description }}</p>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-                <div class="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-2.5">
+            <div class="flex flex-wrap items-center" :class="compact ? 'gap-2' : 'gap-3'">
+                <div class="rounded-2xl border border-emerald-100 bg-emerald-50" :class="compact ? 'px-3 py-2' : 'px-4 py-2.5'">
                     <div class="flex items-center gap-2 text-xs font-bold text-emerald-800"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>当前项目 MySQL</div>
                     <p class="mt-1 text-[11px] tabular-nums text-emerald-700/70">{{ dashboard.source.table_count }} 张表 · {{ dashboard.source.record_count }} 条 · {{ formatDateTime(dashboard.source.last_synced_at) }}</p>
                 </div>
                 <button
                     type="button"
-                    class="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-lg shadow-slate-950/10 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    class="rounded-2xl bg-slate-950 text-sm font-black text-white shadow-lg shadow-slate-950/10 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    :class="compact ? 'px-4 py-2.5' : 'px-5 py-3'"
                     :disabled="!canSync || !configured || syncing"
                     @click="refresh"
                 >
@@ -95,21 +98,21 @@ function formatDateTime(value: string | null): string {
             </div>
         </div>
 
-        <form class="grid gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4 sm:grid-cols-2 lg:grid-cols-[170px_170px_190px_minmax(0,180px)_auto] lg:px-8" @submit.prevent="applyFilters">
-            <label class="text-xs font-bold text-slate-500">开始日期<input v-model="filters.date_from" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800" /></label>
-            <label class="text-xs font-bold text-slate-500">结束日期<input v-model="filters.date_to" type="date" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800" /></label>
-            <label class="text-xs font-bold text-slate-500">数据对比<select v-model="filters.comparison" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800"><option value="previous">对比上一等长周期</option><option value="none">无对比</option></select></label>
-            <label v-if="selectParam" class="text-xs font-bold text-slate-500">{{ selectLabel }}<select v-model="filters.select" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800"><option value="">全部</option><option v-for="option in selectOptions" :key="option" :value="option">{{ option }}</option></select></label>
-            <div class="flex items-end"><button type="submit" class="w-full rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-black text-slate-800 shadow-sm hover:border-slate-400">应用筛选</button></div>
+        <form class="grid gap-3 border-t border-slate-100 bg-slate-50/70 sm:grid-cols-2 lg:grid-cols-[170px_170px_190px_minmax(0,180px)_auto]" :class="compact ? 'px-5 py-3 lg:px-6' : 'px-6 py-4 lg:px-8'" @submit.prevent="applyFilters">
+            <label class="text-xs font-bold text-slate-500">开始日期<input v-model="filters.date_from" type="date" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
+            <label class="text-xs font-bold text-slate-500">结束日期<input v-model="filters.date_to" type="date" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
+            <label class="text-xs font-bold text-slate-500">数据对比<select v-model="filters.comparison" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="previous">对比上一等长周期</option><option value="none">无对比</option></select></label>
+            <label v-if="selectParam" class="text-xs font-bold text-slate-500">{{ selectLabel }}<select v-model="filters.select" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="">全部</option><option v-for="option in selectOptions" :key="option" :value="option">{{ option }}</option></select></label>
+            <div class="flex items-end"><button type="submit" class="w-full rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-800 shadow-sm hover:border-slate-400" :class="compact ? 'h-9' : 'py-2.5'">应用筛选</button></div>
         </form>
 
-        <div class="flex gap-1 overflow-x-auto border-t border-slate-100 px-5 pt-3 lg:px-8">
+        <div class="flex gap-1 overflow-x-auto border-t border-slate-100" :class="compact ? 'px-5 pt-1 lg:px-6' : 'px-5 pt-3 lg:px-8'">
             <button
                 v-for="tab in dashboard.tabs"
                 :key="tab.key"
                 type="button"
-                class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-black transition"
-                :class="activeTab === tab.key ? accentClasses[accent].tab : 'border-transparent text-slate-500 hover:text-slate-800'"
+                class="whitespace-nowrap border-b-2 px-4 text-sm font-black transition"
+                :class="[activeTab === tab.key ? accentClasses[accent].tab : 'border-transparent text-slate-500 hover:text-slate-800', compact ? 'py-2' : 'py-3']"
                 @click="emit('tab', tab.key)"
             >{{ tab.label }}</button>
         </div>
