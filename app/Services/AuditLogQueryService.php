@@ -22,6 +22,13 @@ class AuditLogQueryService
         'shopify_webhook_retried' => 'Webhook 重新处理',
         'shopify_sync_retried' => '同步任务重新执行',
         'system_settings_updated' => '系统设置已更新',
+        'brand_social_post_visibility_updated' => '品牌官媒帖子显示状态已更新',
+        'brand_social_daily_review_created' => '品牌官媒每日复盘已创建',
+        'brand_social_daily_review_updated' => '品牌官媒每日复盘已更新',
+        'brand_social_daily_review_deleted' => '品牌官媒每日复盘已删除',
+        'brand_social_weekly_report_created' => '品牌官媒周报已创建',
+        'brand_social_weekly_report_updated' => '品牌官媒周报已更新',
+        'brand_social_weekly_report_deleted' => '品牌官媒周报已删除',
     ];
 
     /** @var list<string> */
@@ -223,6 +230,7 @@ class AuditLogQueryService
             str_contains($action, 'user') => '用户管理',
             str_contains($action, 'role'), str_contains($action, 'permission') => '权限管理',
             str_starts_with($action, 'system_settings_') => '系统设置',
+            str_starts_with($action, 'brand_social_') => '品牌官媒',
             default => '系统操作',
         };
     }

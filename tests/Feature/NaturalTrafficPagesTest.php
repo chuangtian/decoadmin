@@ -156,6 +156,17 @@ class NaturalTrafficPagesTest extends TestCase
         }
     }
 
+    public function test_reports_user_can_download_brand_media_import_template(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media.import-template'))
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8')
+            ->assertDownload('decoadmin-brand-media-template.csv');
+    }
+
     public function test_non_ai_dashboards_read_only_current_store_database_and_apply_real_previous_periods(): void
     {
         [$user, $organization, $store] = $this->context('operator');
@@ -184,9 +195,9 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.kpis.1.previous', 500)
             ->where('dashboard.kpis.1.change', 100)
             ->where('dashboard.funnel.0.value', 1000)
-            ->where('dashboard.weekly_reports.0.included_posts', 2)
+            ->where('dashboard.weekly_reports.0.included_posts', 3)
             ->where('dashboard.platform_coverage.missing.0', 'Facebook')
-            ->has('dashboard.tabs', 3));
+            ->has('dashboard.tabs', 4));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-current', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_a', '平台' => ['IG'], '浏览' => 20000, '赞' => 1000, '评' => 60, '互动率' => 0.053, 'clicks' => 120,
@@ -245,6 +256,24 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.kpis.2.value', 10));
     }
 
+    public function test_brand_media_default_period_includes_current_store_day(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-03 12:00:00', 'Asia/Shanghai'));
+        [$user, $organization, $store] = $this->context('operator');
+        $store->update(['timezone' => 'America/Los_Angeles']);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'today-post', [
+            '发布日期' => '2026-09-02', '平台' => 'YouTube', '描述' => 'Today', '浏览量' => 607,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.filters.date_from', '2026-08-27')
+                ->where('dashboard.filters.date_to', '2026-09-02')
+                ->where('dashboard.kpis.1.value', 607));
+    }
+
     public function test_non_ai_dashboards_keep_source_semantics_for_outliers_links_and_missing_fields(): void
     {
         [$user, $organization, $store] = $this->context('operator');
@@ -260,12 +289,12 @@ class NaturalTrafficPagesTest extends TestCase
         $this->actingAs($user)->withSession($session)
             ->get(route('natural-traffic.brand-media', ['date_from' => '2026-08-18', 'date_to' => '2026-08-24']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.weekly_reports.0.included_posts', 1)
-            ->where('dashboard.weekly_reports.0.excluded_posts', 1)
-            ->where('dashboard.weekly_reports.0.included_views', 10000)
-            ->where('dashboard.weekly_reports.0.included_interactions', 530)
-            ->where('dashboard.weekly_reports.0.average_views', 10000)
-            ->has('dashboard.weekly_reports.0.excluded_content', 1));
+            ->where('dashboard.selected_weekly_report.included_posts', 1)
+            ->where('dashboard.selected_weekly_report.excluded_posts', 1)
+            ->where('dashboard.selected_weekly_report.included_views', 10000)
+            ->where('dashboard.selected_weekly_report.included_interactions', 530)
+            ->where('dashboard.selected_weekly_report.average_views', 10000)
+            ->has('dashboard.selected_weekly_report.excluded_content', 1));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-with-link', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_link', '平台' => ['IG'], '浏览' => 20000,
@@ -335,7 +364,7 @@ class NaturalTrafficPagesTest extends TestCase
                 ->where('dashboard.posts.0.record_id', 'post-11')
                 ->where('dashboard.posts.9.record_id', 'post-20')
                 ->has('dashboard.posts', 10)
-                ->where('dashboard.kpis.0.value', 26)
+                ->where('dashboard.kpis.0.value', 27)
                 ->where('dashboard.source.record_count', 27)
                 ->where('dashboard.post_filter_options.platforms', ['Instagram', 'Facebook', 'YouTube'])
                 ->where('dashboard.post_filter_options.aggregation_statuses.1.value', 'excluded'));

@@ -98,6 +98,7 @@ class PermissionSeeder extends Seeder
         'reports.refresh',
         'codex.tokens.view',
         'codex.tokens.manage',
+        'reports.manage',
         'system.settings.view',
         'system.settings.update',
         'system.health.view',

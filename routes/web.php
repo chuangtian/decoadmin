@@ -322,6 +322,24 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/natural-traffic/brand-media/import', [NaturalTrafficController::class, 'importBrandMedia'])
         ->middleware(['permission:sync.run', 'throttle:12,1'])
         ->name('natural-traffic.brand-media.import');
+    Route::get('/natural-traffic/brand-media/import-template', [NaturalTrafficController::class, 'downloadBrandMediaTemplate'])
+        ->middleware(['permission:reports.view', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.import-template');
+    Route::put('/natural-traffic/brand-media/posts/visibility', [NaturalTrafficController::class, 'updateBrandMediaPostVisibility'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.posts.visibility');
+    Route::put('/natural-traffic/brand-media/daily-reviews', [NaturalTrafficController::class, 'upsertBrandMediaDailyReview'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.daily-reviews.upsert');
+    Route::delete('/natural-traffic/brand-media/daily-reviews/{brandSocialDailyReview}', [NaturalTrafficController::class, 'deleteBrandMediaDailyReview'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.daily-reviews.destroy');
+    Route::put('/natural-traffic/brand-media/weekly-reports', [NaturalTrafficController::class, 'upsertBrandMediaWeeklyReport'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.weekly-reports.upsert');
+    Route::delete('/natural-traffic/brand-media/weekly-reports/{brandSocialWeeklyReport}', [NaturalTrafficController::class, 'deleteBrandMediaWeeklyReport'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.weekly-reports.destroy');
     Route::post('/natural-traffic/seo-geo/refresh', [NaturalTrafficController::class, 'refresh'])
         ->middleware(['permission:sync.run', 'throttle:6,1'])
         ->name('natural-traffic.seo-geo.refresh');
