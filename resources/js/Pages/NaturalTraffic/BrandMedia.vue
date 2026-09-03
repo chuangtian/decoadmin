@@ -185,7 +185,6 @@ const contentFilters = reactive<PostFilters>({ ...props.dashboard.post_filters }
 const postColumns = ['platform', 'account_handle', 'content_origin_label', 'source_mode', 'date', 'title', 'post_type', 'views', 'likes', 'comments', 'shares', 'visibility_status', 'aggregation_status', 'permalink'];
 const postLabels: Record<string, string> = { platform: '平台', account_handle: '账号', account_name: '账户名称', content_origin_label: '内容来源', source_mode: '数据来源', date: '发布日期', title: '内容', post_type: '类型', views: '播放 / 浏览', likes: '点赞', comments: '评论', shares: '分享', visibility_status: '显示状态', aggregation_status: '周报口径', permalink: '链接' };
 const sortablePostColumns = new Set(['platform', 'date', 'views', 'likes', 'comments', 'shares']);
-const platformMax = computed(() => Math.max(1, ...props.dashboard.platforms.map((row) => Number(row.views ?? 0))));
 const selectedWeeklyReport = computed(() => props.dashboard.selected_weekly_report);
 const platformTrendSeries = computed(() => [
     { key: `instagram_${trendMetric.value}`, label: 'Instagram', color: '#ec4899' },
@@ -482,27 +481,15 @@ function clearContentFilters(): void {
                     <aside v-if="dashboard.platform_coverage.missing.length" class="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-900">
                         {{ dashboard.platform_coverage.missing.join('、') }} 当前尚无数据；平台入口仍保留，完成 CSV 导入或官方 API 同步后自动展示表现。
                     </aside>
-                    <div class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,.65fr)]">
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
-                            <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                                <div><h2 class="text-lg font-black text-slate-950">跨平台表现趋势</h2><p class="mt-1 text-xs text-slate-500">按发布日期和平台汇总，包含周报中单独列出的高浏览内容</p></div>
-                                <div class="flex rounded-xl bg-slate-100 p-1">
-                                    <button v-for="metric in trendMetrics" :key="metric.key" type="button" class="rounded-lg px-3 py-1.5 text-xs font-black transition" :class="trendMetric === metric.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'" @click="trendMetric = metric.key">{{ metric.label }}</button>
-                                </div>
+                    <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
+                        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <div><h2 class="text-lg font-black text-slate-950">跨平台表现趋势</h2><p class="mt-1 text-xs text-slate-500">按发布日期和平台汇总，包含周报中单独列出的高浏览内容</p></div>
+                            <div class="flex rounded-xl bg-slate-100 p-1">
+                                <button v-for="metric in trendMetrics" :key="metric.key" type="button" class="rounded-lg px-3 py-1.5 text-xs font-black transition" :class="trendMetric === metric.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'" @click="trendMetric = metric.key">{{ metric.label }}</button>
                             </div>
-                            <NaturalTrafficTrendChart :points="dashboard.platform_trends" :series="platformTrendSeries" />
-                        </section>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
-                            <h2 class="text-lg font-black text-slate-950">平台拆解</h2><p class="mt-1 text-xs text-slate-500">IG / FB / YouTube 固定展示</p>
-                            <div class="mt-6 space-y-5">
-                                <article v-for="row in dashboard.platforms" :key="String(row.platform)" class="rounded-2xl bg-slate-50 p-4" :class="{ 'opacity-60': !row.available }">
-                                    <div class="flex items-start justify-between gap-3"><div><h3 class="font-black text-slate-900">{{ row.platform }}</h3><p class="mt-1 text-xs text-slate-500">{{ row.available ? `${compact(row.posts)} 帖 · ER ${Number(row.engagement_rate ?? 0).toFixed(2)}%` : '当前无数据' }}</p></div><strong class="text-lg tabular-nums text-slate-950">{{ row.available ? compact(row.views) : '—' }}</strong></div>
-                                    <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-blue-500" :style="{ width: `${row.available && Number(row.views ?? 0) > 0 ? Math.max(2, Number(row.views ?? 0) / platformMax * 100) : 0}%` }"></div></div>
-                                    <div class="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-500"><span>赞 {{ row.available ? compact(row.likes) : '—' }}</span><span>评 {{ row.available ? compact(row.comments) : '—' }}</span><span>分享 {{ row.available ? compact(row.shares) : '—' }}</span></div>
-                                </article>
-                            </div>
-                        </section>
-                    </div>
+                        </div>
+                        <NaturalTrafficTrendChart :points="dashboard.platform_trends" :series="platformTrendSeries" />
+                    </section>
                     <section aria-label="内容表现漏斗" class="grid gap-6 xl:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]">
                         <article class="overflow-hidden rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                             <div>
