@@ -37,7 +37,7 @@ class RoleSeeder extends Seeder
         'operator' => [
             'name' => '运营人员',
             'description' => '负责店铺的日常运营工作。',
-            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read'],
+            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'reports.manage', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read'],
         ],
         'marketing' => [
             'name' => '营销人员',

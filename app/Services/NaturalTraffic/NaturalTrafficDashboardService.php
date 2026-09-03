@@ -2,6 +2,9 @@
 
 namespace App\Services\NaturalTraffic;
 
+use App\Models\BrandSocialDailyReview;
+use App\Models\BrandSocialPostState;
+use App\Models\BrandSocialWeeklyReport;
 use App\Models\Customer;
 use App\Models\FeishuBitableTable;
 use App\Models\Store;
@@ -26,7 +29,7 @@ class NaturalTrafficDashboardService
         $period = $this->period($store, $filters);
 
         return match ($channel) {
-            'brand-media' => $this->brandMedia($store, $period, $this->brandPostFilters($filters)),
+            'brand-media' => $this->brandMedia($store, $period, $this->brandPostFilters($filters), $filters),
             'influencer-operations' => $this->influencerOperations($store, $period),
             'edm-email' => $this->edm($store, $period),
             'affiliate-marketing' => $this->affiliate($store, $period, trim((string) ($filters['affiliate'] ?? ''))),
@@ -34,31 +37,54 @@ class NaturalTrafficDashboardService
         };
     }
 
-    /** @param array<string, mixed> $period @param array<string, mixed> $postFilters @return array<string, mixed> */
-    private function brandMedia(Store $store, array $period, array $postFilters): array
+    /** @param array<string, mixed> $period @param array<string, mixed> $postFilters @param array<string, mixed> $filters @return array<string, mixed> */
+    private function brandMedia(Store $store, array $period, array $postFilters, array $filters): array
     {
+        $period = $this->brandDefaultPeriod($store, $period);
         $source = $this->source($store, [
             'natural-traffic:social',
             BrandSocialCsvImportService::SOURCE_SECTION,
             YouTubeAnalyticsSyncService::SOURCE_SECTION,
         ]);
-        $all = collect($source['records'])->map(fn (array $row): array => $this->socialRow($row));
-        $period = $this->latestAvailablePeriod($period, $all, ['views', 'likes', 'comments', 'shares']);
-        $currentAll = $this->within($all, $period['date_from'], $period['date_to']);
-        $previousAll = $this->within($all, $period['compare_from'], $period['compare_to']);
-        $current = $currentAll->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
-        $previous = $previousAll->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
+        $postStates = BrandSocialPostState::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->get()
+            ->keyBy(fn (BrandSocialPostState $state): string => $this->brandSourceKey(
+                $state->source_section,
+                $state->source_table_key,
+                $state->source_record_id,
+            ));
+        $all = collect($source['records'])->map(function (array $row) use ($postStates): array {
+            $social = $this->socialRow($row);
+            $state = $postStates->get($this->brandSourceKey(
+                $social['source_section'],
+                $social['source_table_key'],
+                $social['record_id'],
+            ));
+
+            return [
+                ...$social,
+                'is_hidden' => (bool) ($state?->is_hidden ?? false),
+                'visibility_status' => ($state?->is_hidden ?? false) ? '已隐藏' : '可见',
+            ];
+        });
+        $visible = $all->reject(fn (array $row): bool => $row['is_hidden'])->values();
+        $period = $this->latestAvailablePeriod($period, $visible, ['views', 'likes', 'comments', 'shares']);
+        $periodAll = $this->within($all, $period['date_from'], $period['date_to']);
+        $current = $this->within($visible, $period['date_from'], $period['date_to']);
+        $previous = $this->within($visible, $period['compare_from'], $period['compare_to']);
         $metrics = ['posts', 'views', 'likes', 'comments', 'shares'];
         $totals = $this->sums($current, $metrics);
         $previousTotals = $this->sums($previous, $metrics);
-        $platforms = collect(['Instagram', 'Facebook', 'YouTube'])->map(function (string $platform) use ($all, $current, $metrics): array {
+        $platforms = collect(self::BRAND_POST_PLATFORMS)->map(function (string $platform) use ($visible, $current, $metrics): array {
             $rows = $current->where('platform', $platform);
             $totals = $this->sums($rows, $metrics);
             $engagement = $totals['likes'] + $totals['comments'] + $totals['shares'];
 
             return [
                 'platform' => $platform,
-                'available' => $all->contains(fn (array $row): bool => $row['platform'] === $platform),
+                'available' => $visible->contains(fn (array $row): bool => $row['platform'] === $platform),
                 ...$totals,
                 'reach' => round($rows->sum('reach'), 2),
                 'clicks' => round($rows->sum('clicks'), 2),
@@ -66,6 +92,20 @@ class NaturalTrafficDashboardService
             ];
         })->all();
         $trends = $this->trend($current, $metrics, 'date');
+        $platformTrends = $current->filter(fn (array $row): bool => filled($row['date']))
+            ->groupBy('date')
+            ->map(function (Collection $rows, string $date) use ($metrics): array {
+                $point = ['date' => $date];
+                foreach (self::BRAND_POST_PLATFORMS as $platform) {
+                    $slug = mb_strtolower($platform);
+                    $platformTotals = $this->sums($rows->where('platform', $platform), $metrics);
+                    foreach ($metrics as $metric) {
+                        $point["{$slug}_{$metric}"] = $platformTotals[$metric];
+                    }
+                }
+
+                return $point;
+            })->sortKeys()->values()->all();
         $daily = $current->filter(fn (array $row): bool => filled($row['date']))
             ->groupBy('date')->map(function (Collection $rows, string $date) use ($metrics): array {
                 $dailyTotals = $this->sums($rows, $metrics);
@@ -79,44 +119,65 @@ class NaturalTrafficDashboardService
                         : 0,
                 ];
             })->sortKeys()->values()->all();
-        $weeklyReports = $currentAll->filter(fn (array $row): bool => filled($row['date']))
-            ->groupBy(fn (array $row): string => CarbonImmutable::parse($row['date'])->startOfWeek()->toDateString())
-            ->map(function (Collection $rows, string $week) use ($metrics): array {
-                $rawTotals = $this->sums($rows, $metrics);
-                $included = $rows->reject(fn (array $row): bool => $row['excluded_from_aggregates']);
-                $excluded = $rows->filter(fn (array $row): bool => $row['excluded_from_aggregates']);
-                $totals = $this->sums($included, $metrics);
-                $includedTotals = $totals;
-                $interactions = $includedTotals['likes'] + $includedTotals['comments'];
+        $weeklyReportRecords = BrandSocialWeeklyReport::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->orderBy('week_start')
+            ->get()
+            ->keyBy(fn (BrandSocialWeeklyReport $report): string => $report->week_start->toDateString());
+        $weeklyGroups = $visible->filter(fn (array $row): bool => filled($row['date']))
+            ->groupBy(fn (array $row): string => CarbonImmutable::parse($row['date'])->startOfWeek()->toDateString());
+        $availableWeeks = $weeklyGroups->keys()->merge($weeklyReportRecords->keys())->unique();
+        $requestedWeek = trim((string) ($filters['weekly_week'] ?? ''));
+        $selectedWeek = $availableWeeks->contains($requestedWeek) ? $requestedWeek : $availableWeeks->sortDesc()->first();
+        $weeklyReportMap = $weeklyGroups
+            ->map(fn (Collection $rows, string $week): array => $this->brandWeeklyReport($rows, $week, $week === $selectedWeek));
+        foreach ($weeklyReportRecords as $week => $record) {
+            if (! $weeklyReportMap->has($week)) {
+                $weeklyReportMap->put($week, $this->brandWeeklyReport(collect(), $week, $week === $selectedWeek));
+            }
+        }
+        $weeklyReportMap = $weeklyReportMap->map(function (array $report, string $week) use ($weeklyReportRecords): array {
+            $record = $weeklyReportRecords->get($week);
 
-                return [
-                    'week' => $week,
-                    ...$totals,
-                    'all_posts' => $rawTotals['posts'],
-                    'all_views' => $rawTotals['views'],
-                    'included_posts' => $includedTotals['posts'],
-                    'excluded_posts' => $excluded->sum('posts'),
-                    'included_views' => $includedTotals['views'],
-                    'included_interactions' => $interactions,
-                    'average_views' => $includedTotals['posts'] > 0 ? round($includedTotals['views'] / $includedTotals['posts'], 2) : 0,
-                    'content_types' => $included->groupBy(fn (array $row): string => $row['post_type'] ?: '未分类')
-                        ->map(fn (Collection $items, string $type): array => ['type' => $type, 'posts' => $items->sum('posts'), 'views' => round($items->sum('views'), 2)])
-                        ->sortByDesc('posts')->values()->all(),
-                    'top_views' => $included->sortByDesc('views')->take(5)->values()->all(),
-                    'top_engagement' => $included->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'])->take(5)->values()->all(),
-                    'excluded_content' => $excluded->sortByDesc('views')->values()->all(),
-                ];
-            })->sortKeys()->values();
+            return [
+                ...$report,
+                'uuid' => $record?->uuid,
+                'title' => $record?->title ?? $report['label'],
+                'status' => $record?->status ?? 'generated',
+                'summary' => $record?->summary,
+                'published_at' => $record?->published_at?->toIso8601String(),
+            ];
+        })->sortKeys();
+        $weeklyReports = $weeklyReportMap->values();
         $weekly = $weeklyReports->map(fn (array $report): array => collect($report)
-            ->except(['content_types', 'top_views', 'top_engagement', 'excluded_content'])->all())->all();
-        $allPosts = $currentAll
+            ->except(['content_types', 'content_efficiency', 'scatter', 'top_views', 'top_engagement', 'excluded_content', 'included_content', 'post_performance', 'summary_items'])->all())->all();
+        $selectedWeeklyReport = is_string($selectedWeek) ? $weeklyReportMap->get($selectedWeek) : null;
+        $previousWeek = is_string($selectedWeek) ? CarbonImmutable::parse($selectedWeek)->subWeek()->toDateString() : null;
+        $previousWeeklyReport = is_string($previousWeek)
+            ? ($weeklyReportMap->get($previousWeek) ?? $this->brandWeeklyReport(collect(), $previousWeek, false))
+            : null;
+        $weeklyComparison = $selectedWeeklyReport
+            ? collect(['included_views', 'included_interactions', 'average_views', 'included_posts'])
+                ->mapWithKeys(fn (string $metric): array => [$metric => [
+                    'current' => $selectedWeeklyReport[$metric],
+                    'previous' => $previousWeeklyReport[$metric] ?? 0,
+                    'change' => $this->change($selectedWeeklyReport[$metric], $previousWeeklyReport[$metric] ?? 0),
+                ]])->all()
+            : [];
+        $allPosts = $periodAll
             ->filter(fn (array $row): bool => $row['title'] !== '' || $row['permalink'] !== '')
             ->values();
         $postTypes = $allPosts->pluck('post_type')->filter()->unique()->sort()->values()->all();
         $postFilters['post_type'] = collect($postTypes)
             ->first(fn (string $postType): bool => mb_strtolower($postType) === mb_strtolower($postFilters['post_type'])) ?? '';
         $filteredPosts = $this->filterBrandPosts($allPosts, $postFilters)
-            ->sort(fn (array $left, array $right): int => $this->compareBrandPosts($left, $right))
+            ->sort(fn (array $left, array $right): int => $this->compareBrandPosts(
+                $left,
+                $right,
+                $postFilters['sort'],
+                $postFilters['direction'],
+            ))
             ->values();
         $postsTotal = $filteredPosts->count();
         $postsLastPage = max(1, (int) ceil($postsTotal / $postFilters['per_page']));
@@ -126,19 +187,37 @@ class NaturalTrafficDashboardService
             ->values()
             ->all();
         $postFilters['page'] = $postsCurrentPage;
-        $availablePlatforms = $all->pluck('platform')->filter()->intersect(['Instagram', 'Facebook', 'YouTube'])->unique()->values()->all();
-        $expectedPlatforms = ['Instagram', 'Facebook', 'YouTube'];
+        $availablePlatforms = $visible->pluck('platform')->filter()->intersect(self::BRAND_POST_PLATFORMS)->unique()->values()->all();
+        $expectedPlatforms = self::BRAND_POST_PLATFORMS;
         $engagements = $totals['likes'] + $totals['comments'] + $totals['shares'];
-        $excluded = $currentAll->filter(fn (array $row): bool => $row['excluded_from_aggregates']);
+        $excluded = $current->filter(fn (array $row): bool => $row['excluded_from_aggregates']);
+        $dailyReviews = BrandSocialDailyReview::query()
+            ->forOrganization((int) $store->organization_id)
+            ->forStore((int) $store->id)
+            ->whereBetween('review_date', [$period['date_from'], $period['date_to']])
+            ->orderByDesc('review_date')
+            ->get()
+            ->map(fn (BrandSocialDailyReview $review): array => [
+                'uuid' => $review->uuid,
+                'review_date' => $review->review_date->toDateString(),
+                'status' => $review->status,
+                'core_data' => $review->core_data,
+                'top_content' => $review->top_content,
+                'low_content' => $review->low_content,
+                'recommendations' => $review->recommendations,
+                'published_at' => $review->published_at?->toIso8601String(),
+            ])->all();
+        $platformLeader = collect($platforms)->sortByDesc('views')->first();
 
         return [
-            'schema' => 'natural-traffic-brand-media-v2',
+            'schema' => 'natural-traffic-brand-media-v3',
             'title' => '品牌官媒',
             'description' => 'Instagram / Facebook 手动导入、YouTube 官方 API 同步，以及统一口径的每日复盘与周度汇总。',
             'tabs' => [
                 ['key' => 'platforms', 'label' => '平台拆解'],
                 ['key' => 'daily', 'label' => '每日复盘'],
                 ['key' => 'weekly', 'label' => '周报'],
+                ['key' => 'ai', 'label' => 'AI 分析'],
             ],
             'filters' => $period,
             'source' => $this->sourceSummary($source),
@@ -164,7 +243,7 @@ class NaturalTrafficDashboardService
                 'platform' => 'Instagram',
                 'threshold' => self::INSTAGRAM_OUTLIER_THRESHOLD,
                 'rule' => 'Reels / 视频按播放或浏览量；图片 / 轮播按曝光量，源文件无曝光量时按覆盖人数。',
-                'behavior' => '原始明细保留并标记，但不计入 KPI、趋势、平台汇总、漏斗、日表和周报均值。',
+                'behavior' => '原始明细与平台拆解继续保留，仅在周报总量、周报均值和周报排行中单独排除。',
             ],
             'exclusion_summary' => [
                 'posts' => round($excluded->sum('posts'), 2),
@@ -178,9 +257,18 @@ class NaturalTrafficDashboardService
                 ['key' => 'clicks', 'label' => '点击', 'value' => round($current->sum('clicks'), 2)],
             ],
             'trends' => $trends,
+            'platform_trends' => $platformTrends,
             'daily' => $daily,
             'weekly' => $weekly,
-            'weekly_reports' => $weeklyReports->all(),
+            'weekly_reports' => $weekly,
+            'weekly_options' => $weeklyReports->sortByDesc('week')->map(fn (array $report): array => [
+                'value' => $report['week'],
+                'label' => $report['label'],
+                'posts' => $report['all_posts'],
+            ])->values()->all(),
+            'selected_week' => $selectedWeek,
+            'selected_weekly_report' => $selectedWeeklyReport,
+            'weekly_comparison' => $weeklyComparison,
             'daily_review' => [
                 'posting_days' => $current->pluck('date')->filter()->unique()->count(),
                 'engagements' => $totals['likes'] + $totals['comments'] + $totals['shares'],
@@ -189,10 +277,28 @@ class NaturalTrafficDashboardService
                 'top_post' => $current->sortByDesc('views')->first(),
                 'top_engagement_post' => $current->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'] + $row['shares'])->first(),
             ],
+            'daily_reviews' => $dailyReviews,
+            'ai_insights' => [
+                'platform_leader' => $platformLeader,
+                'top_post' => $current->sortByDesc('views')->first(),
+                'top_engagement_post' => $current->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'] + $row['shares'])->first(),
+                'views_change' => $this->change($totals['views'], $previousTotals['views']),
+                'engagements' => $engagements,
+                'generated_from' => 'current-project-mysql',
+            ],
             'post_filters' => $postFilters,
             'post_filter_options' => [
                 'platforms' => self::BRAND_POST_PLATFORMS,
                 'post_types' => $postTypes,
+                'origins' => [
+                    ['value' => 'official', 'label' => '官媒内容'],
+                    ['value' => 'collaboration', 'label' => '合作内容'],
+                ],
+                'visibility_statuses' => [
+                    ['value' => 'visible', 'label' => '可见帖子'],
+                    ['value' => 'hidden', 'label' => '已隐藏帖子'],
+                    ['value' => 'all', 'label' => '全部帖子'],
+                ],
                 'aggregation_statuses' => [
                     ['value' => 'included', 'label' => '已纳入'],
                     ['value' => 'excluded', 'label' => '异常爆款，已排除'],
@@ -207,18 +313,23 @@ class NaturalTrafficDashboardService
                 'to' => $postsTotal === 0 ? null : min($postsCurrentPage * $postFilters['per_page'], $postsTotal),
             ],
             'posts' => $posts,
+            'hidden_posts_count' => $periodAll->where('is_hidden', true)->count(),
             'columns' => $this->columns($source['records']),
             'raw_rows' => $this->sanitizedRows($source['records'], 1000),
         ];
     }
 
-    /** @param array<string, mixed> $filters @return array{keyword: string, platform: string, post_type: string, aggregation_status: string, page: int, per_page: int} */
+    /** @param array<string, mixed> $filters @return array{keyword: string, platform: string, post_type: string, aggregation_status: string, visibility: string, origin: string, sort: string, direction: string, page: int, per_page: int} */
     private function brandPostFilters(array $filters): array
     {
         $platformInput = mb_strtolower(trim((string) ($filters['content_platform'] ?? '')));
         $platform = collect(self::BRAND_POST_PLATFORMS)
             ->first(fn (string $candidate): bool => mb_strtolower($candidate) === $platformInput) ?? '';
         $status = mb_strtolower(trim((string) ($filters['content_status'] ?? '')));
+        $visibility = mb_strtolower(trim((string) ($filters['content_visibility'] ?? 'visible')));
+        $origin = mb_strtolower(trim((string) ($filters['content_origin'] ?? '')));
+        $sort = mb_strtolower(trim((string) ($filters['content_sort'] ?? 'date')));
+        $direction = mb_strtolower(trim((string) ($filters['content_direction'] ?? 'desc')));
         $page = (int) ($filters['content_page'] ?? 1);
         $perPage = (int) ($filters['content_per_page'] ?? 20);
 
@@ -227,6 +338,10 @@ class NaturalTrafficDashboardService
             'platform' => $platform,
             'post_type' => mb_substr(trim((string) ($filters['content_type'] ?? '')), 0, 100),
             'aggregation_status' => in_array($status, ['included', 'excluded'], true) ? $status : '',
+            'visibility' => in_array($visibility, ['visible', 'hidden', 'all'], true) ? $visibility : 'visible',
+            'origin' => in_array($origin, ['official', 'collaboration'], true) ? $origin : '',
+            'sort' => in_array($sort, ['date', 'platform', 'views', 'likes', 'comments', 'shares', 'engagement_rate'], true) ? $sort : 'date',
+            'direction' => in_array($direction, ['asc', 'desc'], true) ? $direction : 'desc',
             'page' => min(max($page, 1), 10000),
             'per_page' => in_array($perPage, self::BRAND_POST_PER_PAGE_OPTIONS, true) ? $perPage : 20,
         ];
@@ -234,7 +349,7 @@ class NaturalTrafficDashboardService
 
     /**
      * @param  Collection<int, array<string, mixed>>  $posts
-     * @param  array{keyword: string, platform: string, post_type: string, aggregation_status: string, page: int, per_page: int}  $filters
+     * @param  array{keyword: string, platform: string, post_type: string, aggregation_status: string, visibility: string, origin: string, sort: string, direction: string, page: int, per_page: int}  $filters
      * @return Collection<int, array<string, mixed>>
      */
     private function filterBrandPosts(Collection $posts, array $filters): Collection
@@ -248,6 +363,12 @@ class NaturalTrafficDashboardService
                 ->filter(fn (array $row): bool => $filters['aggregation_status'] === 'excluded'
                     ? (bool) $row['excluded_from_aggregates']
                     : ! (bool) $row['excluded_from_aggregates']))
+            ->when($filters['visibility'] !== 'all', fn (Collection $rows): Collection => $rows
+                ->filter(fn (array $row): bool => $filters['visibility'] === 'hidden'
+                    ? (bool) $row['is_hidden']
+                    : ! (bool) $row['is_hidden']))
+            ->when($filters['origin'] !== '', fn (Collection $rows): Collection => $rows
+                ->filter(fn (array $row): bool => $row['content_origin'] === $filters['origin']))
             ->when($filters['keyword'] !== '', function (Collection $rows) use ($filters): Collection {
                 $keyword = mb_strtolower($filters['keyword']);
 
@@ -266,11 +387,13 @@ class NaturalTrafficDashboardService
     }
 
     /** @param array<string, mixed> $left @param array<string, mixed> $right */
-    private function compareBrandPosts(array $left, array $right): int
+    private function compareBrandPosts(array $left, array $right, string $sort, string $direction): int
     {
-        $date = strcmp((string) ($right['date'] ?? ''), (string) ($left['date'] ?? ''));
-        if ($date !== 0) {
-            return $date;
+        $comparison = in_array($sort, ['views', 'likes', 'comments', 'shares', 'engagement_rate'], true)
+            ? ((float) ($left[$sort] ?? 0) <=> (float) ($right[$sort] ?? 0))
+            : strcmp((string) ($left[$sort] ?? ''), (string) ($right[$sort] ?? ''));
+        if ($comparison !== 0) {
+            return $direction === 'desc' ? -$comparison : $comparison;
         }
 
         return [
@@ -281,6 +404,117 @@ class NaturalTrafficDashboardService
             (string) ($right['platform'] ?? ''),
             (string) ($right['record_id'] ?? ''),
             (string) ($right['table_name'] ?? ''),
+        ];
+    }
+
+    /** @param Collection<int, array<string, mixed>> $rows @return array<string, mixed> */
+    private function brandWeeklyReport(Collection $rows, string $week, bool $includeDetails = true): array
+    {
+        $metrics = ['posts', 'views', 'likes', 'comments', 'shares'];
+        $rawTotals = $this->sums($rows, $metrics);
+        $included = $rows->reject(fn (array $row): bool => $row['excluded_from_aggregates'])->values();
+        $excluded = $rows->filter(fn (array $row): bool => $row['excluded_from_aggregates'])->values();
+        $totals = $this->sums($included, $metrics);
+        $interactions = $totals['likes'] + $totals['comments'];
+        $reportIncluded = $includeDetails ? $included->map(fn (array $row): array => $this->brandReportPost($row)) : collect();
+        $reportExcluded = $includeDetails ? $excluded->map(fn (array $row): array => $this->brandReportPost($row)) : collect();
+        $weekStart = CarbonImmutable::parse($week)->startOfWeek();
+        $weekEnd = $weekStart->endOfWeek();
+        $contentTypes = $includeDetails ? $included
+            ->groupBy(fn (array $row): string => $row['post_type'] ?: '未分类')
+            ->map(function (Collection $items, string $type) use ($totals): array {
+                $posts = (float) $items->sum('posts');
+                $views = (float) $items->sum('views');
+                $interactions = (float) $items->sum(fn (array $row): float => $row['likes'] + $row['comments']);
+
+                return [
+                    'type' => $type,
+                    'posts' => round($posts, 2),
+                    'percentage' => $totals['posts'] > 0 ? round($posts / $totals['posts'] * 100, 2) : 0,
+                    'views' => round($views, 2),
+                    'interactions' => round($interactions, 2),
+                    'average_views' => $posts > 0 ? round($views / $posts, 2) : 0,
+                    'average_interactions' => $posts > 0 ? round($interactions / $posts, 2) : 0,
+                ];
+            })->sortByDesc('posts')->values()->all() : [];
+        $postPerformance = $includeDetails ? $included->sortByDesc('views')->values()->map(fn (array $row, int $index): array => [
+            'index' => $index + 1,
+            'label' => '#'.($index + 1),
+            'record_id' => $row['record_id'],
+            'title' => $row['title'],
+            'platform' => $row['platform'],
+            'views' => $row['views'],
+            'interactions' => $row['likes'] + $row['comments'],
+        ])->all() : [];
+
+        return [
+            'week' => $weekStart->toDateString(),
+            'week_end' => $weekEnd->toDateString(),
+            'label' => $weekStart->format('M j').' – '.$weekEnd->format('M j, Y'),
+            ...$totals,
+            'all_posts' => $rawTotals['posts'],
+            'all_views' => $rawTotals['views'],
+            'included_posts' => $totals['posts'],
+            'excluded_posts' => round($excluded->sum('posts'), 2),
+            'included_views' => $totals['views'],
+            'included_interactions' => round($interactions, 2),
+            'average_views' => $totals['posts'] > 0 ? round($totals['views'] / $totals['posts'], 2) : 0,
+            'content_types' => $contentTypes,
+            'content_efficiency' => $contentTypes,
+            'scatter' => $includeDetails ? $included->map(fn (array $row): array => [
+                'name' => $row['title'] ?: $row['record_id'],
+                'platform' => $row['platform'],
+                'views' => $row['views'],
+                'interactions' => $row['likes'] + $row['comments'],
+                'engagement_rate' => $row['views'] > 0 ? round(($row['likes'] + $row['comments']) / $row['views'] * 100, 2) : 0,
+            ])->values()->all() : [],
+            'top_views' => $includeDetails ? $reportIncluded->sortByDesc('views')->take(5)->values()->all() : [],
+            'top_engagement' => $includeDetails ? $reportIncluded->sortByDesc(fn (array $row): float => $row['likes'] + $row['comments'])->take(5)->values()->all() : [],
+            'excluded_content' => $includeDetails ? $reportExcluded->sortByDesc('exclusion_value')->values()->all() : [],
+            'included_content' => $includeDetails ? $reportIncluded->sortByDesc('views')->values()->all() : [],
+            'post_performance' => $postPerformance,
+            'summary_items' => $includeDetails ? [
+                "本周共发布 {$rawTotals['posts']} 篇内容，计入 {$totals['posts']} 篇",
+                "计入口径总浏览 {$totals['views']}，平均每篇 ".($totals['posts'] > 0 ? round($totals['views'] / $totals['posts'], 2) : 0),
+                "总互动 {$interactions}（赞 {$totals['likes']} + 评论 {$totals['comments']}）",
+                "{$excluded->sum('posts')} 篇超过 10 万的 Instagram 内容已单独列出",
+            ] : [],
+        ];
+    }
+
+    /** @param array<string, mixed> $row @return array<string, mixed> */
+    private function brandReportPost(array $row): array
+    {
+        return collect($row)->only([
+            'record_id', 'platform', 'date', 'title', 'post_type', 'content_origin', 'content_origin_label',
+            'views', 'likes', 'comments', 'shares', 'engagement_rate', 'permalink', 'aggregation_status',
+            'exclusion_metric', 'exclusion_value',
+        ])->all();
+    }
+
+    private function brandSourceKey(string $sourceSection, string $sourceTableKey, string $sourceRecordId): string
+    {
+        return $sourceSection."\n".$sourceTableKey."\n".$sourceRecordId;
+    }
+
+    /** @param array<string, mixed> $period @return array<string, mixed> */
+    private function brandDefaultPeriod(Store $store, array $period): array
+    {
+        if (! ($period['default_range'] ?? false)) {
+            return $period;
+        }
+
+        $to = CarbonImmutable::now($store->timezone ?: 'UTC')->startOfDay();
+        $from = $to->subDays(6);
+        $compareTo = $from->subDay();
+        $compareFrom = $compareTo->subDays(6);
+
+        return [
+            ...$period,
+            'date_from' => $from->toDateString(),
+            'date_to' => $to->toDateString(),
+            'compare_from' => $period['comparison'] === 'none' ? '' : $compareFrom->toDateString(),
+            'compare_to' => $period['comparison'] === 'none' ? '' : $compareTo->toDateString(),
         ];
     }
 
@@ -563,6 +797,7 @@ class NaturalTrafficDashboardService
             foreach ($table->records as $record) {
                 $records[] = [
                     'table_id' => (int) $table->id,
+                    'source_table_key' => (string) $table->source_table_id,
                     'table_name' => (string) ($table->name ?? ''),
                     'source_section' => (string) $table->source_section,
                     'record_id' => (string) $record->source_record_id,
@@ -637,6 +872,7 @@ class NaturalTrafficDashboardService
             'record_id' => $row['record_id'], 'table_name' => $row['table_name'],
             'synced_at' => $row['synced_at'],
             'source_section' => $row['source_section'],
+            'source_table_key' => $row['source_table_key'],
             'source_mode' => match ($row['source_section']) {
                 BrandSocialCsvImportService::SOURCE_SECTION => '手动 CSV',
                 YouTubeAnalyticsSyncService::SOURCE_SECTION => '官方 API',
@@ -646,6 +882,8 @@ class NaturalTrafficDashboardService
             'date' => $this->date($this->pick($fields, ['发布日期', '发布时间', '日期', '开始日期', '日期周期', 'date'])),
             'title' => $title,
             'post_type' => $postType,
+            'content_origin' => $this->socialContentOrigin($fields),
+            'content_origin_label' => $this->socialContentOrigin($fields) === 'collaboration' ? '合作内容' : '官媒内容',
             'posts' => $isAggregate ? $this->number($postsValue) : 1,
             'views' => $views,
             'likes' => $likes,
@@ -667,6 +905,18 @@ class NaturalTrafficDashboardService
                 : '',
             'source_fields' => $this->sanitizeFields($fields),
         ];
+    }
+
+    /** @param array<string, mixed> $fields */
+    private function socialContentOrigin(array $fields): string
+    {
+        $origin = mb_strtolower($this->text($this->pick($fields, [
+            '内容来源', '来源类型', '内容归属', '是否合作', '合作类型', 'content origin', 'origin',
+        ])));
+
+        return preg_match('/合作|达人|红人|collab|partner|influencer/i', $origin) === 1
+            ? 'collaboration'
+            : 'official';
     }
 
     /** @param Collection<int, array<string, mixed>> $all @return list<array<string, mixed>> */

@@ -93,6 +93,7 @@ class PermissionSeeder extends Seeder
         'finance.manage',
         'reports.view',
         'reports.export',
+        'reports.manage',
         'system.settings.view',
         'system.settings.update',
         'system.health.view',
