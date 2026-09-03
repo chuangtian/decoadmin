@@ -596,7 +596,8 @@
       const selectedId = resourceId(product?.selected_variant_gid, 'ProductVariant');
       const variant = variants.find((item) => resourceId(item?.shopify_variant_id, 'ProductVariant') === selectedId && item?.available_for_sale === true)
         || variants.find((item) => resourceId(item?.shopify_variant_id, 'ProductVariant') && item?.available_for_sale === true);
-      if (productId && !cartProducts.has(productId) && variant) return {product, variant};
+      const permitsSameProduct = product?.reason_code === 'same_product_upsell';
+      if (productId && (permitsSameProduct || !cartProducts.has(productId)) && variant) return {product, variant};
     }
     return null;
   }
@@ -674,6 +675,9 @@
     const url = new URL(`${proxyPath}/smart-cart`, window.location.origin);
     setIdQuery(url, 'cart_product_ids', productIds(cart?.items));
     setIdQuery(url, 'recently_viewed_product_ids', recentProducts());
+    if (Number.isFinite(Number(cart?.total_price)) && Number(cart.total_price) >= 0) {
+      url.searchParams.set('cart_subtotal_amount', (Number(cart.total_price) / 100).toFixed(2));
+    }
     url.searchParams.set('_deco_refresh', String(Date.now()));
     return requestJson(url.toString(), {cache: 'no-store', timeoutMs: 10000}).then((payload) => {
       if (!payload?.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) throw failure('invalid_config');

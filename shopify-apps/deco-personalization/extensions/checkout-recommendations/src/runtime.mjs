@@ -31,6 +31,21 @@ export function configurationEndpoint(entries) {
 }
 
 export async function fetchConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data);
+}
+
+export async function fetchThankYouConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data?.thank_you, 'thank_you');
+}
+
+export async function fetchOrderStatusConfiguration(api, entries = api?.appMetafields?.value) {
+  const payload = await fetchConfigurationPayload(api, entries);
+  return normalizeConfiguration(payload?.data?.order_status, 'order_status');
+}
+
+async function fetchConfigurationPayload(api, entries) {
   const endpoint = configurationEndpoint(entries);
   if (!endpoint) return null;
   const token = await api.sessionToken.get();
@@ -39,8 +54,7 @@ export async function fetchConfiguration(api, entries = api?.appMetafields?.valu
     headers: {Authorization: `Bearer ${token}`, Accept: 'application/json'},
   });
   if (!response.ok) return null;
-  const payload = await response.json();
-  return normalizeConfiguration(payload?.data);
+  return response.json();
 }
 
 export async function fetchRecommendations(api, configuration, lines, context = {}) {
@@ -52,6 +66,8 @@ export async function fetchRecommendations(api, configuration, lines, context = 
     headers: {Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json'},
     body: JSON.stringify({
       cart_lines: cartLines(lines),
+      cart_subtotal_amount: boundedNumber(context.cartSubtotal, 0, 1000000, null),
+      surface: string(context.surface, 40) || 'checkout',
       market: string(context.market, 80),
       currency: string(context.currency, 3),
       language: string(context.language, 20),
@@ -62,17 +78,17 @@ export async function fetchRecommendations(api, configuration, lines, context = 
   return normalizeServiceRecommendations(payload?.data);
 }
 
-export function normalizeConfiguration(value) {
+export function normalizeConfiguration(value, expectedPlacement = 'checkout') {
   const component = value?.component;
   if (!value || value.enabled !== true
     || !component || !uuid(component.uuid) || !uuid(component.strategy_uuid)
-    || component.placement !== 'checkout'
+    || component.placement !== expectedPlacement
     || !safeEndpoint(value?.recommendations_url, RECOMMENDATIONS_PATH)) return null;
   return {
     component: {
       uuid: component.uuid,
       strategy_uuid: component.strategy_uuid,
-      placement: 'checkout',
+      placement: expectedPlacement,
       heading: string(component.heading, 120) || 'Great Value Bundles for You',
       button_label: string(component.button_label, 60) || 'Add',
     },
@@ -109,6 +125,7 @@ export function normalizeServiceRecommendations(value) {
         ? String(product?.pricing?.currency ?? product?.price?.currency)
         : '',
       minimum_purchase_quantity: boundedInteger(product?.minimum_purchase_quantity, 1, 999, 1),
+      reason_code: string(product?.reason_code, 64),
       rule_id: uuid(product?.rule_id) ? product.rule_id : '',
       strategy_version_uuid: strategyVersionUuid,
       discount: value?.discount && typeof value.discount === 'object' ? {
@@ -131,7 +148,7 @@ export function selectNextCandidate(candidates, lines, dismissed = new Set()) {
   return candidates.find((candidate) => candidate.available
     && !dismissed.has(candidate.variant_id)
     && !cartVariants.has(candidate.variant_id)
-    && !cartProducts.has(candidate.product_id)) ?? null;
+    && (candidate.reason_code === 'same_product_upsell' || !cartProducts.has(candidate.product_id))) ?? null;
 }
 
 export function eventPayload(configuration, products) {
@@ -147,6 +164,23 @@ export function eventPayload(configuration, products) {
       rule_id: uuid(product.rule_id) ? product.rule_id : '',
     })),
   };
+}
+
+export function cartPermalink(storefrontUrl, candidate) {
+  const variantId = numericId(candidate?.variant_id, 'ProductVariant');
+  const quantity = boundedInteger(candidate?.minimum_purchase_quantity, 1, 999, 1);
+  if (!variantId) return '';
+  try {
+    const storefront = new URL(String(storefrontUrl ?? ''));
+    if (storefront.protocol !== 'https:' || storefront.username || storefront.password) return '';
+    const permalink = new URL(`/cart/${variantId}:${quantity}`, storefront.origin);
+    permalink.searchParams.set('storefront', 'true');
+    const discountCode = string(candidate?.discount?.code, 80);
+    if (discountCode && !discountCode.includes(',')) permalink.searchParams.set('discount', discountCode);
+    return permalink.toString();
+  } catch {
+    return '';
+  }
 }
 
 export function formatMoney(amount, currency, locale = '') {

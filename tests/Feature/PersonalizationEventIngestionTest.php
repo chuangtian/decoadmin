@@ -154,6 +154,35 @@ class PersonalizationEventIngestionTest extends TestCase
             ->assertJsonPath('error.code', 'SHOP_WRITE_DENIED');
     }
 
+    public function test_product_view_event_is_anonymous_store_scoped_and_does_not_require_a_strategy(): void
+    {
+        [, $organization, $store] = $this->context('Product Views');
+        $product = $this->product($organization, $store, 951, 'Viewed Bike');
+        $source = $this->source($organization, $store);
+
+        $this->event($source, [
+            'event_id' => 'product-view-951',
+            'event_name' => PersonalizationEventIngestionService::PRODUCT_VIEWED,
+            'client_id' => 'anonymous-client',
+            'session_id' => 'anonymous-session',
+            'occurred_at' => now()->toIso8601String(),
+            'products' => [[
+                'product_id' => 'gid://shopify/Product/951',
+                'variant_id' => 'gid://shopify/ProductVariant/9510',
+                'rank' => 1,
+            ]],
+        ])->assertAccepted();
+
+        $event = PersonalizationEvent::query()->with('products')->sole();
+        $this->assertSame(PersonalizationEventIngestionService::PRODUCT_VIEWED, $event->event_name);
+        $this->assertNull($event->component_id);
+        $this->assertNull($event->strategy_id);
+        $this->assertNull($event->placement);
+        $this->assertSame($product->id, $event->products->sole()->product_id);
+        $this->assertStringNotContainsString('anonymous-client', json_encode($event->toArray(), JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('anonymous-session', json_encode($event->toArray(), JSON_THROW_ON_ERROR));
+    }
+
     public function test_enabled_smart_cart_events_use_the_store_scoped_active_strategy(): void
     {
         [$admin, $organization, $store] = $this->context('Smart Cart Events');

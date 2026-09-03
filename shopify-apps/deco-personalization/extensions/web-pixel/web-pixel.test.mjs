@@ -15,7 +15,7 @@ test('Web Pixel runs in strict analytics-only privacy mode', () => {
   assert.match(config, /sale_of_data = "disabled"/);
 });
 
-test('Web Pixel subscribes only to P0 recommendation and checkout events', () => {
+test('Web Pixel subscribes only to bounded recommendation, product view, and checkout events', () => {
   assert.match(runtime, /deco_personalization:impression/);
   assert.match(runtime, /deco_personalization:click/);
   assert.match(runtime, /deco_personalization:add_to_cart/);
@@ -25,6 +25,7 @@ test('Web Pixel subscribes only to P0 recommendation and checkout events', () =>
   assert.match(runtime, /deco_personalization:checkout_recommendation_add_failed/);
   assert.match(runtime, /deco_personalization:checkout_recommendation_sequence_completed/);
   assert.match(runtime, /checkout_completed/);
+  assert.match(runtime, /product_viewed/);
   assert.doesNotMatch(runtime, /all_events|all_standard_events|all_custom_events/);
 });
 

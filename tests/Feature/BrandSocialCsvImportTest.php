@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Models\BrandSocialPostState;
 use App\Models\FeishuBitableRecord;
 use App\Models\Organization;
 use App\Models\Role;
@@ -53,10 +54,12 @@ CSV;
             'date_to' => '2026-08-15',
             'comparison' => 'none',
         ]);
-        $this->assertSame(2.0, $dashboard['kpis'][0]['value']);
-        $this->assertSame(230000.0, $dashboard['kpis'][1]['value']);
-        $this->assertSame(230000.0, $dashboard['funnel'][0]['value']);
+        $this->assertSame(4.0, $dashboard['kpis'][0]['value']);
+        $this->assertSame(521640.0, $dashboard['kpis'][1]['value']);
+        $this->assertSame(521640.0, $dashboard['funnel'][0]['value']);
         $this->assertSame(2.0, $dashboard['exclusion_summary']['posts']);
+        $this->assertSame(1.0, $dashboard['selected_weekly_report']['included_posts']);
+        $this->assertSame(50000.0, $dashboard['selected_weekly_report']['included_views']);
         $this->assertCount(3, $dashboard['platforms']);
         $this->assertSame(['Instagram', 'Facebook', 'YouTube'], array_column($dashboard['platforms'], 'platform'));
         $this->assertTrue($dashboard['platform_sources'][0]['available']);
@@ -178,6 +181,36 @@ CSV;
         $this->assertCount(2, $records);
         $this->assertEqualsCanonicalizing(['Instagram', 'Facebook'], $records->pluck('fields_encrypted')->map(fn (array $fields): string => $fields['平台'])->all());
         $this->assertSame(2, $records->pluck('feishu_bitable_table_id')->unique()->count());
+    }
+
+    public function test_decoadmin_template_imports_cross_platform_origin_and_visibility_without_id_collisions(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $csv = <<<'CSV'
+平台,帖子编号,发布时间,帖子类型,内容来源,账户账号,描述,浏览量,赞,评论数,分享,固定链接,显示状态,数据更新时间
+Instagram,shared,09/01/2026 09:00,Reels,官媒内容,macfoxbike,Official,100,10,2,1,https://instagram.test/shared,可见,09/02/2026 09:00
+Facebook,shared,09/01/2026 09:00,Video,合作内容,creator,Collaboration,200,20,3,2,https://facebook.test/shared,已隐藏,09/02/2026 09:00
+CSV;
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->post(route('natural-traffic.brand-media.import'), [
+                'file' => UploadedFile::fake()->createWithContent('decoadmin.csv', $csv),
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseCount('feishu_bitable_records', 2);
+        $this->assertDatabaseCount('brand_social_post_states', 2);
+        $this->assertTrue(BrandSocialPostState::query()->where('source_record_id', 'post:facebook:shared')->sole()->is_hidden);
+        $dashboard = app(NaturalTrafficDashboardService::class)->forChannel($store, 'brand-media', [
+            'date_from' => '2026-09-01', 'date_to' => '2026-09-01', 'comparison' => 'none',
+            'content_visibility' => 'all',
+        ]);
+
+        $this->assertSame(1.0, $dashboard['kpis'][0]['value']);
+        $this->assertSame(100.0, $dashboard['kpis'][1]['value']);
+        $this->assertSame(1, $dashboard['hidden_posts_count']);
+        $posts = collect($dashboard['posts'])->keyBy('record_id');
+        $this->assertSame('official', $posts['post:instagram:shared']['content_origin']);
+        $this->assertSame('collaboration', $posts['post:facebook:shared']['content_origin']);
     }
 
     /** @return array{User, Organization, Store} */

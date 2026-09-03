@@ -7,6 +7,7 @@ use App\Jobs\RefreshShopifyAnalyticsSnapshot;
 use App\Models\AnalyticsSnapshot;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
+use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -24,6 +25,17 @@ class ShopifyAnalyticsReportService
     private const ANALYTICS_OVERVIEW_SCHEMA_VERSION = 3;
 
     private const CATALOG_REPORT_SCHEMA_VERSION = 2;
+
+    /** @var list<string> */
+    private const ANALYTICS_CACHE_REPORTS = [
+        'catalog:core-sales-timeseries',
+        'catalog:core-sales-year-comparison',
+        'catalog:product-sales',
+        'catalog:vendor-sales',
+        'catalog:product-type-sales',
+        'catalog:customer-overview',
+        'catalog:customer-returning-rate',
+    ];
 
     /** @var array<string, string> */
     private const REPORT_QUERIES = [
@@ -117,7 +129,10 @@ class ShopifyAnalyticsReportService
         }
         GRAPHQL;
 
-    public function __construct(private ShopifyGraphQLClient $client) {}
+    public function __construct(
+        private ShopifyGraphQLClient $client,
+        private AnalyticsCacheVersionService $analyticsCache,
+    ) {}
 
     /**
      * @param  array{local_start: mixed, local_end: mixed, timezone: string}  $period
@@ -527,6 +542,13 @@ class ShopifyAnalyticsReportService
             },
             static fn (): null => null,
         );
+
+        // A dashboard request may have cached its local fallback while this
+        // background refresh was pending. The completed snapshot must become
+        // visible on the next request instead of waiting for that cache TTL.
+        if (in_array($snapshot->report_key, self::ANALYTICS_CACHE_REPORTS, true)) {
+            $this->analyticsCache->bump((int) $store->getKey());
+        }
     }
 
     /** @return array{scope_granted: bool, available: bool, source: string, rows: array<never, never>, error: string} */

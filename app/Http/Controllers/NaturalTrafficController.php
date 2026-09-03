@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Models\BrandSocialDailyReview;
+use App\Models\BrandSocialWeeklyReport;
 use App\Models\SeoAnalyticsSyncRun;
 use App\Models\Store;
 use App\Services\NaturalTraffic\BrandSocialCsvImportService;
+use App\Services\NaturalTraffic\BrandSocialWorkflowService;
 use App\Services\NaturalTraffic\NaturalTrafficDashboardService;
 use App\Services\NaturalTraffic\NaturalTrafficDataSyncService;
 use App\Services\SeoAnalytics\SeoAnalyticsConfigurationService;
@@ -21,6 +24,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class NaturalTrafficController extends Controller
@@ -87,12 +91,147 @@ class NaturalTrafficController extends Controller
             'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => $store->currency ?: 'USD'],
             'dashboard' => $trafficDashboard->forChannel($store, $channel, $request->only([
                 'date_from', 'date_to', 'comparison', 'affiliate',
-                'content_keyword', 'content_platform', 'content_type', 'content_status',
-                'content_page', 'content_per_page',
+                'content_keyword', 'content_platform', 'content_type', 'content_status', 'content_visibility',
+                'content_origin', 'content_sort', 'content_direction', 'content_page', 'content_per_page',
+                'weekly_week',
             ])),
             'configured' => $trafficSync->hasConfiguration($store, $channel),
             'canSync' => $request->user()?->hasPermission('sync.run', $organization, $store) ?? false,
+            ...($channel === 'brand-media' ? [
+                'canManage' => $request->user()?->hasPermission('reports.manage', $organization, $store) ?? false,
+            ] : []),
         ]);
+    }
+
+    public function updateBrandMediaPostVisibility(
+        Request $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialWorkflowService $workflow,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $validated = $request->validate([
+            'source_section' => ['required', 'string', 'max:80'],
+            'source_table_key' => ['required', 'string', 'max:191'],
+            'source_record_id' => ['required', 'string', 'max:191'],
+            'hidden' => ['required', 'boolean'],
+        ]);
+
+        $workflow->setPostVisibility(
+            $store,
+            $request->user(),
+            $validated['source_section'],
+            $validated['source_table_key'],
+            $validated['source_record_id'],
+            (bool) $validated['hidden'],
+        );
+
+        return back()->with('success', $validated['hidden'] ? '帖子已隐藏，后续统计不再计入。' : '帖子已恢复显示并重新计入统计。');
+    }
+
+    public function downloadBrandMediaTemplate(
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+    ): StreamedResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+
+        return response()->streamDownload(function (): void {
+            $output = fopen('php://output', 'wb');
+            if ($output === false) {
+                return;
+            }
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, [
+                '平台', '帖子编号', '发布时间', '帖子类型', '内容来源', '账户账号', '描述',
+                '浏览量', '赞', '评论数', '分享', '固定链接', '显示状态', '数据更新时间',
+            ]);
+            fputcsv($output, [
+                'Instagram', 'example-001', '2026-09-01 09:00:00', 'Reels', '官媒内容', 'macfoxbike',
+                '示例内容', '10000', '500', '30', '10', 'https://example.com/post', '可见', '2026-09-02 09:00:00',
+            ]);
+            fclose($output);
+        }, 'decoadmin-brand-media-template.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    public function upsertBrandMediaDailyReview(
+        Request $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialWorkflowService $workflow,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $validated = $request->validate([
+            'review_date' => ['required', 'date_format:Y-m-d'],
+            'status' => ['required', 'in:draft,published'],
+            'core_data' => ['nullable', 'string', 'max:10000'],
+            'top_content' => ['nullable', 'string', 'max:10000'],
+            'low_content' => ['nullable', 'string', 'max:10000'],
+            'recommendations' => ['nullable', 'string', 'max:10000'],
+        ]);
+        $workflow->upsertDailyReview($store, $request->user(), $validated);
+
+        return back()->with('success', $validated['status'] === 'published' ? '每日复盘已发布。' : '每日复盘草稿已保存。');
+    }
+
+    public function deleteBrandMediaDailyReview(
+        Request $request,
+        BrandSocialDailyReview $brandSocialDailyReview,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialWorkflowService $workflow,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $workflow->deleteDailyReview($store, $request->user(), $brandSocialDailyReview);
+
+        return back()->with('success', '每日复盘记录已删除。');
+    }
+
+    public function upsertBrandMediaWeeklyReport(
+        Request $request,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialWorkflowService $workflow,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $validated = $request->validate([
+            'week_start' => ['required', 'date_format:Y-m-d'],
+            'title' => ['required', 'string', 'max:160'],
+            'status' => ['required', 'in:draft,published'],
+            'summary' => ['nullable', 'string', 'max:20000'],
+        ]);
+        $workflow->upsertWeeklyReport($store, $request->user(), $validated);
+
+        return back()->with('success', $validated['status'] === 'published' ? '周报已发布并保存统计快照。' : '周报草稿已保存。');
+    }
+
+    public function deleteBrandMediaWeeklyReport(
+        Request $request,
+        BrandSocialWeeklyReport $brandSocialWeeklyReport,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
+        BrandSocialWorkflowService $workflow,
+    ): RedirectResponse {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $workflow->deleteWeeklyReport($store, $request->user(), $brandSocialWeeklyReport);
+
+        return back()->with('success', '周报记录已删除；原始帖子数据未删除。');
     }
 
     public function refreshChannel(
@@ -178,7 +317,7 @@ class NaturalTrafficController extends Controller
             ]);
 
             return back()->with('success', sprintf(
-                '%s CSV 已处理：%d 条（新增 %d、更新 %d、未变化 %d、跳过旧快照 %d）；%d 条 IG 异常爆款保留在明细并从汇总中排除。',
+                '%s CSV 已处理：%d 条（新增 %d、更新 %d、未变化 %d、跳过旧快照 %d）；%d 条 IG 高浏览内容保留在平台与每日数据中，并仅从周报汇总单列。',
                 $summary['platform'], $summary['rows'], $summary['created'], $summary['updated'],
                 $summary['unchanged'], $summary['skipped_stale'], $summary['outliers'],
             ));

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\SyncSeoAnalyticsForStore;
 use App\Jobs\SyncSeoAnalyticsShardForStore;
+use App\Models\FeishuBitableField;
 use App\Models\FeishuBitableRecord;
 use App\Models\FeishuBitableTable;
 use App\Models\Organization;
@@ -156,6 +157,17 @@ class NaturalTrafficPagesTest extends TestCase
         }
     }
 
+    public function test_reports_user_can_download_brand_media_import_template(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media.import-template'))
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8')
+            ->assertDownload('decoadmin-brand-media-template.csv');
+    }
+
     public function test_non_ai_dashboards_read_only_current_store_database_and_apply_real_previous_periods(): void
     {
         [$user, $organization, $store] = $this->context('operator');
@@ -169,6 +181,9 @@ class NaturalTrafficPagesTest extends TestCase
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-previous', [
             '发布日期' => '2026-08-17', '平台' => 'Instagram', '帖子数' => 1, '浏览量' => 500, '点赞' => 30, '评论数' => 5, '分享数' => 2,
         ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-youtube', [
+            '发布日期' => '2026-08-18', '平台' => 'YouTube', '帖子数' => 4, '浏览量' => 4000, '点赞' => 300, '评论数' => 20,
+        ]);
         $this->archiveRecord($organization, $otherStore, 'natural-traffic:social', '官媒周数据', 'social-other', [
             '发布日期' => '2026-08-18', '平台' => 'Facebook', '帖子数' => 99, '浏览量' => 99999,
         ]);
@@ -178,15 +193,17 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('NaturalTraffic/BrandMedia')
             ->where('dashboard.source.storage', 'current-project-mysql')
-            ->where('dashboard.source.record_count', 2)
-            ->where('dashboard.kpis.0.value', 2)
-            ->where('dashboard.kpis.1.value', 1000)
+            ->where('dashboard.source.record_count', 3)
+            ->where('dashboard.kpis.0.value', 6)
+            ->where('dashboard.kpis.1.value', 5000)
             ->where('dashboard.kpis.1.previous', 500)
-            ->where('dashboard.kpis.1.change', 100)
-            ->where('dashboard.funnel.0.value', 1000)
-            ->where('dashboard.weekly_reports.0.included_posts', 2)
+            ->where('dashboard.kpis.1.change', 900)
+            ->where('dashboard.funnel.0.value', 5000)
+            ->where('dashboard.weekly_reports.0.included_posts', 3)
+            ->where('dashboard.weekly_reports.0.week', '2026-08-16')
+            ->where('dashboard.weekly_reports.0.week_end', '2026-08-22')
             ->where('dashboard.platform_coverage.missing.0', 'Facebook')
-            ->has('dashboard.tabs', 3));
+            ->has('dashboard.tabs', 4));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-current', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_a', '平台' => ['IG'], '浏览' => 20000, '赞' => 1000, '评' => 60, '互动率' => 0.053, 'clicks' => 120,
@@ -245,13 +262,84 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.kpis.2.value', 10));
     }
 
+    public function test_brand_media_default_period_includes_current_store_day(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-03 12:00:00', 'Asia/Shanghai'));
+        [$user, $organization, $store] = $this->context('operator');
+        $store->update(['timezone' => 'America/Los_Angeles']);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'today-post', [
+            '发布日期' => '2026-09-02', '平台' => 'YouTube', '描述' => 'Today', '浏览量' => 607,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.filters.date_from', '2026-08-27')
+                ->where('dashboard.filters.date_to', '2026-09-02')
+                ->where('dashboard.kpis.1.value', 607));
+    }
+
+    public function test_influencer_tables_follow_source_field_order_format_dates_and_sort_by_date(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $olderTimestamp = CarbonImmutable::parse('2026-08-17 12:00:00', 'Asia/Shanghai')->getTimestampMs();
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-older', [
+            '浏览' => 900000, '发布日期' => $olderTimestamp, '平台' => ['IG'], '红人title' => 'older_creator',
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-newer', [
+            '浏览' => 1000, '发布日期' => '2026-08-18', '平台' => ['YTB'], '红人title' => 'newer_creator',
+        ]);
+        $mainTable = FeishuBitableTable::query()->where('name', '红人数据')->sole();
+        foreach (['红人title', '平台', '发布日期', '浏览'] as $order => $name) {
+            FeishuBitableField::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'feishu_bitable_table_id' => $mainTable->id,
+                'source_field_id' => 'field-'.$order,
+                'name' => $name,
+                'field_order' => $order,
+                'is_primary' => $order === 0,
+                'metadata_encrypted' => [],
+                'synced_at' => now(),
+            ]);
+        }
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-older', [
+            '发布日期' => '2026-08-16', '红人title' => 'viral_older', '浏览' => 9999999,
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-newer', [
+            '发布日期' => '2026-08-19', '红人title' => 'viral_newer', '浏览' => 10,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.influencer-operations', [
+                'date_from' => '2026-08-16',
+                'date_to' => '2026-08-19',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.columns', ['红人title', '平台', '发布日期', '浏览'])
+                ->where('dashboard.details.0.influencer', 'newer_creator')
+                ->where('dashboard.details.0.source_fields.发布日期', '2026-08-18')
+                ->where('dashboard.details.1.influencer', 'older_creator')
+                ->where('dashboard.details.1.source_fields.发布日期', '2026-08-17')
+                ->where('dashboard.viral_content.0.influencer', 'viral_newer')
+                ->where('dashboard.viral_content.1.influencer', 'viral_older')
+                ->where('dashboard.resources.0.influencer', 'newer_creator')
+                ->where('dashboard.resources.0.date', '2026-08-18')
+                ->where('dashboard.resources.1.influencer', 'older_creator')
+                ->where('dashboard.resources.1.date', '2026-08-17'));
+    }
+
     public function test_non_ai_dashboards_keep_source_semantics_for_outliers_links_and_missing_fields(): void
     {
         [$user, $organization, $store] = $this->context('operator');
         $session = $this->contextSession($organization, $store);
 
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'regular-post', [
-            '发布日期' => '2026-08-18', '平台' => 'Instagram', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
+            '发布日期' => '2026-08-18', '平台' => 'Instagram', '账户账号' => 'macfoxbike', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
         ]);
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'viral-post', [
             '发布日期' => '2026-08-19', '平台' => 'Instagram', '描述' => '爆款内容', '浏览量' => 150000, '点赞' => 6000, '评论数' => 400,
@@ -260,12 +348,13 @@ class NaturalTrafficPagesTest extends TestCase
         $this->actingAs($user)->withSession($session)
             ->get(route('natural-traffic.brand-media', ['date_from' => '2026-08-18', 'date_to' => '2026-08-24']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.weekly_reports.0.included_posts', 1)
-            ->where('dashboard.weekly_reports.0.excluded_posts', 1)
-            ->where('dashboard.weekly_reports.0.included_views', 10000)
-            ->where('dashboard.weekly_reports.0.included_interactions', 530)
-            ->where('dashboard.weekly_reports.0.average_views', 10000)
-            ->has('dashboard.weekly_reports.0.excluded_content', 1));
+            ->where('dashboard.selected_weekly_report.included_posts', 1)
+            ->where('dashboard.selected_weekly_report.excluded_posts', 1)
+            ->where('dashboard.selected_weekly_report.included_views', 10000)
+            ->where('dashboard.selected_weekly_report.included_interactions', 530)
+            ->where('dashboard.selected_weekly_report.average_views', 10000)
+            ->where('dashboard.selected_weekly_report.top_views.0.account_handle', 'macfoxbike')
+            ->has('dashboard.selected_weekly_report.excluded_content', 1));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-with-link', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_link', '平台' => ['IG'], '浏览' => 20000,
@@ -335,7 +424,7 @@ class NaturalTrafficPagesTest extends TestCase
                 ->where('dashboard.posts.0.record_id', 'post-11')
                 ->where('dashboard.posts.9.record_id', 'post-20')
                 ->has('dashboard.posts', 10)
-                ->where('dashboard.kpis.0.value', 26)
+                ->where('dashboard.kpis.0.value', 27)
                 ->where('dashboard.source.record_count', 27)
                 ->where('dashboard.post_filter_options.platforms', ['Instagram', 'Facebook', 'YouTube'])
                 ->where('dashboard.post_filter_options.aggregation_statuses.1.value', 'excluded'));

@@ -23,6 +23,7 @@
   data-proxy-path="{{ proxy_path | escape }}"
   data-product-id="{{ current_product_id | escape }}"
   data-cart-product-ids="{{ cart_product_ids | strip | escape }}"
+  data-cart-subtotal-cents="{{ cart.total_price | default: 0 }}"
   data-heading-override="{{ block.settings.heading_override | escape }}"
   data-design-mode="{{ request.design_mode }}"
   aria-live="polite"

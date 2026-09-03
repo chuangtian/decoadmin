@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 #[Fillable([
-    'uuid', 'organization_id', 'store_id', 'component_id', 'collection_id', 'shopify_collection_id',
+    'uuid', 'organization_id', 'store_id', 'component_id', 'thank_you_component_id', 'order_status_component_id', 'collection_id', 'shopify_collection_id',
     'maximum_recommendations', 'enabled', 'trust_items', 'settings', 'updated_by',
 ])]
 class PersonalizationCheckoutSetting extends Model
@@ -21,6 +21,16 @@ class PersonalizationCheckoutSetting extends Model
     public function component(): BelongsTo
     {
         return $this->belongsTo(PersonalizationRecommendationComponent::class, 'component_id');
+    }
+
+    public function thankYouComponent(): BelongsTo
+    {
+        return $this->belongsTo(PersonalizationRecommendationComponent::class, 'thank_you_component_id');
+    }
+
+    public function orderStatusComponent(): BelongsTo
+    {
+        return $this->belongsTo(PersonalizationRecommendationComponent::class, 'order_status_component_id');
     }
 
     public function collection(): BelongsTo

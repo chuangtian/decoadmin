@@ -22,7 +22,7 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'codex.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
@@ -32,12 +32,12 @@ class RoleSeeder extends Seeder
         'developer' => [
             'name' => '开发人员',
             'description' => '管理集成、应用、Webhook、数据同步和日志。',
-            'permissions' => ['store.view', 'apps.view', 'apps.create', 'apps.update', 'apps.configure', 'shopify.*', 'webhooks.*', 'sync.*', 'alerts.view', 'audit.view', 'system.health.view'],
+            'permissions' => ['store.view', 'apps.view', 'apps.create', 'apps.update', 'apps.configure', 'shopify.*', 'webhooks.*', 'sync.*', 'alerts.view', 'audit.view', 'reports.refresh', 'system.health.view'],
         ],
         'operator' => [
             'name' => '运营人员',
             'description' => '负责店铺的日常运营工作。',
-            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read'],
+            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'reports.manage', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read'],
         ],
         'marketing' => [
             'name' => '营销人员',
