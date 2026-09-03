@@ -35,14 +35,16 @@ onMounted(() => {
         >
             <Header class="shrink-0" @menu="sidebarOpen = true" />
             <main
-                class="min-h-0 min-w-0 max-w-full flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-4 sm:pb-6 lg:px-8 lg:pt-4 lg:pb-8"
+                class="app-content-density min-h-0 min-w-0 max-w-full flex-1 px-4 pt-3 pb-4 sm:px-6 sm:pt-4 sm:pb-6 lg:px-8 lg:pt-4 lg:pb-8"
                 :class="viewport ? 'flex flex-col overflow-hidden' : 'overflow-y-auto overflow-x-clip overscroll-x-none'"
             >
                 <Breadcrumb v-if="breadcrumbs.length" :items="breadcrumbs" class="mb-5 shrink-0" />
                 <div v-if="viewport" class="min-h-0 min-w-0 flex-1">
                     <slot />
                 </div>
-                <slot v-else />
+                <div v-else class="app-page-content min-w-0">
+                    <slot />
+                </div>
             </main>
         </div>
     </div>

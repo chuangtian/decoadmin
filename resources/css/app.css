@@ -149,3 +149,57 @@ body {
 .sidebar-font-scale .text-\[13px\] {
     font-size: 12.48px;
 }
+
+/*
+ * Balanced compact density for authenticated page content.
+ * Large layout gaps are halved while card padding, controls, table rows,
+ * typography, and small inline gaps keep their original visual rhythm.
+ */
+.app-content-density .gap-4 { gap: 0.5rem; }
+.app-content-density .gap-5 { gap: 0.625rem; }
+.app-content-density .gap-6 { gap: 0.75rem; }
+.app-content-density .gap-7 { gap: 0.875rem; }
+.app-content-density .gap-8 { gap: 1rem; }
+
+.app-content-density .gap-x-4 { column-gap: 0.5rem; }
+.app-content-density .gap-x-5 { column-gap: 0.625rem; }
+.app-content-density .gap-x-6 { column-gap: 0.75rem; }
+.app-content-density .gap-x-7 { column-gap: 0.875rem; }
+.app-content-density .gap-x-8 { column-gap: 1rem; }
+
+.app-content-density .gap-y-4 { row-gap: 0.5rem; }
+.app-content-density .gap-y-5 { row-gap: 0.625rem; }
+.app-content-density .gap-y-6 { row-gap: 0.75rem; }
+.app-content-density .gap-y-7 { row-gap: 0.875rem; }
+.app-content-density .gap-y-8 { row-gap: 1rem; }
+
+.app-content-density .space-y-4 > :not(:last-child) {
+    margin-block-start: calc(0.5rem * var(--tw-space-y-reverse));
+    margin-block-end: calc(0.5rem * (1 - var(--tw-space-y-reverse)));
+}
+
+.app-content-density .space-y-5 > :not(:last-child) {
+    margin-block-start: calc(0.625rem * var(--tw-space-y-reverse));
+    margin-block-end: calc(0.625rem * (1 - var(--tw-space-y-reverse)));
+}
+
+.app-content-density .space-y-6 > :not(:last-child) {
+    margin-block-start: calc(0.75rem * var(--tw-space-y-reverse));
+    margin-block-end: calc(0.75rem * (1 - var(--tw-space-y-reverse)));
+}
+
+.app-content-density .space-y-7 > :not(:last-child) {
+    margin-block-start: calc(0.875rem * var(--tw-space-y-reverse));
+    margin-block-end: calc(0.875rem * (1 - var(--tw-space-y-reverse)));
+}
+
+.app-content-density .space-y-8 > :not(:last-child) {
+    margin-block-start: calc(1rem * var(--tw-space-y-reverse));
+    margin-block-end: calc(1rem * (1 - var(--tw-space-y-reverse)));
+}
+
+.app-page-content > .mt-4 { margin-top: 0.5rem; }
+.app-page-content > .mt-5 { margin-top: 0.625rem; }
+.app-page-content > .mt-6 { margin-top: 0.75rem; }
+.app-page-content > .mt-7 { margin-top: 0.875rem; }
+.app-page-content > .mt-8 { margin-top: 1rem; }
