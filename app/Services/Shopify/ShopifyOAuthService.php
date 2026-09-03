@@ -26,7 +26,7 @@ class ShopifyOAuthService
     /**
      * @return array{authorization_url: string, state: string, state_record: OAuthState, store: Store}
      */
-    public function begin(Organization $organization, User $user, Store $store): array
+    public function begin(Organization $organization, User $user, Store $store, array $additionalScopes = []): array
     {
         $this->ensureConfigured();
         if ($store->organization_id !== $organization->getKey()) {
@@ -37,6 +37,15 @@ class ShopifyOAuthService
         $app = $this->configuredApp();
         $redirectUri = $this->redirectUri();
         $scopes = config('shopify.requested_scopes', []);
+        // Preserve existing grants when explicitly upgrading feature permissions.
+        // Normal store authorization requests remain unchanged.
+        if ($additionalScopes !== []) {
+            $scopes = array_values(array_unique([
+                ...$scopes,
+                ...(array) ($store->shopifyConnection?->scopes ?? []),
+                ...$additionalScopes,
+            ]));
+        }
         $plainState = Str::random(64);
 
         $stateRecord = DB::transaction(function () use ($organization, $user, $domain, $store, $app, $redirectUri, $scopes, $plainState): OAuthState {

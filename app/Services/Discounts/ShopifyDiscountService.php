@@ -164,7 +164,7 @@ class ShopifyDiscountService
 
     public function __construct(
         private ShopifyGraphQLClient $shopify,
-        private DiscountManagerAppTokenService $tokens,
+        private DiscountShopifyConnectionService $connections,
     ) {}
 
     /** @return array{data: list<array<string, mixed>>, next_cursor: string|null} */
@@ -206,6 +206,8 @@ class ShopifyDiscountService
     /** @param array<string, mixed> $input @return array<string, mixed> */
     public function create(Store $store, User $actor, array $input): array
     {
+        $this->connections->forStore($store, write: true);
+
         return $this->idempotentWrite($store, $actor, 'create', $input, function () use ($store, $actor, $input): array {
             $kind = (string) $input['kind'];
             [$mutation, $operation, $shopifyInput] = match ($kind) {
@@ -224,6 +226,8 @@ class ShopifyDiscountService
     /** @param array<string, mixed> $input @return array<string, mixed> */
     public function update(Store $store, User $actor, string $id, array $input): array
     {
+        $this->connections->forStore($store, write: true);
+
         return $this->idempotentWrite($store, $actor, 'update:'.$id, $input, function () use ($store, $actor, $id, $input): array {
             $current = $this->detail($store, $id);
             if (($current['editable'] ?? false) !== true || ($current['kind'] ?? null) !== $input['kind']) {
@@ -427,12 +431,11 @@ class ShopifyDiscountService
     }
 
     /** @param array<string, mixed> $variables @return array<string, mixed> */
-    private function query(Store $store, string $query, array $variables): array
+    private function query(Store $store, string $query, array $variables, bool $write = false): array
     {
         try {
-            return $this->shopify->queryWithAccessToken(
-                $this->shopDomain($store),
-                $this->tokens->accessTokenFor($store),
+            return $this->shopify->query(
+                $this->connections->forStore($store, $write),
                 $query,
                 $variables,
             );
@@ -444,7 +447,7 @@ class ShopifyDiscountService
     /** @param array<string, mixed> $variables */
     private function mutate(Store $store, string $mutation, string $operation, array $variables): string
     {
-        $payload = $this->query($store, $mutation, $variables);
+        $payload = $this->query($store, $mutation, $variables, write: true);
         $result = data_get($payload, "data.{$operation}");
         $errors = (array) data_get($result, 'userErrors', []);
         $id = data_get($result, 'codeDiscountNode.id');
@@ -459,16 +462,6 @@ class ShopifyDiscountService
     private function withFields(string $query): string
     {
         return str_replace('DISCOUNT_FIELDS', self::DISCOUNT_FIELDS, $query);
-    }
-
-    private function shopDomain(Store $store): string
-    {
-        $shop = strtolower(trim((string) $store->shopify_domain));
-        if ($store->status !== 'active' || preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $shop) !== 1) {
-            throw new DiscountManagerException('STORE_NOT_CONNECTED', '当前店铺尚未连接 Shopify。', 409);
-        }
-
-        return $shop;
     }
 
     /** @param array<string, mixed> $input @return array<string, mixed> */

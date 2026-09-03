@@ -65,10 +65,10 @@ const ProductPicker = defineComponent({
 const props = defineProps<{
     discounts: { data: DiscountRow[]; next_cursor: string | null };
     filters: { status: string };
-    connection: { ready: boolean; code: string | null; message: string | null };
+    connection: { ready: boolean; can_write: boolean; code: string | null; message: string | null };
     store: { id: number; name: string; currency: string; timezone: string };
     products: ProductOption[];
-    permissions: { manage: boolean };
+    permissions: { manage: boolean; connect: boolean };
 }>();
 
 const rows = ref([...props.discounts.data]);
@@ -87,12 +87,10 @@ const kindOptions: Array<{ value: Kind; title: string; description: string; icon
     { value: 'free_shipping', title: '免运费', description: '满足条件的订单免除运费', icon: '→' },
 ];
 
-const nowLocal = () => {
-    const date = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-    return date.toISOString().slice(0, 16);
-};
+const nowLocal = () => localDateTime(new Date().toISOString());
 const blankForm = (kind: Kind = 'product_amount') => ({
     idempotency_key: requestId(),
+    store_id: props.store.id,
     kind,
     title: '',
     code: '',
@@ -141,11 +139,11 @@ function chooseKind(kind: Kind) {
     editorOpen.value = true;
 }
 function openCreate() {
-    if (!props.permissions.manage || !props.connection.ready) return;
+    if (!props.permissions.manage || !props.connection.can_write || !props.connection.ready) return;
     typeDialog.value = true;
 }
 function edit(row: DiscountRow) {
-    if (!row.editable || !props.permissions.manage) return;
+    if (!row.editable || !props.permissions.manage || !props.connection.can_write) return;
     const kind = row.kind as Kind;
     resetForm(kind);
     editingId.value = row.id;
@@ -177,8 +175,12 @@ function edit(row: DiscountRow) {
 }
 function localDateTime(value: string | null) {
     if (!value) return '';
-    const date = new Date(value);
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: props.store.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(value));
+    const field = (name: string) => parts.find(part => part.type === name)?.value ?? '';
+    return `${field('year')}-${field('month')}-${field('day')}T${field('hour')}:${field('minute')}`;
 }
 function numericId(gid: string) { return gid.split('/').pop() ?? ''; }
 function requestId() { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
@@ -222,13 +224,13 @@ async function save() {
 function setStatus(status: string) {
     router.get('/discounts', status ? { status } : {}, { preserveState: false, replace: true });
 }
-function connectApp() { router.post('/discounts/connect'); }
+function connectApp() { router.post('/discounts/connect', { store_id: props.store.id }); }
 function statusLabel(status: string) { return ({ active: '有效', scheduled: '已计划', expired: '已过期' } as Record<string, string>)[status] ?? '未知'; }
 function statusClass(status: string) {
     return status === 'active' ? 'bg-emerald-100 text-emerald-800' : status === 'scheduled' ? 'bg-sky-100 text-sky-800' : status === 'expired' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800';
 }
 function kindLabel(kind: DiscountRow['kind']) { return ({ product_amount: '产品金额减免', order_amount: '订单金额减免', bxgy: '买 X 送 Y', free_shipping: '免运费', app: '应用折扣' } as Record<string, string>)[kind] ?? '其他'; }
-function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '无结束时间'; }
+function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: props.store.timezone, month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '无结束时间'; }
 function toggleProduct(field: 'product_ids' | 'buys_product_ids' | 'gets_product_ids', id: string) {
     const values = form[field];
     const index = values.indexOf(id);
@@ -254,12 +256,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                     <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">折扣管理</h1>
                     <p class="mt-2 text-sm text-slate-500">直接查看、创建和修改当前店铺的 Shopify 折扣码。</p>
                 </div>
-                <button v-if="permissions.manage" type="button" :disabled="!connection.ready" class="h-11 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" @click="openCreate">＋ 创建折扣</button>
+                <button v-if="permissions.manage" type="button" :disabled="!connection.ready || !connection.can_write" class="h-11 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" @click="openCreate">＋ 创建折扣</button>
             </header>
 
-            <section v-if="!connection.ready" class="flex flex-col gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div><h2 class="font-semibold text-amber-950">折扣管理 App 尚未连接</h2><p class="mt-1 text-sm text-amber-800">{{ connection.message }}</p></div>
-                <div class="flex items-center gap-3"><span class="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-amber-800">当前店铺：{{ store.name }}</span><button v-if="permissions.manage" type="button" class="rounded-xl bg-amber-950 px-4 py-2 text-sm font-semibold text-white" @click="connectApp">连接 Shopify</button></div>
+            <section v-if="!connection.ready || !connection.can_write" class="flex flex-col gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div><h2 class="font-semibold text-amber-950">{{ connection.code === 'SHOPIFY_DISCOUNT_SCOPE_REQUIRED' ? '需要补充折扣权限' : '暂时无法读取 Shopify 折扣' }}</h2><p class="mt-1 text-sm text-amber-800">{{ connection.message }}</p></div>
+                <div class="flex items-center gap-3"><span class="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-amber-800">当前店铺：{{ store.name }}</span><button v-if="permissions.manage && permissions.connect && ['SHOPIFY_DISCOUNT_SCOPE_REQUIRED', 'SHOPIFY_CONNECTION_REQUIRED'].includes(connection.code ?? '')" type="button" class="rounded-xl bg-amber-950 px-4 py-2 text-sm font-semibold text-white" @click="connectApp">授权折扣权限</button></div>
             </section>
 
             <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -281,12 +283,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                                 <td class="px-5 py-4 text-slate-700">{{ kindLabel(row.kind) }}</td>
                                 <td class="px-5 py-4 font-semibold text-slate-700">{{ row.usage_count.toLocaleString() }}<span v-if="row.usage_limit" class="font-normal text-slate-400"> / {{ row.usage_limit.toLocaleString() }}</span></td>
                                 <td class="px-5 py-4 text-xs text-slate-500">{{ formatDate(row.ends_at) }}</td>
-                                <td class="px-5 py-4 text-right"><button v-if="permissions.manage && row.editable" type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 hover:bg-white" @click="edit(row)">编辑</button><span v-else class="text-xs text-slate-400">{{ row.editable ? '只读' : '请在 Shopify 修改' }}</span></td>
+                                <td class="px-5 py-4 text-right"><button v-if="permissions.manage && row.editable && connection.can_write" type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 hover:bg-white" @click="edit(row)">编辑</button><span v-else class="text-xs text-slate-400">{{ row.editable ? '只读' : '请在 Shopify 修改' }}</span></td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div v-else class="grid min-h-72 place-items-center p-8 text-center"><div><div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-2xl text-emerald-700">%</div><h2 class="mt-4 font-semibold text-slate-900">{{ connection.ready ? '暂无折扣' : '等待 Shopify 授权' }}</h2><p class="mt-2 text-sm text-slate-500">{{ connection.ready ? '创建第一条折扣后会显示在这里。' : '连接折扣管理 App 后即可读取当前店铺折扣。' }}</p></div></div>
+                <div v-else class="grid min-h-72 place-items-center p-8 text-center"><div><div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-2xl text-emerald-700">%</div><h2 class="mt-4 font-semibold text-slate-900">{{ connection.ready ? '暂无折扣' : '当前无法加载折扣' }}</h2><p class="mt-2 text-sm text-slate-500">{{ connection.ready ? '创建第一条折扣后会显示在这里。' : '使用当前店铺已有的 Shopify 连接，无需另建 App。' }}</p></div></div>
                 <button v-if="discounts.next_cursor" type="button" class="m-4 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700" @click="router.get('/discounts', { status: filters.status || undefined, cursor: discounts.next_cursor })">加载更多</button>
             </section>
         </div>

@@ -202,10 +202,6 @@ Route::prefix('/api/shopify-app/personalization')->group(function (): void {
         ->name('personalization.shopify-app.bootstrap');
 });
 
-Route::get('/shopify/discount-manager/oauth/callback', [DiscountManagerOAuthController::class, 'callback'])
-    ->middleware('throttle:30,1')
-    ->name('discount-manager.oauth.callback');
-
 Route::get('/api/shopify-app/personalization/checkout/configuration', PersonalizationCheckoutExtensionController::class)
     ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
     ->name('personalization.checkout.configuration');
