@@ -87,23 +87,23 @@ class BrandSocialWorkflowTest extends TestCase
         $this->assertDatabaseCount('brand_social_daily_reviews', 1);
         $this->assertSame('published', BrandSocialDailyReview::query()->sole()->status);
 
-        $weekly = ['week_start' => '2026-08-19', 'title' => 'Aug 17 – Aug 23, 2026', 'status' => 'published', 'summary' => '本周总结'];
+        $weekly = ['week_start' => '2026-08-19', 'title' => 'Aug 16 – Aug 22, 2026', 'status' => 'published', 'summary' => '本周总结'];
         $this->actingAs($user)->withSession($this->contextSession($organization, $store))
             ->put(route('natural-traffic.brand-media.weekly-reports.upsert'), $weekly)
             ->assertRedirect();
         $report = BrandSocialWeeklyReport::query()->sole();
-        $this->assertSame('2026-08-17', $report->week_start->toDateString());
+        $this->assertSame('2026-08-16', $report->week_start->toDateString());
         $this->assertEquals(1, $report->metrics_snapshot['included_posts']);
         $this->assertEquals(20000, $report->metrics_snapshot['included_views']);
         $this->assertEquals(1, $report->metrics_snapshot['excluded_posts']);
 
         $this->actingAs($user)->withSession($this->contextSession($organization, $store))
-            ->get(route('natural-traffic.brand-media', ['date_from' => '2026-08-17', 'date_to' => '2026-08-23']))
+            ->get(route('natural-traffic.brand-media', ['date_from' => '2026-08-16', 'date_to' => '2026-08-22']))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('canManage', true)
                 ->where('dashboard.daily_reviews.0.core_data', '核心数据')
-                ->where('dashboard.selected_weekly_report.title', 'Aug 17 – Aug 23, 2026')
+                ->where('dashboard.selected_weekly_report.title', 'Aug 16 – Aug 22, 2026')
                 ->where('dashboard.selected_weekly_report.included_posts', 1)
                 ->where('dashboard.selected_weekly_report.excluded_posts', 1));
 

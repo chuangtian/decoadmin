@@ -708,7 +708,7 @@ function clearContentFilters(): void {
 
                 <template v-else-if="activeTab === 'weekly'">
                     <section class="flex flex-col gap-4 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-                        <div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Weekly report</p><h2 class="mt-1 text-xl font-black text-slate-950">周报分析</h2><p class="mt-1 text-sm text-slate-500">独立选择周次，不受顶部日期筛选限制。</p></div>
+                        <div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Weekly report</p><h2 class="mt-1 text-xl font-black text-slate-950">周报分析</h2><p class="mt-1 text-sm text-slate-500">Instagram 专属周报，按周日到周六归档，不受顶部日期筛选限制。</p></div>
                         <div class="flex flex-wrap items-center gap-2">
                             <select :value="dashboard.selected_week ?? ''" class="min-w-64 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-800" @change="selectWeek">
                                 <option v-for="option in dashboard.weekly_options" :key="option.value" :value="option.value">{{ option.label }}（{{ compact(option.posts) }} 篇）</option>
@@ -717,7 +717,7 @@ function clearContentFilters(): void {
                             <button v-if="canManage && selectedWeeklyReport?.uuid" type="button" class="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-black text-rose-700" @click="deleteWeeklyReport">删除</button>
                         </div>
                     </section>
-                    <aside class="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm leading-6 text-blue-900">周报口径仅对 Instagram 生效：Reels / 视频播放量或图片 / 轮播曝光量超过 100,000 时单独列出；Meta 文件无曝光量时以覆盖人数判定。互动为点赞 + 评论。</aside>
+                    <aside class="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm leading-6 text-blue-900">周报只统计 Instagram 官媒与合作内容，周期为周日到周六：Reels / 视频播放量或图片 / 轮播曝光量超过 100,000 时单独列出；Meta 文件无曝光量时以覆盖人数判定。互动为点赞 + 评论。</aside>
                     <template v-if="selectedWeeklyReport">
                         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                             <article v-for="item in [{ label: '总浏览量', value: selectedWeeklyReport.included_views, hint: `${compact(selectedWeeklyReport.included_posts)} 篇计入` }, { label: '总互动数', value: selectedWeeklyReport.included_interactions, hint: `赞 ${compact(selectedWeeklyReport.likes)} + 评论 ${compact(selectedWeeklyReport.comments)}` }, { label: '帖子数', value: selectedWeeklyReport.included_posts, hint: `${compact(selectedWeeklyReport.excluded_posts)} 篇高浏览单列` }, { label: '平均浏览', value: selectedWeeklyReport.average_views, hint: '单帖均值' }]" :key="item.label" class="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-bold text-slate-500">{{ item.label }}</p><p class="mt-2 text-3xl font-black tabular-nums text-slate-950">{{ compact(item.value) }}</p><p class="mt-2 text-xs text-slate-400">{{ item.hint }}</p></article>

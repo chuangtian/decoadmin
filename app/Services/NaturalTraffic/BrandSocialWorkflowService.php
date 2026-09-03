@@ -10,6 +10,7 @@ use App\Models\FeishuBitableRecord;
 use App\Models\Store;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
@@ -108,8 +109,9 @@ class BrandSocialWorkflowService
     /** @param array<string, mixed> $values */
     public function upsertWeeklyReport(Store $store, User $actor, array $values): BrandSocialWeeklyReport
     {
-        $weekStart = CarbonImmutable::parse((string) $values['week_start'], $store->timezone ?: 'UTC')->startOfWeek();
-        $weekEnd = $weekStart->endOfWeek();
+        $weekStart = CarbonImmutable::parse((string) $values['week_start'], $store->timezone ?: 'UTC')
+            ->startOfWeek(CarbonInterface::SUNDAY);
+        $weekEnd = $weekStart->endOfWeek(CarbonInterface::SATURDAY);
         $week = $weekStart->toDateString();
         $dashboard = $this->dashboard->forChannel($store, 'brand-media', [
             'date_from' => $week,
