@@ -5,8 +5,10 @@ import NaturalTrafficDataTable from '../../Components/NaturalTraffic/NaturalTraf
 import NaturalTrafficEmptyState from '../../Components/NaturalTraffic/NaturalTrafficEmptyState.vue';
 import NaturalTrafficKpiGrid from '../../Components/NaturalTraffic/NaturalTrafficKpiGrid.vue';
 import NaturalTrafficPageHeader from '../../Components/NaturalTraffic/NaturalTrafficPageHeader.vue';
+import NaturalTrafficContentEfficiencyChart from '../../Components/NaturalTraffic/NaturalTrafficContentEfficiencyChart.vue';
 import NaturalTrafficScatterPlot from '../../Components/NaturalTraffic/NaturalTrafficScatterPlot.vue';
 import NaturalTrafficTrendChart from '../../Components/NaturalTraffic/NaturalTrafficTrendChart.vue';
+import NaturalTrafficWeeklyComparisonChart from '../../Components/NaturalTraffic/NaturalTrafficWeeklyComparisonChart.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import type { NaturalTrafficDashboardBase } from '../../types/naturalTraffic';
 
@@ -51,7 +53,7 @@ type WeeklyReport = Record<string, unknown> & {
     included_interactions: number;
     average_views: number;
     content_types: Array<Record<string, unknown>>;
-    content_efficiency: Array<Record<string, unknown>>;
+    content_efficiency: Array<{ type: string; posts: number; average_views: number; average_interactions: number }>;
     scatter: Array<Record<string, unknown>>;
     top_views: SocialPost[];
     top_engagement: SocialPost[];
@@ -157,14 +159,24 @@ type BrandDashboard = NaturalTrafficDashboardBase & {
 const props = defineProps<{ store: { id: number; name: string; currency: string }; dashboard: BrandDashboard; configured: boolean; canSync: boolean; canManage: boolean }>();
 const activeTab = ref('platforms');
 const trendMetric = ref<'views' | 'likes' | 'comments' | 'shares'>('views');
+const weeklyTrendMetric = ref<'included_views' | 'included_interactions' | 'average_views' | 'included_posts'>('included_views');
 const trendMetrics = [
     { key: 'views', label: '浏览量' },
     { key: 'likes', label: '赞' },
     { key: 'shares', label: '分享' },
     { key: 'comments', label: '评论' },
 ] as const;
+const weeklyTrendMetrics = [
+    { key: 'included_views', label: '浏览' },
+    { key: 'included_interactions', label: '互动' },
+    { key: 'average_views', label: '平均浏览' },
+    { key: 'included_posts', label: '帖子数' },
+] as const;
 const fileInput = ref<HTMLInputElement | null>(null);
 const reviewEditorOpen = ref(false);
+const reviewEditorMode = ref<'create' | 'edit'>('create');
+const reviewCombinedContent = ref('');
+const reviewOriginalCombinedContent = ref('');
 const weeklyEditorOpen = ref(false);
 const reviewStatusFilter = ref<'all' | 'published' | 'draft'>('all');
 const reviewStatuses = [
@@ -206,6 +218,11 @@ const weeklyComparisonCards = computed(() => [
     ['average_views', '平均浏览'],
     ['included_posts', '帖子数'],
 ].map(([key, label]) => ({ key, label, ...props.dashboard.weekly_comparison[key] })));
+const weeklyTrendSeries = computed(() => {
+    const metric = weeklyTrendMetrics.find((item) => item.key === weeklyTrendMetric.value) ?? weeklyTrendMetrics[0];
+
+    return [{ key: metric.key, label: metric.label, color: '#3b82f6' }];
+});
 const brandFunnel = computed(() => {
     const views = metricValue('views');
     const interactions = metricValue('engagements');
@@ -301,6 +318,10 @@ function barWidth(value: number, maximum: number): number {
 function selectFile(event: Event): void {
     importForm.file = (event.target as HTMLInputElement).files?.[0] ?? null;
 }
+function selectWeeklyImportFile(event: Event): void {
+    selectFile(event);
+    if (importForm.file) uploadCsv();
+}
 function uploadCsv(): void {
     if (!importForm.file || !props.canSync) return;
     importForm.post('/natural-traffic/brand-media/import', {
@@ -371,17 +392,33 @@ function selectWeek(event: Event): void {
 }
 function openDailyReview(review?: DailyReview): void {
     reviewForm.clearErrors();
+    reviewEditorMode.value = review ? 'edit' : 'create';
     reviewForm.review_date = review?.review_date ?? props.dashboard.filters.date_to;
     reviewForm.status = review?.status ?? 'draft';
     reviewForm.core_data = review?.core_data ?? '';
     reviewForm.top_content = review?.top_content ?? '';
     reviewForm.low_content = review?.low_content ?? '';
     reviewForm.recommendations = review?.recommendations ?? '';
+    reviewCombinedContent.value = [review?.top_content, review?.low_content]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .join('\n');
+    reviewOriginalCombinedContent.value = reviewCombinedContent.value;
     reviewEditorOpen.value = true;
+}
+function reviewDateLabel(value: string): string {
+    const [year, month, day] = value.split('-').map(Number);
+    if (!year || !month || !day) return value;
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+    return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')} ${weekdays[new Date(year, month - 1, day).getDay()]}`;
 }
 function saveDailyReview(status: 'draft' | 'published'): void {
     if (!props.canManage || reviewForm.processing) return;
     if (status === 'published' && !window.confirm('确认发布这份每日复盘？')) return;
+    if (reviewCombinedContent.value !== reviewOriginalCombinedContent.value) {
+        reviewForm.top_content = reviewCombinedContent.value;
+        reviewForm.low_content = '';
+    }
     reviewForm.status = status;
     reviewForm.put('/natural-traffic/brand-media/daily-reviews', {
         preserveScroll: true,
@@ -499,60 +536,60 @@ function clearContentFilters(): void {
                         </div>
                         <NaturalTrafficTrendChart :points="dashboard.platform_trends" :series="platformTrendSeries" />
                     </section>
-                    <section aria-label="内容表现漏斗" class="grid gap-6 xl:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]">
-                        <article class="overflow-hidden rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <section aria-label="内容表现漏斗" class="grid items-start gap-5 xl:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]">
+                        <article class="self-start overflow-hidden rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
                             <div>
                                 <h2 class="text-lg font-black text-slate-950">品牌官媒漏斗</h2>
                                 <p class="mt-1 text-xs leading-5 text-slate-500">当前筛选期全部可见内容；10 万以上内容只在周报中单列</p>
                             </div>
 
-                            <div class="mx-auto mt-7 max-w-[580px]">
-                                <div class="brand-funnel-layer brand-funnel-layer--views relative mx-auto flex min-h-28 w-full items-center justify-center overflow-hidden bg-gradient-to-r from-blue-700 via-blue-600 to-sky-500 px-12 py-5 text-center text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,.9)] sm:min-h-32">
+                            <div class="mx-auto mt-5 max-w-[500px]">
+                                <div class="brand-funnel-layer brand-funnel-layer--views relative mx-auto flex min-h-20 w-full items-center justify-center overflow-hidden bg-gradient-to-r from-blue-700 via-blue-600 to-sky-500 px-10 py-4 text-center text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,.9)] sm:min-h-24">
                                     <div class="relative z-10">
                                         <p class="text-xs font-black tracking-[0.2em] text-blue-100">浏览 / 播放</p>
-                                        <p class="mt-2 text-3xl font-black tabular-nums sm:text-4xl">{{ compact(brandFunnel.views) }}</p>
+                                        <p class="mt-1 text-2xl font-black tabular-nums sm:text-3xl">{{ compact(brandFunnel.views) }}</p>
                                     </div>
                                 </div>
                                 <div class="relative z-10 mx-auto -my-1 flex w-fit items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1.5 text-[11px] font-black text-blue-700 shadow-sm">
                                     <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
                                     互动率 {{ percent(brandFunnel.engagementRate) }}
                                 </div>
-                                <div class="brand-funnel-layer brand-funnel-layer--interactions relative mx-auto flex min-h-24 w-[74%] items-center justify-center overflow-hidden bg-gradient-to-r from-violet-600 via-purple-500 to-fuchsia-500 px-10 py-5 text-center text-white shadow-[0_18px_40px_-24px_rgba(147,51,234,.85)] sm:min-h-28">
+                                <div class="brand-funnel-layer brand-funnel-layer--interactions relative mx-auto flex min-h-16 w-[72%] items-center justify-center overflow-hidden bg-gradient-to-r from-violet-600 via-purple-500 to-fuchsia-500 px-8 py-3 text-center text-white shadow-[0_18px_40px_-24px_rgba(147,51,234,.85)] sm:min-h-20">
                                     <div class="relative z-10">
                                         <p class="text-xs font-black tracking-[0.2em] text-violet-100">互动</p>
-                                        <p class="mt-2 text-2xl font-black tabular-nums sm:text-3xl">{{ compact(brandFunnel.interactions) }}</p>
+                                        <p class="mt-1 text-xl font-black tabular-nums sm:text-2xl">{{ compact(brandFunnel.interactions) }}</p>
                                     </div>
                                 </div>
                             </div>
 
-                            <p class="mt-6 text-center text-[11px] leading-5 text-slate-400">互动为点赞、评论与分享之和；漏斗层宽仅表示阶段结构</p>
+                            <p class="mt-4 text-center text-[11px] leading-5 text-slate-400">互动为点赞、评论与分享之和；漏斗层宽仅表示阶段结构</p>
                         </article>
 
-                        <article class="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                        <article class="self-start rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
                             <div>
                                 <h2 class="text-lg font-black text-slate-950">平台漏斗对比</h2>
                                 <p class="mt-1 text-xs leading-5 text-slate-500">浏览与互动共用同一刻度；没有数据的平台按 0 展示</p>
                             </div>
 
-                            <div class="mt-6 space-y-5">
-                                <article v-for="row in platformFunnelRows" :key="row.platform" class="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 sm:p-5">
+                            <div class="mt-4 space-y-3">
+                                <article v-for="row in platformFunnelRows" :key="row.platform" class="rounded-2xl border border-slate-100 bg-slate-50/80 p-3.5">
                                     <div class="flex items-center justify-between gap-3">
                                         <h3 class="font-black text-slate-900">{{ row.platform }}</h3>
                                         <span class="rounded-full px-2.5 py-1 text-[11px] font-black tabular-nums ring-1 ring-inset" :class="row.badgeClass">互动率 {{ percent(row.engagementRate) }}</span>
                                     </div>
 
-                                    <div class="mt-4">
-                                        <div class="mb-2 flex items-center justify-between gap-3 text-xs">
+                                    <div class="mt-3">
+                                        <div class="mb-1.5 flex items-center justify-between gap-3 text-xs">
                                             <span class="font-bold text-slate-500">浏览 / 播放</span>
                                             <strong class="tabular-nums text-slate-800">{{ compact(row.views) }}</strong>
                                         </div>
-                                        <div class="h-3 overflow-hidden rounded-full bg-slate-200/80">
+                                        <div class="h-2.5 overflow-hidden rounded-full bg-slate-200/80">
                                             <div class="h-full rounded-full transition-[width] duration-500" :class="row.viewBarClass" :style="{ width: `${barWidth(row.views, platformFunnelMax)}%` }"></div>
                                         </div>
                                     </div>
 
-                                    <div class="mt-3">
-                                        <div class="mb-2 flex items-center justify-between gap-3 text-xs">
+                                    <div class="mt-2.5">
+                                        <div class="mb-1.5 flex items-center justify-between gap-3 text-xs">
                                             <span class="font-bold text-slate-500">互动</span>
                                             <strong class="tabular-nums text-slate-800">{{ compact(row.interactions) }}</strong>
                                         </div>
@@ -563,12 +600,12 @@ function clearContentFilters(): void {
                                 </article>
                             </div>
 
-                            <div class="mt-5 flex flex-col gap-2 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="mt-3 flex flex-col gap-2 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                     <p class="text-xs font-black text-blue-700">综合互动率</p>
                                     <p class="mt-0.5 text-[11px] text-blue-600/80">全部平台互动 ÷ 浏览 / 播放</p>
                                 </div>
-                                <strong class="text-2xl font-black tabular-nums text-blue-700">{{ percent(brandFunnel.engagementRate) }}</strong>
+                                <strong class="text-xl font-black tabular-nums text-blue-700">{{ percent(brandFunnel.engagementRate) }}</strong>
                             </div>
                         </article>
                     </section>
@@ -701,39 +738,54 @@ function clearContentFilters(): void {
                 </template>
 
                 <template v-else-if="activeTab === 'weekly'">
-                    <section class="flex flex-col gap-4 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-                        <div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Weekly report</p><h2 class="mt-1 text-xl font-black text-slate-950">周报分析</h2><p class="mt-1 text-sm text-slate-500">Instagram 专属周报，按周日到周六归档，不受顶部日期筛选限制。</p></div>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <select :value="dashboard.selected_week ?? ''" class="min-w-64 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-800" @change="selectWeek">
+                    <section class="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
+                        <select :value="dashboard.selected_week ?? ''" class="min-w-72 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800" @change="selectWeek">
                                 <option v-for="option in dashboard.weekly_options" :key="option.value" :value="option.value">{{ option.label }}（{{ compact(option.posts) }} 篇）</option>
-                            </select>
-                            <button v-if="canManage && selectedWeeklyReport" type="button" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white" @click="openWeeklyEditor">{{ selectedWeeklyReport.uuid ? '编辑周报' : '保存周报' }}</button>
-                            <button v-if="canManage && selectedWeeklyReport?.uuid" type="button" class="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-black text-rose-700" @click="deleteWeeklyReport">删除</button>
+                        </select>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button v-if="canManage && selectedWeeklyReport" type="button" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 hover:border-slate-500" @click="openWeeklyEditor">重命名</button>
+                            <button v-if="canManage && selectedWeeklyReport" type="button" :disabled="!selectedWeeklyReport.uuid" :title="selectedWeeklyReport.uuid ? undefined : '请先保存这份周报'" class="rounded-xl border border-rose-300 bg-white px-4 py-2.5 text-sm font-black text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40" @click="deleteWeeklyReport">删除</button>
+                            <label v-if="canSync" class="cursor-pointer rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-blue-700" :class="importForm.processing ? 'pointer-events-none opacity-50' : ''">
+                                {{ importForm.processing ? '导入中…' : '导入 CSV' }}
+                                <input ref="fileInput" type="file" accept=".csv,text/csv" class="hidden" :disabled="importForm.processing" @change="selectWeeklyImportFile" />
+                            </label>
                         </div>
                     </section>
+                    <p v-if="importForm.errors.file" class="text-xs font-bold text-rose-600">{{ importForm.errors.file }}</p>
                     <aside class="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm leading-6 text-blue-900">周报只统计 Instagram 官媒与合作内容，周期为周日到周六：Reels / 视频播放量或图片 / 轮播曝光量超过 100,000 时单独列出；Meta 文件无曝光量时以覆盖人数判定。互动为点赞 + 评论。</aside>
                     <template v-if="selectedWeeklyReport">
                         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                             <article v-for="item in [{ label: '总浏览量', value: selectedWeeklyReport.included_views, hint: `${compact(selectedWeeklyReport.included_posts)} 篇计入` }, { label: '总互动数', value: selectedWeeklyReport.included_interactions, hint: `赞 ${compact(selectedWeeklyReport.likes)} + 评论 ${compact(selectedWeeklyReport.comments)}` }, { label: '帖子数', value: selectedWeeklyReport.included_posts, hint: `${compact(selectedWeeklyReport.excluded_posts)} 篇高浏览单列` }, { label: '平均浏览', value: selectedWeeklyReport.average_views, hint: '单帖均值' }]" :key="item.label" class="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-bold text-slate-500">{{ item.label }}</p><p class="mt-2 text-3xl font-black tabular-nums text-slate-950">{{ compact(item.value) }}</p><p class="mt-2 text-xs text-slate-400">{{ item.hint }}</p></article>
                         </div>
                         <div class="grid gap-6 xl:grid-cols-2">
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">最近周报趋势</h2><p class="mt-1 mb-5 text-xs text-slate-500">所有可用周次的计入口径数据</p><NaturalTrafficTrendChart :points="dashboard.weekly" x-key="week" :series="[{ key: 'included_views', label: '总浏览量', color: '#2563eb' }, { key: 'included_interactions', label: '总互动', color: '#8b5cf6' }]" /></section>
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">本周 vs 上周</h2><div class="mt-5 space-y-5"><article v-for="item in weeklyComparisonCards" :key="item.key"><div class="flex items-center justify-between text-sm"><span class="font-bold text-slate-600">{{ item.label }}</span><span class="font-black" :class="(item.change ?? 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'">{{ changeText(item.change) }}</span></div><div class="mt-2 grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 text-xs"><span class="text-blue-600">选中周</span><div class="h-2.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-blue-500" :style="{ width: `${barWidth(Number(item.current ?? 0), Math.max(1, Number(item.current ?? 0), Number(item.previous ?? 0)))}%` }"></div></div><strong>{{ compact(item.current) }}</strong><span class="text-slate-400">上周</span><div class="h-2.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-slate-400" :style="{ width: `${barWidth(Number(item.previous ?? 0), Math.max(1, Number(item.current ?? 0), Number(item.previous ?? 0)))}%` }"></div></div><strong>{{ compact(item.previous) }}</strong></div></article></div></section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
+                                <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <h2 class="text-lg font-black text-slate-950">最近周报趋势</h2>
+                                    <div class="flex flex-wrap rounded-xl bg-slate-100 p-1">
+                                        <button v-for="metric in weeklyTrendMetrics" :key="metric.key" type="button" class="rounded-lg px-3 py-1.5 text-xs font-black transition" :class="weeklyTrendMetric === metric.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'" @click="weeklyTrendMetric = metric.key">{{ metric.label }}</button>
+                                    </div>
+                                </div>
+                                <NaturalTrafficTrendChart :points="dashboard.weekly" x-key="week" :series="weeklyTrendSeries" :fill-area="true" :height="300" />
+                            </section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
+                                <h2 class="mb-5 text-lg font-black text-slate-950">本周 vs 上周</h2>
+                                <NaturalTrafficWeeklyComparisonChart :items="weeklyComparisonCards" />
+                            </section>
                         </div>
                         <div class="grid gap-6 xl:grid-cols-2">
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">内容形式效率对比</h2><NaturalTrafficDataTable :columns="['type', 'posts', 'average_views', 'average_interactions']" :rows="selectedWeeklyReport.content_efficiency" :labels="{ type: '内容类型', posts: '帖子数', average_views: '平均浏览', average_interactions: '平均互动' }" /></section>
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">单帖表现四象限</h2><p class="mt-1 text-xs text-slate-500">横轴浏览量，纵轴互动量</p><NaturalTrafficScatterPlot :points="selectedWeeklyReport.scatter" y-key="interactions" y-label="互动量" /></section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">内容形式效率对比</h2><NaturalTrafficContentEfficiencyChart :items="selectedWeeklyReport.content_efficiency" /></section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">单帖表现四象限</h2><p class="mt-1 text-xs text-slate-500">横轴浏览量，纵轴互动量</p><NaturalTrafficScatterPlot :points="selectedWeeklyReport.scatter" x-label="浏览量" y-key="interactions" y-label="互动量" :log-scale="false" /></section>
                         </div>
                         <div class="grid gap-6 xl:grid-cols-2">
                             <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">本周内容结构</h2><div class="space-y-4"><article v-for="row in selectedWeeklyReport.content_types" :key="String(row.type)"><div class="flex justify-between text-sm"><strong class="text-slate-700">{{ row.type }}</strong><span class="text-slate-500">{{ compact(row.posts) }} 篇（{{ Number(row.percentage ?? 0).toFixed(1) }}%）</span></div><div class="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-fuchsia-500" :style="{ width: `${Math.max(2, Number(row.percentage ?? 0))}%` }"></div></div></article></div></section>
                             <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">本周摘要</h2><ul class="space-y-3 text-sm leading-6 text-slate-700"><li v-for="item in selectedWeeklyReport.summary_items" :key="item" class="rounded-xl bg-slate-50 px-4 py-3">{{ item }}</li></ul><p v-if="selectedWeeklyReport.summary" class="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">{{ selectedWeeklyReport.summary }}</p></section>
                         </div>
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-1 text-lg font-black text-slate-950">不计入周报的 10 万+ 内容</h2><p class="mb-5 text-xs text-slate-500">高波动内容单独列出；只从周报汇总和排行排除，平台拆解与每日数据仍保留</p><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.excluded_content" :labels="postLabels" empty-text="本周没有超过阈值的 Instagram 内容" /></section>
                         <div class="grid gap-6 xl:grid-cols-2">
                             <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">浏览 TOP 5</h2><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_views" :labels="postLabels" /></section>
                             <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">互动 TOP 5</h2><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_engagement" :labels="postLabels" /></section>
                         </div>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-1 text-lg font-black text-slate-950">不计入周报的 10 万+ 内容</h2><p class="mb-5 text-xs text-slate-500">只从周报汇总和排行排除，平台拆解与每日数据仍保留</p><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.excluded_content" :labels="postLabels" empty-text="本周没有超过阈值的 Instagram 内容" /></section>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">计入周报的帖子列表</h2><NaturalTrafficDataTable :columns="['post_type', 'account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.included_content" :labels="postLabels" :page-size="30" /></section>
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">计入周报的帖子列表</h2><NaturalTrafficDataTable :columns="['post_type', 'account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.included_content" :labels="postLabels" :page-size="8" /></section>
                         <div class="grid gap-6 xl:grid-cols-2"><section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">单帖浏览趋势</h2><NaturalTrafficTrendChart :points="selectedWeeklyReport.post_performance" x-key="label" :series="[{ key: 'views', label: '浏览量', color: '#2563eb' }]" /></section><section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">单帖互动趋势</h2><NaturalTrafficTrendChart :points="selectedWeeklyReport.post_performance" x-key="label" :series="[{ key: 'interactions', label: '互动量', color: '#7c3aed' }]" /></section></div>
                     </template>
                     <p v-else class="rounded-[26px] border border-slate-200 bg-white py-16 text-center text-sm font-semibold text-slate-400">暂无可生成周报的内容数据</p>
@@ -752,13 +804,12 @@ function clearContentFilters(): void {
             </template>
 
             <div v-if="reviewEditorOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" @click.self="reviewEditorOpen = false">
-                <section class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl sm:p-8">
-                    <div class="flex items-start justify-between gap-4"><div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Daily review</p><h2 class="mt-1 text-2xl font-black text-slate-950">编辑每日复盘</h2></div><button type="button" class="rounded-lg px-3 py-2 text-slate-400 hover:bg-slate-100" @click="reviewEditorOpen = false">关闭</button></div>
-                    <div class="mt-6 space-y-5">
-                        <label class="block text-sm font-bold text-slate-700">日期<input v-model="reviewForm.review_date" type="date" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3" /></label>
-                        <label class="block text-sm font-bold text-slate-700">核心数据<textarea v-model="reviewForm.core_data" rows="3" maxlength="10000" placeholder="例：IG 浏览量、帖子数、点赞、分享与评论" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"></textarea></label>
-                        <div class="grid gap-4 md:grid-cols-2"><label class="block text-sm font-bold text-slate-700">Top 内容<textarea v-model="reviewForm.top_content" rows="4" maxlength="10000" placeholder="表现最佳的内容及原因" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"></textarea></label><label class="block text-sm font-bold text-slate-700">低效内容<textarea v-model="reviewForm.low_content" rows="4" maxlength="10000" placeholder="表现偏低的内容及原因" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"></textarea></label></div>
-                        <label class="block text-sm font-bold text-slate-700">平台建议与执行记录<textarea v-model="reviewForm.recommendations" rows="4" maxlength="10000" placeholder="下一步动作、负责人和执行结果" class="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"></textarea></label>
+                <section class="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl sm:p-9">
+                    <div class="flex items-start justify-between gap-4"><div><h2 class="text-2xl font-black text-slate-950">{{ reviewEditorMode === 'create' ? '新增复盘记录' : '编辑复盘记录' }}</h2><p class="mt-5 text-sm font-semibold text-slate-500">日期：{{ reviewDateLabel(reviewForm.review_date) }}</p></div><button type="button" aria-label="关闭" class="rounded-lg px-3 py-1 text-3xl font-light leading-none text-slate-400 hover:bg-slate-100" @click="reviewEditorOpen = false">×</button></div>
+                    <div class="mt-7 space-y-6">
+                        <label class="block text-base font-black text-slate-800">核心数据<textarea v-model="reviewForm.core_data" rows="4" maxlength="10000" placeholder="例：IG 浏览量 12.5K，帖子数 8，点赞量 1.2K，分享/评论 89/156..." class="mt-3 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"></textarea></label>
+                        <label class="block text-base font-black text-slate-800">Top 内容与低效内容<textarea v-model="reviewCombinedContent" rows="4" maxlength="10000" placeholder="例：Top：X7 开箱 Reels 表现最佳。低效：产品图文帖互动率偏低..." class="mt-3 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"></textarea></label>
+                        <label class="block text-base font-black text-slate-800">平台建议与执行记录<textarea v-model="reviewForm.recommendations" rows="4" maxlength="10000" placeholder="例：IG 继续复用高互动内容；已安排评论回复和素材二剪..." class="mt-3 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"></textarea></label>
                         <p v-if="Object.keys(reviewForm.errors).length" class="rounded-xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">请检查必填项和字段长度。</p>
                     </div>
                     <div class="mt-7 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-700" @click="reviewEditorOpen = false">取消</button><button type="button" :disabled="reviewForm.processing" class="rounded-xl border border-blue-200 px-5 py-3 text-sm font-black text-blue-700 disabled:opacity-40" @click="saveDailyReview('draft')">暂存草稿</button><button type="button" :disabled="reviewForm.processing" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40" @click="saveDailyReview('published')">发布</button></div>
