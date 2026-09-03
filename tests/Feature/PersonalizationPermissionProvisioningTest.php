@@ -39,7 +39,8 @@ class PersonalizationPermissionProvisioningTest extends TestCase
         $migration->up();
         $migration->up();
 
-        $this->assertDatabaseCount('permissions', 5);
+        $this->assertSame(4, DB::table('permissions')->where('group', 'personalization')->count());
+        $this->assertDatabaseHas('permissions', ['slug' => 'apps.view']);
         $this->assertDatabaseCount('role_permissions', 18);
 
         foreach (['super-admin', 'organization-admin', 'store-admin', 'operator', 'marketing'] as $slug) {

@@ -15,6 +15,7 @@ class PermissionSeeder extends Seeder
         'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'reports' => '报表', 'system' => '系统',
         'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram 内容',
         'personalization' => '个性化推荐',
+        'discounts' => '折扣管理',
     ];
 
     /** @var array<string, string> */
@@ -115,6 +116,8 @@ class PermissionSeeder extends Seeder
         'personalization.manage',
         'personalization.analytics.read',
         'personalization.smart_cart.manage',
+        'discounts.view',
+        'discounts.manage',
     ];
 
     public function run(): void

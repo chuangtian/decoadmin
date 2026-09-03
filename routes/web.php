@@ -14,6 +14,8 @@ use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DiscountController;
+use App\Http\Controllers\DiscountManagerOAuthController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
 use App\Http\Controllers\GoogleSearchConsoleOAuthController;
@@ -172,6 +174,10 @@ Route::prefix('/api/shopify-app/personalization')->group(function (): void {
         ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
         ->name('personalization.shopify-app.bootstrap');
 });
+
+Route::get('/shopify/discount-manager/oauth/callback', [DiscountManagerOAuthController::class, 'callback'])
+    ->middleware('throttle:30,1')
+    ->name('discount-manager.oauth.callback');
 
 Route::get('/api/shopify-app/personalization/checkout/configuration', PersonalizationCheckoutExtensionController::class)
     ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
@@ -575,6 +581,11 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/model-assets/images/{image}/thumbnail', [ModelAssetController::class, 'thumbnail'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.thumbnail');
     Route::get('/model-assets/images/{image}', [ModelAssetController::class, 'image'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.content');
     Route::delete('/model-assets/images/{image}', [ModelAssetController::class, 'destroyImage'])->whereUuid('image')->middleware(['permission:products.update', 'throttle:60,1'])->name('model-assets.images.destroy');
+    Route::get('/discounts', [DiscountController::class, 'index'])->middleware('permission:discounts.view')->name('discounts.index');
+    Route::post('/discounts/connect', [DiscountManagerOAuthController::class, 'redirect'])->middleware(['permission:discounts.manage', 'throttle:10,1'])->name('discounts.connect');
+    Route::get('/discounts/{discountId}', [DiscountController::class, 'show'])->whereNumber('discountId')->middleware(['permission:discounts.view', 'throttle:120,1'])->name('discounts.show');
+    Route::post('/discounts', [DiscountController::class, 'store'])->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.store');
+    Route::put('/discounts/{discountId}', [DiscountController::class, 'update'])->whereNumber('discountId')->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.update');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

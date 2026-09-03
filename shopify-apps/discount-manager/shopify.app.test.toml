@@ -1,0 +1,5 @@
+# Test Shopify App placeholder. Do not publish until the Test App has been
+# explicitly created and its public client ID has been assigned.
+# Required scopes: read_discounts,write_discounts,read_products
+# Application URL: https://testadmin.decomkt.com/discounts
+# Redirect URL: https://testadmin.decomkt.com/shopify/discount-manager/oauth/callback
