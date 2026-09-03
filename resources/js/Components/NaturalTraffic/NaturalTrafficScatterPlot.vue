@@ -2,18 +2,18 @@
 import { computed } from 'vue';
 
 type Point = Record<string, unknown> & { name?: string; platform?: string };
-const props = withDefaults(defineProps<{ points: Point[]; xKey?: string; yKey?: string; xLabel?: string; yLabel?: string; logScale?: boolean }>(), {
+const props = withDefaults(defineProps<{ points: Point[]; xKey?: string; yKey?: string; xLabel?: string; yLabel?: string; height?: number; logScale?: boolean }>(), {
     xKey: 'views',
     yKey: 'engagement_rate',
     xLabel: '浏览量（对数刻度）',
     yLabel: '互动率',
+    height: 310,
     logScale: true,
 });
 const width = 760;
-const height = 310;
 const padding = { left: 62, right: 24, top: 24, bottom: 48 };
 const plotWidth = width - padding.left - padding.right;
-const plotHeight = height - padding.top - padding.bottom;
+const plotHeight = computed(() => props.height - padding.top - padding.bottom);
 const maxViews = computed(() => Math.max(1, ...props.points.map((point) => Number(point[props.xKey] ?? 0))));
 const maxRate = computed(() => Math.max(1, ...props.points.map((point) => Number(point[props.yKey] ?? 0))));
 const colors: Record<string, string> = { Instagram: '#ec4899', Facebook: '#2563eb', YouTube: '#ef4444', TikTok: '#111827', IG: '#ec4899' };
@@ -28,7 +28,7 @@ function x(value: unknown): number {
 function xTick(tick: number): number {
     return props.logScale ? Math.pow(maxViews.value + 1, tick) - 1 : maxViews.value * tick;
 }
-function y(value: unknown): number { return padding.top + plotHeight - Math.max(0, Number(value ?? 0)) / maxRate.value * plotHeight; }
+function y(value: unknown): number { return padding.top + plotHeight.value - Math.max(0, Number(value ?? 0)) / maxRate.value * plotHeight.value; }
 function color(platform: unknown): string { return colors[String(platform ?? '')] ?? '#7c3aed'; }
 function compact(value: number): string { return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
 </script>
@@ -52,5 +52,5 @@ function compact(value: number): string { return new Intl.NumberFormat('en-US', 
             <text :x="width / 2" :y="height - 1" text-anchor="middle" fill="#64748b" font-size="11">{{ xLabel }}</text>
         </svg>
     </div>
-    <div v-else class="flex h-56 items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400">当前筛选暂无散点数据</div>
+    <div v-else class="flex items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400" :style="{ height: `${Math.max(160, height)}px` }">当前筛选暂无散点数据</div>
 </template>

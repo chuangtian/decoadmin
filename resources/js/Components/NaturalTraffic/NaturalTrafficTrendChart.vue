@@ -50,5 +50,5 @@ function compact(value: number): string {
             </g>
         </svg>
     </div>
-    <div v-else class="flex h-56 items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400">当前筛选暂无趋势数据</div>
+    <div v-else class="flex items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400" :style="{ height: `${Math.max(160, height)}px` }">当前筛选暂无趋势数据</div>
 </template>

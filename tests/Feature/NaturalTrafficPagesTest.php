@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\SyncSeoAnalyticsForStore;
 use App\Jobs\SyncSeoAnalyticsShardForStore;
+use App\Models\FeishuBitableField;
 use App\Models\FeishuBitableRecord;
 use App\Models\FeishuBitableTable;
 use App\Models\Organization;
@@ -277,6 +278,59 @@ class NaturalTrafficPagesTest extends TestCase
                 ->where('dashboard.filters.date_from', '2026-08-27')
                 ->where('dashboard.filters.date_to', '2026-09-02')
                 ->where('dashboard.kpis.1.value', 607));
+    }
+
+    public function test_influencer_tables_follow_source_field_order_format_dates_and_sort_by_date(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $olderTimestamp = CarbonImmutable::parse('2026-08-17 12:00:00', 'Asia/Shanghai')->getTimestampMs();
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-older', [
+            '浏览' => 900000, '发布日期' => $olderTimestamp, '平台' => ['IG'], '红人title' => 'older_creator',
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-newer', [
+            '浏览' => 1000, '发布日期' => '2026-08-18', '平台' => ['YTB'], '红人title' => 'newer_creator',
+        ]);
+        $mainTable = FeishuBitableTable::query()->where('name', '红人数据')->sole();
+        foreach (['红人title', '平台', '发布日期', '浏览'] as $order => $name) {
+            FeishuBitableField::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'feishu_bitable_table_id' => $mainTable->id,
+                'source_field_id' => 'field-'.$order,
+                'name' => $name,
+                'field_order' => $order,
+                'is_primary' => $order === 0,
+                'metadata_encrypted' => [],
+                'synced_at' => now(),
+            ]);
+        }
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-older', [
+            '发布日期' => '2026-08-16', '红人title' => 'viral_older', '浏览' => 9999999,
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-newer', [
+            '发布日期' => '2026-08-19', '红人title' => 'viral_newer', '浏览' => 10,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.influencer-operations', [
+                'date_from' => '2026-08-16',
+                'date_to' => '2026-08-19',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.columns', ['红人title', '平台', '发布日期', '浏览'])
+                ->where('dashboard.details.0.influencer', 'newer_creator')
+                ->where('dashboard.details.0.source_fields.发布日期', '2026-08-18')
+                ->where('dashboard.details.1.influencer', 'older_creator')
+                ->where('dashboard.details.1.source_fields.发布日期', '2026-08-17')
+                ->where('dashboard.viral_content.0.influencer', 'viral_newer')
+                ->where('dashboard.viral_content.1.influencer', 'viral_older')
+                ->where('dashboard.resources.0.influencer', 'newer_creator')
+                ->where('dashboard.resources.0.date', '2026-08-18')
+                ->where('dashboard.resources.1.influencer', 'older_creator')
+                ->where('dashboard.resources.1.date', '2026-08-17'));
     }
 
     public function test_non_ai_dashboards_keep_source_semantics_for_outliers_links_and_missing_fields(): void
