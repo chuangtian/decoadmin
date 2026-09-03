@@ -1,0 +1,5 @@
+# Production Shopify App placeholder. Do not publish until the Production App
+# has been explicitly created and a Production release is authorized.
+# Required scopes: read_discounts,write_discounts,read_products
+# Application URL: https://admin.decomkt.com/discounts
+# Redirect URL: https://admin.decomkt.com/shopify/discount-manager/oauth/callback

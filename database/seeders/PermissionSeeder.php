@@ -16,6 +16,7 @@ class PermissionSeeder extends Seeder
         'codex' => 'Codex 插件',
         'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram 内容',
         'personalization' => '个性化推荐',
+        'discounts' => '折扣管理',
     ];
 
     /** @var array<string, string> */
@@ -120,6 +121,8 @@ class PermissionSeeder extends Seeder
         'personalization.manage',
         'personalization.analytics.read',
         'personalization.smart_cart.manage',
+        'discounts.view',
+        'discounts.manage',
     ];
 
     public function run(): void

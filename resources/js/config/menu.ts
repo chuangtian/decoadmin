@@ -31,6 +31,7 @@ export const menu: MenuItem[] = [
             { name: '库存管理', route: '/inventory', icon: 'inventory', permission: 'inventory.view' },
             { name: '地点管理', route: '/locations', icon: 'stores', permission: 'inventory.view' },
             { name: '车型素材', route: '/model-assets', icon: 'products', permission: 'products.view' },
+            { name: '折扣管理', route: '/discounts', icon: 'campaign', permission: 'discounts.view' },
         ],
     },
     {

@@ -1,0 +1,9 @@
+{
+  "name": "deco-discount-manager",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "check": "node --test"
+  }
+}
