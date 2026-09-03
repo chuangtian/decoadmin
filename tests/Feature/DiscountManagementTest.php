@@ -220,6 +220,41 @@ class DiscountManagementTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_store_admin_can_enable_priority_monitoring_only_for_the_current_store(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $otherStore = $organization->stores()->create([
+            'name' => 'Other Store', 'shopify_domain' => 'other-monitor.myshopify.com', 'status' => 'active',
+        ]);
+
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->patchJson(route('discounts.monitor.update', ['discountId' => 1789315613037]), [
+                'store_id' => $store->id,
+                'enabled' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.shopify_discount_id', 'gid://shopify/DiscountCodeNode/1789315613037')
+            ->assertJsonPath('data.is_enabled', true);
+
+        $this->assertDatabaseHas('shopify_discount_monitors', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/1789315613037',
+            'is_enabled' => true,
+            'baseline_pending' => true,
+        ]);
+        $this->assertDatabaseMissing('shopify_discount_monitors', ['store_id' => $otherStore->id]);
+        $this->assertDatabaseHas('audit_logs', [
+            'store_id' => $store->id,
+            'action' => 'shopify_discount_monitor_enabled',
+        ]);
+
+        $this->patchJson(route('discounts.monitor.update', ['discountId' => 1789315613037]), [
+            'store_id' => $otherStore->id,
+            'enabled' => false,
+        ])->assertStatus(409);
+    }
+
     /** @return array{User, Organization, Store} */
     private function context(string $role): array
     {

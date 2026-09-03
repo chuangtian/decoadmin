@@ -625,6 +625,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/discounts/{discountId}', [DiscountController::class, 'show'])->whereNumber('discountId')->middleware(['permission:discounts.view', 'throttle:120,1'])->name('discounts.show');
     Route::post('/discounts', [DiscountController::class, 'store'])->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.store');
     Route::put('/discounts/{discountId}', [DiscountController::class, 'update'])->whereNumber('discountId')->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.update');
+    Route::patch('/discounts/{discountId}/monitor', [DiscountController::class, 'updateMonitor'])->whereNumber('discountId')->middleware(['permission:discounts.manage', 'throttle:60,1'])->name('discounts.monitor.update');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');

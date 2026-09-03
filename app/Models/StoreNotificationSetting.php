@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'organization_id', 'store_id', 'mail_enabled', 'mail_host', 'mail_port', 'mail_encryption',
     'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'mail_recipients',
     'feishu_enabled', 'feishu_webhook_url', 'feishu_secret', 'notify_sync_failed',
-    'notify_webhook_failed', 'notify_connection_unhealthy', 'updated_by',
+    'notify_webhook_failed', 'notify_connection_unhealthy', 'notify_discount_monitor', 'updated_by',
 ])]
 #[Hidden(['mail_password', 'feishu_webhook_url', 'feishu_secret'])]
 class StoreNotificationSetting extends Model
@@ -39,6 +39,7 @@ class StoreNotificationSetting extends Model
             'feishu_webhook_url' => 'encrypted', 'feishu_secret' => 'encrypted',
             'notify_sync_failed' => 'boolean', 'notify_webhook_failed' => 'boolean',
             'notify_connection_unhealthy' => 'boolean',
+            'notify_discount_monitor' => 'boolean',
         ];
     }
 }

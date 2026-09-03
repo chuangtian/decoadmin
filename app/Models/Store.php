@@ -170,6 +170,11 @@ class Store extends Model
         return $this->hasMany(StoreAlert::class);
     }
 
+    public function shopifyDiscountMonitors(): HasMany
+    {
+        return $this->hasMany(ShopifyDiscountMonitor::class);
+    }
+
     public function storefrontEvents(): HasMany
     {
         return $this->hasMany(StorefrontEvent::class);

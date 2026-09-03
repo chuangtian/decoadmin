@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DiscountManagerException;
 use App\Models\Product;
+use App\Models\ShopifyDiscountMonitor;
 use App\Models\Store;
 use App\Services\Discounts\DiscountShopifyConnectionService;
+use App\Services\Discounts\ShopifyDiscountMonitorService;
 use App\Services\Discounts\ShopifyDiscountService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
@@ -23,6 +25,7 @@ class DiscountController extends Controller
         private CurrentStore $currentStore,
         private ShopifyDiscountService $discounts,
         private DiscountShopifyConnectionService $connections,
+        private ShopifyDiscountMonitorService $monitors,
     ) {}
 
     public function index(Request $request): Response
@@ -46,6 +49,17 @@ class DiscountController extends Controller
 
         return Inertia::render('Discounts/Index', [
             'discounts' => $listing,
+            'monitors' => ShopifyDiscountMonitor::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->whereIn('shopify_discount_id', collect($listing['data'])->pluck('id')->all())
+                ->get(['shopify_discount_id', 'is_enabled', 'last_checked_at', 'last_error'])
+                ->map(fn (ShopifyDiscountMonitor $monitor): array => [
+                    'shopify_discount_id' => $monitor->shopify_discount_id,
+                    'is_enabled' => $monitor->is_enabled,
+                    'last_checked_at' => $monitor->last_checked_at?->toIso8601String(),
+                    'last_error' => $monitor->last_error,
+                ])->values()->all(),
             'filters' => ['status' => $filters['status'] ?? ''],
             'connection' => $connection,
             'store' => [
@@ -103,6 +117,24 @@ class DiscountController extends Controller
             $this->gid($discountId),
             $values,
         ));
+    }
+
+    public function updateMonitor(Request $request, string $discountId): JsonResponse
+    {
+        $store = $this->scopedStore($request, 'discounts.manage');
+        $values = $request->validate([
+            'store_id' => ['required', 'integer'],
+            'enabled' => ['required', 'boolean'],
+        ]);
+        abort_unless((int) $values['store_id'] === (int) $store->id, 409, '当前店铺已切换，请刷新折扣页面后重试。');
+        $monitor = $this->monitors->setEnabled($store, $request->user(), $this->gid($discountId), (bool) $values['enabled']);
+
+        return response()->json(['data' => [
+            'shopify_discount_id' => $monitor->shopify_discount_id,
+            'is_enabled' => $monitor->is_enabled,
+            'last_checked_at' => $monitor->last_checked_at?->toIso8601String(),
+            'last_error' => $monitor->last_error,
+        ]]);
     }
 
     /** @return array<string, mixed> */
