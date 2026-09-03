@@ -285,7 +285,7 @@ class NaturalTrafficPagesTest extends TestCase
         $session = $this->contextSession($organization, $store);
 
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'regular-post', [
-            '发布日期' => '2026-08-18', '平台' => 'Instagram', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
+            '发布日期' => '2026-08-18', '平台' => 'Instagram', '账户账号' => 'macfoxbike', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
         ]);
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'viral-post', [
             '发布日期' => '2026-08-19', '平台' => 'Instagram', '描述' => '爆款内容', '浏览量' => 150000, '点赞' => 6000, '评论数' => 400,
@@ -299,6 +299,7 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.selected_weekly_report.included_views', 10000)
             ->where('dashboard.selected_weekly_report.included_interactions', 530)
             ->where('dashboard.selected_weekly_report.average_views', 10000)
+            ->where('dashboard.selected_weekly_report.top_views.0.account_handle', 'macfoxbike')
             ->has('dashboard.selected_weekly_report.excluded_content', 1));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-with-link', [

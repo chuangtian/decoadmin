@@ -14,6 +14,8 @@ type SocialPost = Record<string, unknown> & {
     record_id: string;
     platform: string;
     date: string | null;
+    account_handle: string;
+    account_name: string;
     title: string;
     post_type: string;
     posts: number;
@@ -180,8 +182,8 @@ const weeklyForm = useForm({
     summary: props.dashboard.selected_weekly_report?.summary ?? '',
 });
 const contentFilters = reactive<PostFilters>({ ...props.dashboard.post_filters });
-const postColumns = ['platform', 'content_origin_label', 'source_mode', 'date', 'title', 'post_type', 'views', 'likes', 'comments', 'shares', 'visibility_status', 'aggregation_status', 'permalink'];
-const postLabels: Record<string, string> = { platform: '平台', content_origin_label: '内容来源', source_mode: '数据来源', date: '发布日期', title: '内容', post_type: '类型', views: '播放 / 浏览', likes: '点赞', comments: '评论', shares: '分享', visibility_status: '显示状态', aggregation_status: '周报口径', permalink: '链接' };
+const postColumns = ['platform', 'account_handle', 'content_origin_label', 'source_mode', 'date', 'title', 'post_type', 'views', 'likes', 'comments', 'shares', 'visibility_status', 'aggregation_status', 'permalink'];
+const postLabels: Record<string, string> = { platform: '平台', account_handle: '账号', account_name: '账户名称', content_origin_label: '内容来源', source_mode: '数据来源', date: '发布日期', title: '内容', post_type: '类型', views: '播放 / 浏览', likes: '点赞', comments: '评论', shares: '分享', visibility_status: '显示状态', aggregation_status: '周报口径', permalink: '链接' };
 const sortablePostColumns = new Set(['platform', 'date', 'views', 'likes', 'comments', 'shares']);
 const platformMax = computed(() => Math.max(1, ...props.dashboard.platforms.map((row) => Number(row.views ?? 0))));
 const selectedWeeklyReport = computed(() => props.dashboard.selected_weekly_report);
@@ -735,11 +737,11 @@ function clearContentFilters(): void {
                             <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">本周摘要</h2><ul class="space-y-3 text-sm leading-6 text-slate-700"><li v-for="item in selectedWeeklyReport.summary_items" :key="item" class="rounded-xl bg-slate-50 px-4 py-3">{{ item }}</li></ul><p v-if="selectedWeeklyReport.summary" class="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">{{ selectedWeeklyReport.summary }}</p></section>
                         </div>
                         <div class="grid gap-6 xl:grid-cols-2">
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">浏览 TOP 5</h2><NaturalTrafficDataTable :columns="['platform', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_views" :labels="postLabels" /></section>
-                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">互动 TOP 5</h2><NaturalTrafficDataTable :columns="['platform', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_engagement" :labels="postLabels" /></section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">浏览 TOP 5</h2><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_views" :labels="postLabels" /></section>
+                            <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">互动 TOP 5</h2><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.top_engagement" :labels="postLabels" /></section>
                         </div>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-1 text-lg font-black text-slate-950">不计入周报的 10 万+ 内容</h2><p class="mb-5 text-xs text-slate-500">只从周报汇总和排行排除，平台拆解与每日数据仍保留</p><NaturalTrafficDataTable :columns="['content_origin_label', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.excluded_content" :labels="postLabels" empty-text="本周没有超过阈值的 Instagram 内容" /></section>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">计入周报的帖子列表</h2><NaturalTrafficDataTable :columns="['post_type', 'content_origin_label', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.included_content" :labels="postLabels" :page-size="30" /></section>
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-1 text-lg font-black text-slate-950">不计入周报的 10 万+ 内容</h2><p class="mb-5 text-xs text-slate-500">只从周报汇总和排行排除，平台拆解与每日数据仍保留</p><NaturalTrafficDataTable :columns="['account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.excluded_content" :labels="postLabels" empty-text="本周没有超过阈值的 Instagram 内容" /></section>
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">计入周报的帖子列表</h2><NaturalTrafficDataTable :columns="['post_type', 'account_handle', 'title', 'views', 'likes', 'comments', 'permalink']" :rows="selectedWeeklyReport.included_content" :labels="postLabels" :page-size="30" /></section>
                         <div class="grid gap-6 xl:grid-cols-2"><section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">单帖浏览趋势</h2><NaturalTrafficTrendChart :points="selectedWeeklyReport.post_performance" x-key="label" :series="[{ key: 'views', label: '浏览量', color: '#2563eb' }]" /></section><section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="mb-5 text-lg font-black text-slate-950">单帖互动趋势</h2><NaturalTrafficTrendChart :points="selectedWeeklyReport.post_performance" x-key="label" :series="[{ key: 'interactions', label: '互动量', color: '#7c3aed' }]" /></section></div>
                     </template>
                     <p v-else class="rounded-[26px] border border-slate-200 bg-white py-16 text-center text-sm font-semibold text-slate-400">暂无可生成周报的内容数据</p>
