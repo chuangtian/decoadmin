@@ -492,7 +492,7 @@ class NaturalTrafficDashboardService
     private function brandReportPost(array $row): array
     {
         return collect($row)->only([
-            'record_id', 'platform', 'date', 'title', 'post_type', 'content_origin', 'content_origin_label',
+            'record_id', 'platform', 'date', 'account_handle', 'account_name', 'title', 'post_type', 'content_origin', 'content_origin_label',
             'views', 'likes', 'comments', 'shares', 'engagement_rate', 'permalink', 'aggregation_status',
             'exclusion_metric', 'exclusion_value',
         ])->all();
@@ -854,6 +854,8 @@ class NaturalTrafficDashboardService
         $postType = $this->text($this->pick($fields, ['帖子类型', 'post type', '类型']));
         $title = $this->text($this->pick($fields, ['标题', 'Name', 'name']));
         $title = $title !== '' ? $title : $this->text($this->pick($fields, ['描述', '内容', '文案', '文本']));
+        $accountHandle = $this->text($this->pick($fields, ['账户账号', '账号', 'account username', 'account handle', 'username']));
+        $accountName = $this->text($this->pick($fields, ['账户名称', '公共主页名称', '频道名称', 'account name', 'channel title']));
         $reach = $this->number($this->pick($fields, ['触达', 'reach', '覆盖人数']));
         $impressions = $this->number($this->pick($fields, ['曝光量', '展示次数', 'impressions']));
         $isVideo = (bool) preg_match('/reel|视频|video|short/i', $postType);
@@ -886,6 +888,8 @@ class NaturalTrafficDashboardService
             },
             'platform' => $platform,
             'date' => $this->date($this->pick($fields, ['发布日期', '发布时间', '日期', '开始日期', '日期周期', 'date'])),
+            'account_handle' => $accountHandle,
+            'account_name' => $accountName,
             'title' => $title,
             'post_type' => $postType,
             'content_origin' => $this->socialContentOrigin($fields),
