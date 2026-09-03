@@ -166,6 +166,12 @@ const trendMetrics = [
 const fileInput = ref<HTMLInputElement | null>(null);
 const reviewEditorOpen = ref(false);
 const weeklyEditorOpen = ref(false);
+const reviewStatusFilter = ref<'all' | 'published' | 'draft'>('all');
+const reviewStatuses = [
+    { value: 'all', label: '全部' },
+    { value: 'published', label: '已发布' },
+    { value: 'draft', label: '草稿' },
+] as const;
 const importForm = useForm<{ file: File | null }>({ file: null });
 const reviewForm = useForm({
     review_date: props.dashboard.filters.date_to,
@@ -186,6 +192,9 @@ const postColumns = ['platform', 'account_handle', 'content_origin_label', 'sour
 const postLabels: Record<string, string> = { platform: '平台', account_handle: '账号', account_name: '账户名称', content_origin_label: '内容来源', source_mode: '数据来源', date: '发布日期', title: '内容', post_type: '类型', views: '播放 / 浏览', likes: '点赞', comments: '评论', shares: '分享', visibility_status: '显示状态', aggregation_status: '周报口径', permalink: '链接' };
 const sortablePostColumns = new Set(['platform', 'date', 'views', 'likes', 'comments', 'shares']);
 const selectedWeeklyReport = computed(() => props.dashboard.selected_weekly_report);
+const filteredDailyReviews = computed(() => reviewStatusFilter.value === 'all'
+    ? props.dashboard.daily_reviews
+    : props.dashboard.daily_reviews.filter((review) => review.status === reviewStatusFilter.value));
 const platformTrendSeries = computed(() => [
     { key: `instagram_${trendMetric.value}`, label: 'Instagram', color: '#ec4899' },
     { key: `facebook_${trendMetric.value}`, label: 'Facebook', color: '#2563eb' },
@@ -444,7 +453,7 @@ function clearContentFilters(): void {
         <div class="mx-auto w-full max-w-[1680px] space-y-6">
             <NaturalTrafficPageHeader :dashboard="dashboard" :store="store" :configured="configured" :can-sync="canSync" route-path="/natural-traffic/brand-media" refresh-path="/natural-traffic/brand-media/refresh" :active-tab="activeTab" accent="blue" @tab="activeTab = $event" />
 
-            <section class="grid gap-5 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm xl:grid-cols-[minmax(360px,.8fr)_minmax(0,1.2fr)]">
+            <section v-if="activeTab === 'platforms'" class="grid gap-5 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm xl:grid-cols-[minmax(360px,.8fr)_minmax(0,1.2fr)]">
                 <div>
                     <h2 class="text-lg font-black text-slate-950">导入 Instagram / Facebook</h2>
                     <p class="mt-1 text-sm leading-6 text-slate-500">直接上传 Meta Business Suite 原始 CSV。按平台和帖子编号增量合并；相同帖子保留最新快照，旧文件不会覆盖新数据，未出现在本次文件中的历史记录继续保留。</p>
@@ -468,14 +477,14 @@ function clearContentFilters(): void {
                 </div>
             </section>
 
-            <aside class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950">
+            <aside v-if="activeTab === 'platforms'" class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950">
                 <strong>IG 异常爆款口径：</strong>{{ dashboard.exclusion_policy.rule }} 超过 {{ compact(dashboard.exclusion_policy.threshold) }} 时，{{ dashboard.exclusion_policy.behavior }}
                 <span v-if="dashboard.exclusion_summary.posts > 0" class="ml-2 font-black">当前筛选期已单列 {{ compact(dashboard.exclusion_summary.posts) }} 帖。</span>
             </aside>
 
             <NaturalTrafficEmptyState v-if="!dashboard.source.ready" :configured="configured" :can-sync="canSync" />
             <template v-else>
-                <NaturalTrafficKpiGrid :kpis="dashboard.kpis" :currency="store.currency" :columns="5" />
+                <NaturalTrafficKpiGrid v-if="activeTab === 'platforms'" :kpis="dashboard.kpis" :currency="store.currency" :columns="5" />
 
                 <template v-if="activeTab === 'platforms'">
                     <aside v-if="dashboard.platform_coverage.missing.length" class="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-900">
@@ -668,21 +677,18 @@ function clearContentFilters(): void {
 
                 <template v-else-if="activeTab === 'daily'">
                     <section class="flex flex-col gap-4 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                        <div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Daily review</p><h2 class="mt-1 text-xl font-black text-slate-950">每日复盘记录</h2><p class="mt-1 text-sm text-slate-500">指标自动计算，复盘结论按日期保存，可暂存草稿或发布。</p></div>
+                        <div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Daily review</p><h2 class="mt-1 text-xl font-black text-slate-950">每日复盘记录</h2><p class="mt-1 text-sm text-slate-500">按日期保存复盘内容，可暂存草稿或发布。</p></div>
                         <button v-if="canManage" type="button" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700" @click="openDailyReview()">新增复盘</button>
                     </section>
-                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                        <article v-for="item in [{ label: '活跃发布天数', value: dashboard.daily_review.posting_days }, { label: '总互动', value: dashboard.daily_review.engagements }, { label: '总触达', value: dashboard.daily_review.reach }, { label: '总点击', value: dashboard.daily_review.clicks }]" :key="item.label" class="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-bold text-slate-500">{{ item.label }}</p><p class="mt-2 text-2xl font-black tabular-nums text-slate-950">{{ compact(item.value) }}</p></article>
-                    </div>
-                    <div class="grid gap-6 lg:grid-cols-2">
-                        <article class="rounded-[24px] border border-blue-100 bg-blue-50/70 p-6"><p class="text-xs font-black uppercase tracking-wider text-blue-600">常规内容浏览最佳</p><h2 class="mt-3 line-clamp-2 text-lg font-black text-slate-950">{{ dashboard.daily_review.top_post?.title || '暂无内容标题' }}</h2><p class="mt-3 text-sm text-slate-600">{{ compact(dashboard.daily_review.top_post?.views) }} 播放 / 浏览 · {{ dashboard.daily_review.top_post?.platform || '未分类平台' }}</p></article>
-                        <article class="rounded-[24px] border border-emerald-100 bg-emerald-50/70 p-6"><p class="text-xs font-black uppercase tracking-wider text-emerald-600">常规内容互动最佳</p><h2 class="mt-3 line-clamp-2 text-lg font-black text-slate-950">{{ dashboard.daily_review.top_engagement_post?.title || '暂无内容标题' }}</h2><p class="mt-3 text-sm text-slate-600">赞 {{ compact(dashboard.daily_review.top_engagement_post?.likes) }} · 评 {{ compact(dashboard.daily_review.top_engagement_post?.comments) }} · 分享 {{ compact(dashboard.daily_review.top_engagement_post?.shares) }}</p></article>
-                    </div>
-                    <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><div class="mb-5"><h2 class="text-lg font-black text-slate-950">每日指标</h2><p class="mt-1 text-xs text-slate-500">按发布日期归集全部可见内容；周报异常规则不影响每日数据</p></div><NaturalTrafficDataTable :columns="['date', 'posts', 'views', 'likes', 'comments', 'shares', 'engagements', 'engagement_rate']" :rows="dashboard.daily" :labels="{ date: '日期', posts: '帖子数', views: '播放 / 浏览', likes: '点赞', comments: '评论', shares: '分享', engagements: '总互动', engagement_rate: '互动率 %' }" /></section>
                     <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
-                        <div class="mb-5 flex items-center justify-between gap-4"><div><h2 class="text-lg font-black text-slate-950">复盘档案</h2><p class="mt-1 text-xs text-slate-500">当前筛选期内保存的复盘记录</p></div><span class="text-xs font-bold text-slate-400">{{ dashboard.daily_reviews.length }} 条</span></div>
-                        <div v-if="dashboard.daily_reviews.length" class="space-y-3">
-                            <article v-for="review in dashboard.daily_reviews" :key="review.uuid" class="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                        <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex flex-wrap gap-2">
+                                <button v-for="status in reviewStatuses" :key="status.value" type="button" class="rounded-xl border px-4 py-2 text-xs font-black transition" :class="reviewStatusFilter === status.value ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'" @click="reviewStatusFilter = status.value">{{ status.label }}</button>
+                            </div>
+                            <span class="text-xs font-bold tabular-nums text-slate-400">共 {{ filteredDailyReviews.length }} 条</span>
+                        </div>
+                        <div v-if="filteredDailyReviews.length" class="space-y-3">
+                            <article v-for="review in filteredDailyReviews" :key="review.uuid" class="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div><div class="flex items-center gap-2"><h3 class="font-black text-slate-950">{{ review.review_date }}</h3><span class="rounded-full px-2.5 py-1 text-[11px] font-black" :class="review.status === 'published' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">{{ review.status === 'published' ? '已发布' : '草稿' }}</span></div><p class="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{{ review.core_data || '未填写核心数据说明' }}</p></div>
                                     <div v-if="canManage" class="flex gap-2"><button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700" @click="openDailyReview(review)">编辑</button><button type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-700" @click="deleteDailyReview(review)">删除</button></div>
@@ -690,9 +696,8 @@ function clearContentFilters(): void {
                                 <div class="mt-4 grid gap-3 text-sm lg:grid-cols-3"><div class="rounded-xl bg-white p-3"><p class="text-xs font-bold text-slate-400">Top 内容</p><p class="mt-1 line-clamp-3 text-slate-700">{{ review.top_content || '—' }}</p></div><div class="rounded-xl bg-white p-3"><p class="text-xs font-bold text-slate-400">低效内容</p><p class="mt-1 line-clamp-3 text-slate-700">{{ review.low_content || '—' }}</p></div><div class="rounded-xl bg-white p-3"><p class="text-xs font-bold text-slate-400">建议与执行</p><p class="mt-1 line-clamp-3 text-slate-700">{{ review.recommendations || '—' }}</p></div></div>
                             </article>
                         </div>
-                        <p v-else class="rounded-2xl bg-slate-50 py-12 text-center text-sm font-semibold text-slate-400">当前筛选期暂无复盘记录</p>
+                        <p v-else class="rounded-2xl bg-slate-50 py-20 text-center text-sm font-semibold text-slate-400">暂无复盘记录</p>
                     </section>
-                    <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><div class="mb-5"><h2 class="text-lg font-black text-slate-950">发布内容明细</h2><p class="mt-1 text-xs text-slate-500">沿用“平台拆解”页签中的明细筛选与分页条件</p></div><NaturalTrafficDataTable :columns="postColumns" :rows="dashboard.posts" :labels="postLabels" :page-size="Math.max(1, dashboard.posts.length)" /></section>
                 </template>
 
                 <template v-else-if="activeTab === 'weekly'">
