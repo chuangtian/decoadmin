@@ -17,7 +17,7 @@ class ShopifyDiscountService
     private const DISCOUNT_FIELDS = <<<'GRAPHQL'
         __typename
         ... on DiscountCodeBasic {
-          title summary status startsAt endsAt discountClasses
+          title summary status startsAt endsAt updatedAt discountClasses
           codes(first: 5) { nodes { code } }
           usageLimit asyncUsageCount appliesOncePerCustomer
           combinesWith { orderDiscounts productDiscounts shippingDiscounts }
@@ -44,7 +44,7 @@ class ShopifyDiscountService
           }
         }
         ... on DiscountCodeBxgy {
-          title summary status startsAt endsAt discountClasses
+          title summary status startsAt endsAt updatedAt discountClasses
           codes(first: 5) { nodes { code } }
           usageLimit asyncUsageCount appliesOncePerCustomer usesPerOrderLimit
           combinesWith { orderDiscounts productDiscounts shippingDiscounts }
@@ -73,7 +73,7 @@ class ShopifyDiscountService
           }
         }
         ... on DiscountCodeFreeShipping {
-          title summary status startsAt endsAt discountClasses
+          title summary status startsAt endsAt updatedAt discountClasses
           codes(first: 5) { nodes { code } }
           usageLimit asyncUsageCount appliesOncePerCustomer
           combinesWith { orderDiscounts productDiscounts shippingDiscounts }
@@ -87,7 +87,7 @@ class ShopifyDiscountService
           }
         }
         ... on DiscountCodeApp {
-          title status startsAt endsAt discountClasses
+          title status startsAt endsAt updatedAt discountClasses
           codes(first: 5) { nodes { code } }
           asyncUsageCount
         }
@@ -395,6 +395,7 @@ class ShopifyDiscountService
             'codes' => collect((array) data_get($discount, 'codes.nodes', []))->pluck('code')->filter()->values()->all(),
             'starts_at' => $discount['startsAt'] ?? null,
             'ends_at' => $discount['endsAt'] ?? null,
+            'updated_at' => $discount['updatedAt'] ?? null,
             'usage_limit' => $discount['usageLimit'] ?? null,
             'usage_count' => (int) ($discount['asyncUsageCount'] ?? 0),
             'applies_once_per_customer' => (bool) ($discount['appliesOncePerCustomer'] ?? false),
@@ -410,8 +411,12 @@ class ShopifyDiscountService
             'minimum_subtotal' => data_get($minimum, 'greaterThanOrEqualToSubtotal.amount'),
             'minimum_quantity' => $minimum['greaterThanOrEqualToQuantity'] ?? null,
             'product_ids' => $this->productIds((array) data_get($items, 'products.nodes', [])),
+            'collection_ids' => $this->collectionIds((array) data_get($items, 'collections.nodes', [])),
+            'all_items' => data_get($items, 'allItems') === true,
             'buys_product_ids' => $this->productIds((array) data_get($discount, 'customerBuys.items.products.nodes', [])),
+            'buys_collection_ids' => $this->collectionIds((array) data_get($discount, 'customerBuys.items.collections.nodes', [])),
             'gets_product_ids' => $this->productIds((array) data_get($discount, 'customerGets.items.products.nodes', [])),
+            'gets_collection_ids' => $this->collectionIds((array) data_get($discount, 'customerGets.items.collections.nodes', [])),
             'buys_quantity' => data_get($discount, 'customerBuys.value.quantity'),
             'gets_quantity' => data_get($discount, 'customerGets.value.quantity.quantity'),
             'gets_percentage' => is_numeric(data_get($discount, 'customerGets.value.effect.percentage'))
@@ -427,6 +432,14 @@ class ShopifyDiscountService
     {
         return collect($nodes)->pluck('id')->filter(fn (mixed $id): bool => is_string($id))
             ->map(fn (string $id): string => str_replace('gid://shopify/Product/', '', $id))
+            ->values()->all();
+    }
+
+    /** @param array<int, mixed> $nodes @return list<string> */
+    private function collectionIds(array $nodes): array
+    {
+        return collect($nodes)->pluck('id')->filter(fn (mixed $id): bool => is_string($id))
+            ->map(fn (string $id): string => str_replace('gid://shopify/Collection/', '', $id))
             ->values()->all();
     }
 

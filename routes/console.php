@@ -21,6 +21,19 @@ Schedule::command('shopify:scan-alerts')
     ->onOneServer()
     ->withoutOverlapping(10);
 
+if (config('discount_monitoring.enabled', true)) {
+    $discountMonitor = Schedule::command('shopify:monitor-discounts')
+        ->name('shopify:monitor-priority-discounts');
+    if ((int) config('discount_monitoring.poll_minutes', 5) >= 10) {
+        $discountMonitor->everyTenMinutes();
+    } else {
+        $discountMonitor->everyFiveMinutes();
+    }
+    $discountMonitor
+        ->onOneServer()
+        ->withoutOverlapping(10);
+}
+
 Schedule::command('shopify:prune-analytics-snapshots')
     ->name('shopify:prune-analytics-snapshots')
     ->dailyAt('04:15')

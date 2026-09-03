@@ -33,6 +33,7 @@ interface DiscountRow {
     editable: boolean;
 }
 interface ProductOption { id: string; title: string; image: string | null }
+interface DiscountMonitor { shopify_discount_id: string; is_enabled: boolean; last_checked_at: string | null; last_error: string | null }
 
 const ProductPickerTitle = defineComponent({
     props: { title: { type: String, required: true }, count: { type: Number, required: true } },
@@ -64,6 +65,7 @@ const ProductPicker = defineComponent({
 
 const props = defineProps<{
     discounts: { data: DiscountRow[]; next_cursor: string | null };
+    monitors: DiscountMonitor[];
     filters: { status: string };
     connection: { ready: boolean; can_write: boolean; code: string | null; message: string | null };
     store: { id: number; name: string; currency: string; timezone: string };
@@ -72,6 +74,9 @@ const props = defineProps<{
 }>();
 
 const rows = ref([...props.discounts.data]);
+const monitorById = ref<Record<string, DiscountMonitor>>(Object.fromEntries(props.monitors.map(monitor => [monitor.shopify_discount_id, monitor])));
+const monitorSavingId = ref('');
+const monitorError = ref('');
 const search = ref('');
 const typeDialog = ref(false);
 const editorOpen = ref(false);
@@ -225,6 +230,23 @@ function setStatus(status: string) {
     router.get('/discounts', status ? { status } : {}, { preserveState: false, replace: true });
 }
 function connectApp() { router.post('/discounts/connect', { store_id: props.store.id }); }
+function isMonitored(row: DiscountRow) { return monitorById.value[row.id]?.is_enabled === true; }
+async function toggleMonitor(row: DiscountRow) {
+    if (!props.permissions.manage || monitorSavingId.value) return;
+    monitorSavingId.value = row.id;
+    monitorError.value = '';
+    try {
+        const monitor = await requestJson<DiscountMonitor>(`/discounts/${numericId(row.id)}/monitor`, {
+            method: 'PATCH',
+            body: JSON.stringify({ store_id: props.store.id, enabled: !isMonitored(row) }),
+        });
+        monitorById.value = { ...monitorById.value, [row.id]: monitor };
+    } catch (exception) {
+        monitorError.value = exception instanceof Error ? exception.message : '重点折扣监控设置失败。';
+    } finally {
+        monitorSavingId.value = '';
+    }
+}
 function statusLabel(status: string) { return ({ active: '有效', scheduled: '已计划', expired: '已过期' } as Record<string, string>)[status] ?? '未知'; }
 function statusClass(status: string) {
     return status === 'active' ? 'bg-emerald-100 text-emerald-800' : status === 'scheduled' ? 'bg-sky-100 text-sky-800' : status === 'expired' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800';
@@ -265,6 +287,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
             </section>
 
             <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div v-if="monitorError" class="border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-700">{{ monitorError }}</div>
                 <div class="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
                     <div class="flex flex-wrap gap-2">
                         <button v-for="option in [{value:'',label:'全部'},{value:'active',label:'有效'},{value:'scheduled',label:'已计划'},{value:'expired',label:'已过期'}]" :key="option.value" type="button" class="rounded-lg px-3 py-2 text-sm font-semibold transition" :class="filters.status === option.value ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'" @click="setStatus(option.value)">{{ option.label }}</button>
@@ -273,8 +296,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                 </div>
 
                 <div v-if="visibleRows.length" class="overflow-x-auto">
-                    <table class="w-full min-w-[1080px] text-left text-sm">
-                        <thead class="bg-slate-50 text-xs font-semibold text-slate-500"><tr><th class="px-5 py-4">标题</th><th class="px-5 py-4">状态</th><th class="px-5 py-4">方式</th><th class="px-5 py-4">折扣类型</th><th class="px-5 py-4">使用次数</th><th class="px-5 py-4">结束时间</th><th class="px-5 py-4 text-right">操作</th></tr></thead>
+                    <table class="w-full min-w-[1220px] text-left text-sm">
+                        <thead class="bg-slate-50 text-xs font-semibold text-slate-500"><tr><th class="px-5 py-4">标题</th><th class="px-5 py-4">状态</th><th class="px-5 py-4">方式</th><th class="px-5 py-4">折扣类型</th><th class="px-5 py-4">使用次数</th><th class="px-5 py-4">结束时间</th><th class="px-5 py-4">预警</th><th class="px-5 py-4 text-right">操作</th></tr></thead>
                         <tbody class="divide-y divide-slate-100">
                             <tr v-for="row in visibleRows" :key="row.id" class="transition hover:bg-slate-50">
                                 <td class="max-w-sm px-5 py-4"><p class="font-semibold text-slate-950">{{ row.title }}</p><p class="mt-1 truncate text-xs text-slate-500">{{ row.codes.join('、') || '应用自动管理' }}<span v-if="row.summary"> · {{ row.summary }}</span></p></td>
@@ -283,6 +306,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                                 <td class="px-5 py-4 text-slate-700">{{ kindLabel(row.kind) }}</td>
                                 <td class="px-5 py-4 font-semibold text-slate-700">{{ row.usage_count.toLocaleString() }}<span v-if="row.usage_limit" class="font-normal text-slate-400"> / {{ row.usage_limit.toLocaleString() }}</span></td>
                                 <td class="px-5 py-4 text-xs text-slate-500">{{ formatDate(row.ends_at) }}</td>
+                                <td class="px-5 py-4"><button v-if="permissions.manage" type="button" :disabled="monitorSavingId === row.id" class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50" :class="isMonitored(row) ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-slate-200 text-slate-600 hover:bg-slate-50'" @click="toggleMonitor(row)"><span aria-hidden="true">{{ isMonitored(row) ? '★' : '☆' }}</span>{{ monitorSavingId === row.id ? '保存中' : (isMonitored(row) ? '重点监控中' : '设为重点') }}</button><span v-else class="text-xs text-slate-400">{{ isMonitored(row) ? '重点监控中' : '未监控' }}</span></td>
                                 <td class="px-5 py-4 text-right"><button v-if="permissions.manage && row.editable && connection.can_write" type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 hover:bg-white" @click="edit(row)">编辑</button><span v-else class="text-xs text-slate-400">{{ row.editable ? '只读' : '请在 Shopify 修改' }}</span></td>
                             </tr>
                         </tbody>

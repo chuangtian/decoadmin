@@ -31,6 +31,7 @@ class UpdateStoreNotificationSettingsRequest extends FormRequest
             'notify_sync_failed' => ['required', 'boolean'],
             'notify_webhook_failed' => ['required', 'boolean'],
             'notify_connection_unhealthy' => ['required', 'boolean'],
+            'notify_discount_monitor' => ['required', 'boolean'],
         ];
     }
 }
