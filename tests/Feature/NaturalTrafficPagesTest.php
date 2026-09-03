@@ -180,6 +180,9 @@ class NaturalTrafficPagesTest extends TestCase
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-previous', [
             '发布日期' => '2026-08-17', '平台' => 'Instagram', '帖子数' => 1, '浏览量' => 500, '点赞' => 30, '评论数' => 5, '分享数' => 2,
         ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-youtube', [
+            '发布日期' => '2026-08-18', '平台' => 'YouTube', '帖子数' => 4, '浏览量' => 4000, '点赞' => 300, '评论数' => 20,
+        ]);
         $this->archiveRecord($organization, $otherStore, 'natural-traffic:social', '官媒周数据', 'social-other', [
             '发布日期' => '2026-08-18', '平台' => 'Facebook', '帖子数' => 99, '浏览量' => 99999,
         ]);
@@ -189,13 +192,15 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('NaturalTraffic/BrandMedia')
             ->where('dashboard.source.storage', 'current-project-mysql')
-            ->where('dashboard.source.record_count', 2)
-            ->where('dashboard.kpis.0.value', 2)
-            ->where('dashboard.kpis.1.value', 1000)
+            ->where('dashboard.source.record_count', 3)
+            ->where('dashboard.kpis.0.value', 6)
+            ->where('dashboard.kpis.1.value', 5000)
             ->where('dashboard.kpis.1.previous', 500)
-            ->where('dashboard.kpis.1.change', 100)
-            ->where('dashboard.funnel.0.value', 1000)
+            ->where('dashboard.kpis.1.change', 900)
+            ->where('dashboard.funnel.0.value', 5000)
             ->where('dashboard.weekly_reports.0.included_posts', 3)
+            ->where('dashboard.weekly_reports.0.week', '2026-08-16')
+            ->where('dashboard.weekly_reports.0.week_end', '2026-08-22')
             ->where('dashboard.platform_coverage.missing.0', 'Facebook')
             ->has('dashboard.tabs', 4));
 

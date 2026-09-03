@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Services\StoreBusinessCredentialService;
 use App\Services\YouTubeAnalytics\YouTubeAnalyticsSyncService;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
 class NaturalTrafficDashboardService
@@ -124,9 +125,14 @@ class NaturalTrafficDashboardService
             ->forStore((int) $store->id)
             ->orderBy('week_start')
             ->get()
-            ->keyBy(fn (BrandSocialWeeklyReport $report): string => $report->week_start->toDateString());
-        $weeklyGroups = $visible->filter(fn (array $row): bool => filled($row['date']))
-            ->groupBy(fn (array $row): string => CarbonImmutable::parse($row['date'])->startOfWeek()->toDateString());
+            ->keyBy(fn (BrandSocialWeeklyReport $report): string => $report->week_start
+                ->startOfWeek(CarbonInterface::SUNDAY)
+                ->toDateString());
+        $weeklyGroups = $visible
+            ->filter(fn (array $row): bool => filled($row['date']) && $row['platform'] === 'Instagram')
+            ->groupBy(fn (array $row): string => CarbonImmutable::parse($row['date'])
+                ->startOfWeek(CarbonInterface::SUNDAY)
+                ->toDateString());
         $availableWeeks = $weeklyGroups->keys()->merge($weeklyReportRecords->keys())->unique();
         $requestedWeek = trim((string) ($filters['weekly_week'] ?? ''));
         $selectedWeek = $availableWeeks->contains($requestedWeek) ? $requestedWeek : $availableWeeks->sortDesc()->first();
@@ -418,8 +424,8 @@ class NaturalTrafficDashboardService
         $interactions = $totals['likes'] + $totals['comments'];
         $reportIncluded = $includeDetails ? $included->map(fn (array $row): array => $this->brandReportPost($row)) : collect();
         $reportExcluded = $includeDetails ? $excluded->map(fn (array $row): array => $this->brandReportPost($row)) : collect();
-        $weekStart = CarbonImmutable::parse($week)->startOfWeek();
-        $weekEnd = $weekStart->endOfWeek();
+        $weekStart = CarbonImmutable::parse($week)->startOfWeek(CarbonInterface::SUNDAY);
+        $weekEnd = $weekStart->endOfWeek(CarbonInterface::SATURDAY);
         $contentTypes = $includeDetails ? $included
             ->groupBy(fn (array $row): string => $row['post_type'] ?: '未分类')
             ->map(function (Collection $items, string $type) use ($totals): array {
