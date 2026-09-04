@@ -87,7 +87,7 @@ export const menu: MenuItem[] = [
         icon: 'settings',
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
-            { name: 'Instagram 内容', route: '/instagram-feed', icon: 'campaign', permission: 'instagram_feed.view' },
+            // Instagram Feed 是应用中心的应用，入口由 applicationNavigation 动态注入，不在这里重复挂。
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
             { name: '业务凭证', route: '/store-settings/credentials', icon: 'settings', permission: 'store.view' },

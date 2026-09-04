@@ -26,7 +26,7 @@ class InstagramFeedShopifyClient
         if (! $installation || ! $installation->isUsable()) {
             throw new InstagramFeedException(
                 'INSTAGRAM_FEED_APP_SESSION_MISSING',
-                '尚未建立 Instagram 内容 App 的 Shopify 会话，请先在 Shopify 后台打开一次该应用。',
+                '尚未建立 Instagram Feed App 的 Shopify 会话，请先在 Shopify 后台打开一次该应用。',
                 409,
             );
         }
@@ -69,7 +69,7 @@ class InstagramFeedShopifyClient
         if ($response->status() === 401 || $response->status() === 403) {
             throw new InstagramFeedException(
                 'SHOPIFY_APP_SESSION_INVALID',
-                'Instagram 内容 App 的 Shopify 授权已失效，请在 Shopify 后台重新打开该应用。',
+                'Instagram Feed App 的 Shopify 授权已失效，请在 Shopify 后台重新打开该应用。',
                 401,
             );
         }

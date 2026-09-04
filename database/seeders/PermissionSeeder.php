@@ -14,7 +14,7 @@ class PermissionSeeder extends Seeder
         'webhooks' => 'Webhook', 'sync' => '数据同步', 'users' => '用户', 'roles' => '角色',
         'audit' => '审计日志', 'alerts' => '异常告警', 'finance' => '公司财务', 'reports' => '报表', 'system' => '系统',
         'codex' => 'Codex 插件',
-        'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram 内容',
+        'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram Feed',
         'personalization' => '个性化推荐',
         'discounts' => '折扣管理',
     ];
