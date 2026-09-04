@@ -99,6 +99,48 @@ class DiscountManagementTest extends TestCase
             && data_get($request->data(), 'variables.input.customerGets.items.products.productsToAdd.0') === 'gid://shopify/Product/101');
     }
 
+    public function test_updating_real_length_shopify_ids_preserves_target_isolation_and_idempotency(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $product = $this->product($store, '101', 'X1 Bike');
+        $this->installation($store, 'current-store-token');
+        $ids = ['1789315613037', '1789315613038'];
+        $sequence = Http::fakeSequence("https://{$store->shopify_domain}/*");
+        foreach ($ids as $id) {
+            $gid = "gid://shopify/DiscountCodeNode/{$id}";
+            $updated = $this->detailPayload($product, $gid, 'LABOR10');
+            $updated['data']['node']['codeDiscount']['customerGets']['value']['percentage'] = 0.11;
+            $sequence->push($this->detailPayload($product, $gid, 'LABOR10'))
+                ->push(['data' => ['discountCodeBasicUpdate' => [
+                    'codeDiscountNode' => ['id' => $gid], 'userErrors' => [],
+                ]]])
+                ->push($updated);
+        }
+        $payload = $this->writePayload((string) Str::uuid(), ['101']);
+        $payload['value'] = 11;
+
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store));
+        foreach ($ids as $id) {
+            $gid = "gid://shopify/DiscountCodeNode/{$id}";
+            $this->assertGreaterThan(40, strlen('update:'.$gid));
+            $response = $this->putJson(route('discounts.update', ['discountId' => $id]), $payload)
+                ->assertOk()->assertJsonPath('data.id', $gid)->assertJsonPath('data.value', 11);
+            $this->putJson(route('discounts.update', ['discountId' => $id]), $payload)
+                ->assertOk()->assertExactJson($response->json());
+            $this->assertDatabaseHas('discount_action_idempotencies', [
+                'store_id' => $store->id,
+                'operation' => 'update:'.$gid,
+                'shopify_discount_id' => $gid,
+                'status' => 'completed',
+            ]);
+        }
+        $this->assertDatabaseCount('discount_action_idempotencies', 2);
+        Http::assertSentCount(6);
+        Http::assertSent(fn ($request): bool => str_contains((string) $request['query'], 'DiscountManagerBasicUpdate')
+            && data_get($request->data(), 'variables.id') === 'gid://shopify/DiscountCodeNode/1789315613037'
+            && data_get($request->data(), 'variables.input.customerGets.value.percentage') === 0.11);
+    }
+
     public function test_cross_store_product_and_read_only_user_cannot_write_discount(): void
     {
         [$viewer, $organization, $store] = $this->context('viewer');
