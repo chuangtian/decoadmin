@@ -14,18 +14,31 @@ class StudentDiscountDecisionMail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    public string $renderedSubject;
+
+    public string $renderedBody;
+
+    public bool $isTest = false;
+
     public function __construct(
         public StudentDiscountClaim $claim,
         public ?StudentDiscountCode $discountCode,
-    ) {}
+        public array $renderedTemplate,
+    ) {
+        $this->renderedSubject = (string) ($renderedTemplate['subject'] ?? 'Your student discount update');
+        $this->renderedBody = (string) ($renderedTemplate['body'] ?? '');
+    }
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: $this->discountCode ? '你的学生优惠码已生成' : '学生优惠申请审核结果');
+        return new Envelope(subject: $this->renderedSubject);
     }
 
     public function content(): Content
     {
-        return new Content(view: 'mail.student-discount-decision');
+        return new Content(
+            view: 'mail.student-discount-decision',
+            text: 'mail.student-discount-decision-text',
+        );
     }
 }

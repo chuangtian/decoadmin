@@ -2,114 +2,57 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AppInstallation;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\User;
-use App\Services\Marketing\MarketingModuleCatalog;
-use App\Services\StoreBusinessCredentialService;
+use App\Services\AppCenter\AppConfigurationCatalog;
+use App\Services\AppCenter\ApplicationCenterQueryService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ApplicationCenterController extends Controller
 {
-    public function __construct(
-        private CurrentOrganization $currentOrganization,
-        private CurrentStore $currentStore,
-    ) {}
+    public function __construct(private ApplicationCenterQueryService $applicationCenter) {}
 
-    public function installations(Request $request): Response
+    public function installations(): RedirectResponse
     {
-        $organization = $this->currentOrganization->require();
-        $storeIds = $this->accessibleStoreIds($request->user(), $organization);
-        $filters = $request->validate([
-            'search' => ['nullable', 'string', 'max:120'],
-            'status' => ['nullable', 'in:active,pending,uninstalled,disabled'],
-        ]);
-        $search = trim((string) ($filters['search'] ?? ''));
-        $status = (string) ($filters['status'] ?? '');
-
-        $installations = AppInstallation::query()
-            ->whereIn('store_id', $storeIds)
-            ->whereHas('store', fn (Builder $query) => $query->whereBelongsTo($organization))
-            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
-                $query->whereHas('app', fn (Builder $query) => $query
-                    ->where('name', 'like', "%{$search}%")
-                    ->orWhere('handle', 'like', "%{$search}%"))
-                    ->orWhereHas('store', fn (Builder $query) => $query
-                        ->where('name', 'like', "%{$search}%")
-                        ->orWhere('shopify_domain', 'like', "%{$search}%"));
-            }))
-            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
-            ->with(['app:id,name,handle,status', 'store:id,organization_id,name,shopify_domain,status,timezone', 'installedBy:id,name'])
-            ->latest('installed_at')
-            ->paginate(20)
-            ->withQueryString()
-            ->through(fn (AppInstallation $installation): array => [
-                'id' => $installation->id,
-                'status' => $installation->status,
-                'app' => $installation->app ? [
-                    'id' => $installation->app->id,
-                    'name' => $installation->app->name,
-                    'handle' => $installation->app->handle,
-                ] : null,
-                'store' => [
-                    'id' => $installation->store->id,
-                    'name' => $installation->store->name,
-                    'shopify_domain' => $installation->store->shopify_domain,
-                ],
-                'installed_by' => $installation->installedBy?->name,
-                'installed_at' => $installation->installed_at?->toIso8601String(),
-                'uninstalled_at' => $installation->uninstalled_at?->toIso8601String(),
-            ]);
-
-        return Inertia::render('Apps/Installations', [
-            'installations' => $installations,
-            'filters' => ['search' => $search, 'status' => $status],
-        ]);
+        return redirect()->route('app-center.index');
     }
 
     public function configurations(
         Request $request,
-        MarketingModuleCatalog $modules,
-        StoreBusinessCredentialService $credentials,
+        AppConfigurationCatalog $catalog,
+        CurrentOrganization $currentOrganization,
+        CurrentStore $currentStore,
     ): Response {
-        $store = $this->currentStore->get();
+        $organization = $currentOrganization->require();
+        $store = $currentStore->get();
         if (! $store) {
             return Inertia::render('Apps/Configurations', [
                 'store' => null,
-                'installation' => null,
-                'credentialProviders' => [],
-                'canConfigure' => false,
+                'applications' => [],
             ]);
         }
 
         $this->authorize('view', $store);
-        $installation = $this->marketingInstallation($store->id);
+        abort_unless($store->organization_id === $organization->id, 403);
+        $store->loadMissing('organization:id,name');
+        $installations = $this->applicationCenter->configurationInstallations($store);
 
         return Inertia::render('Apps/Configurations', [
             'store' => ['id' => $store->id, 'name' => $store->name, 'shopify_domain' => $store->shopify_domain],
-            'installation' => $installation ? [
-                'id' => $installation->id,
-                'status' => $installation->status,
-                'app_name' => $installation->app?->name,
-                'modules' => $modules->forInstallation($installation),
-            ] : null,
-            'credentialProviders' => collect($credentials->catalogForFrontend($store))
-                ->whereIn('key', ['email_marketing', 'sms_marketing'])
-                ->values()
-                ->all(),
-            'canConfigure' => $request->user()->hasPermission('apps.configure', $store->organization, $store),
+            'applications' => $catalog->forInstallations($installations, $request->user()),
         ]);
     }
 
-    public function logs(Request $request): Response
+    public function logs(Request $request, CurrentOrganization $currentOrganization): Response
     {
-        $organization = $this->currentOrganization->require();
+        $organization = $currentOrganization->require();
         $storeIds = $this->accessibleStoreIds($request->user(), $organization);
         $filters = $request->validate(['search' => ['nullable', 'string', 'max:120']]);
         $search = trim((string) ($filters['search'] ?? ''));
@@ -120,8 +63,9 @@ class ApplicationCenterController extends Controller
             ->where(function (Builder $query): void {
                 $query->where('action', 'like', 'shopify_app_%')
                     ->orWhere('action', 'like', 'shopify_connection_%')
-                    ->orWhere('action', 'like', 'marketing_module_%')
-                    ->orWhere('action', 'like', 'store_business_credential_%');
+                    ->orWhere('action', 'like', 'store_business_credential_%')
+                    ->orWhere('action', 'like', 'student_discount_%')
+                    ->orWhere('action', 'like', 'personalization_%');
             })
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                 $query->where('action', 'like', "%{$search}%")
@@ -141,7 +85,6 @@ class ApplicationCenterController extends Controller
                 'action_label' => $this->actionLabel($log->action),
                 'store' => $log->store ? ['id' => $log->store->id, 'name' => $log->store->name] : null,
                 'actor' => $log->user?->name ?? '系统',
-                'module' => data_get($log->metadata, 'module'),
                 'created_at' => $log->created_at?->toIso8601String(),
             ]);
 
@@ -149,16 +92,6 @@ class ApplicationCenterController extends Controller
             'logs' => $logs,
             'filters' => ['search' => $search],
         ]);
-    }
-
-    private function marketingInstallation(int $storeId): ?AppInstallation
-    {
-        return AppInstallation::query()
-            ->where('store_id', $storeId)
-            ->where('status', 'active')
-            ->whereHas('app', fn (Builder $query) => $query->where('handle', config('shopify.app_handle')))
-            ->with('app:id,name,handle')
-            ->first();
     }
 
     /** @return list<int> */
@@ -177,9 +110,38 @@ class ApplicationCenterController extends Controller
             'shopify_connection_reconnected' => '应用重新连接',
             'shopify_connection_disconnected' => '应用连接已断开',
             'shopify_connection_invalid' => '应用授权失效',
-            'marketing_module_configured' => '营销模块配置已更新',
             'store_business_credential_updated' => '应用凭证已更新',
             'store_business_credential_cleared' => '应用凭证已清除',
+            'student_discount_shopify_app_bootstrapped' => '学生优惠应用连接成功',
+            'student_discount_shopify_app_reconciled' => '学生优惠应用安装记录已同步',
+            'student_discount_shopify_app_uninstalled' => '学生优惠应用已卸载',
+            'student_discount_shopify_app_scopes_updated' => '学生优惠应用权限已更新',
+            'student_discount_campaign_updated' => '学生优惠活动配置已更新',
+            'student_discount_claim_submitted' => '学生优惠申请已提交',
+            'student_discount_claim_resubmitted' => '学生优惠申请已重新提交',
+            'student_discount_claim_approved' => '学生优惠申请已通过',
+            'student_discount_claim_rejected' => '学生优惠申请已拒绝',
+            'personalization_shopify_app_bootstrapped' => '个性化推荐应用连接成功',
+            'personalization_shopify_app_uninstalled' => '个性化推荐应用已卸载',
+            'personalization_shopify_app_scopes_updated' => '个性化推荐应用权限已更新',
+            'personalization_strategy_created' => '个性化推荐策略已创建',
+            'personalization_strategy_rules_replaced' => '个性化推荐规则已更新',
+            'personalization_strategy_products_replaced' => '个性化推荐商品已更新',
+            'personalization_strategy_updated' => '个性化推荐策略已更新',
+            'personalization_component_created' => '个性化推荐组件已创建',
+            'personalization_component_updated' => '个性化推荐组件已更新',
+            'personalization_component_style_updated' => '个性化推荐样式已更新',
+            'personalization_component_activated' => '个性化推荐组件已启用',
+            'personalization_component_disabled' => '个性化推荐组件已停用',
+            'personalization_smart_cart_draft_saved' => 'Smart Cart 草稿已保存',
+            'personalization_smart_cart_compatibility_recorded' => 'Smart Cart 兼容性已检查',
+            'personalization_smart_cart_preview_confirmed' => 'Smart Cart 预览已确认',
+            'personalization_smart_cart_activated' => 'Smart Cart 已启用',
+            'personalization_smart_cart_restored' => '已恢复 Shopify 默认购物车',
+            'personalization_customer_data_request_received' => '已处理客户数据请求（无客户数据）',
+            'personalization_customer_redact_received' => '已处理客户清除请求（无客户数据）',
+            'personalization_shop_redact_received' => '已接收店铺清除请求',
+            'personalization_online_data_purged' => '个性化推荐在线数据已清理',
         ][$action] ?? str($action)->replace('_', ' ')->headline()->toString();
     }
 }

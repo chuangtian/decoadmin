@@ -55,6 +55,10 @@ class WebhookEvent extends Model
 
     public function payloadIntegrityIsValid(): bool
     {
+        if (data_get($this->payload, 'storage') === 'redacted') {
+            return true;
+        }
+
         return ! $this->payload_sha256
             || hash_equals($this->payload_sha256, hash('sha256', $this->rawPayload()));
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services\NaturalTraffic;
 
+use App\Models\BrandSocialPostState;
 use App\Models\FeishuBitableField;
 use App\Models\FeishuBitableRecord;
 use App\Models\FeishuBitableTable;
@@ -53,6 +54,12 @@ class BrandSocialCsvImportService
             'table_name' => 'Facebook 手动导入',
             'required' => ['帖子编号', '公共主页编号', '发布时间', '帖子类型', '观看量', '覆盖人数', '心情'],
         ],
+        'decoadmin' => [
+            'platform' => '跨平台',
+            'table_id' => 'manual:decoadmin',
+            'table_name' => 'DecoAdmin 品牌官媒导入',
+            'required' => ['平台', '帖子编号', '发布时间', '帖子类型', '浏览量', '赞', '评论数'],
+        ],
     ];
 
     /**
@@ -67,6 +74,7 @@ class BrandSocialCsvImportService
 
         [$headers, $csvRows] = $this->readCsv($path);
         $format = $this->detectFormat($headers);
+        $csvRows = $this->scopeRecordIds($csvRows, $format);
         [$rows, $duplicateUnchanged, $duplicateStale] = $this->coalesceRows(
             $csvRows,
             $store->timezone ?: 'UTC',
@@ -131,7 +139,8 @@ class BrandSocialCsvImportService
             $outliers = 0;
 
             foreach ($rows as $recordId => $row) {
-                $fields = ['平台' => $format['platform'], ...$row['fields']];
+                $platform = $this->rowPlatform($row['fields'], $format);
+                $fields = [...$row['fields'], '平台' => $platform];
                 $existingRecord = $existing->get($recordId);
 
                 if (! $existingRecord instanceof FeishuBitableRecord) {
@@ -177,7 +186,25 @@ class BrandSocialCsvImportService
                     }
                 }
 
-                if ($format['platform'] === 'Instagram' && $this->instagramMetric($fields) > 100000) {
+                $hidden = $this->rowHiddenState($fields);
+                if ($hidden !== null) {
+                    BrandSocialPostState::query()->updateOrCreate(
+                        [
+                            'store_id' => (int) $store->id,
+                            'source_section' => self::SOURCE_SECTION,
+                            'source_table_key' => $format['table_id'],
+                            'source_record_id' => $recordId,
+                        ],
+                        [
+                            'organization_id' => (int) $store->organization_id,
+                            'is_hidden' => $hidden,
+                            'hidden_by' => null,
+                            'hidden_at' => $hidden ? $now : null,
+                        ],
+                    );
+                }
+
+                if ($platform === 'Instagram' && $this->instagramMetric($fields) > 100000) {
                     $outliers++;
                 }
             }
@@ -437,7 +464,68 @@ class BrandSocialCsvImportService
             }
         }
 
-        throw new RuntimeException('无法识别 CSV：请上传 Meta Business Suite 原始导出的 Instagram 或 Facebook 帖子数据。');
+        throw new RuntimeException('无法识别 CSV：请上传 Meta Business Suite 原始导出文件或 DecoAdmin 品牌官媒模板。');
+    }
+
+    /**
+     * @param  list<array{record_id: string, fields: array<string, string>, row_number: int}>  $rows
+     * @param  array{platform: string, table_id: string, table_name: string, required: list<string>}  $format
+     * @return list<array{record_id: string, fields: array<string, string>, row_number: int}>
+     */
+    private function scopeRecordIds(array $rows, array $format): array
+    {
+        if ($format['platform'] !== '跨平台') {
+            return $rows;
+        }
+
+        return array_map(function (array $row) use ($format): array {
+            $platform = $this->rowPlatform($row['fields'], $format);
+
+            return [
+                ...$row,
+                'record_id' => 'post:'.mb_strtolower($platform).':'.mb_substr($row['record_id'], 5),
+            ];
+        }, $rows);
+    }
+
+    /** @param array<string, string> $fields @param array{platform: string, table_id: string, table_name: string, required: list<string>} $format */
+    private function rowPlatform(array $fields, array $format): string
+    {
+        if ($format['platform'] !== '跨平台') {
+            return $format['platform'];
+        }
+
+        $value = mb_strtoupper(trim((string) ($fields['平台'] ?? '')));
+        $platform = match ($value) {
+            'IG', 'INS', 'INSTAGRAM' => 'Instagram',
+            'FB', 'FACEBOOK' => 'Facebook',
+            'YT', 'YOUTUBE' => 'YouTube',
+            default => '',
+        };
+        if ($platform === '') {
+            throw new RuntimeException('DecoAdmin 模板中的平台必须是 Instagram、Facebook 或 YouTube。');
+        }
+
+        return $platform;
+    }
+
+    /** @param array<string, string> $fields */
+    private function rowHiddenState(array $fields): ?bool
+    {
+        $raw = $this->fieldValue($fields, ['显示状态', 'visibility', '是否显示']);
+        if (! is_scalar($raw) || trim((string) $raw) === '') {
+            return null;
+        }
+
+        $value = mb_strtolower(trim((string) $raw));
+        if (in_array($value, ['已隐藏', '隐藏', 'hidden', '否', 'no', 'false', '0'], true)) {
+            return true;
+        }
+        if (in_array($value, ['可见', '显示', 'visible', '是', 'yes', 'true', '1'], true)) {
+            return false;
+        }
+
+        throw new RuntimeException('显示状态只能填写“可见”或“已隐藏”。');
     }
 
     private function cleanCell(mixed $value, bool $header = false): string

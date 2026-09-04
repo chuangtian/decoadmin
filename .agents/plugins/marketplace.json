@@ -1,0 +1,20 @@
+{
+  "name": "decomkt-test",
+  "interface": {
+    "displayName": "Decomkt Test"
+  },
+  "plugins": [
+    {
+      "name": "decoadmin-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/decoadmin-test"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

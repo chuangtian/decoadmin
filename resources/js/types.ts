@@ -75,7 +75,10 @@ export interface ShopifyApp {
     type: string;
     status: string;
     description: string | null;
-    installations_count: number;
+    current_store_installation?: {
+        status: 'active' | 'pending' | 'disabled' | 'uninstalled' | 'not_installed' | string;
+        is_installed: boolean;
+    };
     created_at: string | null;
 }
 
@@ -353,6 +356,13 @@ export interface FlashMessages {
     info?: string;
 }
 
+export interface ApplicationNavigationItem {
+    app_id: number;
+    name: string;
+    route: string;
+    permission: string;
+}
+
 export interface SharedProps {
     appName: string;
     auth: {
@@ -362,6 +372,7 @@ export interface SharedProps {
     currentOrganization: { id: number; name: string; code: string } | null;
     currentStore: (StoreOption & { organization_id: number }) | null;
     availableOrganizations: OrganizationOption[];
+    applicationNavigation: ApplicationNavigationItem[];
     flash: FlashMessages;
     [key: string]: unknown;
 }

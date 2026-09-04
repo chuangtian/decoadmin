@@ -18,7 +18,7 @@ class AnalyticsOverviewInsightsService
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
-    public function forStore(Store $store, array $period, array $customers, array $filters = []): array
+    public function forStore(Store $store, array $period, array $customers, array $filters = [], array $comparison = []): array
     {
         $native = $this->reports->analyticsOverview($store, $period['from'], $period['to']);
         $source = $native['acquisition'];
@@ -27,7 +27,15 @@ class AnalyticsOverviewInsightsService
         $posLocations = $native['pos_locations'];
         $posStaff = $native['pos_staff'];
         $behavior = $native['behavior'];
+        $comparisonNative = $this->comparisonOverview($store, $comparison);
+        $comparisonBehavior = is_array($comparisonNative) ? $comparisonNative['behavior'] : null;
         $localPos = $this->businessInsights->localPosOverview($store, $filters);
+        $integrationError = collect([$behavior, $source, $device, $location, $posLocations, $posStaff])
+            ->map(fn (array $report): ?string => filled($report['error'] ?? null)
+                ? trim((string) $report['error'])
+                : null)
+            ->filter()
+            ->first();
 
         $nativePosAvailable = $posLocations['available'] || $posStaff['available'];
         $locations = $posLocations['available']
@@ -42,7 +50,7 @@ class AnalyticsOverviewInsightsService
             'acquisition' => $this->reportCard($source, $this->acquisitionRows($source['rows'])),
             'devices' => $this->reportCard($device, $this->deviceRows($device['rows'])),
             'locations' => $this->reportCard($location, $this->locationRows($location['rows'])),
-            'behavior' => $this->behaviorCard($behavior),
+            'behavior' => $this->behaviorCard($behavior, $comparisonBehavior),
             'customers' => [
                 'available' => true,
                 'source' => (string) ($customers['source'] ?? 'local_sync'),
@@ -65,7 +73,9 @@ class AnalyticsOverviewInsightsService
                 'report_scope_granted' => $source['scope_granted'],
                 'shopifyql_available' => collect([$source, $device, $location, $posLocations, $posStaff, $behavior])
                     ->contains(fn (array $report): bool => $report['available']),
+                'error' => $integrationError,
                 'storage' => $native['storage'] ?? null,
+                'comparison_storage' => $comparisonNative['storage'] ?? null,
             ],
             'generated_at' => now()->toIso8601String(),
         ];
@@ -130,7 +140,7 @@ class AnalyticsOverviewInsightsService
     }
 
     /** @param array<string, mixed> $report */
-    private function behaviorCard(array $report): array
+    private function behaviorCard(array $report, ?array $comparisonReport = null): array
     {
         $rows = collect($report['rows'] ?? [])->filter(fn (mixed $row): bool => is_array($row))->values();
         $dailyRows = $rows->filter(fn (array $row): bool => filled($row['day'] ?? null))->values();
@@ -154,8 +164,18 @@ class AnalyticsOverviewInsightsService
             );
         }
 
+        if (is_array($comparisonReport) && ($comparisonReport['available'] ?? false)) {
+            $baseline = $this->behaviorCard($comparisonReport);
+            foreach (array_keys($metrics) as $key) {
+                $current = (float) data_get($metrics, "{$key}.value", 0);
+                $previous = (float) data_get($baseline, "metrics.{$key}.value", 0);
+                $metrics[$key]['comparison'] = $this->comparison($current, $previous);
+            }
+        }
+
         return [
             'available' => (bool) ($report['available'] ?? false),
+            'comparison_available' => is_array($comparisonReport) && (bool) ($comparisonReport['available'] ?? false),
             'source' => 'shopifyql',
             'metrics' => $metrics,
             'trend' => $dailyRows->map(fn (array $row): array => [
@@ -167,6 +187,39 @@ class AnalyticsOverviewInsightsService
                 'completed_checkout' => $this->integer($row['sessions_that_completed_checkout'] ?? 0),
             ])->all(),
             'error' => $report['error'] ?? null,
+        ];
+    }
+
+    /** @param array<string, mixed> $comparison @return array<string, mixed>|null */
+    private function comparisonOverview(Store $store, array $comparison): ?array
+    {
+        $mode = (string) ($comparison['mode'] ?? 'previous');
+        $period = $comparison['period'] ?? null;
+
+        if (in_array($mode, ['none', 'previous'], true) || ! is_array($period)) {
+            return null;
+        }
+
+        $from = trim((string) ($period['from'] ?? ''));
+        $to = trim((string) ($period['to'] ?? ''));
+
+        return $from !== '' && $to !== ''
+            ? $this->reports->analyticsOverview($store, $from, $to)
+            : null;
+    }
+
+    /** @return array{current: float, baseline: float, change: float, change_percent: float|null} */
+    private function comparison(float $current, float $baseline): array
+    {
+        $change = round($current - $baseline, 2);
+
+        return [
+            'current' => $current,
+            'baseline' => $baseline,
+            'change' => $change,
+            'change_percent' => abs($baseline) > 0.000001
+                ? round($change / abs($baseline) * 100, 2)
+                : (abs($current) < 0.000001 ? 0.0 : null),
         ];
     }
 

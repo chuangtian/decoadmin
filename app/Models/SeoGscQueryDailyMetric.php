@@ -6,7 +6,7 @@ use App\Models\Concerns\ScopesToOrganizationStore;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['organization_id', 'store_id', 'metric_date', 'segment', 'query_hash', 'query', 'clicks', 'impressions', 'average_position', 'synced_at'])]
+#[Fillable(['organization_id', 'store_id', 'metric_date', 'segment', 'query_id', 'clicks', 'impressions', 'average_position', 'synced_at'])]
 class SeoGscQueryDailyMetric extends Model
 {
     use ScopesToOrganizationStore;

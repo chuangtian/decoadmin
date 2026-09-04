@@ -189,7 +189,7 @@ class StoreOperationalAlertService
             ->where('store_id', $store->id)
             ->where('status', 'failed')
             ->where('received_at', '>=', now()->subDays(7))
-            ->get()
+            ->get(['id', 'store_id', 'webhook_id', 'topic', 'last_error', 'received_at'])
             ->sum(fn (WebhookEvent $event): int => (int) $this->record(
                 $store,
                 'webhook',

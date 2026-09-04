@@ -16,6 +16,7 @@ use App\Services\CampaignThemePlanningService;
 use App\Services\CampaignThemeRefreshService;
 use App\Services\CampaignThemeReviewService;
 use App\Services\Feishu\CampaignActivitySyncService;
+use App\Services\Feishu\CampaignPlanningDocumentSyncService;
 use App\Services\Shopify\Analytics\ShopifyAnalyticsReportService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
@@ -354,6 +355,12 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.activity.analysis.summary', "【结果】GMV 与 ROI 表现稳定。\n【亮点】活动末段增长明显。")
                 ->where('review.activity.analysis.diagnosis', "① 活动周期偏长。\n② 前段转化承接不足。")
                 ->where('review.activity.analysis.optimization', "【P1】缩短活动周期。\n【P2】提前验证素材。")
+                ->where('review.activity.metrics.gmv.value', 212000)
+                ->where('review.activity.metrics.ad_spend.value', 24000)
+                ->where('review.activity.metrics.roi.value', 8.86)
+                ->where('review.activity.metrics.daily_average_sales.value', 35333.33)
+                ->where('review.activity.metrics.daily_average_ad_spend.value', 4000)
+                ->where('review.activity.metrics.conversion_rate_percent.value', 0.427)
                 ->where('review.activity.metrics.average_order_value.value', 1054.73)
                 ->where('review.activity.metrics.orders.value', 201)
                 ->where('review.activity.metrics.daily_average_sessions.value', 7846.17)
@@ -440,6 +447,109 @@ class CampaignThemeOverviewTest extends TestCase
                 ->where('review.model_sales.models.0.share_percent', 80));
 
         $this->assertNotSame($hidden->id, $current->id);
+    }
+
+    public function test_review_falls_back_to_shopify_reports_when_feishu_metrics_are_empty(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+        $activity = $this->campaign(
+            $organization,
+            $store,
+            'report-fallback',
+            0,
+            0,
+            0,
+            null,
+            '2026-07-27',
+            '2026-07-28',
+        );
+        $activity->forceFill([
+            'sales_amount' => null,
+            'ad_spend' => null,
+            'roi' => null,
+            'order_count' => null,
+            'conversion_rate' => null,
+            'daily_average_sales' => 0,
+            'daily_average_ad_spend' => 0,
+        ])->save();
+
+        $reports = \Mockery::mock(ShopifyAnalyticsReportService::class);
+        $reports->shouldReceive('report')->times(5)->andReturnUsing(
+            function (Store $reportedStore, string $report, string $from, string $to) use ($store): array {
+                $this->assertTrue($reportedStore->is($store));
+                $this->assertSame('2026-07-27', $from);
+                $this->assertSame('2026-07-28', $to);
+
+                return match ($report) {
+                    'core-sales-timeseries' => $this->shopifyReport([
+                        ['day' => '2026-07-27', 'total_sales' => '100', 'orders' => '1'],
+                        ['day' => '2026-07-28', 'total_sales' => '200', 'orders' => '2'],
+                    ]),
+                    'marketing-engagement-spend-timeseries' => $this->shopifyReport([
+                        ['day' => '2026-07-27', 'engagements_ad_spend' => '10'],
+                        ['day' => '2026-07-28', 'engagements_ad_spend' => '20'],
+                    ]),
+                    'conversion-funnel-timeseries' => $this->shopifyReport([
+                        [
+                            'day' => '2026-07-27',
+                            'sessions' => '400',
+                            'sessions_with_cart_additions' => '40',
+                            'sessions_that_reached_checkout' => '20',
+                        ],
+                        [
+                            'day' => '2026-07-28',
+                            'sessions' => '600',
+                            'sessions_with_cart_additions' => '60',
+                            'sessions_that_reached_checkout' => '30',
+                        ],
+                    ]),
+                    'conversion-funnel-breakdown' => $this->shopifyReport([[
+                        'sessions' => '1000',
+                        'conversion_rate' => '0.003',
+                        'sessions_with_cart_additions' => '100',
+                        'sessions_that_reached_checkout' => '50',
+                        'sessions_that_completed_checkout' => '3',
+                    ]]),
+                    default => $this->shopifyReport([]),
+                };
+            },
+        );
+        app()->instance(ShopifyAnalyticsReportService::class, $reports);
+
+        $channelSnapshots = \Mockery::mock(AdvertisingChannelSnapshotService::class);
+        $channelSnapshots->shouldReceive('report')->once()->andReturn([
+            'available' => false,
+            'complete' => false,
+            'pending' => false,
+            'source' => 'advertising_apis',
+            'message' => '尚未配置广告平台凭据。',
+            'failed_channels' => [],
+            'channels' => [],
+            'storage' => ['pending' => false, 'stale' => false],
+        ]);
+        app()->instance(AdvertisingChannelSnapshotService::class, $channelSnapshots);
+
+        $this->actingAs($user)
+            ->withSession($this->contextSession($organization, $store))
+            ->get(route('campaign-themes.index', [
+                'tab' => 'planning',
+                'activity' => $activity->id,
+                'detail' => 1,
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('review.activity.id', $activity->id)
+                ->where('review.activity.judgment', 'reusable')
+                ->where('review.activity.metrics.gmv.value', 300)
+                ->where('review.activity.metrics.ad_spend.value', 30)
+                ->where('review.activity.metrics.roi.value', 10)
+                ->where('review.activity.metrics.orders.value', 3)
+                ->where('review.activity.metrics.daily_average_sales.value', 150)
+                ->where('review.activity.metrics.daily_average_ad_spend.value', 15)
+                ->where('review.activity.metrics.conversion_rate_percent.value', 0.3)
+                ->where('review.activity.metrics.average_order_value.value', 100)
+                ->where('review.activity.metrics.daily_average_cart_addition_cost.value', 0.3)
+                ->where('review.activity.metrics.daily_average_checkout_cost.value', 0.6));
     }
 
     public function test_empty_review_returns_an_unavailable_traffic_cost_trend(): void
@@ -593,13 +703,32 @@ class CampaignThemeOverviewTest extends TestCase
             ->once()
             ->withArgs(fn (Store $syncedStore): bool => $syncedStore->is($store))
             ->andReturn(['inserted' => 1, 'updated' => 11, 'skipped' => 0, 'records' => 12]);
+        $planningDocuments = \Mockery::mock(CampaignPlanningDocumentSyncService::class);
+        $planningDocuments->shouldReceive('syncStore')
+            ->once()
+            ->withArgs(fn (Store $syncedStore): bool => $syncedStore->is($store))
+            ->andReturn([
+                'documents' => 2,
+                'inserted' => 1,
+                'updated' => 0,
+                'unchanged' => 1,
+                'failed' => 0,
+                'failures' => [],
+            ]);
 
         $refresh = app(CampaignThemeRefreshService::class);
-        (new SyncFeishuCampaignActivitiesForStore($store->id, $user->id))->handle($sync, $refresh);
+        (new SyncFeishuCampaignActivitiesForStore($store->id, $user->id))->handle(
+            $sync,
+            $planningDocuments,
+            $refresh,
+        );
 
         $status = $refresh->status($store);
         $this->assertSame('completed', $status['status']);
-        $this->assertSame('更新完成：新增 1，更新 11，跳过 0。', $status['message']);
+        $this->assertSame(
+            '更新完成：新增 1，更新 11，跳过 0。 策划书同步 2 份：新增 1，更新 0，无变化 1，失败 0。',
+            $status['message'],
+        );
         $this->assertDatabaseHas('audit_logs', [
             'organization_id' => $organization->id,
             'store_id' => $store->id,

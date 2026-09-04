@@ -21,6 +21,19 @@ Schedule::command('shopify:scan-alerts')
     ->onOneServer()
     ->withoutOverlapping(10);
 
+if (config('discount_monitoring.enabled', true)) {
+    $discountMonitor = Schedule::command('shopify:monitor-discounts')
+        ->name('shopify:monitor-priority-discounts');
+    if ((int) config('discount_monitoring.poll_minutes', 5) >= 10) {
+        $discountMonitor->everyTenMinutes();
+    } else {
+        $discountMonitor->everyFiveMinutes();
+    }
+    $discountMonitor
+        ->onOneServer()
+        ->withoutOverlapping(10);
+}
+
 Schedule::command('shopify:prune-analytics-snapshots')
     ->name('shopify:prune-analytics-snapshots')
     ->dailyAt('04:15')
@@ -32,6 +45,24 @@ Schedule::command('shopify:prune-uninstalled-data')
     ->hourlyAt(20)
     ->onOneServer()
     ->withoutOverlapping(60);
+
+Schedule::command('personalization:reconcile-attribution')
+    ->name('personalization:reconcile-attribution')
+    ->everyFiveMinutes()
+    ->onOneServer()
+    ->withoutOverlapping(10);
+
+Schedule::command('personalization:prune-data --due-only')
+    ->name('personalization:purge-due-stores')
+    ->hourlyAt(35)
+    ->onOneServer()
+    ->withoutOverlapping(30);
+
+Schedule::command('personalization:prune-data')
+    ->name('personalization:retention-maintenance')
+    ->dailyAt('04:25')
+    ->onOneServer()
+    ->withoutOverlapping(120);
 
 Schedule::command('student-discounts:prune-evidence --days=30')
     ->name('student-discounts:prune-reviewed-evidence')

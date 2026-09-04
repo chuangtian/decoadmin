@@ -25,7 +25,13 @@ class AnalyticsController extends Controller
         $this->authorize('view', $store);
         $filters = $request->filters();
         $overview = $analytics->operationsOverview($store, $filters);
-        $overviewInsights = $insights->forStore($store, $overview['period'], $overview['customers'], $filters);
+        $overviewInsights = $insights->forStore(
+            $store,
+            $overview['period'],
+            $overview['customers'],
+            $filters,
+            $overview['comparison'],
+        );
         $comparisonMode = (string) ($filters['comparison'] ?? 'previous');
 
         return Inertia::render('Analytics/Overview', [

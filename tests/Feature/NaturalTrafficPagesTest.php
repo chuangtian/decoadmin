@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\SyncSeoAnalyticsForStore;
 use App\Jobs\SyncSeoAnalyticsShardForStore;
+use App\Models\FeishuBitableField;
 use App\Models\FeishuBitableRecord;
 use App\Models\FeishuBitableTable;
 use App\Models\Organization;
@@ -14,12 +15,19 @@ use App\Models\SeoGa4LandingPageDailyMetric;
 use App\Models\SeoGoalWorkRecord;
 use App\Models\SeoGscBreakdownDailyMetric;
 use App\Models\SeoGscDailyMetric;
+use App\Models\SeoGscPage;
 use App\Models\SeoGscPageDailyMetric;
+use App\Models\SeoGscQuery;
 use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
 use App\Models\User;
+use App\Services\SeoAnalytics\GoogleSeoApiClient;
+use App\Services\SeoAnalytics\GscDetailPruneService;
+use App\Services\SeoAnalytics\GscDimensionBackfillService;
+use App\Services\SeoAnalytics\GscMetricQueryService;
+use App\Services\SeoAnalytics\SeoAnalyticsCacheVersionService;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncManager;
 use App\Services\SeoAnalytics\SeoAnalyticsSyncService;
 use App\Services\SeoAnalytics\SeoOverviewDashboardService;
@@ -149,6 +157,17 @@ class NaturalTrafficPagesTest extends TestCase
         }
     }
 
+    public function test_reports_user_can_download_brand_media_import_template(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media.import-template'))
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8')
+            ->assertDownload('decoadmin-brand-media-template.csv');
+    }
+
     public function test_non_ai_dashboards_read_only_current_store_database_and_apply_real_previous_periods(): void
     {
         [$user, $organization, $store] = $this->context('operator');
@@ -162,6 +181,9 @@ class NaturalTrafficPagesTest extends TestCase
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-previous', [
             '发布日期' => '2026-08-17', '平台' => 'Instagram', '帖子数' => 1, '浏览量' => 500, '点赞' => 30, '评论数' => 5, '分享数' => 2,
         ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒周数据', 'social-youtube', [
+            '发布日期' => '2026-08-18', '平台' => 'YouTube', '帖子数' => 4, '浏览量' => 4000, '点赞' => 300, '评论数' => 20,
+        ]);
         $this->archiveRecord($organization, $otherStore, 'natural-traffic:social', '官媒周数据', 'social-other', [
             '发布日期' => '2026-08-18', '平台' => 'Facebook', '帖子数' => 99, '浏览量' => 99999,
         ]);
@@ -171,15 +193,17 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('NaturalTraffic/BrandMedia')
             ->where('dashboard.source.storage', 'current-project-mysql')
-            ->where('dashboard.source.record_count', 2)
-            ->where('dashboard.kpis.0.value', 2)
-            ->where('dashboard.kpis.1.value', 1000)
+            ->where('dashboard.source.record_count', 3)
+            ->where('dashboard.kpis.0.value', 6)
+            ->where('dashboard.kpis.1.value', 5000)
             ->where('dashboard.kpis.1.previous', 500)
-            ->where('dashboard.kpis.1.change', 100)
-            ->where('dashboard.funnel.0.value', 1000)
-            ->where('dashboard.weekly_reports.0.included_posts', 2)
+            ->where('dashboard.kpis.1.change', 900)
+            ->where('dashboard.funnel.0.value', 5000)
+            ->where('dashboard.weekly_reports.0.included_posts', 3)
+            ->where('dashboard.weekly_reports.0.week', '2026-08-16')
+            ->where('dashboard.weekly_reports.0.week_end', '2026-08-22')
             ->where('dashboard.platform_coverage.missing.0', 'Facebook')
-            ->has('dashboard.tabs', 3));
+            ->has('dashboard.tabs', 4));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-current', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_a', '平台' => ['IG'], '浏览' => 20000, '赞' => 1000, '评' => 60, '互动率' => 0.053, 'clicks' => 120,
@@ -238,13 +262,84 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.kpis.2.value', 10));
     }
 
+    public function test_brand_media_default_period_includes_current_store_day(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-03 12:00:00', 'Asia/Shanghai'));
+        [$user, $organization, $store] = $this->context('operator');
+        $store->update(['timezone' => 'America/Los_Angeles']);
+        $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'today-post', [
+            '发布日期' => '2026-09-02', '平台' => 'YouTube', '描述' => 'Today', '浏览量' => 607,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.brand-media'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.filters.date_from', '2026-08-27')
+                ->where('dashboard.filters.date_to', '2026-09-02')
+                ->where('dashboard.kpis.1.value', 607));
+    }
+
+    public function test_influencer_tables_follow_source_field_order_format_dates_and_sort_by_date(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $olderTimestamp = CarbonImmutable::parse('2026-08-17 12:00:00', 'Asia/Shanghai')->getTimestampMs();
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-older', [
+            '浏览' => 900000, '发布日期' => $olderTimestamp, '平台' => ['IG'], '红人title' => 'older_creator',
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-newer', [
+            '浏览' => 1000, '发布日期' => '2026-08-18', '平台' => ['YTB'], '红人title' => 'newer_creator',
+        ]);
+        $mainTable = FeishuBitableTable::query()->where('name', '红人数据')->sole();
+        foreach (['红人title', '平台', '发布日期', '浏览'] as $order => $name) {
+            FeishuBitableField::query()->create([
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'feishu_bitable_table_id' => $mainTable->id,
+                'source_field_id' => 'field-'.$order,
+                'name' => $name,
+                'field_order' => $order,
+                'is_primary' => $order === 0,
+                'metadata_encrypted' => [],
+                'synced_at' => now(),
+            ]);
+        }
+
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-older', [
+            '发布日期' => '2026-08-16', '红人title' => 'viral_older', '浏览' => 9999999,
+        ]);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-newer', [
+            '发布日期' => '2026-08-19', '红人title' => 'viral_newer', '浏览' => 10,
+        ]);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.influencer-operations', [
+                'date_from' => '2026-08-16',
+                'date_to' => '2026-08-19',
+            ]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.columns', ['红人title', '平台', '发布日期', '浏览'])
+                ->where('dashboard.details.0.influencer', 'newer_creator')
+                ->where('dashboard.details.0.source_fields.发布日期', '2026-08-18')
+                ->where('dashboard.details.1.influencer', 'older_creator')
+                ->where('dashboard.details.1.source_fields.发布日期', '2026-08-17')
+                ->where('dashboard.viral_content.0.influencer', 'viral_newer')
+                ->where('dashboard.viral_content.1.influencer', 'viral_older')
+                ->where('dashboard.resources.0.influencer', 'newer_creator')
+                ->where('dashboard.resources.0.date', '2026-08-18')
+                ->where('dashboard.resources.1.influencer', 'older_creator')
+                ->where('dashboard.resources.1.date', '2026-08-17'));
+    }
+
     public function test_non_ai_dashboards_keep_source_semantics_for_outliers_links_and_missing_fields(): void
     {
         [$user, $organization, $store] = $this->context('operator');
         $session = $this->contextSession($organization, $store);
 
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'regular-post', [
-            '发布日期' => '2026-08-18', '平台' => 'Instagram', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
+            '发布日期' => '2026-08-18', '平台' => 'Instagram', '账户账号' => 'macfoxbike', '描述' => '常规内容', '浏览量' => 10000, '点赞' => 500, '评论数' => 30,
         ]);
         $this->archiveRecord($organization, $store, 'natural-traffic:social', '官媒内容', 'viral-post', [
             '发布日期' => '2026-08-19', '平台' => 'Instagram', '描述' => '爆款内容', '浏览量' => 150000, '点赞' => 6000, '评论数' => 400,
@@ -253,12 +348,13 @@ class NaturalTrafficPagesTest extends TestCase
         $this->actingAs($user)->withSession($session)
             ->get(route('natural-traffic.brand-media', ['date_from' => '2026-08-18', 'date_to' => '2026-08-24']))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.weekly_reports.0.included_posts', 1)
-            ->where('dashboard.weekly_reports.0.excluded_posts', 1)
-            ->where('dashboard.weekly_reports.0.included_views', 10000)
-            ->where('dashboard.weekly_reports.0.included_interactions', 530)
-            ->where('dashboard.weekly_reports.0.average_views', 10000)
-            ->has('dashboard.weekly_reports.0.excluded_content', 1));
+            ->where('dashboard.selected_weekly_report.included_posts', 1)
+            ->where('dashboard.selected_weekly_report.excluded_posts', 1)
+            ->where('dashboard.selected_weekly_report.included_views', 10000)
+            ->where('dashboard.selected_weekly_report.included_interactions', 530)
+            ->where('dashboard.selected_weekly_report.average_views', 10000)
+            ->where('dashboard.selected_weekly_report.top_views.0.account_handle', 'macfoxbike')
+            ->has('dashboard.selected_weekly_report.excluded_content', 1));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-with-link', [
             '发布日期' => '2026-08-18', '红人title' => 'creator_link', '平台' => ['IG'], '浏览' => 20000,
@@ -328,7 +424,7 @@ class NaturalTrafficPagesTest extends TestCase
                 ->where('dashboard.posts.0.record_id', 'post-11')
                 ->where('dashboard.posts.9.record_id', 'post-20')
                 ->has('dashboard.posts', 10)
-                ->where('dashboard.kpis.0.value', 26)
+                ->where('dashboard.kpis.0.value', 27)
                 ->where('dashboard.source.record_count', 27)
                 ->where('dashboard.post_filter_options.platforms', ['Instagram', 'Facebook', 'YouTube'])
                 ->where('dashboard.post_filter_options.aggregation_statuses.1.value', 'excluded'));
@@ -444,13 +540,15 @@ class NaturalTrafficPagesTest extends TestCase
 
         $run = SeoAnalyticsSyncRun::query()->sole();
         $this->assertSame('queued', $run->status);
+        $this->assertSame('2026-01-01', $run->date_from?->toDateString());
+        $this->assertSame('2026-08-22', $run->date_to?->toDateString());
         Queue::assertPushed(SyncSeoAnalyticsForStore::class, fn (SyncSeoAnalyticsForStore $job): bool => $job->storeId === $store->id && $job->syncRunId === $run->id);
 
         app(SeoAnalyticsSyncManager::class)->dispatchShards($store, $run);
         $run->refresh();
-        $this->assertSame(18, data_get($run->result, 'total_shards'));
+        $this->assertSame(9, data_get($run->result, 'total_shards'));
         $this->assertSame(['2026-08-16', '2026-08-22'], data_get($run->result, 'priority_period'));
-        Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, 18);
+        Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, 9);
         Queue::assertPushed(SyncSeoAnalyticsShardForStore::class, fn (SyncSeoAnalyticsShardForStore $job): bool => $job->shardIndex === 0
             && $job->phase === 'priority'
             && $job->dateFrom === '2026-08-16'
@@ -600,6 +698,221 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertJsonPath('totals.revenue', 250);
     }
 
+    public function test_blog_page_details_are_derived_from_total_page_rows(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $blogPage = 'https://example.com/blogs/news/electric-bike-guide';
+
+        $this->gscPage($organization, $store, '2026-08-22', 'total', $blogPage, 15, 300, 4);
+        $this->gscPage($organization, $store, '2026-08-15', 'total', $blogPage, 10, 200, 5);
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/products/x1', 99, 999, 1);
+        $this->gscPage($organization, $store, '2026-08-22', 'blog', $blogPage, 500, 5000, 2);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->getJson(route('natural-traffic.seo-geo.source-details', [
+                'source' => 'gsc', 'date_from' => '2026-08-16', 'date_to' => '2026-08-22',
+                'segment' => 'blog', 'detail_type' => 'pages',
+            ]))->assertOk()
+            ->assertJsonPath('type', 'pages')
+            ->assertJsonPath('segment', 'blog')
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', $blogPage)
+            ->assertJsonPath('rows.0.clicks', 15)
+            ->assertJsonPath('rows.0.previous.clicks', 10)
+            ->assertJsonPath('rows.0.difference.clicks', 5);
+    }
+
+    public function test_gsc_dimension_backfill_preserves_page_and_query_details(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $blogPage = 'https://example.com/blogs/news/dimension-guide';
+
+        $this->gscPage($organization, $store, '2026-08-22', 'total', $blogPage, 15, 300, 4);
+        $this->gscPage($organization, $store, '2026-08-15', 'total', $blogPage, 10, 200, 5);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'dimension ebike', 8, 120, 6);
+
+        $status = app(GscDimensionBackfillService::class)->backfill($store->id, 1000);
+
+        $this->assertSame(0, $status['pages']['missing_rows']);
+        $this->assertSame(0, $status['queries']['missing_rows']);
+        $this->assertSame(1, $status['pages']['dimension_rows']);
+        $this->assertSame(1, $status['queries']['dimension_rows']);
+        $this->assertTrue(SeoGscPage::query()->sole()->is_blog);
+        $this->assertSame('dimension ebike', SeoGscQuery::query()->sole()->query);
+        $this->assertTrue(app(GscMetricQueryService::class)->dimensionsReady($store, 'pages'));
+        $this->assertTrue(app(GscMetricQueryService::class)->dimensionsReady($store, 'queries'));
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', ['page_id' => null]);
+        $this->assertDatabaseMissing('seo_gsc_query_daily_metrics', ['query_id' => null]);
+
+        $session = $this->contextSession($organization, $store);
+        $this->actingAs($user)->withSession($session)->getJson(route('natural-traffic.seo-geo.source-details', [
+            'source' => 'gsc', 'date_from' => '2026-08-16', 'date_to' => '2026-08-22',
+            'segment' => 'blog', 'detail_type' => 'pages',
+        ]))->assertOk()
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', $blogPage)
+            ->assertJsonPath('rows.0.clicks', 15)
+            ->assertJsonPath('rows.0.previous.clicks', 10);
+
+        $this->actingAs($user)->withSession($session)->getJson(route('natural-traffic.seo-geo.source-details', [
+            'source' => 'gsc', 'date_from' => '2026-08-22', 'date_to' => '2026-08-22',
+            'segment' => 'industry', 'detail_type' => 'queries', 'search' => 'dimension',
+        ]))->assertOk()
+            ->assertJsonPath('pagination.total', 1)
+            ->assertJsonPath('rows.0.label', 'dimension ebike')
+            ->assertJsonPath('rows.0.clicks', 8);
+    }
+
+    public function test_gsc_detail_cache_is_invalidated_by_store_version(): void
+    {
+        [, $organization, $store] = $this->context('operator');
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'cached ebike', 5, 100, 4);
+        $filters = [
+            'date_from' => '2026-08-22', 'date_to' => '2026-08-22',
+            'segment' => 'industry', 'detail_type' => 'queries',
+        ];
+        $overview = app(SeoOverviewDashboardService::class);
+
+        $this->assertSame(5, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+        SeoGscQueryDailyMetric::query()->update(['clicks' => 9]);
+        $this->assertSame(5, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+
+        app(SeoAnalyticsCacheVersionService::class)->bump((int) $store->id);
+
+        $this->assertSame(9, data_get($overview->gscSourceDetails($store, $filters), 'rows.0.clicks'));
+    }
+
+    public function test_gsc_sync_skips_blog_page_request_and_removes_legacy_rows(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        foreach ([
+            'gsc_client_id' => 'client', 'gsc_client_secret' => 'secret', 'gsc_refresh_token' => 'refresh',
+            'gsc_site_url' => 'https://example.com/', 'ga4_property_id' => '12345',
+            'ga4_service_account_json' => json_encode(['client_email' => 'seo@example.test', 'private_key' => 'private']),
+        ] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id, 'store_id' => $store->id, 'provider' => 'google_search_console_ga4',
+                'credential_key' => $key, 'credential_value' => $value, 'updated_by' => $user->id,
+            ]);
+        }
+
+        $legacyBlogPage = 'https://example.com/blogs/news/legacy';
+        $this->gscPage($organization, $store, '2026-08-22', 'blog', $legacyBlogPage, 5, 100, 3);
+
+        $pageRequests = [];
+        $google = \Mockery::mock(GoogleSeoApiClient::class);
+        $google->shouldReceive('ga4Rows')->twice()->andReturn([]);
+        $google->shouldReceive('gscRows')->andReturn([]);
+        $google->shouldReceive('gscRowPages')->andReturnUsing(
+            function (Store $candidate, string $from, string $to, array $dimensions, array $filters = []) use (&$pageRequests, $legacyBlogPage): \Generator {
+                if ($dimensions === ['date', 'page']) {
+                    $pageRequests[] = $filters;
+                }
+
+                if ($dimensions === ['date', 'page'] && $filters === []) {
+                    yield [
+                        ['keys' => ['2026-08-22', $legacyBlogPage], 'clicks' => 5, 'impressions' => 100, 'position' => 3],
+                        ['keys' => ['2026-08-22', 'https://example.com/low-value'], 'clicks' => 0, 'impressions' => 4, 'position' => 80],
+                    ];
+
+                    return;
+                }
+
+                if ($dimensions === ['date', 'query'] && ($filters[0]['operator'] ?? null) === 'includingRegex') {
+                    yield [
+                        ['keys' => ['2026-08-22', 'macfox'], 'clicks' => 3, 'impressions' => 50, 'position' => 2],
+                        ['keys' => ['2026-08-22', 'low value query'], 'clicks' => 0, 'impressions' => 4, 'position' => 90],
+                    ];
+
+                    return;
+                }
+
+                yield from [];
+            },
+        );
+        $this->instance(GoogleSeoApiClient::class, $google);
+
+        app(SeoAnalyticsSyncService::class)->syncRange($store, '2026-08-22', '2026-08-22');
+
+        $this->assertCount(3, $pageRequests);
+        $this->assertFalse(collect($pageRequests)->contains(
+            fn (array $filters): bool => collect($filters)->contains(
+                fn (array $filter): bool => ($filter['dimension'] ?? null) === 'page'
+                    && ($filter['operator'] ?? null) === 'contains'
+                    && ($filter['expression'] ?? null) === '/blogs/',
+            ),
+        ));
+        $this->assertDatabaseMissing('seo_gsc_page_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'blog',
+            'page_id' => SeoGscPage::query()->sole()->id,
+        ]);
+        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'total',
+            'page_id' => SeoGscPage::query()->sole()->id,
+        ]);
+        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', [
+            'store_id' => $store->id, 'metric_date' => '2026-08-22', 'segment' => 'brand',
+            'query_id' => SeoGscQuery::query()->sole()->id,
+        ]);
+        $this->assertDatabaseMissing('seo_gsc_pages', [
+            'store_id' => $store->id, 'page_hash' => hash('sha256', 'https://example.com/low-value'),
+        ]);
+        $this->assertDatabaseMissing('seo_gsc_queries', [
+            'store_id' => $store->id, 'query_hash' => hash('sha256', 'low value query'),
+        ]);
+        $this->assertDatabaseMissing('seo_gsc_search_type_daily_metrics', [
+            'store_id' => $store->id, 'search_type' => 'web',
+        ]);
+    }
+
+    public function test_gsc_pruner_removes_only_no_click_low_impression_details_and_redundant_rows(): void
+    {
+        [, $organization, $store] = $this->context('organization-admin');
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/retained', 0, 5, 8);
+        $this->gscPage($organization, $store, '2026-08-22', 'total', 'https://example.com/pruned', 0, 4, 80);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'retained click', 1, 1, 9);
+        $this->gscQuery($organization, $store, '2026-08-22', 'industry', 'pruned query', 0, 1, 90);
+        SeoGscDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'segment' => 'total', 'clicks' => 1, 'impressions' => 11, 'average_position' => 7, 'synced_at' => now(),
+        ]);
+        SeoGscSearchTypeDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'search_type' => 'web', 'clicks' => 1, 'impressions' => 11, 'average_position' => 7, 'synced_at' => now(),
+        ]);
+        SeoGscBreakdownDailyMetric::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => '2026-08-22',
+            'search_type' => 'web', 'dimension' => 'country', 'value_hash' => hash('sha256', 'empty'), 'value' => 'empty',
+            'clicks' => 0, 'impressions' => 0, 'average_position' => 0, 'synced_at' => now(),
+        ]);
+
+        app(GscDimensionBackfillService::class)->backfill($store->id, 1000);
+        $version = app(SeoAnalyticsCacheVersionService::class)->current($store->id);
+
+        $this->artisan('seo-analytics:prune-gsc-details', [
+            '--store' => $store->id, '--min-impressions' => 5, '--dry-run' => true,
+        ])->assertSuccessful();
+        $this->assertSame(2, SeoGscPageDailyMetric::query()->count());
+        $this->assertSame(2, SeoGscQueryDailyMetric::query()->count());
+
+        $result = app(GscDetailPruneService::class)->prune($store->id, 5, 1000);
+
+        $this->assertSame(1, $result['pages']['deleted_rows']);
+        $this->assertSame(1, $result['queries']['deleted_rows']);
+        $this->assertSame(1, $result['pages']['orphan_dimensions_deleted']);
+        $this->assertSame(1, $result['queries']['orphan_dimensions_deleted']);
+        $this->assertDatabaseHas('seo_gsc_page_daily_metrics', ['page_id' => SeoGscPage::query()->sole()->id]);
+        $this->assertDatabaseHas('seo_gsc_query_daily_metrics', ['query_id' => SeoGscQuery::query()->sole()->id]);
+        $this->assertDatabaseMissing('seo_gsc_pages', ['page_hash' => hash('sha256', 'https://example.com/pruned')]);
+        $this->assertDatabaseMissing('seo_gsc_queries', ['query_hash' => hash('sha256', 'pruned query')]);
+        $this->assertSame(1, SeoGscDailyMetric::query()->count());
+        $this->assertSame(0, SeoGscSearchTypeDailyMetric::query()->count());
+        $this->assertSame(0, SeoGscBreakdownDailyMetric::query()->count());
+        $this->assertSame(1, SeoGscPage::query()->count());
+        $this->assertSame(1, SeoGscQuery::query()->count());
+        $this->assertGreaterThan($version, app(SeoAnalyticsCacheVersionService::class)->current($store->id));
+    }
+
     /** @return array<string, string> */
     private function pages(): array
     {
@@ -680,18 +993,30 @@ class NaturalTrafficPagesTest extends TestCase
 
     private function gscQuery(Organization $organization, Store $store, string $date, string $segment, string $query, int $clicks, int $impressions, float $position): void
     {
+        $dimension = SeoGscQuery::query()->firstOrCreate(
+            ['store_id' => $store->id, 'query_hash' => hash('sha256', $query)],
+            ['organization_id' => $organization->id, 'query' => $query],
+        );
         SeoGscQueryDailyMetric::query()->create([
             'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => $date, 'segment' => $segment,
-            'query_hash' => hash('sha256', $query), 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions,
+            'query_id' => $dimension->id, 'clicks' => $clicks, 'impressions' => $impressions,
             'average_position' => $position, 'synced_at' => now(),
         ]);
     }
 
     private function gscPage(Organization $organization, Store $store, string $date, string $segment, string $page, int $clicks, int $impressions, float $position): void
     {
+        $dimension = SeoGscPage::query()->firstOrCreate(
+            ['store_id' => $store->id, 'page_hash' => hash('sha256', $page)],
+            [
+                'organization_id' => $organization->id,
+                'page' => $page,
+                'is_blog' => str_contains(strtolower($page), '/blogs/'),
+            ],
+        );
         SeoGscPageDailyMetric::query()->create([
             'organization_id' => $organization->id, 'store_id' => $store->id, 'metric_date' => $date, 'segment' => $segment,
-            'page_hash' => hash('sha256', $page), 'page' => $page, 'clicks' => $clicks, 'impressions' => $impressions,
+            'page_id' => $dimension->id, 'clicks' => $clicks, 'impressions' => $impressions,
             'average_position' => $position, 'synced_at' => now(),
         ]);
     }

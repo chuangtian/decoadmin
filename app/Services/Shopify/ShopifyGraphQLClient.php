@@ -40,6 +40,30 @@ class ShopifyGraphQLClient
         array $variables = [],
         int $timeoutSeconds = 20,
     ): array {
+        return $this->queryWithAccessToken(
+            $connection->shop_domain,
+            $connection->access_token_encrypted,
+            $query,
+            $variables,
+            $timeoutSeconds,
+            $connection->api_version,
+        );
+    }
+
+    /**
+     * Execute a request with an app-owned token without storing it on the shared connection.
+     *
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed>
+     */
+    public function queryWithAccessToken(
+        string $shopDomain,
+        string $accessToken,
+        string $query,
+        array $variables = [],
+        int $timeoutSeconds = 20,
+        ?string $apiVersion = null,
+    ): array {
         $payload = ['query' => $query];
 
         if ($variables !== []) {
@@ -51,15 +75,15 @@ class ShopifyGraphQLClient
                 ->acceptJson()
                 ->withHeaders([
                     'Content-Type' => 'application/json',
-                    'X-Shopify-Access-Token' => $connection->access_token_encrypted,
+                    'X-Shopify-Access-Token' => $accessToken,
                 ])
                 ->timeout($timeoutSeconds)
-                ->post($this->endpoint($connection->shop_domain, $connection->api_version), $payload);
+                ->post($this->endpoint($shopDomain, $apiVersion), $payload);
         } catch (ConnectionException $exception) {
             throw new ShopifyApiException('Shopify API 请求超时或网络连接失败。', [
                 'error_type' => 'timeout',
                 'retryable' => true,
-                'shop_domain' => $connection->shop_domain,
+                'shop_domain' => $shopDomain,
             ]);
         }
 
@@ -75,7 +99,7 @@ class ShopifyGraphQLClient
                 },
                 'retryable' => $status === 429 || $status === 408 || $status >= 500,
                 'retry_after' => $response->header('Retry-After'),
-                'shop_domain' => $connection->shop_domain,
+                'shop_domain' => $shopDomain,
             ]);
         }
 
@@ -88,7 +112,7 @@ class ShopifyGraphQLClient
             );
 
             throw new ShopifyApiException('Shopify GraphQL 返回错误。', [
-                'shop_domain' => $connection->shop_domain,
+                'shop_domain' => $shopDomain,
                 'status' => $throttled ? 429 : null,
                 'error_type' => $throttled ? 'rate_limit' : 'graphql_error',
                 'retryable' => $throttled,

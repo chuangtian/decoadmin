@@ -8,12 +8,16 @@ use App\Models\SeoAnalyticsSyncRun;
 use App\Models\SeoGscDailyMetric;
 use App\Models\Store;
 use App\Models\User;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
 class SeoAnalyticsSyncManager
 {
-    public function __construct(private SeoAnalyticsConfigurationService $configuration) {}
+    public function __construct(
+        private SeoAnalyticsConfigurationService $configuration,
+        private CurrentYearSyncWindow $currentYear,
+    ) {}
 
     public function queue(Store $store, string $source = 'manual', ?User $actor = null, string $mode = 'incremental'): SeoAnalyticsSyncRun
     {
@@ -28,6 +32,7 @@ class SeoAnalyticsSyncManager
 
         $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
         $to = CarbonImmutable::now($timezone)->subDays(max(1, (int) config('services.google_search_console.data_delay_days', 2)))->startOfDay();
+        $to = $this->currentYear->clampStart($to, $timezone);
         $latest = SeoGscDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id)
             ->where('segment', 'total')->max('metric_date');
         if ($mode === 'backfill' || ! $latest) {
@@ -37,6 +42,7 @@ class SeoAnalyticsSyncManager
             $from = CarbonImmutable::parse((string) $latest, $timezone)
                 ->subDays(max(1, (int) config('services.google_search_console.overlap_days', 7)));
         }
+        $from = $this->currentYear->clampStart($from, $timezone);
 
         $run = SeoAnalyticsSyncRun::query()->create([
             'uuid' => (string) Str::uuid(), 'organization_id' => $store->organization_id, 'store_id' => $store->id,
@@ -50,8 +56,22 @@ class SeoAnalyticsSyncManager
 
     public function dispatchShards(Store $store, SeoAnalyticsSyncRun $run): void
     {
-        $from = CarbonImmutable::parse((string) $run->date_from)->startOfDay();
-        $to = CarbonImmutable::parse((string) $run->date_to)->startOfDay();
+        $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
+        $from = CarbonImmutable::parse((string) $run->date_from, $timezone)->startOfDay();
+        $to = CarbonImmutable::parse((string) $run->date_to, $timezone)->startOfDay();
+        $range = $this->currentYear->clampExistingRange($from, $to, $timezone);
+        if ($range === null) {
+            $run->forceFill([
+                'status' => 'completed',
+                'progress_percent' => 100,
+                'processed_rows' => 0,
+                'result' => ['total_shards' => 0, 'completed_shards' => [], 'priority_ready' => true],
+                'completed_at' => now(),
+            ])->save();
+
+            return;
+        }
+        [$from, $to] = $range;
         $priorityFrom = $to->subDays(6)->max($from);
         $shards = [[
             'index' => 0,
@@ -83,7 +103,13 @@ class SeoAnalyticsSyncManager
             'priority_ready' => (bool) ($result['priority_ready'] ?? false),
             'priority_period' => [$priorityFrom->toDateString(), $to->toDateString()],
         ];
-        $run->forceFill(['status' => 'queued', 'result' => $result, 'last_error' => null])->save();
+        $run->forceFill([
+            'status' => 'queued',
+            'date_from' => $from->toDateString(),
+            'date_to' => $to->toDateString(),
+            'result' => $result,
+            'last_error' => null,
+        ])->save();
 
         foreach ($shards as $shard) {
             SyncSeoAnalyticsShardForStore::dispatch(

@@ -7,6 +7,7 @@ use App\Jobs\RefreshShopifyAnalyticsSnapshot;
 use App\Models\AnalyticsSnapshot;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
+use App\Services\AnalyticsCacheVersionService;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -24,6 +25,17 @@ class ShopifyAnalyticsReportService
     private const ANALYTICS_OVERVIEW_SCHEMA_VERSION = 3;
 
     private const CATALOG_REPORT_SCHEMA_VERSION = 2;
+
+    /** @var list<string> */
+    private const ANALYTICS_CACHE_REPORTS = [
+        'catalog:core-sales-timeseries',
+        'catalog:core-sales-year-comparison',
+        'catalog:product-sales',
+        'catalog:vendor-sales',
+        'catalog:product-type-sales',
+        'catalog:customer-overview',
+        'catalog:customer-returning-rate',
+    ];
 
     /** @var array<string, string> */
     private const REPORT_QUERIES = [
@@ -117,7 +129,10 @@ class ShopifyAnalyticsReportService
         }
         GRAPHQL;
 
-    public function __construct(private ShopifyGraphQLClient $client) {}
+    public function __construct(
+        private ShopifyGraphQLClient $client,
+        private AnalyticsCacheVersionService $analyticsCache,
+    ) {}
 
     /**
      * @param  array{local_start: mixed, local_end: mixed, timezone: string}  $period
@@ -372,15 +387,23 @@ class ShopifyAnalyticsReportService
         $keys = ['acquisition', 'devices', 'locations', 'pos_locations', 'pos_staff', 'behavior'];
 
         if (! $connection || ! in_array($connection->status, ['connected', 'warning'], true)) {
-            return $snapshot
-                ? $this->storedAnalyticsOverview($snapshot, true)
-                : $this->unavailableReports($keys, false, 'Shopify 连接不可用。');
+            return $this->failedAnalyticsOverview(
+                $store,
+                $snapshot,
+                $from,
+                $to,
+                $this->unavailableReports($keys, false, 'Shopify 连接不可用。'),
+            );
         }
 
         if (! in_array('read_reports', $scopes, true)) {
-            return $snapshot
-                ? $this->storedAnalyticsOverview($snapshot, true)
-                : $this->unavailableReports($keys, false, '缺少 read_reports，请重新授权店铺。');
+            return $this->failedAnalyticsOverview(
+                $store,
+                $snapshot,
+                $from,
+                $to,
+                $this->unavailableReports($keys, false, '缺少 read_reports，请重新授权店铺。'),
+            );
         }
 
         if (! $snapshot && ! $insideRefreshLock) {
@@ -432,17 +455,25 @@ class ShopifyAnalyticsReportService
                 'behavior' => $this->tableReport($payload, 'behavior'),
             ];
         } catch (ShopifyApiException $exception) {
-            return $snapshot
-                ? $this->storedAnalyticsOverview($snapshot, true)
-                : $this->unavailableReports($keys, true, $exception->getMessage());
+            return $this->failedAnalyticsOverview(
+                $store,
+                $snapshot,
+                $from,
+                $to,
+                $this->unavailableReports($keys, true, $exception->getMessage()),
+            );
         } catch (Throwable) {
-            return $snapshot
-                ? $this->storedAnalyticsOverview($snapshot, true)
-                : $this->unavailableReports($keys, true, 'Shopify 报表暂时不可用。');
+            return $this->failedAnalyticsOverview(
+                $store,
+                $snapshot,
+                $from,
+                $to,
+                $this->unavailableReports($keys, true, 'Shopify 报表暂时不可用。'),
+            );
         }
 
         if (! $this->reportsAvailable($reports, $keys)) {
-            return $snapshot ? $this->storedAnalyticsOverview($snapshot, true) : $reports;
+            return $this->failedAnalyticsOverview($store, $snapshot, $from, $to, $reports);
         }
 
         return $this->storedAnalyticsOverview(
@@ -511,6 +542,13 @@ class ShopifyAnalyticsReportService
             },
             static fn (): null => null,
         );
+
+        // A dashboard request may have cached its local fallback while this
+        // background refresh was pending. The completed snapshot must become
+        // visible on the next request instead of waiting for that cache TTL.
+        if (in_array($snapshot->report_key, self::ANALYTICS_CACHE_REPORTS, true)) {
+            $this->analyticsCache->bump((int) $store->getKey());
+        }
     }
 
     /** @return array{scope_granted: bool, available: bool, source: string, rows: array<never, never>, error: string} */
@@ -711,6 +749,35 @@ class ShopifyAnalyticsReportService
         $payload['storage'] = $this->storageMetadata($snapshot, $stale);
 
         return $payload;
+    }
+
+    /** @param array<string, mixed> $reports */
+    private function failedAnalyticsOverview(
+        Store $store,
+        ?AnalyticsSnapshot $snapshot,
+        string $from,
+        string $to,
+        array $reports,
+    ): array {
+        if (! $snapshot) {
+            return $reports;
+        }
+
+        if ($snapshot->source !== 'pending' && (bool) data_get($snapshot->payload, 'behavior.available', false)) {
+            return $this->storedAnalyticsOverview($snapshot, true);
+        }
+
+        return $this->storedAnalyticsOverview(
+            $this->persistSnapshot(
+                $store,
+                self::ANALYTICS_OVERVIEW_REPORT,
+                $from,
+                $to,
+                self::ANALYTICS_OVERVIEW_SCHEMA_VERSION,
+                $reports,
+            ),
+            false,
+        );
     }
 
     /** @param array<string, mixed> $reports @param list<string> $keys */

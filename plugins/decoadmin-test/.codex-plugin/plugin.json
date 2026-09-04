@@ -1,0 +1,29 @@
+{
+  "name": "decoadmin-test",
+  "version": "0.3.0",
+  "description": "通过网页登录安全连接 DecoAdmin 测试服，并按当前用户权限查询数据或执行需二次确认的受控操作。",
+  "author": {
+    "name": "DecoMKT",
+    "url": "https://testadmin.decomkt.com"
+  },
+  "homepage": "https://testadmin.decomkt.com/codex-tokens",
+  "repository": "https://github.com/chuangtian/decoadmin",
+  "keywords": ["decoadmin", "shopify", "analytics", "operations", "test"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DecoAdminTest",
+    "shortDescription": "登录并安全使用 DecoAdmin 测试服",
+    "longDescription": "安装后登录 DecoAdmin 测试服，按当前账号的组织、店铺和 RBAC 权限查询经营数据，并通过二次确认执行刷新、同步及有限配置操作。",
+    "developerName": "DecoMKT",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://testadmin.decomkt.com",
+    "defaultPrompt": [
+      "检查我在 DecoAdmin 测试服有权限访问的店铺。",
+      "查询 Macfox Bike 最近 30 天经营数据。",
+      "检查 Macfox Bike 缺少哪些配置。"
+    ],
+    "brandColor": "#10B981"
+  },
+  "apps": "./.app.json"
+}

@@ -1,0 +1,653 @@
+<script setup lang="ts">
+import { Head, useForm } from '@inertiajs/vue3';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import AppLayout from '../../Layouts/AppLayout.vue';
+
+type Algorithm = 'manual' | 'next_llm' | 'free_shipping_upsell' | 'similar_products' | 'substitute_products' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'frequently_viewed_together' | 'complementary_products' | 'recently_viewed' | 'complete_the_look' | 'same_product_upsell' | 'all_products';
+type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart' | 'checkout' | 'thank_you' | 'order_status';
+type StrategyStatus = 'draft' | 'enabled' | 'disabled' | 'configuration_error';
+type TopTab = 'overview' | 'strategies' | 'analytics';
+type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
+type PickerMode = 'manual' | 'pinned' | 'excluded' | 'custom-action' | 'custom-condition' | 'fallback-action';
+type RecommendationMode = 'preset' | 'custom';
+type RuleMatch = 'all' | 'any';
+type RuleOperator = 'contains_any' | 'contains_all' | 'contains_none';
+type RuleConditionField = 'cart_product_ids' | 'cart_collection_ids' | 'cart_tags' | 'cart_vendors';
+type ActionFilterField = 'product_tags' | 'product_collections' | 'product_vendors';
+
+interface Usage { component_uuid: string; name: string; placement: Placement; status: 'configured_not_enabled' | 'live' | 'disabled' | 'configuration_error' }
+interface StrategyRow {
+    uuid: string; name: string; technical_id: string; status: StrategyStatus; algorithm: Algorithm; item_limit: number;
+    recommendation_mode: RecommendationMode; custom_rule_count: number;
+    used_in: Usage[]; created_at: string | null; updated_at: string | null;
+    published_version: { uuid: string; version_number: number; published_at: string | null } | null; has_draft: boolean;
+}
+interface ProductSelection {
+    shopify_product_id: string; product_gid: string; variant_gid: string; minimum_quantity: number;
+    selected_at: string; position: number;
+}
+interface RuleCondition { id: string; field: RuleConditionField; operator: RuleOperator; values: string[] }
+interface ActionFilter { id: string; field: ActionFilterField; operator: RuleOperator; values: string[] }
+interface RuleAction { type: 'manual'; products: ProductSelection[]; filters: ActionFilter[] }
+interface CustomRule { id: string; name: string; priority: number; match: RuleMatch; conditions: RuleCondition[]; exit_on_match: boolean; action: RuleAction }
+interface RecommendationRule {
+    mode: RecommendationMode;
+    preset: Algorithm;
+    custom: { rules: CustomRule[]; fallback: { enabled: boolean; action: RuleAction } };
+}
+interface PlacementDraft {
+    placement: Placement; enabled: boolean; component_uuid: string | null; name: string; heading: string; button_label: string;
+    style: { layout: 'carousel' | 'grid'; desktop_columns: number; mobile_columns: number; show_image: boolean; show_vendor: boolean; show_price: boolean; show_compare_at_price: boolean; show_add_to_cart: boolean; tokens: Record<string, never> };
+}
+interface StrategyDraft {
+    uuid: string; version_number: number; status: string; name: string; algorithm: Algorithm; item_limit: number; lock_version: number; updated_at: string | null;
+    configuration: {
+        recommendation_rule: RecommendationRule;
+        rules: { include_tags: string[]; exclude_tags: string[]; include_collection_ids: string[]; exclude_collection_ids: string[]; exclude_vendors: string[]; exclude_purchase_options: string[]; minimum_price: string | null; maximum_price: string | null; minimum_inventory: number | null; in_stock_only: boolean; exclude_cart_products: boolean; exclude_purchased_products: boolean };
+        products: { manual: ProductSelection[]; pinned: ProductSelection[]; excluded: string[] };
+        discount: { enabled: boolean; reference: string | null; title?: string | null; summary?: string | null; code?: string | null; status?: string | null; percentage?: number | null; validated_at?: string | null };
+        placements: PlacementDraft[];
+        checkout: { maximum_recommendations: number | null; collection_id: string | null };
+    };
+}
+interface ProductOption {
+    shopify_product_id: string; shopify_gid: string; title: string; handle: string; vendor: string | null; image_url: string | null; price: string | null; currency: string;
+    status: string; available_for_sale: boolean; availability_label: string; tags: string[]; collection_ids: string[];
+    variants: Array<{ shopify_variant_id: string; shopify_gid: string; title: string; sku: string | null; price: string; available_for_sale: boolean; selected_options: Array<{ name?: string; value?: string }> }>;
+}
+interface CheckoutTrustItem { key: string; icon: string; title: string; description: string; position: number; enabled: boolean }
+interface ComponentOption { uuid: string; strategy_uuid: string; strategy_name: string; name: string; placement: Placement; status: string; heading: string | null; button_label: string | null }
+interface DiscountOption { id: string; title: string; summary: string; status: string; code: string; percentage: number | null; editable: boolean }
+
+const props = defineProps<{
+    organization: { id: number; name: string };
+    store: { id: number; name: string; shopify_domain: string; currency: string };
+    strategyRows: StrategyRow[];
+    strategies: Array<{ uuid: string; name: string; algorithm: Algorithm; enabled: boolean }>;
+    components: ComponentOption[]; products: ProductOption[];
+    collections: Array<{ shopify_collection_id: string; title: string; handle: string; sort_order: string | null; product_count: number }>;
+    checkout: { uuid: string | null; strategy_uuid: string | null; thank_you: { uuid: string | null; strategy_uuid: string | null; heading: string; enabled: boolean }; order_status: { uuid: string | null; strategy_uuid: string | null; heading: string; enabled: boolean }; trust_items: CheckoutTrustItem[]; icon_options: Array<{ value: string; label: string }> };
+    smartCart: { uuid: string; strategy_uuid: string | null; enabled: boolean; compatibility_status: string; compatibility_details: { checks?: Array<{ key: string; label: string; passed: boolean; details: string | null }> }; compatibility_checked_at: string | null; theme_id: string | null; theme_name: string | null; preview_confirmed_at: string | null; fallback_mode: string; settings: Record<string, unknown> } | null;
+    globalSettings: { default_locale: 'zh-CN' | 'en'; copy: { recommendation_heading: string; add_button: string; checkout_heading: string }; attribution: { model: string; window_days: number; click_only: boolean; refund_cancel_reversal: boolean } };
+    options: { algorithms: Array<{ value: Algorithm; label: string }>; placements: Array<{ value: Placement; label: string }> };
+    permissions: { manage: boolean; manageSmartCart: boolean; viewAnalytics: boolean };
+    analytics: { status: string; period: { days: number; from: string; to: string; timezone: string }; currency: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; aov: string; click_through_rate: number; add_to_cart_rate: number; reversed_orders: number; excluded_currency_orders: number; attribution: { model: string; window_days: number; click_only: boolean; refund_cancel_reversal: boolean }; dimensions: Array<{ strategy_uuid: string | null; strategy_name: string; strategy_version_uuid: string | null; strategy_version: number | null; component_uuid: string | null; component_name: string; placement: string; impressions: number; clicks: number; add_to_carts: number; orders: number; attributed_revenue: string; click_through_rate: number }> };
+}>();
+
+const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/personalization`;
+const csrf = () => document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+const requestId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12)}`;
+class ApiError extends Error { constructor(public code: string, message: string, public status: number) { super(message); } }
+async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+    const response = await fetch(url, { ...options, credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), ...(options.headers ?? {}) } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const validation = payload?.errors ? Object.values(payload.errors).flat().join('；') : '';
+        throw new ApiError(payload?.error?.code ?? 'REQUEST_FAILED', payload?.error?.message ?? validation ?? '操作失败，请重试。', response.status);
+    }
+    return payload.data as T;
+}
+
+const activeTab = ref<TopTab>('overview');
+const tabs = [
+    { value: 'overview' as const, label: '概览', hint: '上线状态与全局设置' },
+    { value: 'strategies' as const, label: '策略', hint: '制定与管理推荐策略' },
+    { value: 'analytics' as const, label: '分析', hint: '按策略和页面拆分' },
+];
+const strategyRows = ref(props.strategyRows.map(row => cloneJson(row)));
+watch(() => props.strategyRows, rows => { strategyRows.value = rows.map(row => cloneJson(row)); }, { deep: true });
+const placementLabel = (value: string) => props.options.placements.find(option => option.value === value)?.label ?? value;
+const statusLabel = (value: StrategyStatus) => ({ draft: '草稿', enabled: '已启用', disabled: '已停用', configuration_error: '配置异常' }[value]);
+const statusClass = (value: StrategyStatus) => ({ draft: 'bg-slate-100 text-slate-700', enabled: 'bg-emerald-100 text-emerald-800', disabled: 'bg-amber-100 text-amber-800', configuration_error: 'bg-rose-100 text-rose-800' }[value]);
+const usageLabel = (value: Usage['status']) => ({ configured_not_enabled: '已配置未启用', live: '已上线', disabled: '已停用', configuration_error: '配置异常' }[value]);
+const formatDate = (value: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const money = (value: string | null, currency = props.store.currency) => value === null ? '—' : new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(Number(value));
+const search = ref('');
+const filteredStrategies = computed(() => { const keyword = search.value.trim().toLocaleLowerCase(); return strategyRows.value.filter(row => !keyword || [row.name, ...row.used_in.map(item => item.name)].some(value => value.toLocaleLowerCase().includes(keyword))); });
+
+const editorOpen = ref(false);
+const editorStrategy = ref<StrategyRow | null>(null);
+const editorDraft = ref<StrategyDraft | null>(null);
+const editorLoading = ref(false);
+const editorError = ref('');
+const saveState = ref<SaveState>('idle');
+const savedAt = ref('');
+const closePrompt = ref(false);
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let ignoreDraftWatch = false;
+let pendingSave: Promise<void> | null = null;
+
+function selection(value: unknown, position = 0): ProductSelection {
+    const fallbackId = typeof value === 'string' ? value : String((value as Partial<ProductSelection>)?.shopify_product_id ?? '');
+    const row = value as Partial<ProductSelection>;
+    const option = props.products.find(item => item.shopify_product_id === fallbackId);
+    const variant = option?.variants.find(item => item.available_for_sale) ?? option?.variants[0];
+    return {
+        shopify_product_id: fallbackId,
+        product_gid: row?.product_gid || option?.shopify_gid || `gid://shopify/Product/${fallbackId}`,
+        variant_gid: row?.variant_gid || variant?.shopify_gid || '',
+        minimum_quantity: Math.max(1, Number(row?.minimum_quantity ?? 1)),
+        selected_at: row?.selected_at || new Date().toISOString(),
+        position: position + 1,
+    };
+}
+function emptyAction(): RuleAction { return { type: 'manual', products: [], filters: [] }; }
+function defaultRecommendationRule(preset: Algorithm = 'manual'): RecommendationRule {
+    return { mode: 'preset', preset, custom: { rules: [], fallback: { enabled: false, action: emptyAction() } } };
+}
+function normalizeRuleAction(action: Partial<RuleAction> | undefined): RuleAction {
+    return {
+        type: 'manual',
+        products: (action?.products ?? []).map((item, index) => selection(item, index)).filter(item => item.shopify_product_id),
+        filters: (action?.filters ?? []).map(filter => ({
+            id: filter.id || requestId(),
+            field: filter.field || 'product_tags',
+            operator: filter.operator || 'contains_any',
+            values: Array.isArray(filter.values) ? filter.values.map(String) : [],
+        })),
+    };
+}
+function normalizeEditorPayload(payload: { strategy: StrategyRow; draft: StrategyDraft }) {
+    ignoreDraftWatch = true;
+    const draft = cloneJson(payload.draft);
+    draft.item_limit = 24;
+    draft.configuration.recommendation_rule ??= defaultRecommendationRule(draft.algorithm);
+    const recommendationRule = draft.configuration.recommendation_rule;
+    recommendationRule.mode = recommendationRule.mode === 'custom' ? 'custom' : 'preset';
+    recommendationRule.preset = props.options.algorithms.some(option => option.value === recommendationRule.preset) ? recommendationRule.preset : 'manual';
+    recommendationRule.custom ??= defaultRecommendationRule().custom;
+    recommendationRule.custom.rules = (recommendationRule.custom.rules ?? []).map((rule, index) => ({
+        id: rule.id || requestId(),
+        name: String(rule.name || `规则 ${index + 1}`).slice(0, 50),
+        priority: index + 1,
+        match: rule.match === 'any' ? 'any' : 'all',
+        conditions: (rule.conditions ?? []).map(condition => ({
+            id: condition.id || requestId(),
+            field: condition.field || 'cart_product_ids',
+            operator: condition.operator || 'contains_any',
+            values: Array.isArray(condition.values) ? condition.values.map(String) : [],
+        })),
+        exit_on_match: Boolean(rule.exit_on_match),
+        action: normalizeRuleAction(rule.action),
+    }));
+    recommendationRule.custom.fallback ??= { enabled: false, action: emptyAction() };
+    recommendationRule.custom.fallback.action = normalizeRuleAction(recommendationRule.custom.fallback.action);
+    draft.algorithm = recommendationRule.mode === 'preset' ? recommendationRule.preset : 'manual';
+    draft.configuration.rules.exclude_purchase_options ??= [];
+    draft.configuration.products.manual = (draft.configuration.products.manual ?? []).map((item, index) => selection(item, index)).filter(row => row.shopify_product_id);
+    draft.configuration.products.pinned = (draft.configuration.products.pinned ?? []).map((item, index) => selection(item, index)).filter(row => row.shopify_product_id);
+    excludeSpecificEnabled.value = draft.configuration.products.excluded.length > 0;
+    excludeTagsEnabled.value = draft.configuration.rules.exclude_tags.length > 0;
+    excludeCollectionsEnabled.value = draft.configuration.rules.exclude_collection_ids.length > 0;
+    excludeVendorsEnabled.value = draft.configuration.rules.exclude_vendors.length > 0;
+    excludePurchaseOptionsEnabled.value = draft.configuration.rules.exclude_purchase_options.length > 0;
+    editorStrategy.value = cloneJson(payload.strategy); editorDraft.value = draft; saveState.value = 'saved'; savedAt.value = draft.updated_at ?? '';
+    queueMicrotask(() => { ignoreDraftWatch = false; });
+}
+async function createStrategy() {
+    editorOpen.value = true; editorLoading.value = true; editorError.value = '';
+    try { const payload = await requestJson<{ strategy: StrategyRow; draft: StrategyDraft }>(`${baseUrl}/strategy-workflow/drafts`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId() }) }); normalizeEditorPayload(payload); upsertStrategy(payload.strategy); }
+    catch (error) { editorError.value = error instanceof Error ? error.message : '无法创建策略。'; }
+    finally { editorLoading.value = false; }
+}
+async function openEditor(strategy: StrategyRow) {
+    editorOpen.value = true; editorLoading.value = true; editorError.value = '';
+    try { normalizeEditorPayload(await requestJson(`${baseUrl}/strategy-workflow/${strategy.uuid}`)); }
+    catch (error) { editorError.value = error instanceof Error ? error.message : '无法读取策略。'; }
+    finally { editorLoading.value = false; }
+}
+function scheduleAutosave() { if (!editorOpen.value || !editorDraft.value || ignoreDraftWatch) return; saveState.value = 'idle'; if (autosaveTimer) clearTimeout(autosaveTimer); autosaveTimer = setTimeout(() => { void saveDraft(); }, 800); }
+watch(editorDraft, scheduleAutosave, { deep: true });
+async function saveDraft() {
+    if (!editorStrategy.value || !editorDraft.value) return;
+    if (pendingSave) return pendingSave;
+    if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+    saveState.value = 'saving';
+    const snapshot = cloneJson(editorDraft.value);
+    snapshot.algorithm = snapshot.configuration.recommendation_rule.mode === 'preset'
+        ? snapshot.configuration.recommendation_rule.preset
+        : 'manual';
+    snapshot.item_limit = 24;
+    pendingSave = (async () => {
+        try {
+            const payload = await requestJson<{ draft: StrategyDraft; saved_at: string }>(`${baseUrl}/strategy-workflow/${editorStrategy.value!.uuid}/draft`, { method: 'PATCH', body: JSON.stringify({ idempotency_key: requestId(), lock_version: snapshot.lock_version, draft: snapshot }) });
+            const row = strategyRows.value.find(item => item.uuid === editorStrategy.value?.uuid);
+            if (row) {
+                row.name = payload.draft.name;
+                row.updated_at = payload.saved_at;
+                row.algorithm = payload.draft.algorithm;
+                row.recommendation_mode = payload.draft.configuration.recommendation_rule.mode;
+                row.custom_rule_count = payload.draft.configuration.recommendation_rule.custom.rules.length;
+            }
+            normalizeEditorPayload({ strategy: { ...editorStrategy.value!, name: payload.draft.name, updated_at: payload.saved_at }, draft: payload.draft }); savedAt.value = payload.saved_at; saveState.value = 'saved'; editorError.value = '';
+        } catch (error) { saveState.value = 'failed'; editorError.value = error instanceof Error ? error.message : '自动保存失败。'; }
+        finally { pendingSave = null; queueMicrotask(() => { ignoreDraftWatch = false; }); }
+    })();
+    return pendingSave;
+}
+async function requestClose() { if (saveState.value === 'saving' || saveState.value === 'idle') await saveDraft(); if ((saveState.value as SaveState) === 'failed') { closePrompt.value = true; return; } closeEditor(); }
+function closeEditor() { if (autosaveTimer) clearTimeout(autosaveTimer); autosaveTimer = null; editorOpen.value = false; editorDraft.value = null; editorStrategy.value = null; closePrompt.value = false; editorError.value = ''; }
+function upsertStrategy(row: StrategyRow) { const index = strategyRows.value.findIndex(item => item.uuid === row.uuid); if (index < 0) strategyRows.value.unshift(cloneJson(row)); else strategyRows.value.splice(index, 1, cloneJson(row)); }
+const pageNotice = ref('');
+async function duplicateStrategy(strategy: StrategyRow) {
+    pageNotice.value = '';
+    try { const payload = await requestJson<{ strategy: StrategyRow; draft: StrategyDraft }>(`${baseUrl}/strategy-workflow/${strategy.uuid}/duplicate`, { method: 'POST', body: JSON.stringify({ idempotency_key: requestId() }) }); upsertStrategy(payload.strategy); editorOpen.value = true; normalizeEditorPayload(payload); }
+    catch (error) { pageNotice.value = error instanceof Error ? error.message : '复制失败。'; }
+}
+
+const pickerMode = ref<PickerMode | null>(null);
+const pickerRuleId = ref('');
+const pickerConditionId = ref('');
+const pickerSearch = ref('');
+const pickerSelections = ref<ProductSelection[]>([]);
+const pickerError = ref('');
+const filteredProducts = computed(() => { const keyword = pickerSearch.value.trim().toLocaleLowerCase(); return props.products.filter(item => !keyword || [item.title, item.handle, item.availability_label].some(value => value.toLocaleLowerCase().includes(keyword))); });
+const customRules = computed(() => editorDraft.value?.configuration.recommendation_rule.custom.rules ?? []);
+function customRule(id: string) { return customRules.value.find(rule => rule.id === id); }
+const pickerAllowsQuantity = computed(() => !['excluded', 'custom-condition'].includes(pickerMode.value ?? ''));
+const pickerTitle = computed(() => ({
+    manual: '选择推荐产品', pinned: '选择置顶产品', excluded: '选择排除产品',
+    'custom-action': '选择行动推荐产品', 'custom-condition': '选择条件产品', 'fallback-action': '选择备用推荐产品',
+}[pickerMode.value ?? 'manual']));
+function openProductPicker(mode: PickerMode, ruleId = '', conditionId = '') {
+    if (!editorDraft.value) return;
+    pickerMode.value = mode; pickerRuleId.value = ruleId; pickerConditionId.value = conditionId; pickerSearch.value = ''; pickerError.value = '';
+    if (mode === 'excluded') pickerSelections.value = editorDraft.value.configuration.products.excluded.map((id, index) => selection(id, index));
+    else if (mode === 'custom-action') pickerSelections.value = cloneJson(customRule(ruleId)?.action.products ?? []);
+    else if (mode === 'fallback-action') pickerSelections.value = cloneJson(editorDraft.value.configuration.recommendation_rule.custom.fallback.action.products);
+    else if (mode === 'custom-condition') {
+        const condition = customRule(ruleId)?.conditions.find(item => item.id === conditionId);
+        pickerSelections.value = (condition?.values ?? []).map((id, index) => selection(id, index));
+    } else pickerSelections.value = cloneJson(editorDraft.value.configuration.products[mode]);
+}
+function isPickerSelected(id: string) { return pickerSelections.value.some(row => row.shopify_product_id === id); }
+function togglePickerProduct(id: string) { const index = pickerSelections.value.findIndex(row => row.shopify_product_id === id); if (index >= 0) { pickerSelections.value.splice(index, 1); return; } if (pickerSelections.value.length >= 24) { pickerError.value = '最多可以选择 24 种产品。'; return; } pickerSelections.value.push(selection(id, pickerSelections.value.length)); }
+function updatePickerQuantity(id: string, value: unknown) { const row = pickerSelections.value.find(item => item.shopify_product_id === id); if (row) row.minimum_quantity = Math.min(999, Math.max(1, Number(value) || 1)); }
+function updatePickerVariant(id: string, gid: string) { const row = pickerSelections.value.find(item => item.shopify_product_id === id); if (row) row.variant_gid = gid; }
+function closeProductPicker() { pickerMode.value = null; pickerRuleId.value = ''; pickerConditionId.value = ''; pickerSelections.value = []; pickerError.value = ''; }
+function confirmProductPicker() {
+    if (!editorDraft.value || !pickerMode.value || pickerSelections.value.length === 0) return;
+    const normalized = pickerSelections.value.map((item, index) => ({ ...item, position: index + 1 }));
+    if (pickerMode.value === 'excluded') editorDraft.value.configuration.products.excluded = normalized.map(row => row.shopify_product_id);
+    else if (pickerMode.value === 'custom-action') {
+        const rule = customRule(pickerRuleId.value); if (rule) rule.action.products = cloneJson(normalized);
+    } else if (pickerMode.value === 'fallback-action') editorDraft.value.configuration.recommendation_rule.custom.fallback.action.products = cloneJson(normalized);
+    else if (pickerMode.value === 'custom-condition') {
+        const condition = customRule(pickerRuleId.value)?.conditions.find(item => item.id === pickerConditionId.value);
+        if (condition) condition.values = normalized.map(row => row.shopify_product_id);
+    } else {
+        if (pickerMode.value === 'pinned') {
+            const union = new Set([
+                ...editorDraft.value.configuration.products.manual.map(row => row.shopify_product_id),
+                ...pickerSelections.value.map(row => row.shopify_product_id),
+            ]);
+            if (union.size > 24) { pickerError.value = '置顶商品加入候选后，推荐商品总数不能超过 24 种。'; return; }
+        }
+        editorDraft.value.configuration.products[pickerMode.value] = cloneJson(normalized);
+        if (pickerMode.value === 'pinned') for (const pinned of normalized) if (!editorDraft.value.configuration.products.manual.some(row => row.shopify_product_id === pinned.shopify_product_id)) editorDraft.value.configuration.products.manual.push({ ...cloneJson(pinned), position: editorDraft.value.configuration.products.manual.length + 1 });
+    }
+    closeProductPicker();
+}
+function product(id: string) { return props.products.find(item => item.shopify_product_id === id); }
+function removeProduct(mode: 'manual' | 'pinned' | 'excluded', id: string) { if (!editorDraft.value) return; if (mode === 'excluded') editorDraft.value.configuration.products.excluded = editorDraft.value.configuration.products.excluded.filter(item => item !== id); else editorDraft.value.configuration.products[mode] = editorDraft.value.configuration.products[mode].filter(item => item.shopify_product_id !== id); if (mode === 'manual') editorDraft.value.configuration.products.pinned = editorDraft.value.configuration.products.pinned.filter(item => item.shopify_product_id !== id); }
+const manualError = computed(() => editorDraft.value
+    && editorDraft.value.configuration.recommendation_rule.mode === 'preset'
+    && editorDraft.value.configuration.recommendation_rule.preset === 'manual'
+    && editorDraft.value.configuration.products.manual.length === 0 ? '请至少选择 1 件推荐商品。' : '');
+const excludeHistory = computed({ get: () => Boolean(editorDraft.value?.configuration.rules.exclude_cart_products && editorDraft.value?.configuration.rules.exclude_purchased_products), set: (value: boolean) => { if (editorDraft.value) { editorDraft.value.configuration.rules.exclude_cart_products = value; editorDraft.value.configuration.rules.exclude_purchased_products = value; } } });
+const excludeSpecificEnabled = ref(false); const excludeTagsEnabled = ref(false); const excludeCollectionsEnabled = ref(false); const excludeVendorsEnabled = ref(false); const excludePurchaseOptionsEnabled = ref(false);
+watch(excludeSpecificEnabled, enabled => { if (!enabled && editorDraft.value) editorDraft.value.configuration.products.excluded = []; });
+watch(excludeTagsEnabled, enabled => { if (!enabled && editorDraft.value) editorDraft.value.configuration.rules.exclude_tags = []; });
+watch(excludeCollectionsEnabled, enabled => { if (!enabled && editorDraft.value) editorDraft.value.configuration.rules.exclude_collection_ids = []; });
+watch(excludeVendorsEnabled, enabled => { if (!enabled && editorDraft.value) editorDraft.value.configuration.rules.exclude_vendors = []; });
+watch(excludePurchaseOptionsEnabled, enabled => { if (!enabled && editorDraft.value) editorDraft.value.configuration.rules.exclude_purchase_options = []; });
+const availableTags = computed(() => [...new Set(props.products.flatMap(item => item.tags))].sort());
+const availableVendors = computed(() => [...new Set(props.products.map(item => item.vendor).filter((value): value is string => Boolean(value)))].sort());
+const purchaseOptions = computed(() => [...new Set(props.products.flatMap(item => item.variants.flatMap(variant => variant.selected_options.map(option => `${option.name ?? ''}: ${option.value ?? ''}`.trim()).filter(value => value !== ':'))))].sort());
+
+const customRuleEditorOpen = ref(false);
+const activeCustomRuleId = ref('');
+const customRuleDeleteTarget = ref<CustomRule | null>(null);
+const customRuleDeleteError = ref('');
+let draggedRuleIndex: number | null = null;
+let draggedProductIndex: number | null = null;
+const activeCustomRule = computed(() => customRule(activeCustomRuleId.value) ?? customRules.value[0] ?? null);
+const customRuleError = computed(() => {
+    if (!editorDraft.value || editorDraft.value.configuration.recommendation_rule.mode !== 'custom') return '';
+    if (customRules.value.length === 0) return '请至少添加 1 条自定义规则，或启用并配置备用规则。';
+    if (!customRules.value.some(rule => rule.action.products.length > 0)
+        && !editorDraft.value.configuration.recommendation_rule.custom.fallback.action.products.length) return '请至少为一条规则或备用规则选择推荐商品。';
+    return '';
+});
+const hasUnavailableManualProducts = computed(() => editorDraft.value?.configuration.products.manual.some(item => !product(item.shopify_product_id)?.available_for_sale) ?? false);
+function newCondition(): RuleCondition { return { id: requestId(), field: 'cart_product_ids', operator: 'contains_any', values: [] }; }
+function newCustomRule(position: number): CustomRule {
+    return { id: requestId(), name: `规则 ${position}`, priority: position, match: 'all', conditions: [newCondition()], exit_on_match: false, action: emptyAction() };
+}
+function setRecommendationMode(mode: RecommendationMode) {
+    if (!editorDraft.value) return;
+    editorDraft.value.configuration.recommendation_rule.mode = mode;
+    if (mode === 'custom' && customRules.value.length === 0) addCustomRule();
+}
+function openCustomRuleEditor() {
+    if (!editorDraft.value) return;
+    setRecommendationMode('custom');
+    activeCustomRuleId.value = customRules.value[0]?.id ?? '';
+    customRuleEditorOpen.value = true;
+}
+function closeCustomRuleEditor() { customRuleEditorOpen.value = false; customRuleDeleteTarget.value = null; }
+function addCustomRule() {
+    if (!editorDraft.value || customRules.value.length >= 20) return;
+    const rule = newCustomRule(customRules.value.length + 1);
+    editorDraft.value.configuration.recommendation_rule.custom.rules.push(rule);
+    activeCustomRuleId.value = rule.id;
+}
+function renumberRules() { customRules.value.forEach((rule, index) => { rule.priority = index + 1; }); }
+function moveCustomRule(index: number, offset: number) {
+    const target = index + offset;
+    if (target < 0 || target >= customRules.value.length) return;
+    const [rule] = customRules.value.splice(index, 1); customRules.value.splice(target, 0, rule); renumberRules();
+}
+function startRuleDrag(index: number) { draggedRuleIndex = index; }
+function dropRule(index: number) {
+    if (draggedRuleIndex === null || draggedRuleIndex === index) { draggedRuleIndex = null; return; }
+    const [rule] = customRules.value.splice(draggedRuleIndex, 1); customRules.value.splice(index, 0, rule); draggedRuleIndex = null; renumberRules();
+}
+function addCondition(rule: CustomRule) { if (rule.conditions.length < 10) rule.conditions.push(newCondition()); }
+function removeCondition(rule: CustomRule, id: string) { rule.conditions = rule.conditions.filter(condition => condition.id !== id); }
+function addActionFilter(action: RuleAction) { if (action.filters.length < 10) action.filters.push({ id: requestId(), field: 'product_tags', operator: 'contains_any', values: [] }); }
+function removeActionFilter(action: RuleAction, id: string) { action.filters = action.filters.filter(filter => filter.id !== id); }
+function askDeleteCustomRule(rule: CustomRule) { customRuleDeleteTarget.value = rule; customRuleDeleteError.value = ''; }
+function confirmDeleteCustomRule() {
+    if (!customRuleDeleteTarget.value) return;
+    const id = customRuleDeleteTarget.value.id;
+    const index = customRules.value.findIndex(rule => rule.id === id);
+    if (index >= 0) customRules.value.splice(index, 1);
+    renumberRules(); activeCustomRuleId.value = customRules.value[Math.min(index, customRules.value.length - 1)]?.id ?? '';
+    customRuleDeleteTarget.value = null;
+}
+function ruleSummary(rule: CustomRule) {
+    if (!rule.conditions.length) return '尚未添加条件';
+    const labels = rule.conditions.slice(0, 2).map(condition => `${conditionFieldLabel(condition.field)} ${operatorLabel(condition.operator)} ${condition.values.length} 项`);
+    return labels.join(rule.match === 'all' ? ' 且 ' : ' 或 ') + (rule.conditions.length > 2 ? ` 等 ${rule.conditions.length} 条` : '');
+}
+function conditionFieldLabel(field: RuleConditionField) { return ({ cart_product_ids: '购物车中的商品', cart_collection_ids: '购物车商品集合', cart_tags: '购物车商品标签', cart_vendors: '购物车商品供应商' }[field]); }
+function actionFilterLabel(field: ActionFilterField) { return ({ product_tags: '商品标签', product_collections: '商品集合', product_vendors: '商品供应商' }[field]); }
+function operatorLabel(operator: RuleOperator) { return ({ contains_any: '包含任何', contains_all: '包含全部', contains_none: '不包含任何' }[operator]); }
+function moveProductSelection(items: ProductSelection[], index: number, offset: number) {
+    const target = index + offset; if (target < 0 || target >= items.length) return;
+    const [item] = items.splice(index, 1); items.splice(target, 0, item); items.forEach((row, position) => { row.position = position + 1; });
+}
+function startProductDrag(index: number) { draggedProductIndex = index; }
+function dropProductSelection(items: ProductSelection[], index: number) {
+    if (draggedProductIndex === null || draggedProductIndex === index) { draggedProductIndex = null; return; }
+    const [item] = items.splice(draggedProductIndex, 1); items.splice(index, 0, item); draggedProductIndex = null;
+    items.forEach((row, position) => { row.position = position + 1; });
+}
+function removeActionProduct(action: RuleAction, id: string) { action.products = action.products.filter(item => item.shopify_product_id !== id); action.products.forEach((item, index) => { item.position = index + 1; }); }
+function optionValues(field: RuleConditionField | ActionFilterField) {
+    if (field === 'cart_collection_ids' || field === 'product_collections') return props.collections.map(item => ({ value: item.shopify_collection_id, label: item.title }));
+    if (field === 'cart_vendors' || field === 'product_vendors') return availableVendors.value.map(value => ({ value, label: value }));
+    return availableTags.value.map(value => ({ value, label: value }));
+}
+
+const discounts = ref<DiscountOption[]>([]); const discountModal = ref(false); const discountLoading = ref(false); const discountError = ref('');
+const discountForm = reactive({ id: '', title: '九折优惠', code: 'DECO10', percentage: 10 });
+const discountProductIds = computed(() => {
+    if (!editorDraft.value) return [];
+    const recommendation = editorDraft.value.configuration.recommendation_rule;
+    const candidates = recommendation.mode === 'custom'
+        ? [...recommendation.custom.rules.flatMap(rule => rule.action.products), ...recommendation.custom.fallback.action.products]
+        : editorDraft.value.configuration.products.manual;
+    return [...new Set([...editorDraft.value.configuration.products.pinned, ...candidates].map(item => item.shopify_product_id))];
+});
+async function openDiscounts() { discountModal.value = true; discountLoading.value = true; discountError.value = ''; try { discounts.value = await requestJson(`${baseUrl}/discounts`); } catch (error) { discountError.value = error instanceof Error ? error.message : '无法读取 Shopify 折扣。'; } finally { discountLoading.value = false; } }
+function editDiscount(discount?: DiscountOption) { discountForm.id = discount?.id ?? ''; discountForm.title = discount?.title ?? '九折优惠'; discountForm.code = discount?.code ?? 'DECO10'; discountForm.percentage = discount?.percentage ?? 10; }
+async function saveDiscount() {
+    if (!editorDraft.value || discountProductIds.value.length === 0) { discountError.value = '请先选择推荐商品。'; return; }
+    discountLoading.value = true; discountError.value = '';
+    try { const payload = await requestJson<DiscountOption>(`${baseUrl}/discounts`, { method: discountForm.id ? 'PATCH' : 'POST', body: JSON.stringify({ ...discountForm, product_ids: discountProductIds.value }) }); const index = discounts.value.findIndex(item => item.id === payload.id); if (index >= 0) discounts.value.splice(index, 1, payload); else discounts.value.unshift(payload); chooseDiscount(payload); editDiscount(); }
+    catch (error) { discountError.value = error instanceof Error ? error.message : '无法保存 Shopify 折扣。'; }
+    finally { discountLoading.value = false; }
+}
+function chooseDiscount(discount: DiscountOption) { if (!editorDraft.value) return; editorDraft.value.configuration.discount = { enabled: true, reference: discount.id, title: discount.title, summary: discount.summary, code: discount.code, status: discount.status, percentage: discount.percentage, validated_at: new Date().toISOString() }; discountModal.value = false; }
+const selectedDiscount = computed(() => discounts.value.find(item => item.id === editorDraft.value?.configuration.discount.reference));
+
+const deleteTarget = ref<StrategyRow | null>(null); const deleteProcessing = ref(false); const deleteError = ref('');
+function askDelete(strategy: StrategyRow) { deleteTarget.value = strategy; deleteError.value = ''; }
+function closeDelete() { if (!deleteProcessing.value) { deleteTarget.value = null; deleteError.value = ''; } }
+async function confirmDelete() { if (!deleteTarget.value || deleteProcessing.value) return; deleteProcessing.value = true; deleteError.value = ''; try { await requestJson(`${baseUrl}/strategy-workflow/${deleteTarget.value.uuid}`, { method: 'DELETE', body: JSON.stringify({ idempotency_key: requestId() }) }); const uuid = deleteTarget.value.uuid; strategyRows.value = strategyRows.value.filter(item => item.uuid !== uuid); if (editorStrategy.value?.uuid === uuid) closeEditor(); deleteTarget.value = null; } catch (error) { deleteError.value = error instanceof Error ? error.message : '无法删除策略。'; } finally { deleteProcessing.value = false; } }
+function onKeydown(event: KeyboardEvent) { if (event.key !== 'Escape') return; if (customRuleDeleteTarget.value) { event.preventDefault(); customRuleDeleteTarget.value = null; return; } if (deleteTarget.value) { event.preventDefault(); closeDelete(); return; } if (pickerMode.value) { event.preventDefault(); closeProductPicker(); return; } if (discountModal.value) { event.preventDefault(); discountModal.value = false; return; } if (customRuleEditorOpen.value) { event.preventDefault(); return; } if (editorOpen.value) { event.preventDefault(); closePrompt.value = true; } }
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKeydown); if (autosaveTimer) clearTimeout(autosaveTimer); });
+
+const showGlobalSettings = ref(false); const globalForm = reactive(cloneJson(props.globalSettings)); const globalSaveState = ref<SaveState>('idle'); const globalError = ref('');
+async function saveGlobalSettings() { globalSaveState.value = 'saving'; globalError.value = ''; try { await requestJson(`${baseUrl}/global-settings`, { method: 'PUT', body: JSON.stringify({ default_locale: globalForm.default_locale, copy: globalForm.copy }) }); globalSaveState.value = 'saved'; } catch (error) { globalSaveState.value = 'failed'; globalError.value = error instanceof Error ? error.message : '保存失败。'; } }
+const checkoutForm = useForm({ strategy_uuid: props.checkout.strategy_uuid ?? '', trust_items: props.checkout.trust_items.map(item => ({ ...item })) });
+function addTrustItem() { if (checkoutForm.trust_items.length < 6) checkoutForm.trust_items.push({ key: `trust_${Date.now()}`, icon: 'check-circle', title: '', description: '', position: checkoutForm.trust_items.length + 1, enabled: true }); }
+const checkoutSaveState = ref<SaveState>('idle');
+const checkoutMessage = ref('');
+function saveCheckout() {
+    checkoutSaveState.value = 'saving';
+    checkoutMessage.value = '';
+    const strategyName = strategyRows.value.find(strategy => strategy.uuid === checkoutForm.strategy_uuid)?.name ?? '所选策略';
+    checkoutForm
+        .transform(data => ({ strategy_uuid: data.strategy_uuid, trust_items: data.trust_items.map((item, index) => ({ ...item, position: index + 1 })) }))
+        .put(`${baseUrl}/checkout`, {
+            preserveScroll: true,
+            onSuccess: page => {
+                const flash = page.props.flash as { error?: string | null } | undefined;
+                if (flash?.error) {
+                    checkoutSaveState.value = 'failed';
+                    checkoutMessage.value = flash.error;
+                    return;
+                }
+                checkoutSaveState.value = 'saved';
+                checkoutMessage.value = `已绑定到 Checkout：${strategyName}`;
+            },
+            onError: errors => {
+                checkoutSaveState.value = 'failed';
+                checkoutMessage.value = Object.values(errors).join('；') || 'Checkout 策略保存失败，请重试。';
+            },
+            onFinish: () => {
+                if (checkoutSaveState.value === 'saving') checkoutSaveState.value = 'idle';
+            },
+        });
+}
+const smartCartForm = useForm({ strategy_uuid: props.smartCart?.strategy_uuid ?? '', heading: String(props.smartCart?.settings?.heading ?? '购物车推荐') });
+function saveSmartCartDraft() { smartCartForm.put(`${baseUrl}/smart-cart`, { preserveScroll: true }); }
+const thankYouForm = useForm({ strategy_uuid: props.checkout.thank_you.strategy_uuid ?? '', heading: props.checkout.thank_you.heading || 'Great Value Bundles for You' });
+function saveThankYou() { thankYouForm.put(`${baseUrl}/thank-you`, { preserveScroll: true }); }
+const orderStatusForm = useForm({ strategy_uuid: props.checkout.order_status.strategy_uuid ?? '', heading: props.checkout.order_status.heading || 'Great Value Bundles for You' });
+function saveOrderStatus() { orderStatusForm.put(`${baseUrl}/order-status`, { preserveScroll: true }); }
+const setupChecks = computed(() => [{ label: '至少一个推荐策略已配置', passed: strategyRows.value.length > 0 }, { label: '至少一个页面或组件已上线', passed: strategyRows.value.some(row => row.used_in.some(usage => usage.status === 'live')) }, { label: 'Checkout 已选择推荐策略', passed: Boolean(props.checkout.strategy_uuid) }, { label: '感谢页面已选择推荐策略', passed: Boolean(props.checkout.thank_you.strategy_uuid) }, { label: '售后页面已选择推荐策略', passed: Boolean(props.checkout.order_status.strategy_uuid) }, { label: '原生购物车已选择推荐策略', passed: Boolean(props.smartCart?.strategy_uuid) }]);
+const configurationAlerts = computed(() => strategyRows.value.filter(row => row.status === 'configuration_error'));
+const analyticsStrategy = ref(''); const analyticsVersion = ref(''); const analyticsPlacement = ref('');
+const analyticsRows = computed(() => props.analytics.dimensions.filter(row => (!analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value) && (!analyticsVersion.value || row.strategy_version_uuid === analyticsVersion.value) && (!analyticsPlacement.value || row.placement === analyticsPlacement.value)));
+const analyticsVersions = computed(() => props.analytics.dimensions.filter(row => !analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value).filter((row, index, rows) => row.strategy_version_uuid && rows.findIndex(item => item.strategy_version_uuid === row.strategy_version_uuid) === index));
+const analyticsCards = computed(() => [['曝光', props.analytics.impressions.toLocaleString()], ['点击', props.analytics.clicks.toLocaleString()], ['加购', props.analytics.add_to_carts.toLocaleString()], ['订单', props.analytics.orders.toLocaleString()], ['归因收入', money(props.analytics.attributed_revenue, props.analytics.currency)], ['AOV', money(props.analytics.aov, props.analytics.currency)]]);
+</script>
+
+<template>
+    <Head title="Deco 个性化推荐" />
+    <AppLayout>
+        <div class="mx-auto max-w-[1480px] space-y-6 p-4 sm:p-6 lg:p-8">
+            <header class="overflow-hidden rounded-3xl bg-slate-950 px-6 py-7 text-white shadow-xl sm:px-8">
+                <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                    <div><p class="text-xs font-semibold uppercase tracking-[.22em] text-indigo-300">Deco Personalization</p><h1 class="mt-2 text-3xl font-semibold">个性化推荐</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">使用 Commerce Hub 的真实商品、库存和订单数据管理确定性推荐。策略自动保存，是否展示由页面或组件绑定决定。</p></div>
+                    <div class="rounded-2xl bg-white/10 px-4 py-3 text-sm"><p class="font-semibold">{{ store.name }}</p><p class="mt-1 text-xs text-slate-300">{{ store.shopify_domain }}</p></div>
+                </div>
+            </header>
+            <nav class="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="个性化推荐主导航">
+                <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-3 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value"><span class="block text-sm font-semibold">{{ tab.label }}</span><span class="mt-0.5 hidden text-xs opacity-70 sm:block">{{ tab.hint }}</span></button>
+            </nav>
+            <p v-if="pageNotice" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{{ pageNotice }}</p>
+
+            <section v-if="activeTab === 'overview'" class="space-y-6">
+                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">策略</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.length }}</p><p class="mt-2 text-xs text-slate-500">{{ strategyRows.filter(row => row.status === 'enabled').length }} 个已在使用</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">线上场景</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.reduce((total, row) => total + row.used_in.filter(item => item.status === 'live').length, 0) }}</p><p class="mt-2 text-xs text-slate-500">由真实组件绑定计算</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Checkout</p><p class="mt-2 text-xl font-semibold">{{ checkout.strategy_uuid ? '已选择策略' : '待选择策略' }}</p><p class="mt-2 text-xs text-slate-500">区块添加后直接使用所选策略</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">感谢页面推荐</p><p class="mt-2 text-xl font-semibold">{{ checkout.thank_you.strategy_uuid ? '已选择策略' : '暂未设置' }}</p><p class="mt-2 text-xs text-slate-500">显示在订单摘要商品下方</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">售后页面推荐</p><p class="mt-2 text-xl font-semibold">{{ checkout.order_status.strategy_uuid ? '已选择策略' : '暂未设置' }}</p><p class="mt-2 text-xs text-slate-500">显示在订单状态页面</p></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">原生购物车推荐</p><p class="mt-2 text-xl font-semibold">{{ smartCart?.strategy_uuid ? '已选择策略' : '暂未设置' }}</p><p class="mt-2 text-xs text-slate-500">保留主题原生购物车抽屉</p></div>
+                </div>
+                <div class="grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between"><div><h2 class="text-lg font-semibold">上线检查</h2><p class="mt-1 text-sm text-slate-500">集中查看策略和店面能力状态。</p></div><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{{ setupChecks.filter(item => item.passed).length }}/{{ setupChecks.length }}</span></div><div class="mt-5 space-y-3"><div v-for="item in setupChecks" :key="item.label" class="flex items-center gap-3 rounded-xl border p-3" :class="item.passed ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-slate-50'"><span class="flex size-7 items-center justify-center rounded-full text-xs font-bold" :class="item.passed ? 'bg-emerald-600 text-white' : 'bg-white text-slate-400'">{{ item.passed ? '✓' : '·' }}</span><span class="text-sm font-medium text-slate-700">{{ item.label }}</span></div></div></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between"><div><h2 class="text-lg font-semibold">异常提醒</h2><p class="mt-1 text-sm text-slate-500">仅展示当前店铺真实状态。</p></div><span class="rounded-full px-3 py-1 text-xs font-semibold" :class="configurationAlerts.length ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'">{{ configurationAlerts.length ? `${configurationAlerts.length} 项` : '正常' }}</span></div><div v-if="configurationAlerts.length" class="mt-5 space-y-2"><button v-for="strategy in configurationAlerts" :key="strategy.uuid" type="button" class="block w-full rounded-xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900" @click="openEditor(strategy)">{{ strategy.name }}：组件绑定配置异常</button></div><p v-else class="mt-8 text-center text-sm text-slate-500">没有发现配置异常。</p></div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-lg font-semibold">全局设置</h2><p class="mt-1 text-sm text-slate-500">默认文案、Checkout、感谢页面、售后页面、Smart Cart 和归因口径集中管理。</p></div><button type="button" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" @click="showGlobalSettings = !showGlobalSettings">{{ showGlobalSettings ? '收起设置' : '打开全局设置' }}</button></div></div>
+                <div v-if="showGlobalSettings" class="space-y-6">
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveGlobalSettings"><h2 class="text-lg font-semibold">默认语言与文案</h2><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="text-sm font-medium">默认语言<select v-model="globalForm.default_locale" class="mt-1 w-full rounded-xl border-slate-300"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label><label class="text-sm font-medium">推荐标题<input v-model="globalForm.copy.recommendation_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label><label class="text-sm font-medium">加购按钮<input v-model="globalForm.copy.add_button" class="mt-1 w-full rounded-xl border-slate-300" maxlength="60"></label><label class="text-sm font-medium">Checkout 标题<input v-model="globalForm.copy.checkout_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label></div><div class="mt-5 flex items-center gap-3"><button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="globalSaveState === 'saving'">{{ globalSaveState === 'saving' ? '保存中…' : '保存默认设置' }}</button><span class="text-sm" :class="globalSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ globalError || (globalSaveState === 'saved' ? '已保存' : '') }}</span></div></form>
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveCheckout"><div><h2 class="text-lg font-semibold">Checkout</h2><p class="mt-1 text-sm text-slate-500">选择策略并保存；Shopify Checkout Editor 中的“Deco 推荐策略”区块会直接使用它。</p></div><label class="mt-5 block text-sm font-medium">推荐策略<select v-model="checkoutForm.strategy_uuid" required class="mt-1 w-full rounded-xl border-slate-300"><option disabled value="">请选择策略</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select><span class="mt-2 block text-xs text-slate-500">保存后，策略列表“用于”会显示 Checkout；每次只展示一个有效商品，添加成功后获取下一个。</span></label><div class="mt-4 flex flex-wrap items-center gap-3"><button v-if="permissions.manage" type="submit" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="checkoutForm.processing || !checkoutForm.strategy_uuid">{{ checkoutForm.processing ? '保存中…' : '绑定到 Checkout' }}</button><span v-if="checkoutMessage" class="text-sm" :class="checkoutSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ checkoutMessage }}</span></div><div class="mt-6"><div class="flex items-center justify-between"><h3 class="font-semibold">Checkout 信任信息</h3><button v-if="checkoutForm.trust_items.length < 6" type="button" class="text-sm font-semibold text-indigo-700" @click="addTrustItem">+ 添加</button></div><div class="mt-3 grid gap-3 lg:grid-cols-2"><div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4"><div class="flex items-center justify-between"><label class="flex items-center gap-2 text-sm font-semibold"><input v-model="item.enabled" type="checkbox" class="rounded">第 {{ index + 1 }} 项</label><button type="button" class="text-xs text-rose-600" @click="checkoutForm.trust_items.splice(index, 1)">移除</button></div><div class="mt-3 grid gap-3 sm:grid-cols-2"><label class="text-xs">图标<select v-model="item.icon" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></label><label class="text-xs">标题<input v-model="item.title" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><label class="text-xs sm:col-span-2">说明<input v-model="item.description" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label></div></div></div></div><p class="mt-5 text-xs text-slate-500">修改信任信息后，再点击上方“绑定到 Checkout”即可一起保存。</p></form>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">感谢页面推荐</h2><p class="mt-1 text-sm text-slate-500">独立选择感谢页策略和标题；推荐显示在 Shopify 感谢页面右侧订单摘要的商品下方。</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveThankYou"><label class="block text-sm">策略<select v-model="thankYouForm.strategy_uuid" required class="mt-1 w-full rounded-lg border-slate-300"><option disabled value="">请选择策略</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">标题<input v-model="thankYouForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manage" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="thankYouForm.processing || !thankYouForm.strategy_uuid">{{ thankYouForm.processing ? '保存中…' : '保存设置' }}</button><p v-if="thankYouForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(thankYouForm.errors).join('；') }}</p><p class="text-xs text-slate-500 md:col-span-3">优先使用所选策略；订单商品没有匹配结果时，自动从其他在售商品中兜底，并排除本单已购买的商品。</p></form></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">售后页面推荐</h2><p class="mt-1 text-sm text-slate-500">独立选择售后页策略和标题；推荐显示在 Shopify 客户账户的订单状态页面。</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveOrderStatus"><label class="block text-sm">策略<select v-model="orderStatusForm.strategy_uuid" required class="mt-1 w-full rounded-lg border-slate-300"><option disabled value="">请选择策略</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">标题<input v-model="orderStatusForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manage" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="orderStatusForm.processing || !orderStatusForm.strategy_uuid">{{ orderStatusForm.processing ? '保存中…' : '保存设置' }}</button><p v-if="orderStatusForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(orderStatusForm.errors).join('；') }}</p><p class="text-xs text-slate-500 md:col-span-3">优先使用所选策略；没有匹配结果时从其他在售商品中兜底，并始终排除该订单已经购买的商品。</p></form></div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">原生购物车推荐</h2><p class="mt-1 text-sm text-slate-500">只选择策略和标题。保存后直接在主题原生购物车抽屉中显示，无需总开关、兼容检查或另外发布。</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveSmartCartDraft"><label class="block text-sm">策略<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">暂不选择</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">标题<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manageSmartCart" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="smartCartForm.processing">{{ smartCartForm.processing ? '保存中…' : '保存设置' }}</button><p v-if="smartCartForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(smartCartForm.errors).join('；') }}</p><p class="text-xs text-slate-500 md:col-span-3">前台每次只显示一个有效商品；添加成功后重新计算下一个，全部加入或没有合格商品时自动隐藏。</p></form></div>
+                    <div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-950"><strong>归因规则：</strong>7 天内最后一次推荐点击，仅点击归因；退款或取消自动冲销。</div>
+                </div>
+            </section>
+
+            <section v-else-if="activeTab === 'strategies'" class="space-y-5">
+                <div class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between"><div><h2 class="text-lg font-semibold">推荐策略</h2><p class="mt-1 text-sm text-slate-500">制定和编辑都会自动保存；展示位置由各组件自行绑定。</p></div><div class="flex flex-col gap-2 sm:flex-row"><input v-model="search" type="search" placeholder="搜索策略名称或使用位置" class="min-w-72 rounded-xl border-slate-300 text-sm"><button v-if="permissions.manage" type="button" class="rounded-xl bg-slate-950 px-5 py-2 text-sm font-semibold text-white" @click="createStrategy">制定策略</button></div></div>
+                <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div v-if="!filteredStrategies.length" class="p-14 text-center"><p class="font-semibold text-slate-700">没有匹配策略</p><p class="mt-1 text-sm text-slate-500">点击“制定策略”创建第一份推荐策略。</p></div><div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-5 py-3">名称</th><th class="px-5 py-3">状态</th><th class="px-5 py-3">用于</th><th class="px-5 py-3">创建 / 最后修改</th><th class="px-5 py-3 text-right">操作</th></tr></thead><tbody><tr v-for="strategy in filteredStrategies" :key="strategy.uuid" class="border-t border-slate-100 align-top"><td class="px-5 py-4"><button type="button" class="font-semibold text-slate-950 hover:text-indigo-700" @click="openEditor(strategy)">{{ strategy.name }}</button><p class="mt-1 text-xs text-slate-500">{{ strategy.recommendation_mode === 'custom' ? `自定义规则（${strategy.custom_rule_count}）` : (options.algorithms.find(option => option.value === strategy.algorithm)?.label ?? '预设规则') }}</p></td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="statusClass(strategy.status)">{{ statusLabel(strategy.status) }}</span></td><td class="px-5 py-4"><span v-if="!strategy.used_in.length" class="text-slate-400">没有场景</span><div v-else class="flex max-w-md flex-wrap gap-2"><span v-for="usage in strategy.used_in" :key="usage.component_uuid" class="rounded-lg border border-slate-200 px-2.5 py-1 text-xs"><strong>{{ placementLabel(usage.placement) }}</strong><span class="ml-1 text-slate-500">{{ usageLabel(usage.status) }}</span></span></div></td><td class="px-5 py-4 text-xs text-slate-500"><p>{{ formatDate(strategy.created_at) }}</p><p class="mt-2">{{ formatDate(strategy.updated_at) }}</p></td><td class="px-5 py-4"><div class="flex justify-end gap-2"><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="openEditor(strategy)">编辑</button><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="duplicateStrategy(strategy)">复制</button><button type="button" class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700" @click="askDelete(strategy)">删除</button></div></td></tr></tbody></table></div></div>
+            </section>
+
+            <section v-else class="space-y-5">
+                <div v-if="!permissions.viewAnalytics" class="rounded-2xl border border-slate-200 bg-white p-14 text-center text-slate-500">当前账号没有个性化推荐分析权限。</div>
+                <template v-else><div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-950"><strong>归因口径：</strong>7 天内最后一次推荐点击；仅点击归因；退款与取消冲销。</div><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"><div v-for="card in analyticsCards" :key="card[0]" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs text-slate-500">{{ card[0] }}</p><p class="mt-2 text-2xl font-semibold">{{ card[1] }}</p></div></div><div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div class="grid gap-3 md:grid-cols-3"><label class="text-sm">策略<select v-model="analyticsStrategy" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部策略</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="text-sm">策略版本<select v-model="analyticsVersion" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部版本</option><option v-for="row in analyticsVersions" :key="row.strategy_version_uuid!" :value="row.strategy_version_uuid!">版本 {{ row.strategy_version }}</option></select></label><label class="text-sm">页面 / 组件<select v-model="analyticsPlacement" class="mt-1 w-full rounded-xl border-slate-300"><option value="">全部位置</option><option v-for="placement in options.placements" :key="placement.value" :value="placement.value">{{ placement.label }}</option></select></label></div></div><div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div v-if="!analyticsRows.length" class="p-12 text-center text-sm text-slate-500">当前筛选条件没有事件。</div><div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-4 py-3">策略 / 版本</th><th class="px-4 py-3">页面 / 组件</th><th class="px-4 py-3">曝光</th><th class="px-4 py-3">点击</th><th class="px-4 py-3">加购</th><th class="px-4 py-3">订单</th><th class="px-4 py-3">收入</th></tr></thead><tbody><tr v-for="row in analyticsRows" :key="`${row.strategy_version_uuid}-${row.component_uuid}-${row.placement}`" class="border-t border-slate-100"><td class="px-4 py-3"><strong>{{ row.strategy_name }}</strong><p class="text-xs text-slate-500">版本 {{ row.strategy_version ?? '未记录' }}</p></td><td class="px-4 py-3"><strong>{{ placementLabel(row.placement) }}</strong><p class="text-xs text-slate-500">{{ row.component_name }}</p></td><td class="px-4 py-3">{{ row.impressions }}</td><td class="px-4 py-3">{{ row.clicks }}</td><td class="px-4 py-3">{{ row.add_to_carts }}</td><td class="px-4 py-3">{{ row.orders }}</td><td class="px-4 py-3 font-semibold">{{ money(row.attributed_revenue, analytics.currency) }}</td></tr></tbody></table></div></div></template>
+            </section>
+        </div>
+
+        <div v-if="editorOpen" class="fixed inset-0 z-[100] bg-slate-50" role="dialog" aria-modal="true" aria-label="制定或编辑策略">
+            <header class="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm sm:px-6"><div class="min-w-0"><p class="truncate font-semibold text-slate-950">{{ editorDraft?.name || '策略' }}</p><p class="text-xs" :class="saveState === 'failed' ? 'text-rose-700' : 'text-slate-500'"><template v-if="saveState === 'saving'">保存中…</template><template v-else-if="saveState === 'saved'">已保存 {{ formatDate(savedAt) }}</template><template v-else-if="saveState === 'failed'">保存失败，请重试</template><template v-else>等待自动保存</template></p></div><div class="flex items-center gap-2"><button v-if="saveState === 'failed'" type="button" class="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700" @click="saveDraft">重试保存</button><button type="button" class="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" @click="requestClose">关闭</button></div></header>
+            <main class="h-[calc(100vh-4rem)] overflow-y-auto p-4 sm:p-6 lg:p-8"><div v-if="editorLoading" class="mx-auto max-w-5xl rounded-2xl bg-white p-12 text-center text-slate-500">正在读取策略…</div><div v-else-if="editorDraft" class="mx-auto max-w-5xl space-y-6 pb-20">
+                <p v-if="editorError" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{{ editorError }}</p>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">策略名称</h2><label class="mt-5 block text-sm font-medium">名称<input v-model="editorDraft.name" maxlength="80" class="mt-1 w-full rounded-xl border-slate-300" placeholder="例如：商品页配件推荐"></label></section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 class="text-xl font-semibold">推荐规则</h2>
+                    <p class="mt-1 text-sm text-slate-500">可以从预设规则开始，也可以创建自定义规则以匹配目标。</p>
+
+                    <div class="mt-5 rounded-xl border border-slate-200 p-4">
+                        <label class="flex cursor-pointer items-start gap-3">
+                            <input :checked="editorDraft.configuration.recommendation_rule.mode === 'preset'" type="radio" name="recommendation-mode" class="mt-1" @change="setRecommendationMode('preset')">
+                            <span><strong class="text-sm">预设规则</strong><span class="mt-1 block text-xs text-slate-500">使用已经验证的确定性推荐方式。</span></span>
+                        </label>
+                        <div v-if="editorDraft.configuration.recommendation_rule.mode === 'preset'" class="ml-7 mt-4 space-y-4">
+                            <label class="block text-sm font-medium">规则
+                                <select v-model="editorDraft.configuration.recommendation_rule.preset" class="mt-1 w-full max-w-xl rounded-xl border-slate-300">
+                                    <option v-for="option in options.algorithms" :key="option.value" :value="option.value">{{ option.label }}</option>
+                                </select>
+                            </label>
+                            <template v-if="editorDraft.configuration.recommendation_rule.preset === 'manual'">
+                                <p class="text-sm text-slate-500">最多可以添加 24 种产品，并为每种产品设置最低购买数量。</p>
+                                <div class="flex items-center justify-between gap-4">
+                                    <h3 class="text-sm font-semibold">产品（{{ editorDraft.configuration.products.manual.length }}）</h3>
+                                    <button type="button" class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="openProductPicker('manual')">选择</button>
+                                </div>
+                                <div v-if="manualError" class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">{{ manualError }}</div>
+                                <div v-if="hasUnavailableManualProducts" class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="status">部分商品已售罄、下架或当前不可售，店面推荐时会自动跳过。</div>
+                                <p v-if="!editorDraft.configuration.products.manual.length && !manualError" class="text-sm text-slate-500">尚未选择产品。</p>
+                                <div v-else-if="editorDraft.configuration.products.manual.length" class="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                                    <div v-for="(item, index) in editorDraft.configuration.products.manual" :key="item.shopify_product_id" draggable="true" class="grid gap-3 p-3 sm:grid-cols-[32px_48px_1fr_150px_auto] sm:items-center" @dragstart="startProductDrag(index)" @dragover.prevent @drop="dropProductSelection(editorDraft.configuration.products.manual, index)">
+                                        <button type="button" class="cursor-grab text-lg text-slate-400" aria-label="拖动排序">⋮⋮</button>
+                                        <img v-if="product(item.shopify_product_id)?.image_url" :src="product(item.shopify_product_id)?.image_url!" class="size-12 rounded-lg object-cover" alt="">
+                                        <div><p class="font-medium">{{ product(item.shopify_product_id)?.title ?? '已移除或未同步商品' }}</p><span class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="product(item.shopify_product_id)?.available_for_sale ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'">{{ product(item.shopify_product_id)?.availability_label ?? '不可用' }}</span></div>
+                                        <label class="text-xs text-slate-500">最低购买数量<input v-model.number="item.minimum_quantity" type="number" min="1" max="999" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label>
+                                        <div class="flex items-center justify-end gap-2"><button type="button" class="text-xs text-slate-500 disabled:opacity-30" :disabled="index === 0" @click="moveProductSelection(editorDraft.configuration.products.manual, index, -1)">上移</button><button type="button" class="text-xs text-slate-500 disabled:opacity-30" :disabled="index === editorDraft.configuration.products.manual.length - 1" @click="moveProductSelection(editorDraft.configuration.products.manual, index, 1)">下移</button><button type="button" class="text-sm font-semibold text-rose-700" @click="removeProduct('manual', item.shopify_product_id)">删除</button></div>
+                                    </div>
+                                </div>
+                            </template>
+                            <p v-else class="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">该预设规则由 Commerce Hub 的确定性商品、库存和订单数据计算。</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 rounded-xl border border-slate-200 p-4">
+                        <label class="flex cursor-pointer items-start gap-3">
+                            <input :checked="editorDraft.configuration.recommendation_rule.mode === 'custom'" type="radio" name="recommendation-mode" class="mt-1" @change="setRecommendationMode('custom')">
+                            <span><strong class="text-sm">自定义规则（{{ customRules.length }}）</strong><span class="mt-1 block text-xs text-slate-500">按优先级组合购物车商品、集合、标签和供应商条件。</span></span>
+                        </label>
+                        <div v-if="editorDraft.configuration.recommendation_rule.mode === 'custom'" class="ml-7 mt-4">
+                            <button type="button" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold" @click="openCustomRuleEditor">编辑规则</button>
+                            <div v-if="customRuleError" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">{{ customRuleError }}</div>
+                        </div>
+                    </div>
+                </section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between gap-4"><div><h2 class="text-xl font-semibold">置顶产品</h2><p class="mt-1 text-sm text-slate-500">置顶商品排在普通商品之前；无库存或不可售时仍会安全跳过。</p></div><button type="button" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold" @click="openProductPicker('pinned')">选择</button></div><div v-if="editorDraft.configuration.products.pinned.length" class="mt-4 flex flex-wrap gap-2"><span v-for="item in editorDraft.configuration.products.pinned" :key="item.shopify_product_id" class="inline-flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 text-sm text-indigo-900">{{ product(item.shopify_product_id)?.title ?? item.shopify_product_id }}<button type="button" class="font-bold text-rose-600" @click="removeProduct('pinned', item.shopify_product_id)">×</button></span></div><p v-else class="mt-4 text-sm text-slate-500">没有置顶产品。</p></section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">除外条款</h2><div class="mt-5 space-y-4"><label class="flex items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm"><input v-model="excludeHistory" type="checkbox" class="mt-0.5 rounded"><span><strong>从购物车或订单中排除商品</strong><span class="mt-1 block text-xs text-slate-500">默认启用，避免重复推荐已有商品。</span></span></label><div class="rounded-xl border border-slate-200 p-4"><label class="flex gap-3 text-sm font-semibold"><input v-model="excludeSpecificEnabled" type="checkbox" class="rounded">排除特定产品</label><div v-if="excludeSpecificEnabled" class="mt-3"><button type="button" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" @click="openProductPicker('excluded')">选择产品（{{ editorDraft.configuration.products.excluded.length }}）</button></div></div><div class="grid gap-4 md:grid-cols-2"><label class="rounded-xl border border-slate-200 p-4 text-sm"><span class="flex gap-3 font-semibold"><input v-model="excludeTagsEnabled" type="checkbox" class="rounded">按标签排除</span><select v-if="excludeTagsEnabled" v-model="editorDraft.configuration.rules.exclude_tags" multiple class="mt-3 h-28 w-full rounded-lg border-slate-300"><option v-for="tag in availableTags" :key="tag" :value="tag">{{ tag }}</option></select></label><label class="rounded-xl border border-slate-200 p-4 text-sm"><span class="flex gap-3 font-semibold"><input v-model="excludeCollectionsEnabled" type="checkbox" class="rounded">按系列 / 商品集合排除</span><select v-if="excludeCollectionsEnabled" v-model="editorDraft.configuration.rules.exclude_collection_ids" multiple class="mt-3 h-28 w-full rounded-lg border-slate-300"><option v-for="collection in collections" :key="collection.shopify_collection_id" :value="collection.shopify_collection_id">{{ collection.title }}</option></select></label><label class="rounded-xl border border-slate-200 p-4 text-sm"><span class="flex gap-3 font-semibold"><input v-model="excludeVendorsEnabled" type="checkbox" class="rounded">按供应商排除</span><select v-if="excludeVendorsEnabled" v-model="editorDraft.configuration.rules.exclude_vendors" multiple class="mt-3 h-28 w-full rounded-lg border-slate-300"><option v-for="vendor in availableVendors" :key="vendor" :value="vendor">{{ vendor }}</option></select></label><label class="rounded-xl border border-slate-200 p-4 text-sm"><span class="flex gap-3 font-semibold"><input v-model="excludePurchaseOptionsEnabled" type="checkbox" class="rounded">通过购买选项排除</span><select v-if="excludePurchaseOptionsEnabled" v-model="editorDraft.configuration.rules.exclude_purchase_options" multiple class="mt-3 h-28 w-full rounded-lg border-slate-300"><option v-for="option in purchaseOptions" :key="option" :value="option">{{ option }}</option></select></label></div></div></section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-xl font-semibold">优惠促销</h2><div class="mt-5 flex gap-3"><label class="flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold" :class="!editorDraft.configuration.discount.enabled ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200'"><input v-model="editorDraft.configuration.discount.enabled" :value="false" type="radio">已禁用</label><label class="flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold" :class="editorDraft.configuration.discount.enabled ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200'"><input v-model="editorDraft.configuration.discount.enabled" :value="true" type="radio">已启用</label></div><div v-if="editorDraft.configuration.discount.enabled" class="mt-5 rounded-xl bg-slate-50 p-4"><p v-if="selectedDiscount" class="text-sm"><strong>{{ selectedDiscount.title }}</strong><span class="ml-2 text-slate-500">{{ selectedDiscount.summary }}</span></p><p v-else-if="editorDraft.configuration.discount.reference" class="text-sm text-slate-700">已关联 Shopify 折扣；打开列表可刷新当前名称和状态。</p><p v-else class="text-sm text-amber-700">启用优惠后必须选择折扣。</p><button type="button" class="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold" @click="openDiscounts">选择或管理折扣</button></div></section>
+            </div></main>
+            <div v-if="closePrompt" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/50 p-4"><div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" role="alertdialog" aria-modal="true"><h2 class="text-lg font-semibold">关闭策略编辑器？</h2><p class="mt-2 text-sm leading-6 text-slate-600">当前内容会保留。若最后一次自动保存失败，建议先继续编辑并重试。</p><div class="mt-6 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="closePrompt = false">继续编辑</button><button type="button" class="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white" @click="closeEditor">关闭</button></div></div></div>
+        </div>
+
+        <div v-if="customRuleEditorOpen && editorDraft" class="fixed inset-0 z-[115] bg-slate-50" role="dialog" aria-modal="true" aria-label="自定义规则编辑器">
+            <header class="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm sm:px-6"><div><h2 class="font-semibold">自定义规则</h2><p class="text-xs text-slate-500">规则按左侧优先级从上到下执行并自动保存。</p></div><button type="button" class="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" @click="closeCustomRuleEditor">关闭</button></header>
+            <div class="grid h-[calc(100vh-4rem)] min-h-0 lg:grid-cols-[320px_1fr]">
+                <aside class="overflow-y-auto border-b border-slate-200 bg-white p-4 lg:border-b-0 lg:border-r">
+                    <div class="flex items-center justify-between"><div><h3 class="font-semibold">规则集</h3><p class="text-xs text-slate-500">{{ customRules.length }} 条规则</p></div><button type="button" class="text-sm font-semibold text-indigo-700 disabled:opacity-40" :disabled="customRules.length >= 20" @click="addCustomRule">添加规则</button></div>
+                    <div class="mt-4 space-y-2">
+                        <button v-for="(rule, index) in customRules" :key="rule.id" type="button" draggable="true" class="block w-full rounded-xl border p-3 text-left" :class="activeCustomRule?.id === rule.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white'" @click="activeCustomRuleId = rule.id" @dragstart="startRuleDrag(index)" @dragover.prevent @drop="dropRule(index)">
+                            <span class="flex items-center gap-2"><span class="cursor-grab text-slate-400">⋮⋮</span><strong class="min-w-0 flex-1 truncate text-sm">{{ index + 1 }}. {{ rule.name }}</strong></span>
+                            <span class="mt-2 block text-xs leading-5 text-slate-500">{{ ruleSummary(rule) }}</span>
+                            <span class="mt-2 flex gap-3 text-xs text-slate-500"><span @click.stop="moveCustomRule(index, -1)">上移</span><span @click.stop="moveCustomRule(index, 1)">下移</span></span>
+                        </button>
+                    </div>
+                    <button type="button" class="mt-4 w-full rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-40" :disabled="customRules.length >= 20" @click="addCustomRule">+ 添加规则</button>
+                    <div class="mt-6 rounded-xl border border-slate-200 p-4">
+                        <label class="flex items-start gap-3 text-sm font-semibold"><input v-model="editorDraft.configuration.recommendation_rule.custom.fallback.enabled" type="checkbox" class="mt-1 rounded"><span>添加备用规则<span class="mt-1 block text-xs font-normal leading-5 text-slate-500">正常规则没有产生足够的有效候选时，按备用商品顺序补充。</span></span></label>
+                    </div>
+                </aside>
+
+                <main class="overflow-y-auto p-4 sm:p-6 lg:p-8">
+                    <div v-if="activeCustomRule" class="mx-auto max-w-5xl space-y-6 pb-12">
+                        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                            <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><label class="block flex-1 text-sm font-medium">规则名称（最多 50 字）<input v-model="activeCustomRule.name" maxlength="50" class="mt-1 w-full rounded-xl border-slate-300"></label><button type="button" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700" @click="askDeleteCustomRule(activeCustomRule)">删除规则</button></div>
+                        </section>
+
+                        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 class="text-lg font-semibold">状况 / 如果</h3><p class="mt-1 text-sm text-slate-500">场景缺少所需上下文时，本规则按不匹配处理。</p></div><label v-if="activeCustomRule.conditions.length > 1" class="text-sm">条件关系<select v-model="activeCustomRule.match" class="ml-2 rounded-lg border-slate-300 text-sm"><option value="all">和（全部满足）</option><option value="any">或（任一满足）</option></select></label></div>
+                            <div class="mt-5 space-y-4">
+                                <div v-for="condition in activeCustomRule.conditions" :key="condition.id" class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <div class="grid gap-3 md:grid-cols-[1fr_1fr_auto]"><label class="text-xs">条件字段<select v-model="condition.field" class="mt-1 w-full rounded-lg border-slate-300 text-sm" @change="condition.values = []"><option value="cart_product_ids">购物车中的商品</option><option value="cart_collection_ids">购物车商品集合</option><option value="cart_tags">购物车商品标签</option><option value="cart_vendors">购物车商品供应商</option></select></label><label class="text-xs">运算符<select v-model="condition.operator" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option value="contains_any">包含任何</option><option value="contains_all">包含全部</option><option value="contains_none">不包含任何</option></select></label><button type="button" class="self-end rounded-lg px-3 py-2 text-sm font-semibold text-rose-700" @click="removeCondition(activeCustomRule, condition.id)">删除</button></div>
+                                    <div class="mt-3"><button v-if="condition.field === 'cart_product_ids'" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold" @click="openProductPicker('custom-condition', activeCustomRule.id, condition.id)">选择产品（{{ condition.values.length }}）</button><label v-else class="block text-xs">值<select v-model="condition.values" multiple class="mt-1 h-28 w-full rounded-lg border-slate-300 bg-white text-sm"><option v-for="option in optionValues(condition.field)" :key="option.value" :value="option.value">{{ option.label }}</option></select></label></div>
+                                </div>
+                            </div>
+                            <button type="button" class="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-40" :disabled="activeCustomRule.conditions.length >= 10" @click="addCondition(activeCustomRule)">+ 添加条件</button>
+                            <label class="mt-5 flex items-start gap-3 rounded-xl bg-indigo-50 p-4 text-sm"><input v-model="activeCustomRule.exit_on_match" type="checkbox" class="mt-1 rounded"><span><strong>如果匹配则退出</strong><span class="mt-1 block text-xs text-indigo-800">命中后停止计算更低优先级规则；未勾选时继续合并并按首次出现去重。</span></span></label>
+                        </section>
+
+                        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                            <h3 class="text-lg font-semibold">行动 / 应用</h3><p class="mt-1 text-sm text-slate-500">行动固定为手动选择，按保存顺序加入候选。</p>
+                            <div class="mt-5 flex items-center justify-between"><h4 class="text-sm font-semibold">推荐产品（{{ activeCustomRule.action.products.length }}）</h4><button type="button" class="text-sm font-semibold text-indigo-700" @click="openProductPicker('custom-action', activeCustomRule.id)">选择</button></div>
+                            <div v-if="activeCustomRule.action.products.length" class="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200"><div v-for="(item, index) in activeCustomRule.action.products" :key="item.shopify_product_id" draggable="true" class="grid gap-3 p-3 sm:grid-cols-[32px_48px_1fr_140px_auto] sm:items-center" @dragstart="startProductDrag(index)" @dragover.prevent @drop="dropProductSelection(activeCustomRule.action.products, index)"><span class="cursor-grab text-slate-400">⋮⋮</span><img v-if="product(item.shopify_product_id)?.image_url" :src="product(item.shopify_product_id)?.image_url!" class="size-12 rounded-lg object-cover" alt=""><div><p class="font-medium">{{ product(item.shopify_product_id)?.title ?? '失效商品' }}</p><span class="text-xs" :class="product(item.shopify_product_id)?.available_for_sale ? 'text-emerald-700' : 'text-amber-700'">{{ product(item.shopify_product_id)?.availability_label ?? '配置异常' }}</span></div><label class="text-xs">最低购买数量<input v-model.number="item.minimum_quantity" type="number" min="1" max="999" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><div class="flex gap-2"><button type="button" class="text-xs text-slate-500" @click="moveProductSelection(activeCustomRule.action.products, index, -1)">上移</button><button type="button" class="text-xs text-slate-500" @click="moveProductSelection(activeCustomRule.action.products, index, 1)">下移</button><button type="button" class="text-sm font-semibold text-rose-700" @click="removeActionProduct(activeCustomRule.action, item.shopify_product_id)">删除</button></div></div></div>
+                            <div class="mt-6"><div class="flex items-center justify-between"><h4 class="text-sm font-semibold">筛选条件（{{ activeCustomRule.action.filters.length }}）</h4><button type="button" class="text-sm font-semibold text-indigo-700" @click="addActionFilter(activeCustomRule.action)">添加筛选条件</button></div><div class="mt-3 space-y-3"><div v-for="filter in activeCustomRule.action.filters" :key="filter.id" class="grid gap-3 rounded-xl bg-slate-50 p-4 md:grid-cols-[1fr_1fr_1.4fr_auto]"><select v-model="filter.field" class="rounded-lg border-slate-300 text-sm" @change="filter.values = []"><option value="product_tags">商品标签</option><option value="product_collections">商品集合</option><option value="product_vendors">商品供应商</option></select><select v-model="filter.operator" class="rounded-lg border-slate-300 text-sm"><option value="contains_any">包含任何</option><option value="contains_all">包含全部</option><option value="contains_none">不包含任何</option></select><select v-model="filter.values" multiple class="h-24 rounded-lg border-slate-300 text-sm"><option v-for="option in optionValues(filter.field)" :key="option.value" :value="option.value">{{ option.label }}</option></select><button type="button" class="text-sm font-semibold text-rose-700" @click="removeActionFilter(activeCustomRule.action, filter.id)">删除</button></div></div></div>
+                        </section>
+
+                        <section v-if="editorDraft.configuration.recommendation_rule.custom.fallback.enabled" class="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
+                            <h3 class="text-lg font-semibold">备用规则</h3><p class="mt-1 text-sm text-indigo-800">正常规则的有效候选不足时补充；已返回、已排除或不可售商品不会重新加入。</p>
+                            <div class="mt-5 flex items-center justify-between"><h4 class="text-sm font-semibold">备用商品（{{ editorDraft.configuration.recommendation_rule.custom.fallback.action.products.length }}）</h4><button type="button" class="text-sm font-semibold text-indigo-800" @click="openProductPicker('fallback-action')">选择</button></div>
+                            <div v-if="editorDraft.configuration.recommendation_rule.custom.fallback.action.products.length" class="mt-3 divide-y divide-indigo-100 rounded-xl border border-indigo-200 bg-white"><div v-for="(item, index) in editorDraft.configuration.recommendation_rule.custom.fallback.action.products" :key="item.shopify_product_id" class="grid gap-3 p-3 sm:grid-cols-[48px_1fr_140px_auto] sm:items-center"><img v-if="product(item.shopify_product_id)?.image_url" :src="product(item.shopify_product_id)?.image_url!" class="size-12 rounded-lg object-cover" alt=""><div><p class="font-medium">{{ product(item.shopify_product_id)?.title ?? '失效商品' }}</p><p class="text-xs text-slate-500">{{ product(item.shopify_product_id)?.availability_label ?? '配置异常' }}</p></div><label class="text-xs">最低购买数量<input v-model.number="item.minimum_quantity" type="number" min="1" max="999" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><button type="button" class="text-sm font-semibold text-rose-700" @click="removeActionProduct(editorDraft.configuration.recommendation_rule.custom.fallback.action, item.shopify_product_id)">删除</button></div></div>
+                            <div class="mt-5 flex items-center justify-between"><h4 class="text-sm font-semibold">备用筛选条件（{{ editorDraft.configuration.recommendation_rule.custom.fallback.action.filters.length }}）</h4><button type="button" class="text-sm font-semibold text-indigo-800" @click="addActionFilter(editorDraft.configuration.recommendation_rule.custom.fallback.action)">添加筛选条件</button></div>
+                            <div class="mt-3 space-y-3"><div v-for="filter in editorDraft.configuration.recommendation_rule.custom.fallback.action.filters" :key="filter.id" class="grid gap-3 rounded-xl border border-indigo-100 bg-white p-4 md:grid-cols-[1fr_1fr_1.4fr_auto]"><select v-model="filter.field" class="rounded-lg border-slate-300 text-sm" @change="filter.values = []"><option value="product_tags">商品标签</option><option value="product_collections">商品集合</option><option value="product_vendors">商品供应商</option></select><select v-model="filter.operator" class="rounded-lg border-slate-300 text-sm"><option value="contains_any">包含任何</option><option value="contains_all">包含全部</option><option value="contains_none">不包含任何</option></select><select v-model="filter.values" multiple class="h-24 rounded-lg border-slate-300 text-sm"><option v-for="option in optionValues(filter.field)" :key="option.value" :value="option.value">{{ option.label }}</option></select><button type="button" class="text-sm font-semibold text-rose-700" @click="removeActionFilter(editorDraft.configuration.recommendation_rule.custom.fallback.action, filter.id)">删除</button></div></div>
+                        </section>
+                    </div>
+                    <div v-else class="mx-auto max-w-xl rounded-2xl bg-white p-12 text-center text-slate-500">请从左侧添加或选择一条规则。</div>
+                </main>
+            </div>
+        </div>
+
+        <div v-if="customRuleDeleteTarget" class="fixed inset-0 z-[145] flex items-center justify-center bg-slate-950/55 p-4" role="alertdialog" aria-modal="true" aria-labelledby="delete-custom-rule-title"><div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 id="delete-custom-rule-title" class="text-lg font-semibold">删除规则？</h2><p class="mt-3 text-sm leading-6 text-slate-600">确定删除“<strong class="text-slate-950">{{ customRuleDeleteTarget.name }}</strong>”吗？删除后无法恢复。</p><p v-if="customRuleDeleteError" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ customRuleDeleteError }}</p><div class="mt-6 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="customRuleDeleteTarget = null">取消</button><button type="button" class="rounded-xl bg-rose-600 px-5 py-2 text-sm font-semibold text-white" @click="confirmDeleteCustomRule">删除</button></div></div></div>
+
+        <div v-if="pickerMode" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-label="选择产品">
+            <div class="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <header class="border-b border-slate-200 p-5"><div class="flex items-center justify-between"><div><h2 class="text-xl font-semibold">{{ pickerTitle }}</h2><p class="mt-1 text-sm text-slate-500">最多选择 24 种，按选中时间保存顺序。</p></div><button type="button" class="rounded-lg p-2 text-xl" aria-label="关闭" @click="closeProductPicker">×</button></div><input v-model="pickerSearch" type="search" placeholder="搜索商品名称或状态" class="mt-4 w-full rounded-xl border-slate-300"></header>
+                <div class="min-h-0 flex-1 overflow-y-auto"><p v-if="pickerError" class="m-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{{ pickerError }}</p><div v-for="item in filteredProducts" :key="item.shopify_product_id" class="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-[auto_52px_1fr_210px] sm:items-center"><input type="checkbox" :checked="isPickerSelected(item.shopify_product_id)" @change="togglePickerProduct(item.shopify_product_id)"><img v-if="item.image_url" :src="item.image_url" class="size-12 rounded-lg object-cover" alt=""><div><p class="font-medium">{{ item.title }}</p><span class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="item.available_for_sale ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'">{{ item.availability_label }}</span></div><div v-if="pickerAllowsQuantity" class="grid gap-2"><label class="text-xs text-slate-500">变体<select :value="pickerSelections.find(row => row.shopify_product_id === item.shopify_product_id)?.variant_gid ?? ''" :disabled="!isPickerSelected(item.shopify_product_id)" class="mt-1 w-full rounded-lg border-slate-300 text-sm" @change="updatePickerVariant(item.shopify_product_id, ($event.target as HTMLSelectElement).value)"><option v-for="variant in item.variants" :key="variant.shopify_gid" :value="variant.shopify_gid">{{ variant.title }}{{ variant.available_for_sale ? '' : '（不可售）' }}</option></select></label><label class="text-xs text-slate-500">最低购买数量<input :value="pickerSelections.find(row => row.shopify_product_id === item.shopify_product_id)?.minimum_quantity ?? 1" type="number" min="1" max="999" :disabled="!isPickerSelected(item.shopify_product_id)" class="mt-1 w-full rounded-lg border-slate-300 text-sm" @input="updatePickerQuantity(item.shopify_product_id, ($event.target as HTMLInputElement).value)"></label></div></div></div>
+                <footer class="flex items-center justify-between border-t border-slate-200 p-5"><span class="text-sm font-semibold">已选择 {{ pickerSelections.length }} 种</span><div class="flex gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" @click="closeProductPicker">取消</button><button type="button" class="rounded-xl bg-slate-950 px-5 py-2 text-sm font-semibold text-white disabled:opacity-40" :disabled="pickerSelections.length === 0" @click="confirmProductPicker">确认</button></div></footer>
+            </div>
+        </div>
+
+        <div v-if="discountModal" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-label="选择折扣"><div class="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div class="flex items-center justify-between"><div><h2 class="text-xl font-semibold">优惠促销</h2><p class="mt-1 text-sm text-slate-500">选择现有折扣，或创建/编辑 Shopify 基础折扣码。</p></div><button type="button" class="text-xl" @click="discountModal = false">×</button></div><p v-if="discountError" class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ discountError }}</p><div class="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-4"><h3 class="font-semibold">默认九折优惠</h3><p class="mt-1 text-sm text-indigo-800">为当前推荐商品创建 10% off 折扣码。</p></div><div class="mt-5 space-y-2"><div v-for="discount in discounts" :key="discount.id" class="flex items-center justify-between rounded-xl border border-slate-200 p-4"><span><strong>{{ discount.title }}</strong><span class="mt-1 block text-xs text-slate-500">{{ discount.summary }} · {{ discount.code }} · {{ discount.status }}</span></span><span class="flex gap-2"><button v-if="discount.editable" type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="editDiscount(discount)">编辑</button><button type="button" class="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white" @click="chooseDiscount(discount)">选择</button></span></div><p v-if="discountLoading" class="py-5 text-center text-sm text-slate-500">正在读取 Shopify 折扣…</p></div><form class="mt-6 rounded-xl bg-slate-50 p-4" @submit.prevent="saveDiscount"><h3 class="font-semibold">{{ discountForm.id ? '编辑折扣' : '添加新折扣' }}</h3><div class="mt-3 grid gap-3 sm:grid-cols-3"><label class="text-xs">名称<input v-model="discountForm.title" required maxlength="80" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><label class="text-xs">折扣码<input v-model="discountForm.code" required maxlength="40" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><label class="text-xs">折扣百分比<input v-model.number="discountForm.percentage" required type="number" min="1" max="99" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label></div><button class="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" :disabled="discountLoading">{{ discountLoading ? '保存中…' : '保存并选择' }}</button></form></div></div>
+
+        <div v-if="deleteTarget" class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4" role="alertdialog" aria-modal="true" aria-labelledby="delete-strategy-title" aria-describedby="delete-strategy-description" @mousedown.self="closeDelete"><div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 id="delete-strategy-title" class="text-lg font-semibold">删除策略？</h2><div id="delete-strategy-description" class="mt-3 space-y-2 text-sm leading-6 text-slate-600"><p>确定删除“<strong class="text-slate-950">{{ deleteTarget.name }}</strong>”吗？删除后无法恢复。</p><p v-if="deleteTarget.used_in.length" class="rounded-xl bg-amber-50 p-3 text-amber-800">删除后相关位置将停止推荐；组件无结果时会自动隐藏。</p></div><p v-if="deleteError" class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ deleteError }}</p><div class="mt-6 flex justify-end gap-3"><button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold" :disabled="deleteProcessing" @click="closeDelete">取消</button><button type="button" class="rounded-xl bg-rose-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="deleteProcessing" @click="confirmDelete">{{ deleteProcessing ? '删除中…' : '删除' }}</button></div></div></div>
+    </AppLayout>
+</template>

@@ -6,6 +6,7 @@ export interface MenuItem {
     sectionDivider?: boolean;
     permission?: string;
     children?: MenuItem[];
+    dynamicChildren?: 'applications';
     comingSoon?: boolean;
     hidden?: boolean;
 }
@@ -29,17 +30,14 @@ export const menu: MenuItem[] = [
             { name: '客户管理', route: '/customers', icon: 'customers', permission: 'customers.view' },
             { name: '库存管理', route: '/inventory', icon: 'inventory', permission: 'inventory.view' },
             { name: '地点管理', route: '/locations', icon: 'stores', permission: 'inventory.view' },
+            { name: '车型素材', route: '/model-assets', icon: 'products', permission: 'products.view' },
+            { name: '折扣管理', route: '/discounts', icon: 'campaign', permission: 'discounts.view' },
         ],
     },
     {
         name: '应用中心',
         icon: 'app-center',
-        children: [
-            { name: '我的应用', route: '/app-center', icon: 'apps', permission: 'apps.view' },
-            { name: '安装管理', route: '/app-installations', icon: 'installations', permission: 'apps.install' },
-            { name: '应用配置', route: '/app-configurations', icon: 'settings', permission: 'apps.configure' },
-            { name: '应用日志', route: '/app-logs', icon: 'audit', permission: 'audit.view' },
-        ],
+        dynamicChildren: 'applications',
     },
     {
         name: '数据分析',
@@ -89,7 +87,6 @@ export const menu: MenuItem[] = [
         icon: 'settings',
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
-            { name: '学生优惠', route: '/student-discounts', icon: 'campaign', permission: 'student_discount.claim.read' },
             { name: 'Instagram 内容', route: '/instagram-feed', icon: 'campaign', permission: 'instagram_feed.view' },
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
@@ -142,6 +139,7 @@ export const menu: MenuItem[] = [
         name: '系统管理',
         icon: 'system',
         children: [
+            { name: 'Codex 插件授权', route: '/codex-tokens', icon: 'apps', permission: 'codex.tokens.view' },
             { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },

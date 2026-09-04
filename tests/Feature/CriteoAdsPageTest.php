@@ -12,6 +12,7 @@ use App\Models\StoreBusinessCredential;
 use App\Models\User;
 use App\Services\Advertising\AdvertisingChannelApiService;
 use App\Services\Advertising\AdvertisingChannelSyncService;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -209,7 +210,7 @@ class CriteoAdsPageTest extends TestCase
                     ]],
                 ]);
 
-            (new AdvertisingChannelSyncService($api))->sync($store, 'criteo', 'priority');
+            (new AdvertisingChannelSyncService($api, app(CurrentYearSyncWindow::class)))->sync($store, 'criteo', 'priority');
 
             $this->assertDatabaseHas('criteo_campaign_daily_metrics', [
                 'organization_id' => $organization->id,

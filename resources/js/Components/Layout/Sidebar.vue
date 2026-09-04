@@ -24,15 +24,26 @@ const contextualRoute = (route?: string) => {
         : route;
 };
 
+const applicationChildren = computed<MenuItem[]>(() => page.props.applicationNavigation.map((application) => ({
+    name: application.name,
+    route: application.route,
+    icon: 'apps',
+    permission: application.permission,
+})));
+
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
-    .map((item) => ({
-        ...item,
-        route: contextualRoute(item.route),
-        children: item.children
+    .map((item) => {
+        const children = item.dynamicChildren === 'applications' ? applicationChildren.value : item.children;
+
+        return {
+            ...item,
+            route: contextualRoute(item.route),
+            children: children
             ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
             .map((child) => ({ ...child, route: contextualRoute(child.route) })),
-    }))
+        };
+    })
     .filter((item) => item.route
         ? Boolean(item.permission && page.props.auth.permissions.includes(item.permission))
         : Boolean(item.children?.length)));

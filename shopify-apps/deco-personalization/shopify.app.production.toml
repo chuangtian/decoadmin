@@ -1,0 +1,44 @@
+# Production Shopify App configuration.
+# Client Secrets never belong in Shopify TOML files, logs, chat, or Git.
+
+client_id = "b4dca5d161757cb26e0e805642a3b775"
+name = "Deco 个性化推荐"
+handle = "deco-personalization"
+application_url = "https://admin.decomkt.com/shopify-app/personalization"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://admin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "https://admin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[[webhooks.subscriptions]]
+compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+uri = "https://admin.decomkt.com/api/shopify-app/personalization/webhooks"
+
+[access_scopes]
+scopes = "write_app_proxy,write_pixels,read_customer_events,read_discounts,write_discounts"
+use_legacy_install_flow = false
+
+[shop.metafields.deco_personalization.checkout_configuration_url]
+name = "Deco Checkout configuration URL"
+description = "Production backend endpoint used by Deco Checkout UI extensions."
+type = "single_line_text_field"
+access.storefront = "public_read"
+
+[auth]
+redirect_urls = [ "https://admin.decomkt.com/shopify-app/personalization" ]
+
+[app_proxy]
+url = "https://admin.decomkt.com/api/shopify-app/personalization/proxy"
+prefix = "apps"
+subpath = "deco-personalization"

@@ -44,9 +44,7 @@ class MetaAdsApiClient
     private const INSIGHT_FIELDS = [
         'date_start', 'date_stop', 'account_id', 'account_name', 'campaign_id', 'campaign_name',
         'adset_id', 'adset_name', 'ad_id', 'ad_name', 'spend', 'impressions', 'reach', 'clicks',
-        'unique_clicks', 'inline_link_clicks', 'outbound_clicks', 'ctr', 'unique_ctr', 'cpc',
-        'cpm', 'cpp', 'frequency', 'actions', 'action_values', 'cost_per_action_type',
-        'purchase_roas', 'website_purchase_roas',
+        'inline_link_clicks', 'frequency', 'actions', 'action_values',
     ];
 
     /** @var array<string, string> */

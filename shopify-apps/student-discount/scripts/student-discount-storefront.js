@@ -1,7 +1,12 @@
 (() => {
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const HAN_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
   const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  const PUBLIC_LOCALE = 'en-US';
+  const INITIALIZER_VERSION = '4';
+  const INVALID_RESPONSE_MESSAGE = 'The student discount service returned an invalid response. Please try again later.';
+  const REVIEW_SUBMITTED_MESSAGE = 'Your request has been submitted. We will email you when the review is complete.';
   const STATUS_LABELS = {
     UNUSED: 'Status: Unused',
     PARTIALLY_USED: 'Status: Partially used',
@@ -9,9 +14,42 @@
     EXPIRED: 'Status: Expired',
   };
 
+  function removeLegacyInstances(root = document) {
+    root
+      .querySelectorAll('[data-student-discount-app][data-endpoint]:not([data-proxy-path])')
+      .forEach((app) => app.remove());
+
+    root
+      .querySelectorAll('[data-student-discount-dialog]:not([data-student-discount-version="2"])')
+      .forEach((dialog) => dialog.remove());
+  }
+
+  function replaceLegacyInteractiveNodes(app) {
+    if (app.dataset.initialized !== 'true') return;
+
+    const trigger = app.querySelector('[data-student-discount-trigger]');
+    if (trigger) trigger.replaceWith(trigger.cloneNode(true));
+
+    let dialog = app.querySelector('[data-student-discount-dialog]');
+    if (!dialog) {
+      dialog = document.querySelector(
+        '[data-student-discount-dialog][data-student-discount-version="2"]',
+      );
+    }
+    if (dialog) {
+      const freshDialog = dialog.cloneNode(true);
+      dialog.replaceWith(freshDialog);
+      if (!app.contains(freshDialog)) app.appendChild(freshDialog);
+    }
+
+    app.dataset.initialized = 'false';
+  }
+
   function initialize(app) {
-    if (app.dataset.initialized === 'true') return;
+    if (app.dataset.studentDiscountInitializerVersion === INITIALIZER_VERSION) return;
+    replaceLegacyInteractiveNodes(app);
     app.dataset.initialized = 'true';
+    app.dataset.studentDiscountInitializerVersion = INITIALIZER_VERSION;
 
     const trigger = app.querySelector('[data-student-discount-trigger]');
     const dialog = app.querySelector('[data-student-discount-dialog]');
@@ -25,9 +63,11 @@
     const emailSubmit = emailForm.querySelector('button[type="submit"]');
     const emailError = dialog.querySelector('[data-sd-email-error]');
     const alternative = dialog.querySelector('[data-sd-alternative]');
-    const openIdButton = dialog.querySelector('[data-sd-open-id]');
+    const openIdButtons = [...dialog.querySelectorAll('[data-sd-open-id]')];
+    const openIdButton = openIdButtons[0];
     const selectEmailButton = dialog.querySelector('[data-sd-select-email]');
     const selectIdButton = dialog.querySelector('[data-sd-select-id]');
+    const supportLink = dialog.querySelector('[data-sd-support-link]');
     const studentIdForm = dialog.querySelector('[data-sd-id-form]');
     const studentIdInput = studentIdForm.querySelector('input[name="studentId"]');
     const preview = dialog.querySelector('[data-sd-id-preview]');
@@ -72,20 +112,30 @@
 
     const validateEmail = () => {
       const value = emailInput.value.trim().toLowerCase();
-      const valid = EMAIL_PATTERN.test(value) && !value.includes('..');
-      emailInput.classList.toggle('is-invalid', Boolean(value) && !valid);
-      if (value && !valid) emailInput.setAttribute('aria-invalid', 'true');
+      const emailValid = EMAIL_PATTERN.test(value) && !value.includes('..');
+      emailInput.classList.toggle('is-invalid', Boolean(value) && !emailValid);
+      if (value && !emailValid) emailInput.setAttribute('aria-invalid', 'true');
       else emailInput.removeAttribute('aria-invalid');
-      emailSubmit.disabled = !valid;
+      emailSubmit.disabled = !emailValid;
       emailError.hidden = true;
       alternative.hidden = true;
-      return valid;
+      return emailValid;
     };
 
     const openStudentId = () => {
       studentIdForm.querySelector('input[name="email"]').value = emailInput.value.trim();
       showView('student-id');
       window.setTimeout(() => studentIdForm.querySelector('input[name="fullName"]').focus(), 0);
+    };
+
+    const revealStudentIdAlternative = () => {
+      emailError.hidden = true;
+      alternative.hidden = false;
+      window.setTimeout(() => {
+        if (alternative.hidden) return;
+        alternative.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        openIdButton.focus({preventScroll: true});
+      }, 0);
     };
 
     const showCode = (payload) => {
@@ -121,7 +171,7 @@
       successTitle.textContent = title;
       successMessage.textContent = publicMessage(
         message,
-        'Your request has been submitted. We will email you when the review is complete.',
+        REVIEW_SUBMITTED_MESSAGE,
       );
       showView('success');
     };
@@ -179,6 +229,10 @@
             throw new Error(payload.message || 'Student discount is currently unavailable.');
           }
           campaign = payload;
+          if (payload.support_page_url && supportLink) {
+            supportLink.href = payload.support_page_url;
+            supportLink.parentElement.hidden = false;
+          }
         } catch (error) {
           showSubmission(
             'Student discount unavailable',
@@ -203,7 +257,7 @@
       window.setTimeout(() => emailInput.focus(), 0);
     });
     selectIdButton.addEventListener('click', openStudentId);
-    openIdButton.addEventListener('click', openStudentId);
+    openIdButtons.forEach((button) => button.addEventListener('click', openStudentId));
     dialog.querySelectorAll('[data-sd-back-method]').forEach((button) => {
       button.addEventListener('click', () => {
         showView('method');
@@ -262,9 +316,12 @@
       if (emailSubmitting || !validateEmail()) return;
 
       const originalText = emailSubmit.textContent;
+      const controls = [emailInput];
       emailSubmitting = true;
       emailSubmit.disabled = true;
-      emailInput.disabled = true;
+      controls.forEach((control) => {
+        control.disabled = true;
+      });
       emailSubmit.textContent = 'Submitting…';
 
       try {
@@ -285,16 +342,20 @@
         showSubmission('Request in progress', 'Your request is already being reviewed. We will email you when it is complete.');
       } catch (error) {
         if (error?.code === 'EVIDENCE_REQUIRED') {
-          alternative.hidden = false;
+          revealStudentIdAlternative();
         } else {
           emailError.textContent = publicMessage(error?.message, 'Unable to submit your request. Please try again later.');
           emailError.hidden = false;
+          alternative.hidden = true;
         }
       } finally {
         emailSubmitting = false;
-        emailInput.disabled = false;
+        controls.forEach((control) => {
+          control.disabled = false;
+        });
         emailSubmit.textContent = originalText;
-        emailSubmit.disabled = !EMAIL_PATTERN.test(emailInput.value.trim());
+        emailSubmit.disabled = !(EMAIL_PATTERN.test(emailInput.value.trim())
+          && !emailInput.value.trim().includes('..'));
       }
     });
 
@@ -306,6 +367,10 @@
       const originalText = submitButton.textContent;
       const controls = [...studentIdForm.querySelectorAll('input, button')];
       const formData = new FormData(studentIdForm);
+      const fullNameInput = studentIdForm.querySelector('input[name="fullName"]');
+      const privacyConsentInput = studentIdForm.querySelector('input[name="privacyConsent"]');
+      formData.set('name', fullNameInput.value.trim());
+      formData.set('privacy_consent', privacyConsentInput.checked ? 'true' : 'false');
       formData.set('evidence', studentIdInput.files[0]);
       formData.set('idempotency_key', createIdempotencyKey());
       formData.delete('studentId');
@@ -327,7 +392,7 @@
         }
         showSubmission(
           payload.status === 'pending' ? 'Submitted for review' : 'Submitted',
-          'Your request has been submitted. We will email you when the review is complete.',
+          REVIEW_SUBMITTED_MESSAGE,
         );
       } catch (error) {
         studentIdError.textContent = publicMessage(error?.message, 'Unable to submit your request. Please try again later.');
@@ -351,14 +416,52 @@
       ...options,
       headers: {Accept: 'application/json', ...(options.headers || {})},
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(payload.error?.message || 'Request failed.');
-      error.code = String(payload.error?.code || 'REQUEST_FAILED');
-      error.fields = payload.error?.fields || {};
+    const responseText = await response.text();
+    let payload = null;
+    if (responseText.trim() !== '') {
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        payload = null;
+      }
+    }
+
+    const validEnvelope = payload !== null
+      && typeof payload === 'object'
+      && !Array.isArray(payload)
+      && (Object.hasOwn(payload, 'data') || Object.hasOwn(payload, 'error'));
+
+    if (!validEnvelope) {
+      const error = new Error(INVALID_RESPONSE_MESSAGE);
+      error.code = 'INVALID_API_RESPONSE';
+      error.status = response.status;
       throw error;
     }
-    return payload.data || {};
+
+    if (payload.error && typeof payload.error === 'object' && !Array.isArray(payload.error)) {
+      const error = new Error(payload.error.message || 'Request failed.');
+      error.code = String(payload.error?.code || 'REQUEST_FAILED');
+      error.fields = payload.error?.fields || {};
+      error.status = Number(payload.error?.status || response.status);
+      throw error;
+    }
+
+    if (!response.ok) {
+      const error = new Error('Request failed.');
+      error.code = 'REQUEST_FAILED';
+      error.fields = {};
+      error.status = response.status;
+      throw error;
+    }
+
+    if (payload.data === null || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+      const error = new Error(INVALID_RESPONSE_MESSAGE);
+      error.code = 'INVALID_API_RESPONSE';
+      error.status = response.status;
+      throw error;
+    }
+
+    return payload.data;
   }
 
   function normalizeProxyPath(value) {
@@ -379,7 +482,7 @@
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(PUBLIC_LOCALE, {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(date);
@@ -396,10 +499,11 @@
 
   function publicMessage(message, fallback) {
     const value = String(message || '').trim();
-    return value && value.length <= 240 ? value : fallback;
+    return value && value.length <= 240 && !HAN_CHARACTER_PATTERN.test(value) ? value : fallback;
   }
 
   function initializeAll(root = document) {
+    removeLegacyInstances(root);
     root.querySelectorAll('[data-student-discount-app]').forEach(initialize);
   }
 

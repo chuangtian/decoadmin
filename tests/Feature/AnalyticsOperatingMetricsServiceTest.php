@@ -7,6 +7,8 @@ use App\Models\AdvertisingChannelDailyMetric;
 use App\Models\Customer;
 use App\Models\MetaAdAccount;
 use App\Models\MetaAdInsight;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ProductVariant;
@@ -95,6 +97,65 @@ class AnalyticsOperatingMetricsServiceTest extends TestCase
         $this->assertSame(1, $result['catalog']['customer_count']);
     }
 
+    public function test_it_uses_whole_bike_orders_for_order_value_and_conversion_metrics(): void
+    {
+        $organization = Organization::query()->create(['name' => 'Bike Metrics Org', 'code' => 'bike-metrics-org']);
+        $store = $organization->stores()->create([
+            'name' => 'Macfox Bike', 'shopify_domain' => 'macfoxebike.myshopify.com',
+            'status' => 'active', 'currency' => 'USD', 'timezone' => 'UTC',
+        ]);
+        $products = collect([
+            'macfox-x1', 'macfox-x7', 'x1s-x-bs-zay', 'macfox-x2', 'macfox-m16-ebike',
+        ])->mapWithKeys(fn (string $handle, int $index): array => [$handle => Product::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_product_id' => (string) (100 + $index),
+            'title' => $handle,
+            'handle' => $handle,
+            'status' => 'active',
+            'synced_at' => now(),
+        ])]);
+        $this->bikeOrder($organization->id, $store, $products['macfox-x1'], 1000, '2026-08-01 12:00:00');
+        $this->bikeOrder($organization->id, $store, $products['macfox-x7'], 800, '2026-07-31 12:00:00');
+
+        $overview = [
+            'period' => [
+                'from' => '2026-08-01', 'to' => '2026-08-01',
+                'include_test' => false, 'include_cancelled' => true,
+            ],
+            'comparison' => [
+                'mode' => 'previous', 'label' => '上一周期',
+                'period' => ['from' => '2026-07-31', 'to' => '2026-07-31'],
+            ],
+            'summary' => ['net_sales' => 1100],
+            'comparisons' => ['previous' => ['net_sales' => ['baseline' => 900]]],
+            'trend' => [['date' => '2026-08-01', 'net_sales' => 1100]],
+        ];
+        $behavior = [
+            'available' => true,
+            'metrics' => [
+                'sessions' => $this->behaviorMetric(100, 50),
+                'conversion_rate' => $this->behaviorMetric(10, 8),
+                'add_to_cart' => $this->behaviorMetric(50, 40),
+                'checkout' => $this->behaviorMetric(25, 20),
+            ],
+            'trend' => [[
+                'date' => '2026-08-01', 'sessions' => 100, 'conversion_rate' => 10,
+                'add_to_cart' => 50, 'checkout' => 25,
+            ]],
+            'error' => null,
+        ];
+
+        $result = app(AnalyticsOperatingMetricsService::class)->forStore($store, $overview, $behavior);
+
+        $this->assertTrue($result['whole_bike']['available']);
+        $this->assertSame(1.0, $result['metrics']['whole_bike_orders']['value']);
+        $this->assertSame(1000.0, $result['metrics']['whole_bike_average_order_value']['value']);
+        $this->assertSame(1.0, $result['metrics']['whole_bike_conversion_rate']['value']);
+        $this->assertSame(2.0, $result['metrics']['whole_bike_conversion_rate']['comparison']['baseline']);
+        $this->assertSame(-50.0, $result['metrics']['whole_bike_conversion_rate']['comparison']['change_percent']);
+    }
+
     private function adAccount(int $organizationId, Store $store, string $provider): AdvertisingChannelAccount
     {
         return AdvertisingChannelAccount::query()->create([
@@ -125,9 +186,36 @@ class AnalyticsOperatingMetricsServiceTest extends TestCase
         MetaAdInsight::query()->create([
             'organization_id' => $organizationId, 'store_id' => $store->id, 'meta_ad_account_id' => $account->id,
             'level' => 'account', 'entity_id' => $account->meta_account_id, 'account_external_id' => $account->meta_account_id,
-            'account_name' => 'Facebook', 'date_start' => $date, 'date_stop' => $date,
-            'granularity' => 'day', 'hourly_range' => '', 'spend' => $spend, 'purchase_value' => $spend * 2,
-            'raw_payload' => [], 'synced_at' => now(),
+            'date_start' => $date, 'date_stop' => $date, 'granularity' => 'day',
+            'spend' => $spend, 'purchase_value' => $spend * 2, 'synced_at' => now(),
+        ]);
+    }
+
+    private function bikeOrder(int $organizationId, Store $store, Product $product, float $netSales, string $createdAt): void
+    {
+        $order = Order::query()->create([
+            'organization_id' => $organizationId,
+            'store_id' => $store->id,
+            'shopify_order_id' => (string) fake()->unique()->numberBetween(1000, 999999),
+            'order_number' => '#'.fake()->unique()->numberBetween(1000, 999999),
+            'currency' => 'USD',
+            'total_price' => $netSales,
+            'subtotal_price' => $netSales,
+            'net_sales' => $netSales,
+            'total_tax' => 0,
+            'created_at_shopify' => $createdAt,
+            'synced_at' => now(),
+        ]);
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'shopify_line_item_id' => (string) fake()->unique()->numberBetween(1000, 999999),
+            'product_id' => $product->id,
+            'shopify_product_id' => $product->shopify_product_id,
+            'title' => $product->title,
+            'quantity' => 1,
+            'current_quantity' => 1,
+            'price' => $netSales,
+            'attributed_sales' => $netSales,
         ]);
     }
 

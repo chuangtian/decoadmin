@@ -155,7 +155,7 @@ class ShopifyOperationsDashboardAlertsTest extends TestCase
         [$user,$organization,$store] = $this->context('organization-admin');
         $this->actingAs($user)->withSession($this->contextSession($organization, $store))->put(route('stores.notifications.update', $store), [
             'mail_enabled' => true, 'mail_host' => 'smtp.example.com', 'mail_port' => 587, 'mail_encryption' => 'tls', 'mail_username' => 'shop@example.com', 'mail_password' => 'mail-secret', 'mail_from_address' => 'shop@example.com', 'mail_from_name' => 'Shop', 'mail_recipients' => ['ops@example.com'],
-            'feishu_enabled' => true, 'feishu_webhook_url' => 'https://open.feishu.cn/open-apis/bot/v2/hook/private-token', 'feishu_secret' => 'feishu-secret', 'notify_sync_failed' => true, 'notify_webhook_failed' => true, 'notify_connection_unhealthy' => true,
+            'feishu_enabled' => true, 'feishu_webhook_url' => 'https://open.feishu.cn/open-apis/bot/v2/hook/private-token', 'feishu_secret' => 'feishu-secret', 'notify_sync_failed' => true, 'notify_webhook_failed' => true, 'notify_connection_unhealthy' => true, 'notify_discount_monitor' => true,
         ])->assertRedirect()->assertSessionHas('success');
 
         $setting = StoreNotificationSetting::query()->sole();

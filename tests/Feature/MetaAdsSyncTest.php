@@ -16,9 +16,11 @@ use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Services\MetaAds\MetaAdsApiClient;
+use App\Services\MetaAds\MetaAdsInsightOptimizationService;
 use App\Services\MetaAds\MetaAdsRateLimitService;
 use App\Services\MetaAds\MetaAdsSyncService;
 use App\Services\StoreBusinessCredentialService;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -93,11 +95,18 @@ class MetaAdsSyncTest extends TestCase
         $this->assertSame('act_100', MetaAdInsight::query()->where('level', 'account')->value('account_external_id'));
         $this->assertEquals(3, MetaAdInsight::query()->where('level', 'account')->value('purchases'));
         $this->assertEquals(150, MetaAdInsight::query()->where('level', 'account')->value('purchase_value'));
+        $this->assertDatabaseHas('meta_ad_insight_entities', [
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'level' => 'account',
+            'entity_id' => '100',
+            'account_name' => 'Meta Account',
+        ]);
 
         $job = SyncJob::query()->sole();
         $this->assertSame('completed', $job->status);
         $this->assertSame('full', $job->mode);
-        $this->assertSame('2025-08-22 00:00:00', $job->since_at?->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-01-01 00:00:00', $job->since_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-22 12:00:00', $job->until_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertStringNotContainsString('secret-token', json_encode($job->toArray(), JSON_THROW_ON_ERROR));
         $state = StoreSyncState::query()->sole();
@@ -118,20 +127,14 @@ class MetaAdsSyncTest extends TestCase
 
         $this->assertSame('incremental', $incremental['mode']);
         $this->assertDatabaseCount('meta_ad_campaigns', 2);
-        $this->assertDatabaseCount('meta_ad_insights', 8);
+        $this->assertDatabaseCount('meta_ad_insights', 4);
         $this->assertDatabaseCount('sync_jobs', 2);
-        $this->assertDatabaseHas('meta_ad_insights', [
-            'level' => 'account',
-            'granularity' => 'hour',
-            'hourly_range' => '04:00:00 - 04:59:59',
-            'hour_start_at' => '2026-08-22 11:00:00',
-            'hour_end_at' => '2026-08-22 11:59:59',
-        ]);
+        $this->assertDatabaseMissing('meta_ad_insights', ['granularity' => 'hour']);
         $incrementalJob = SyncJob::query()->latest('id')->firstOrFail();
         $this->assertSame('2026-08-22 11:00:00', $incrementalJob->since_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-22 12:00:00', $incrementalJob->until_at?->utc()->format('Y-m-d H:i:s'));
         $this->assertNotNull(StoreSyncState::query()->sole()->last_incremental_sync_at);
-        $this->assertTrue(Http::recorded()->contains(function (array $entry): bool {
+        $this->assertFalse(Http::recorded()->contains(function (array $entry): bool {
             /** @var Request $request */
             $request = $entry[0];
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
@@ -437,7 +440,7 @@ class MetaAdsSyncTest extends TestCase
         }));
     }
 
-    public function test_priority_sync_makes_seven_days_ready_then_queues_backfill_and_hourly_run_reconciles_three_days(): void
+    public function test_priority_sync_makes_seven_days_ready_then_queues_backfill_and_daily_run_reconciles_three_days(): void
     {
         Queue::fake();
         config()->set('services.meta_ads.history_months', 6);
@@ -482,7 +485,7 @@ class MetaAdsSyncTest extends TestCase
             ->count());
         $this->assertTrue(MetaAdSyncShard::query()
             ->where('sync_job_id', $incrementalJob->id)
-            ->where('mode', 'incremental')
+            ->where('mode', 'incremental_day')
             ->where('kind', 'insights')
             ->get()
             ->every(fn (MetaAdSyncShard $shard): bool => $shard->since_at?->utc()->format('Y-m-d H:i:s') === '2026-08-22 11:00:00'));
@@ -504,7 +507,7 @@ class MetaAdsSyncTest extends TestCase
         );
     }
 
-    public function test_manual_incremental_sync_only_queues_the_previous_hour_without_reconciliation(): void
+    public function test_manual_incremental_sync_only_queues_the_current_day_without_reconciliation(): void
     {
         $store = $this->configuredStore(
             'Manual Hour Org',
@@ -552,9 +555,92 @@ class MetaAdsSyncTest extends TestCase
             ->count());
         $this->assertSame(4, MetaAdSyncShard::query()
             ->where('sync_job_id', $job->id)
-            ->where('mode', 'incremental')
+            ->where('mode', 'incremental_day')
             ->where('kind', 'insights')
             ->count());
+    }
+
+    public function test_meta_insight_optimizer_removes_legacy_hourly_rows_after_schema_compaction(): void
+    {
+        $store = $this->configuredStore(
+            'Optimize Org',
+            'optimize-meta-org',
+            'Optimize Store',
+            'optimize-meta.myshopify.com',
+            'optimize-token',
+        );
+        $account = MetaAdAccount::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'meta_account_id' => 'act_optimize',
+            'name' => 'Optimize Account',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $base = [
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'meta_ad_account_id' => $account->id,
+            'level' => 'account',
+            'account_external_id' => 'act_optimize',
+            'date_start' => '2026-08-22',
+            'date_stop' => '2026-08-22',
+            'synced_at' => now(),
+        ];
+        MetaAdInsight::query()->create([
+            ...$base,
+            'entity_id' => 'act_optimize',
+            'granularity' => 'day',
+        ]);
+        MetaAdInsight::query()->create([
+            ...$base,
+            'entity_id' => 'act_optimize_hour',
+            'granularity' => 'hour',
+        ]);
+
+        $this->artisan('meta-ads:optimize-insights', [
+            '--store' => $store->id,
+            '--dry-run' => true,
+        ])->assertSuccessful();
+        $this->assertSame(2, MetaAdInsight::query()->count());
+
+        $result = app(MetaAdsInsightOptimizationService::class)->optimize($store->id, 1000);
+
+        $this->assertSame(1, $result['hourly_deleted']);
+        $this->assertSame(0, $result['json_sanitized']);
+        $this->assertSame(1, $result['remaining_rows']);
+        $retained = MetaAdInsight::query()->sole();
+        $this->assertSame('day', $retained->granularity);
+        $this->assertSame(0, app(MetaAdsInsightOptimizationService::class)->estimate($store->id)['redundant_json_rows']);
+    }
+
+    public function test_queued_shard_before_current_year_completes_without_requesting_meta(): void
+    {
+        $store = $this->configuredStore(
+            'Old Shard Org',
+            'old-shard-meta-org',
+            'Old Shard Store',
+            'old-shard-meta.myshopify.com',
+            'old-shard-token',
+        );
+        $service = app(MetaAdsSyncService::class);
+        $service->orchestrate($store, 'full');
+        $shard = MetaAdSyncShard::query()->where('kind', 'insights')->firstOrFail();
+        $shard->forceFill([
+            'since_at' => '2025-01-01 00:00:00',
+            'until_at' => '2025-12-31 23:59:59',
+            'since_date' => '2025-01-01',
+            'until_date' => '2025-12-31',
+        ])->save();
+        $requestCount = Http::recorded()->count();
+
+        $result = $service->runShard($shard->fresh());
+
+        $this->assertSame($requestCount, Http::recorded()->count());
+        $this->assertSame(0, array_sum($result));
+        $this->assertSame('completed', $shard->fresh()->status);
+        $this->assertTrue((bool) data_get($shard->fresh()->result, 'skipped_before_current_year'));
     }
 
     public function test_failed_large_async_report_is_replaced_with_bounded_date_shards(): void
@@ -584,19 +670,19 @@ class MetaAdsSyncTest extends TestCase
         $recoveryService = new MetaAdsSyncService(new MetaAdsApiClient(
             $http,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
         $recovered = $recoveryService->runShard($shard->fresh());
         $replacementIds = $recovered['replacement_shard_ids'] ?? [];
 
-        $this->assertCount(12, $replacementIds);
+        $this->assertCount(8, $replacementIds);
         $this->assertSame('completed', $shard->fresh()->status);
         $this->assertTrue((bool) data_get($shard->fresh()->result, 'async_recovered_by_split'));
-        $this->assertSame(19, SyncJob::query()->findOrFail($run['sync_job_id'])->total_items);
+        $this->assertSame(15, SyncJob::query()->findOrFail($run['sync_job_id'])->total_items);
         $ranges = MetaAdSyncShard::query()
             ->whereIn('id', $replacementIds)
             ->orderBy('since_date')
             ->get();
-        $this->assertSame('2025-08-22', $ranges->first()?->since_date?->toDateString());
+        $this->assertSame('2026-01-01', $ranges->first()?->since_date?->toDateString());
         $this->assertSame('2026-08-22', $ranges->last()?->until_date?->toDateString());
         $this->assertTrue($ranges->every(
             fn (MetaAdSyncShard $range): bool => $range->since_date?->diffInDays($range->until_date) < 31,
@@ -640,7 +726,7 @@ class MetaAdsSyncTest extends TestCase
         $recoveryService = new MetaAdsSyncService(new MetaAdsApiClient(
             $http,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         $retry = $recoveryService->runShard($shard->fresh());
         $this->assertSame(1, $retry['async_pending']);
@@ -690,7 +776,7 @@ class MetaAdsSyncTest extends TestCase
         $firstAttemptService = new MetaAdsSyncService(new MetaAdsApiClient(
             $firstHttp,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         try {
             $firstAttemptService->runShard($shard);
@@ -716,7 +802,7 @@ class MetaAdsSyncTest extends TestCase
         $resumeService = new MetaAdsSyncService(new MetaAdsApiClient(
             $resumeHttp,
             app(StoreBusinessCredentialService::class),
-        ));
+        ), app(CurrentYearSyncWindow::class));
 
         $completed = $resumeService->runShard($shard->fresh());
         $this->assertSame(['ads-page-2'], $seenAfter);

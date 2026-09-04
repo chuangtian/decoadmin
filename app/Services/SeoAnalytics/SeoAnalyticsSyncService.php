@@ -11,6 +11,7 @@ use App\Models\SeoGscPageDailyMetric;
 use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -21,6 +22,10 @@ class SeoAnalyticsSyncService
     public function __construct(
         private GoogleSeoApiClient $google,
         private SeoAnalyticsConfigurationService $configuration,
+        private CurrentYearSyncWindow $currentYear,
+        private GscDimensionRegistry $dimensions,
+        private GscDetailRetentionPolicy $detailRetention,
+        private SeoAnalyticsCacheVersionService $cacheVersion,
     ) {}
 
     public function syncRange(Store $store, string $from, string $to): int
@@ -30,11 +35,22 @@ class SeoAnalyticsSyncService
             throw new RuntimeException('GA4 / GSC 数据源配置不完整：'.implode(', ', $status['missing']));
         }
 
-        $rangeFrom = CarbonImmutable::parse($from)->startOfDay();
-        $rangeTo = CarbonImmutable::parse($to)->startOfDay();
+        $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
+        $range = $this->currentYear->clampExistingRange(
+            CarbonImmutable::parse($from, $timezone)->startOfDay(),
+            CarbonImmutable::parse($to, $timezone)->startOfDay(),
+            $timezone,
+        );
+        if ($range === null) {
+            return 0;
+        }
+        [$rangeFrom, $rangeTo] = $range;
 
-        return $this->syncGa4($store, $rangeFrom, $rangeTo)
+        $processed = $this->syncGa4($store, $rangeFrom, $rangeTo)
             + $this->syncGsc($store, $rangeFrom, $rangeTo);
+        $this->cacheVersion->bump((int) $store->getKey());
+
+        return $processed;
     }
 
     /** @return array{processed_rows: int, chunks: int} */
@@ -45,8 +61,25 @@ class SeoAnalyticsSyncService
             throw new RuntimeException('GA4 / GSC 数据源配置不完整：'.implode(', ', $status['missing']));
         }
 
-        $from = CarbonImmutable::parse((string) $run->date_from)->startOfDay();
-        $to = CarbonImmutable::parse((string) $run->date_to)->startOfDay();
+        $timezone = $store->timezone ?: (string) config('services.google_search_console.sync_timezone', 'America/Los_Angeles');
+        $range = $this->currentYear->clampExistingRange(
+            CarbonImmutable::parse((string) $run->date_from, $timezone)->startOfDay(),
+            CarbonImmutable::parse((string) $run->date_to, $timezone)->startOfDay(),
+            $timezone,
+        );
+        if ($range === null) {
+            $run->forceFill([
+                'status' => 'completed',
+                'progress_percent' => 100,
+                'processed_rows' => 0,
+                'result' => ['processed_rows' => 0, 'chunks' => 0],
+                'completed_at' => now(),
+            ])->save();
+
+            return ['processed_rows' => 0, 'chunks' => 0];
+        }
+        [$from, $to] = $range;
+        $run->forceFill(['date_from' => $from->toDateString(), 'date_to' => $to->toDateString()])->save();
         $chunks = $this->monthChunks($from, $to);
         $processed = 0;
         $run->forceFill(['status' => 'running', 'started_at' => now(), 'progress_percent' => 1, 'last_error' => null])->save();
@@ -59,6 +92,7 @@ class SeoAnalyticsSyncService
                     'progress_percent' => min(99, (int) floor(((($index * 2) + 1) / (count($chunks) * 2)) * 100)),
                 ])->save();
                 $processed += $this->syncGsc($store, $chunkFrom, $chunkTo);
+                $this->cacheVersion->bump((int) $store->getKey());
                 $run->forceFill([
                     'processed_rows' => $processed,
                     'progress_percent' => min(99, (int) floor(((($index + 1) * 2) / (count($chunks) * 2)) * 100)),
@@ -191,10 +225,17 @@ class SeoAnalyticsSyncService
                 foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', 'query'], $filters) as $rows) {
                     $records = $this->gscDimensionRecords($rows, $scope, $segment, 'query', $now);
                     foreach (array_chunk($records, 1000) as $chunk) {
-                        SeoGscQueryDailyMetric::query()->insert($chunk);
+                        SeoGscQueryDailyMetric::query()->insert($this->dimensions->attachQueryIds($chunk));
                     }
                     $processed += count($records);
                 }
+            }
+
+            if ($segment === 'blog') {
+                SeoGscPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id)->where('segment', $segment)
+                    ->whereDate('metric_date', '>=', $from->toDateString())->whereDate('metric_date', '<=', $to->toDateString())->delete();
+
+                continue;
             }
 
             SeoGscPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id)->where('segment', $segment)
@@ -202,7 +243,7 @@ class SeoAnalyticsSyncService
             foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', 'page'], $filters) as $rows) {
                 $records = $this->gscDimensionRecords($rows, $scope, $segment, 'page', $now);
                 foreach (array_chunk($records, 1000) as $chunk) {
-                    SeoGscPageDailyMetric::query()->insert($chunk);
+                    SeoGscPageDailyMetric::query()->insert($this->dimensions->attachPageIds($chunk));
                 }
                 $processed += count($records);
             }
@@ -215,7 +256,7 @@ class SeoAnalyticsSyncService
     private function syncExtendedGsc(Store $store, CarbonImmutable $from, CarbonImmutable $to, array $scope, mixed $now): int
     {
         $typeRecords = [];
-        foreach (['web', 'image', 'video', 'news'] as $searchType) {
+        foreach (['image', 'video', 'news'] as $searchType) {
             $rows = $this->google->gscRows($store, $from->toDateString(), $to->toDateString(), ['date'], [], $searchType);
             $indexed = collect($rows)->keyBy(fn (array $row): string => (string) data_get($row, 'keys.0'));
             for ($date = $from; $date->lte($to); $date = $date->addDay()) {
@@ -238,7 +279,10 @@ class SeoAnalyticsSyncService
                 foreach ($rows as $row) {
                     $date = (string) data_get($row, 'keys.0');
                     $value = trim((string) data_get($row, 'keys.1'));
-                    if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    $clicks = max(0, (int) ($row['clicks'] ?? 0));
+                    $impressions = max(0, (int) ($row['impressions'] ?? 0));
+                    if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                        || ($clicks === 0 && $impressions === 0)) {
                         continue;
                     }
                     $breakdownRecords[] = [
@@ -248,8 +292,8 @@ class SeoAnalyticsSyncService
                         'dimension' => $dimension === 'searchAppearance' ? 'search_appearance' : $dimension,
                         'value_hash' => hash('sha256', $value),
                         'value' => mb_substr($value, 0, 1000),
-                        'clicks' => max(0, (int) ($row['clicks'] ?? 0)),
-                        'impressions' => max(0, (int) ($row['impressions'] ?? 0)),
+                        'clicks' => $clicks,
+                        'impressions' => $impressions,
                         'average_position' => max(0, (float) ($row['position'] ?? 0)),
                         'synced_at' => $now, 'created_at' => $now, 'updated_at' => $now,
                     ];
@@ -285,7 +329,10 @@ class SeoAnalyticsSyncService
         return collect($rows)->map(function (array $row) use ($scope, $segment, $dimension, $hashColumn, $now): ?array {
             $value = trim((string) data_get($row, 'keys.1'));
             $date = (string) data_get($row, 'keys.0');
-            if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $clicks = max(0, (int) ($row['clicks'] ?? 0));
+            $impressions = max(0, (int) ($row['impressions'] ?? 0));
+            if ($value === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                || ! $this->detailRetention->shouldStore($clicks, $impressions)) {
                 return null;
             }
 
@@ -295,8 +342,8 @@ class SeoAnalyticsSyncService
                 'segment' => $segment,
                 $hashColumn => hash('sha256', $value),
                 $dimension => $value,
-                'clicks' => max(0, (int) ($row['clicks'] ?? 0)),
-                'impressions' => max(0, (int) ($row['impressions'] ?? 0)),
+                'clicks' => $clicks,
+                'impressions' => $impressions,
                 'average_position' => max(0, (float) ($row['position'] ?? 0)),
                 'synced_at' => $now,
                 'created_at' => $now,

@@ -6,6 +6,7 @@ use App\Contracts\Shopify\SyncHandlerInterface;
 use App\Exceptions\ShopifyApiException;
 use App\Models\ShopifyConnection;
 use App\Models\SyncJob;
+use App\Services\Shopify\Products\ShopifyCollectionSyncService;
 use App\Services\Shopify\Products\ShopifyProductDataService;
 use App\Services\Shopify\ShopifyGraphQLClient;
 use App\Services\Shopify\Sync\SyncResult;
@@ -32,12 +33,29 @@ class ProductSyncHandler implements SyncHandlerInterface
               vendor
               productType
               description
+              tags
+              createdAt
+              publishedAt
+              onlineStoreUrl
+              featuredMedia {
+                alt
+                ... on MediaImage { image { url width height } }
+              }
               variants(first: $variantsFirst) {
                 nodes {
                   id
                   title
                   sku
                   price
+                  compareAtPrice
+                  availableForSale
+                  selectedOptions { name value }
+                  media(first: 1) {
+                    nodes {
+                      alt
+                      ... on MediaImage { image { url width height } }
+                    }
+                  }
                   inventoryItem { id }
                 }
                 pageInfo { hasNextPage endCursor }
@@ -57,6 +75,15 @@ class ProductSyncHandler implements SyncHandlerInterface
                 title
                 sku
                 price
+                compareAtPrice
+                availableForSale
+                selectedOptions { name value }
+                media(first: 1) {
+                  nodes {
+                    alt
+                    ... on MediaImage { image { url width height } }
+                  }
+                }
                 inventoryItem { id }
               }
               pageInfo { hasNextPage endCursor }
@@ -68,6 +95,7 @@ class ProductSyncHandler implements SyncHandlerInterface
     public function __construct(
         private ShopifyGraphQLClient $client,
         private ShopifyProductDataService $products,
+        private ShopifyCollectionSyncService $collections,
     ) {}
 
     public function type(): string
@@ -147,6 +175,8 @@ class ProductSyncHandler implements SyncHandlerInterface
             ])->save();
         } while ($hasNextPage);
 
+        $collectionResult = $this->collections->sync($store, $connection, $timeFilter);
+
         $durationMs = max(0, (int) round((hrtime(true) - $startedAt) / 1_000_000));
 
         return SyncResult::successful(
@@ -164,6 +194,7 @@ class ProductSyncHandler implements SyncHandlerInterface
                 'variants_created' => $variantsCreated,
                 'variants_updated' => $variantsUpdated,
                 'time_filter_applied' => $timeFilter !== null,
+                ...$collectionResult,
             ],
         );
     }

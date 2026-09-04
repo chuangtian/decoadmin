@@ -16,6 +16,7 @@ use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Models\TikTokAdsAdDailyMetric;
 use App\Models\TikTokAdsCampaignDailyMetric;
+use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -32,7 +33,10 @@ class AdvertisingChannelSyncService
         'criteo' => ['provider' => 'criteo', 'label' => 'Criteo', 'required' => ['api_key', 'client_secret']],
     ];
 
-    public function __construct(private AdvertisingChannelApiService $api) {}
+    public function __construct(
+        private AdvertisingChannelApiService $api,
+        private CurrentYearSyncWindow $currentYear,
+    ) {}
 
     public function sync(Store $store, string $channel, string $mode, ?string $credentialVersion = null): void
     {
@@ -136,7 +140,7 @@ class AdvertisingChannelSyncService
         $priorityDays = max(1, (int) config('services.advertising_sync.priority_days', 7));
         $rollingDays = max(1, (int) config('services.advertising_sync.rolling_days', 3));
 
-        return match ($mode) {
+        $range = match ($mode) {
             'priority' => [$now->subDays($priorityDays - 1)->startOfDay(), $now],
             'backfill' => [
                 $now->subMonthsNoOverflow(max(1, (int) config('services.advertising_sync.history_months', 6)))->startOfDay(),
@@ -147,6 +151,8 @@ class AdvertisingChannelSyncService
                 $now,
             ],
         };
+
+        return $this->currentYear->clampGeneratedRange($range[0], $range[1], $timezone);
     }
 
     /** @return list<array{0: string, 1: string}> */

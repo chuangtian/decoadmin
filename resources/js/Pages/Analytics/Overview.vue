@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
@@ -29,13 +29,30 @@ interface PosLocationInsight { id: string; name: string; orders: number; net_sal
 interface PosStaffInsight { id: string; name: string; orders: number; units: number; attributed_sales: number }
 interface ReportInsight<T> { available: boolean; source: 'shopifyql'; items: T[]; error: string | null }
 interface OperatingMetric { available: boolean; value: number | null; comparison: ComparisonMetric | null; trend: number[]; note: string }
+type PreservedReloadOptions = NonNullable<Parameters<typeof router.reload>[0]> & {
+    preserveState: true;
+    preserveScroll: true;
+};
+interface AnalyticsStorage {
+    persisted: boolean;
+    source: string | null;
+    stale: boolean;
+    pending: boolean;
+    refreshing: boolean;
+    fetched_at: string | null;
+    expires_at: string | null;
+}
 interface BehaviorInsight {
     available: boolean;
+    comparison_available: boolean;
     source: 'shopifyql';
     metrics: Record<string, { value: number; comparison: ComparisonMetric | null }>;
     trend: { date: string; sessions: number; conversion_rate: number; add_to_cart: number; checkout: number; completed_checkout: number }[];
     error: string | null;
 }
+
+const ANALYTICS_REFRESH_INTERVAL_MS = 2_000;
+const ANALYTICS_REFRESH_MAX_ATTEMPTS = 5;
 
 const props = defineProps<{
     store: { id: number; name: string; currency: string; timezone: string };
@@ -61,12 +78,13 @@ const props = defineProps<{
         behavior: BehaviorInsight;
         customers: { available: boolean; source: 'local_sync'; items: CustomerInsight[]; repeat_rate: number; error: null };
         pos: { available: boolean; source: 'shopifyql' | 'local_sync'; locations: PosLocationInsight[]; staff: PosStaffInsight[]; error: string | null };
-        integration: { report_scope_granted: boolean; shopifyql_available: boolean };
+        integration: { report_scope_granted: boolean; shopifyql_available: boolean; error: string | null; storage: AnalyticsStorage | null; comparison_storage: AnalyticsStorage | null };
         generated_at: string;
     };
     performance: {
         schema: 'analytics-operating-metrics-v1';
-        comparison: { mode: 'previous' | 'none'; label: string; period: { from: string; to: string } | null };
+        comparison: { mode: 'previous' | 'year' | 'year_weekday' | 'custom' | 'none'; label: string; period: { from: string; to: string } | null };
+        whole_bike: { available: boolean; product_count: number; product_handles: string[] };
         advertising: { available: boolean; complete: boolean; available_channels: number; expected_channels: number; channels: { key: string; name: string; available: boolean; spend: number }[]; message: string };
         behavior: { available: boolean; source: 'shopifyql'; message: string };
         metrics: Record<string, OperatingMetric>;
@@ -86,6 +104,8 @@ const filters = reactive({
 });
 const showFilters = ref(false);
 const loading = ref(false);
+const analyticsRefreshInFlight = ref(false);
+const analyticsRefreshAttempts = ref(0);
 const { formatDateTime } = useStoreDateTime();
 const selectedMetric = ref<keyof TrendPoint>('net_sales');
 const isCustomPeriod = computed(() => {
@@ -94,6 +114,57 @@ const isCustomPeriod = computed(() => {
 
     return params.has('date_from') && params.has('date_to');
 });
+const analyticsPeriodKey = computed(() => `${props.store.id}:${props.overview.period.from}:${props.overview.period.to}`);
+const analyticsRefreshing = computed(() => Boolean(
+    (!props.insights.behavior.available && (props.insights.integration.storage?.pending || props.insights.integration.storage?.refreshing))
+    || (!props.insights.behavior.comparison_available && (
+        props.insights.integration.comparison_storage?.pending
+        || props.insights.integration.comparison_storage?.refreshing
+    )),
+));
+const analyticsRefreshTimedOut = computed(() => analyticsRefreshing.value
+    && analyticsRefreshAttempts.value >= ANALYTICS_REFRESH_MAX_ATTEMPTS
+    && !analyticsRefreshInFlight.value);
+const analyticsDisplayRefreshing = computed(() => analyticsRefreshing.value && !analyticsRefreshTimedOut.value);
+const analyticsRetryMessage = '刷新时间较长，请点击刷新重试';
+const behaviorUnavailableLabel = computed(() => {
+    if (analyticsRefreshTimedOut.value) return analyticsRetryMessage;
+    if (analyticsDisplayRefreshing.value) return '数据刷新中';
+
+    return '暂不可用';
+});
+const requestBusy = computed(() => loading.value || analyticsRefreshInFlight.value);
+const analyticsError = computed(() => props.insights.behavior.error
+    || props.insights.integration.error
+    || (props.insights.integration.report_scope_granted
+        ? 'ShopifyQL 报表暂不可用。'
+        : '缺少 read_reports，请重新授权店铺。'));
+const analyticsStatusLabel = computed(() => {
+    if (props.insights.integration.shopifyql_available) return 'ShopifyQL 已接入';
+    if (analyticsDisplayRefreshing.value) return '数据刷新中';
+    if (analyticsRefreshTimedOut.value) return analyticsRetryMessage;
+
+    return analyticsError.value;
+});
+const analyticsStatusClass = computed(() => {
+    if (props.insights.integration.shopifyql_available) return 'bg-emerald-50 text-emerald-700';
+    if (analyticsDisplayRefreshing.value) return 'bg-sky-50 text-sky-700';
+
+    return 'bg-amber-50 text-amber-700';
+});
+const reportStatusLabel = (report: { available: boolean }) => report.available
+    ? 'ShopifyQL'
+    : (analyticsDisplayRefreshing.value ? '刷新中' : (analyticsRefreshTimedOut.value ? '请重试' : '暂不可用'));
+const reportStatusClass = (report: { available: boolean }) => report.available
+    ? 'bg-emerald-50 text-emerald-700'
+    : (analyticsDisplayRefreshing.value ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700');
+const reportMessage = (report: { available: boolean; error: string | null }, emptyMessage: string) => {
+    if (report.available) return emptyMessage;
+    if (analyticsDisplayRefreshing.value) return '数据刷新中';
+    if (analyticsRefreshTimedOut.value) return analyticsRetryMessage;
+
+    return report.error || analyticsError.value;
+};
 
 const money = (value: number) => new Intl.NumberFormat('zh-CN', {
     style: 'currency', currency: props.store.currency || 'USD', maximumFractionDigits: 2,
@@ -116,11 +187,73 @@ const filterParams = () => ({
     include_cancelled: filters.include_cancelled ? 1 : 0,
     comparison: filters.comparison,
 });
+let analyticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let analyticsPollingDisposed = false;
+
+const clearAnalyticsRefreshTimer = () => {
+    if (analyticsRefreshTimer !== null) {
+        clearTimeout(analyticsRefreshTimer);
+        analyticsRefreshTimer = null;
+    }
+};
+const pollAnalytics = () => {
+    if (analyticsPollingDisposed || analyticsRefreshInFlight.value || !analyticsRefreshing.value
+        || analyticsRefreshAttempts.value >= ANALYTICS_REFRESH_MAX_ATTEMPTS) return;
+
+    analyticsRefreshInFlight.value = true;
+    analyticsRefreshAttempts.value += 1;
+    const reloadOptions: PreservedReloadOptions = {
+        only: ['insights', 'performance'],
+        preserveState: true,
+        preserveScroll: true,
+        onFinish: () => {
+            analyticsRefreshInFlight.value = false;
+            scheduleAnalyticsRefresh();
+        },
+    };
+    router.reload(reloadOptions);
+};
+const scheduleAnalyticsRefresh = () => {
+    clearAnalyticsRefreshTimer();
+    if (analyticsPollingDisposed || analyticsRefreshInFlight.value || !analyticsRefreshing.value
+        || analyticsRefreshAttempts.value >= ANALYTICS_REFRESH_MAX_ATTEMPTS) return;
+
+    analyticsRefreshTimer = setTimeout(() => {
+        analyticsRefreshTimer = null;
+        pollAnalytics();
+    }, ANALYTICS_REFRESH_INTERVAL_MS);
+};
+
+watch(
+    () => [analyticsPeriodKey.value, analyticsRefreshing.value] as const,
+    ([periodKey, refreshing], previous) => {
+        if (!previous || previous[0] !== periodKey) {
+            clearAnalyticsRefreshTimer();
+            analyticsRefreshAttempts.value = 0;
+        }
+
+        if (refreshing) scheduleAnalyticsRefresh();
+        else {
+            clearAnalyticsRefreshTimer();
+            analyticsRefreshAttempts.value = 0;
+        }
+    },
+    { immediate: true },
+);
+onBeforeUnmount(() => {
+    analyticsPollingDisposed = true;
+    clearAnalyticsRefreshTimer();
+});
+
 const applyFilters = () => router.get('/analytics/overview', filterParams(), {
     preserveState: false,
     preserveScroll: true,
     replace: true,
-    onStart: () => { loading.value = true; },
+    onStart: () => {
+        clearAnalyticsRefreshTimer();
+        analyticsRefreshAttempts.value = 0;
+        loading.value = true;
+    },
     onFinish: () => { loading.value = false; },
 });
 const preset = (days: number) => {
@@ -129,11 +262,25 @@ const preset = (days: number) => {
     filters.date_to = '';
     applyFilters();
 };
-const refresh = () => router.reload({
-    only: ['overview', 'insights', 'performance'],
-    onStart: () => { loading.value = true; },
-    onFinish: () => { loading.value = false; },
-});
+const refresh = () => {
+    if (analyticsRefreshInFlight.value) return;
+
+    clearAnalyticsRefreshTimer();
+    analyticsRefreshAttempts.value = 0;
+    analyticsRefreshInFlight.value = true;
+    const reloadOptions: PreservedReloadOptions = {
+        only: ['overview', 'insights', 'performance'],
+        preserveState: true,
+        preserveScroll: true,
+        onStart: () => { loading.value = true; },
+        onFinish: () => {
+            loading.value = false;
+            analyticsRefreshInFlight.value = false;
+            scheduleAnalyticsRefresh();
+        },
+    };
+    router.reload(reloadOptions);
+};
 
 const metricOptions: { key: keyof TrendPoint; label: string; money: boolean }[] = [
     { key: 'net_sales', label: '净销售额', money: true },
@@ -165,8 +312,8 @@ const salesComparison = (key: string) => comparisonEnabled.value ? props.overvie
 const performanceMetric = (key: string): OperatingMetric => props.performance.metrics[key] ?? {
     available: false, value: null, comparison: null, trend: [], note: '暂不可用',
 };
-const formatOperating = (metric: OperatingMetric, format: 'money' | 'number' | 'percent' | 'ratio') => {
-    if (!metric.available || metric.value === null) return '暂不可用';
+const formatOperating = (metric: OperatingMetric, format: 'money' | 'number' | 'percent' | 'ratio', unavailableLabel = '暂不可用') => {
+    if (!metric.available || metric.value === null) return unavailableLabel;
     if (format === 'money') return money(metric.value);
     if (format === 'percent') return `${Number(metric.value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}%`;
     if (format === 'ratio') return `${Number(metric.value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
@@ -182,20 +329,24 @@ const cards = computed(() => {
     const checkout = performanceMetric('checkout');
     const addToCartCost = performanceMetric('add_to_cart_cost');
     const checkoutCost = performanceMetric('checkout_cost');
+    const wholeBikeOrders = performanceMetric('whole_bike_orders');
+    const wholeBikeAverage = performanceMetric('whole_bike_average_order_value');
+    const wholeBikeConversion = performanceMetric('whole_bike_conversion_rate');
+    const useWholeBike = props.performance.whole_bike.available;
 
     return [
         { key: 'net_sales', label: '净销售额', value: money(props.overview.summary.net_sales), available: true, comparison: salesComparison('net_sales'), note: '扣除退款后的商品销售额', trend: salesTrend('net_sales'), color: '#0ea5e9' },
         { key: 'ad_spend', label: '广告花费', value: formatOperating(adSpend, 'money'), available: adSpend.available, comparison: comparisonEnabled.value ? adSpend.comparison : null, note: adSpend.note, trend: adSpend.trend, color: '#8b5cf6' },
         { key: 'roi', label: 'ROI', value: formatOperating(roi, 'ratio'), available: roi.available, comparison: comparisonEnabled.value ? roi.comparison : null, note: roi.note, trend: roi.trend, color: '#f59e0b' },
-        { key: 'orders', label: '订单数', value: number(props.overview.summary.orders), available: true, comparison: salesComparison('orders'), note: '有效 Shopify 订单', trend: salesTrend('orders'), color: '#10b981' },
-        { key: 'average_order_value', label: '平均订单金额', value: money(props.overview.summary.average_order_value), available: true, comparison: salesComparison('average_order_value'), note: 'Shopify 原生平均订单金额', trend: salesTrend('average_order_value'), color: '#14b8a6' },
-        { key: 'sessions', label: '访问量', value: formatOperating(sessions, 'number'), available: sessions.available, comparison: comparisonEnabled.value ? sessions.comparison : null, note: sessions.note, trend: sessions.trend, color: '#6366f1' },
-        { key: 'conversion_rate', label: '转化率', value: formatOperating(conversionRate, 'percent'), available: conversionRate.available, comparison: comparisonEnabled.value ? conversionRate.comparison : null, note: conversionRate.note, trend: conversionRate.trend, color: '#06b6d4' },
+        { key: 'orders', label: '订单数', value: useWholeBike ? formatOperating(wholeBikeOrders, 'number') : number(props.overview.summary.orders), available: useWholeBike ? wholeBikeOrders.available : true, comparison: useWholeBike ? wholeBikeOrders.comparison : salesComparison('orders'), note: useWholeBike ? wholeBikeOrders.note : '有效 Shopify 订单', trend: useWholeBike ? wholeBikeOrders.trend : salesTrend('orders'), color: '#10b981' },
+        { key: 'average_order_value', label: '平均订单金额', value: useWholeBike ? formatOperating(wholeBikeAverage, 'money') : money(props.overview.summary.average_order_value), available: useWholeBike ? wholeBikeAverage.available : true, comparison: useWholeBike ? wholeBikeAverage.comparison : salesComparison('average_order_value'), note: useWholeBike ? wholeBikeAverage.note : 'Shopify 原生平均订单金额', trend: useWholeBike ? wholeBikeAverage.trend : salesTrend('average_order_value'), color: '#14b8a6' },
+        { key: 'sessions', label: '访问量', value: formatOperating(sessions, 'number', behaviorUnavailableLabel.value), available: sessions.available, comparison: comparisonEnabled.value ? sessions.comparison : null, note: sessions.note, trend: sessions.trend, color: '#6366f1' },
+        { key: 'conversion_rate', label: '转化率', value: formatOperating(useWholeBike ? wholeBikeConversion : conversionRate, 'percent', behaviorUnavailableLabel.value), available: useWholeBike ? wholeBikeConversion.available : conversionRate.available, comparison: comparisonEnabled.value ? (useWholeBike ? wholeBikeConversion.comparison : conversionRate.comparison) : null, note: useWholeBike ? wholeBikeConversion.note : conversionRate.note, trend: useWholeBike ? wholeBikeConversion.trend : conversionRate.trend, color: '#06b6d4' },
         { key: 'refunds', label: '退款金额', value: money(props.overview.summary.refunds), available: true, comparison: salesComparison('refunds'), note: '统计周期内退款', trend: salesTrend('refunds'), color: '#f43f5e' },
-        { key: 'add_to_cart', label: '加购数', value: formatOperating(addToCart, 'number'), available: addToCart.available, comparison: comparisonEnabled.value ? addToCart.comparison : null, note: addToCart.note, trend: addToCart.trend, color: '#8b5cf6' },
-        { key: 'checkout', label: '结账数', value: formatOperating(checkout, 'number'), available: checkout.available, comparison: comparisonEnabled.value ? checkout.comparison : null, note: checkout.note, trend: checkout.trend, color: '#ec4899' },
-        { key: 'add_to_cart_cost', label: '单次加购成本', value: formatOperating(addToCartCost, 'money'), available: addToCartCost.available, comparison: comparisonEnabled.value ? addToCartCost.comparison : null, note: addToCartCost.note, trend: addToCartCost.trend, color: '#f97316' },
-        { key: 'checkout_cost', label: '单次结账成本', value: formatOperating(checkoutCost, 'money'), available: checkoutCost.available, comparison: comparisonEnabled.value ? checkoutCost.comparison : null, note: checkoutCost.note, trend: checkoutCost.trend, color: '#eab308' },
+        { key: 'add_to_cart', label: '加购数', value: formatOperating(addToCart, 'number', behaviorUnavailableLabel.value), available: addToCart.available, comparison: comparisonEnabled.value ? addToCart.comparison : null, note: addToCart.note, trend: addToCart.trend, color: '#8b5cf6' },
+        { key: 'checkout', label: '结账数', value: formatOperating(checkout, 'number', behaviorUnavailableLabel.value), available: checkout.available, comparison: comparisonEnabled.value ? checkout.comparison : null, note: checkout.note, trend: checkout.trend, color: '#ec4899' },
+        { key: 'add_to_cart_cost', label: '单次加购成本', value: formatOperating(addToCartCost, 'money', behaviorUnavailableLabel.value), available: addToCartCost.available, comparison: comparisonEnabled.value ? addToCartCost.comparison : null, note: addToCartCost.note, trend: addToCartCost.trend, color: '#f97316' },
+        { key: 'checkout_cost', label: '单次结账成本', value: formatOperating(checkoutCost, 'money', behaviorUnavailableLabel.value), available: checkoutCost.available, comparison: comparisonEnabled.value ? checkoutCost.comparison : null, note: checkoutCost.note, trend: checkoutCost.trend, color: '#eab308' },
     ];
 });
 const sparklinePoints = (values: number[]) => {
@@ -227,18 +378,18 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                 <div>
                     <div class="flex items-center gap-3">
                         <h1 class="text-3xl font-semibold tracking-tight text-slate-950">经营分析</h1>
-                        <span class="flex items-center gap-1.5 text-xs font-medium text-slate-400"><i class="h-2 w-2 rounded-full" :class="loading ? 'animate-pulse bg-amber-400' : 'bg-sky-400'" />{{ loading ? '更新中…' : `更新于 ${formatDateTime(overview.generated_at)}` }}</span>
+                        <span class="flex items-center gap-1.5 text-xs font-medium text-slate-400"><i class="h-2 w-2 rounded-full" :class="loading || analyticsDisplayRefreshing ? 'animate-pulse bg-amber-400' : (analyticsRefreshTimedOut ? 'bg-amber-400' : 'bg-sky-400')" />{{ loading || analyticsDisplayRefreshing ? '数据刷新中…' : (analyticsRefreshTimedOut ? analyticsRetryMessage : `更新于 ${formatDateTime(overview.generated_at)}`) }}</span>
                     </div>
                     <p class="mt-2 text-sm text-slate-500">{{ store.name }} · {{ store.timezone }} · {{ store.currency }}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
-                    <button v-for="days in [1, 7, 30, 90]" :key="days" type="button" :disabled="loading" class="rounded-xl border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60" :class="overview.period.days === days && !isCustomPeriod ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="preset(days)">{{ days === 1 ? '今天' : `${days} 天` }}</button>
-                    <button type="button" :disabled="loading" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @click="showFilters = !showFilters">{{ overview.period.from }} — {{ overview.period.to }}</button>
-                    <select v-model="filters.comparison" :disabled="loading" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @change="applyFilters">
+                    <button v-for="days in [1, 7, 30, 90]" :key="days" type="button" :disabled="requestBusy" class="rounded-xl border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60" :class="overview.period.days === days && !isCustomPeriod ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="preset(days)">{{ days === 1 ? '今天' : `${days} 天` }}</button>
+                    <button type="button" :disabled="requestBusy" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @click="showFilters = !showFilters">{{ overview.period.from }} — {{ overview.period.to }}</button>
+                    <select v-model="filters.comparison" :disabled="requestBusy" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60" @change="applyFilters">
                         <option value="previous">对比上一等长周期</option>
                         <option value="none">不对比</option>
                     </select>
-                    <button type="button" :disabled="loading" class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60" @click="refresh">刷新</button>
+                    <button type="button" :disabled="requestBusy" class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60" @click="refresh">刷新</button>
                 </div>
             </header>
 
@@ -266,7 +417,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                 <span>客户总数 {{ number(performance.catalog.customer_count) }}</span>
                 <span>广告花费渠道：{{ advertisingChannels.length ? advertisingChannels.join(' + ') : '暂无已同步渠道' }}</span>
                 <span :class="performance.advertising.complete ? 'text-emerald-700' : 'text-amber-700'">{{ performance.advertising.message }}</span>
-                <span>访问、加购与结账：{{ performance.behavior.available ? 'ShopifyQL' : '暂不可用' }}</span>
+                <span :class="performance.behavior.available ? 'text-emerald-700' : (analyticsDisplayRefreshing ? 'text-sky-700' : 'text-amber-700')">访问、加购与结账：{{ performance.behavior.available ? 'ShopifyQL' : (analyticsDisplayRefreshing ? '数据刷新中' : (analyticsRefreshTimedOut ? analyticsRetryMessage : performance.behavior.message)) }}</span>
             </div>
 
             <section class="grid gap-5 xl:grid-cols-[1.35fr_.85fr]">
@@ -325,22 +476,22 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="flex flex-col gap-3 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
                     <div><h2 class="font-semibold text-slate-950">访问与转化分析</h2><p class="mt-1 text-sm text-slate-500">ShopifyQL 原生报表与已同步订单数据；不生成模拟数据。</p></div>
-                    <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold" :class="insights.integration.shopifyql_available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.integration.shopifyql_available ? 'ShopifyQL 已接入' : (insights.integration.report_scope_granted ? 'ShopifyQL 暂不可用' : '需重新授权 read_reports') }}</span>
+                    <span class="w-fit max-w-full rounded-full px-3 py-1 text-xs font-semibold" :class="analyticsStatusClass">{{ analyticsStatusLabel }}</span>
                 </div>
                 <div class="grid md:grid-cols-2">
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问来源</h3><p class="mt-1 text-sm text-slate-400">推荐人与访问转化</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.acquisition.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.acquisition.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问来源</h3><p class="mt-1 text-sm text-slate-400">推荐人与访问转化</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.acquisition)">{{ reportStatusLabel(insights.acquisition) }}</span></div>
                         <div v-if="insights.acquisition.available && insights.acquisition.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.acquisition.items.slice(0, 5)" :key="item.key">
                                 <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.detail }} · 转化 {{ item.conversion_rate }}%</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
                                 <div class="h-1.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-sky-400" :style="{ width: `${Math.max(3, item.sessions / acquisitionMax * 100)}%` }" /></div>
                             </div>
                         </div>
-                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.acquisition.available ? '此日期范围内没有访问来源数据。' : (insights.acquisition.error || '重新授权 read_reports 后显示访问来源。') }}</p></div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ reportMessage(insights.acquisition, '此日期范围内没有访问来源数据。') }}</p></div>
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">设备类型</h3><p class="mt-1 text-sm text-slate-400">桌面、移动设备和平板占比</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.devices.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.devices.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">设备类型</h3><p class="mt-1 text-sm text-slate-400">桌面、移动设备和平板占比</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.devices)">{{ reportStatusLabel(insights.devices) }}</span></div>
                         <div v-if="insights.devices.available && insights.devices.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.devices.items.slice(0, 5)" :key="item.key" class="rounded-2xl bg-slate-50 p-4">
                                 <div class="flex items-center justify-between"><strong class="text-sm text-slate-800">{{ item.label }}</strong><span class="text-lg font-semibold text-slate-950">{{ item.share }}%</span></div>
@@ -348,18 +499,18 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                                 <p class="mt-2 text-xs text-slate-400">{{ number(item.sessions) }} 次访问 · 跳出率 {{ item.bounce_rate }}%</p>
                             </div>
                         </div>
-                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.devices.available ? '此日期范围内没有设备数据。' : (insights.devices.error || '重新授权 read_reports 后显示设备分布。') }}</p></div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ reportMessage(insights.devices, '此日期范围内没有设备数据。') }}</p></div>
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问地点</h3><p class="mt-1 text-sm text-slate-400">国家和地区分布</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="insights.locations.available ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">{{ insights.locations.available ? 'ShopifyQL' : '待授权' }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问地点</h3><p class="mt-1 text-sm text-slate-400">国家和地区分布</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.locations)">{{ reportStatusLabel(insights.locations) }}</span></div>
                         <div v-if="insights.locations.available && insights.locations.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.locations.items.slice(0, 5)" :key="item.key">
                                 <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.country }} · {{ item.visitors }} 位访客</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
                                 <div class="h-1.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-violet-400" :style="{ width: `${Math.max(3, item.sessions / locationMax * 100)}%` }" /></div>
                             </div>
                         </div>
-                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ insights.locations.available ? '此日期范围内没有地点数据。' : (insights.locations.error || '重新授权 read_reports 后显示访问地点。') }}</p></div>
+                        <div v-else class="mt-8 grid min-h-40 place-items-center rounded-2xl bg-slate-50 p-6 text-center"><p class="max-w-xs text-sm leading-6 text-slate-500">{{ reportMessage(insights.locations, '此日期范围内没有地点数据。') }}</p></div>
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">

@@ -120,6 +120,7 @@ class CampaignThemeReviewService
                 $comparisonActivity,
                 $currentReports['funnel'] ?? null,
                 $comparisonReports['funnel'] ?? null,
+                $dailySales,
                 $today,
             ),
             'comparison_activity' => $comparisonActivity ? $this->activitySummary($comparisonActivity, $today) : null,
@@ -171,9 +172,10 @@ class CampaignThemeReviewService
         ?CampaignActivity $comparison,
         ?array $funnelReport,
         ?array $comparisonFunnelReport,
+        ?array $dailySales,
         string $today,
     ): array {
-        $metrics = $this->metrics($activity, $funnelReport);
+        $metrics = $this->metrics($activity, $funnelReport, $dailySales);
         $comparisonMetrics = $comparison ? $this->metrics($comparison, $comparisonFunnelReport) : [];
 
         foreach ($metrics as $key => $value) {
@@ -189,6 +191,7 @@ class CampaignThemeReviewService
 
         return [
             ...$this->activitySummary($activity, $today),
+            'judgment' => $this->classification->judgment($metrics['roi']['value']),
             'main_title' => $activity->main_title,
             'subtitle' => $activity->subtitle,
             'core_offer' => $activity->core_offer,
@@ -230,12 +233,42 @@ class CampaignThemeReviewService
     }
 
     /** @return array<string, float|int|null> */
-    private function metrics(CampaignActivity $activity, ?array $funnelReport): array
-    {
-        $gmv = $activity->sales_amount !== null ? round((float) $activity->sales_amount, 2) : null;
-        $adSpend = $activity->ad_spend !== null ? round((float) $activity->ad_spend, 2) : null;
-        $orders = $activity->order_count !== null ? (int) $activity->order_count : null;
+    private function metrics(
+        CampaignActivity $activity,
+        ?array $funnelReport,
+        ?array $dailySales = null,
+    ): array {
         $activityDays = $this->activityDays($activity);
+        $dailyPoints = collect(is_array($dailySales['points'] ?? null) ? $dailySales['points'] : []);
+        $reportedGmv = ($dailySales['available'] ?? false)
+            ? round((float) $dailyPoints->sum(fn (array $point): float => $this->decimal($point['total_sales'] ?? 0)), 2)
+            : null;
+        $reportedAdSpend = ($dailySales['ad_spend_available'] ?? false)
+            ? round((float) $dailyPoints->sum(fn (array $point): float => $this->decimal($point['ad_spend'] ?? 0)), 2)
+            : null;
+        $reportedOrders = ($dailySales['available'] ?? false)
+            ? (int) $dailyPoints->sum(fn (array $point): int => $this->integer($point['orders'] ?? 0))
+            : null;
+        $gmv = $this->sourceOrFallback($activity->sales_amount, $reportedGmv);
+        $adSpend = $this->sourceOrFallback($activity->ad_spend, $reportedAdSpend);
+        $orders = $this->sourceIntegerOrFallback($activity->order_count, $reportedOrders);
+        $conversionRate = $this->sourceOrFallback(
+            $activity->conversion_rate,
+            $this->reportDecimalMetric($funnelReport, 'conversion_rate'),
+            10,
+        );
+        $dailyAverageSales = $this->sourceOrFallback(
+            $activity->daily_average_sales,
+            $gmv !== null && $activityDays !== null ? round($gmv / $activityDays, 2) : null,
+        );
+        $dailyAverageAdSpend = $this->sourceOrFallback(
+            $activity->daily_average_ad_spend,
+            $adSpend !== null && $activityDays !== null ? round($adSpend / $activityDays, 2) : null,
+        );
+        $roi = $this->sourceOrFallback(
+            $activity->roi,
+            $gmv !== null && $adSpend !== null && $adSpend > 0 ? round($gmv / $adSpend, 2) : null,
+        );
         $sessions = $this->reportMetric($funnelReport, 'sessions');
         $cartAdditions = $this->reportMetric($funnelReport, 'sessions_with_cart_additions');
         $reachedCheckout = $this->reportMetric($funnelReport, 'sessions_that_reached_checkout');
@@ -246,12 +279,12 @@ class CampaignThemeReviewService
         return [
             'gmv' => $gmv,
             'ad_spend' => $adSpend,
-            'roi' => $activity->roi !== null ? round((float) $activity->roi, 2) : null,
+            'roi' => $roi,
             'orders' => $orders,
-            'daily_average_sales' => $activity->daily_average_sales !== null ? round((float) $activity->daily_average_sales, 2) : null,
-            'daily_average_ad_spend' => $activity->daily_average_ad_spend !== null ? round((float) $activity->daily_average_ad_spend, 2) : null,
-            'conversion_rate_percent' => $activity->conversion_rate !== null
-                ? round((float) $activity->conversion_rate * 100, 3)
+            'daily_average_sales' => $dailyAverageSales,
+            'daily_average_ad_spend' => $dailyAverageAdSpend,
+            'conversion_rate_percent' => $conversionRate !== null
+                ? round($conversionRate * 100, 3)
                 : null,
             'average_order_value' => $gmv !== null && $orders !== null && $orders > 0
                 ? round($gmv / $orders, 2)
@@ -766,6 +799,48 @@ class CampaignThemeReviewService
     private function reportInteger(array $row, string $metric): int
     {
         return $this->integer($row["{$metric}__totals"] ?? $row[$metric] ?? 0);
+    }
+
+    private function reportDecimalMetric(?array $report, string $metric): ?float
+    {
+        if (! ($report['available'] ?? false)) {
+            return null;
+        }
+
+        $row = collect($report['rows'] ?? [])->first(fn (mixed $item): bool => is_array($item));
+        if (! is_array($row)) {
+            return null;
+        }
+
+        $value = $row["{$metric}__totals"] ?? $row[$metric] ?? null;
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function sourceOrFallback(mixed $source, ?float $fallback, int $precision = 2): ?float
+    {
+        if (is_numeric($source)) {
+            $value = round((float) $source, $precision);
+
+            if ($value !== 0.0 || $fallback === null || $fallback === 0.0) {
+                return $value;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function sourceIntegerOrFallback(mixed $source, ?int $fallback): ?int
+    {
+        if (is_numeric($source)) {
+            $value = (int) round((float) $source);
+
+            if ($value !== 0 || $fallback === null || $fallback === 0) {
+                return $value;
+            }
+        }
+
+        return $fallback;
     }
 
     private function activityName(CampaignActivity $activity): string

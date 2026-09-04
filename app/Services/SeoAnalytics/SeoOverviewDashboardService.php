@@ -7,17 +7,21 @@ use App\Models\SeoGa4ChannelDailyMetric;
 use App\Models\SeoGa4LandingPageDailyMetric;
 use App\Models\SeoGscBreakdownDailyMetric;
 use App\Models\SeoGscDailyMetric;
-use App\Models\SeoGscPageDailyMetric;
-use App\Models\SeoGscQueryDailyMetric;
 use App\Models\SeoGscSearchTypeDailyMetric;
 use App\Models\Store;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class SeoOverviewDashboardService
 {
+    public function __construct(
+        private GscMetricQueryService $gscMetrics,
+        private SeoAnalyticsCacheVersionService $cacheVersion,
+    ) {}
+
     /** @param array{date_from?: mixed, date_to?: mixed, comparison?: mixed} $filters */
     public function forStore(Store $store, array $filters = []): array
     {
@@ -122,6 +126,19 @@ class SeoOverviewDashboardService
     /** @param array<string, mixed> $filters */
     public function gscSourceDetails(Store $store, array $filters = []): array
     {
+        ksort($filters);
+        $version = $this->cacheVersion->current((int) $store->getKey());
+        $key = implode(':', [
+            'seo-gsc-details', 'schema-v2', 'organization', $store->organization_id,
+            'store', $store->getKey(), "v{$version}", sha1((string) json_encode($filters)),
+        ]);
+
+        return Cache::remember($key, now()->addMinutes(5), fn (): array => $this->buildGscSourceDetails($store, $filters));
+    }
+
+    /** @param array<string, mixed> $filters */
+    private function buildGscSourceDetails(Store $store, array $filters = []): array
+    {
         [$from, $to] = $this->dates($store, $filters, 'gsc');
         [, $comparisonFrom, $comparisonTo] = $this->comparisonDates($from, $to, $filters);
         $segment = in_array($filters['segment'] ?? null, ['total', 'brand', 'industry', 'blog'], true)
@@ -135,20 +152,24 @@ class SeoOverviewDashboardService
         if ($segment === 'blog') {
             $type = 'pages';
         }
-        $query = $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query();
-        $hashColumn = $type === 'queries' ? 'query_hash' : 'page_hash';
-        $labelColumn = $type === 'queries' ? 'query' : 'page';
-        $segments = $type === 'queries' && $segment === 'total' ? ['brand', 'industry'] : [$segment];
+        $segments = $type === 'queries' && $segment === 'total'
+            ? ['brand', 'industry']
+            : ($type === 'pages' && $segment === 'blog' ? ['total'] : [$segment]);
+        $blogOnly = $type === 'pages' && $segment === 'blog';
         [$page, $perPage] = $this->pageFilters($filters, [12, 25, 50, 100], 50);
         $search = mb_substr(trim((string) ($filters['search'] ?? '')), 0, 200);
         $sort = in_array($filters['sort'] ?? null, ['clicks', 'impressions', 'ctr', 'position', 'label'], true)
             ? (string) $filters['sort'] : 'clicks';
         $direction = ($filters['direction'] ?? null) === 'asc' ? 'asc' : 'desc';
+        $useFactPagination = $dimension === '' && $searchType === 'web' && $sort !== 'label'
+            && $this->gscMetrics->dimensionsReady($store, $type);
 
         $base = $dimension !== ''
             ? $this->gscBreakdownAggregate($store, $from, $to, $searchType, $dimension, $search)
             : ($searchType === 'web'
-                ? $this->gscDimensionAggregate($query, $store, $hashColumn, $labelColumn, $segments, $from, $to, $search)
+                ? ($useFactPagination
+                    ? $this->gscMetrics->factAggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly)
+                    : $this->gscMetrics->aggregate($store, $type, $segments, $from, $to, $search, [], $blogOnly))
                 : null);
         if ($base === null) {
             return [
@@ -159,22 +180,31 @@ class SeoOverviewDashboardService
                 'pagination' => $this->pagination(1, $perPage, 0),
             ];
         }
-        $total = $dimension !== ''
-            ? $this->gscBreakdownCount($store, $from, $to, $searchType, $dimension, $search)
-            : $this->gscDimensionCount(
-                $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $from, $to, $search,
-            );
-        $page = min($page, max(1, (int) ceil($total / $perPage)));
         $sortColumn = ['ctr' => 'ctr', 'position' => 'position', 'label' => 'label'][$sort] ?? $sort;
-        $rows = (clone $base)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        $ranked = DB::query()->fromSub((clone $base), 'gsc_detail_rows')
+            ->select('gsc_detail_rows.*')->selectRaw('COUNT(*) OVER() total_rows');
+        $rows = (clone $ranked)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        $total = (int) ($rows->first()?->total_rows ?? 0);
+        if ($rows->isEmpty() && $page > 1) {
+            $total = (int) DB::query()->fromSub((clone $base), 'gsc_detail_count')->count();
+            $page = min($page, max(1, (int) ceil($total / $perPage)));
+            $rows = (clone $ranked)->orderBy($sortColumn, $direction)->offset(($page - 1) * $perPage)->limit($perPage)->get();
+        }
+        if ($useFactPagination) {
+            $rows = $this->gscMetrics->hydrateDimensions($type, $rows);
+        }
         $hashes = $rows->pluck('hash')->map(fn ($value): string => (string) $value)->all();
-        $previous = $hashes === [] ? collect() : ($dimension !== ''
-            ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
-            : $this->gscDimensionAggregate(
-                $type === 'queries' ? SeoGscQueryDailyMetric::query() : SeoGscPageDailyMetric::query(),
-                $store, $hashColumn, $labelColumn, $segments, $comparisonFrom, $comparisonTo, '', $hashes,
-            ))->get()->keyBy('hash');
+        if ($useFactPagination) {
+            $dimensionIds = $rows->pluck('dimension_id')->map(fn ($id): int => (int) $id)->all();
+            $previous = $dimensionIds === [] ? collect() : $this->gscMetrics
+                ->factAggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $dimensionIds, $blogOnly)
+                ->get()->keyBy('dimension_id');
+        } else {
+            $previous = $hashes === [] ? collect() : ($dimension !== ''
+                ? $this->gscBreakdownAggregate($store, $comparisonFrom, $comparisonTo, $searchType, $dimension, '', $hashes)
+                : $this->gscMetrics->aggregate($store, $type, $segments, $comparisonFrom, $comparisonTo, '', $hashes, $blogOnly))
+                ->get()->keyBy('hash');
+        }
 
         $summary = $searchType === 'web'
             ? $this->gscSummary($store, $segment, $from, $to)
@@ -186,7 +216,10 @@ class SeoOverviewDashboardService
         return [
             'schema' => 'seo-gsc-detail-page-v1', 'type' => $type, 'segment' => $segment,
             'search_type' => $searchType, 'dimension' => $dimension, 'summary' => $summary, 'trend' => $trend,
-            'rows' => $rows->map(fn ($row): array => $this->gscDetailRow($row, $previous->get((string) $row->hash)))->values()->all(),
+            'rows' => $rows->map(fn ($row): array => $this->gscDetailRow(
+                $row,
+                $useFactPagination ? $previous->get((int) $row->dimension_id) : $previous->get((string) $row->hash),
+            ))->values()->all(),
             'pagination' => $this->pagination($page, $perPage, $total),
         ];
     }
@@ -462,14 +495,39 @@ class SeoOverviewDashboardService
     /** @return array{series: list<array{key: string, page: string, channel: string}>, points: list<array<string, mixed>>} */
     private function landingTrend(Store $store, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $rows = $this->dateRange(SeoGa4LandingPageDailyMetric::query()->forOrganization($store->organization_id)->forStore($store->id), $from, $to)->get();
-        $top = $rows->groupBy(fn ($row): string => $row->landing_page_hash.'|'.$row->channel_group)
-            ->map(fn (Collection $items): float => (float) $items->sum('total_revenue'))->sortDesc()->take(5)->keys();
-        $series = $top->map(function (string $key) use ($rows): array {
-            $row = $rows->first(fn ($item): bool => $item->landing_page_hash.'|'.$item->channel_group === $key);
+        $scope = fn () => $this->dateRange(
+            SeoGa4LandingPageDailyMetric::query()
+                ->forOrganization($store->organization_id)
+                ->forStore($store->id),
+            $from,
+            $to,
+        );
+        $topRows = $scope()
+            ->selectRaw('landing_page_hash, channel_group, MAX(landing_page) landing_page, SUM(total_revenue) revenue')
+            ->groupBy('landing_page_hash', 'channel_group')
+            ->orderByDesc('revenue')
+            ->orderBy('landing_page_hash')
+            ->orderBy('channel_group')
+            ->limit(5)
+            ->get();
+        if ($topRows->isEmpty()) {
+            return ['series' => [], 'points' => []];
+        }
 
-            return ['key' => $key, 'page' => (string) $row?->landing_page, 'channel' => (string) $row?->channel_group];
-        })->values()->all();
+        $rows = $scope()->where(function (Builder $pairs) use ($topRows): void {
+            foreach ($topRows as $top) {
+                $pairs->orWhere(function (Builder $pair) use ($top): void {
+                    $pair->where('landing_page_hash', $top->landing_page_hash)
+                        ->where('channel_group', $top->channel_group);
+                });
+            }
+        })->get(['metric_date', 'landing_page_hash', 'channel_group', 'total_revenue']);
+        $top = $topRows->map(fn ($row): string => $row->landing_page_hash.'|'.$row->channel_group);
+        $series = $topRows->map(fn ($row): array => [
+            'key' => $row->landing_page_hash.'|'.$row->channel_group,
+            'page' => (string) $row->landing_page,
+            'channel' => (string) $row->channel_group,
+        ])->values()->all();
         $points = $rows->filter(fn ($row): bool => $top->contains($row->landing_page_hash.'|'.$row->channel_group))
             ->groupBy(fn ($row): string => $row->metric_date->toDateString())->map(function (Collection $dateRows, string $date) use ($top): array {
                 $point = ['date' => $date];
@@ -559,53 +617,6 @@ class SeoOverviewDashboardService
             ])->values()->all();
     }
 
-    /** @return list<array<string, mixed>> */
-    private function queryRows(Store $store, string $segment, CarbonImmutable $from, CarbonImmutable $to, CarbonImmutable $previousFrom, CarbonImmutable $previousTo): array
-    {
-        $segments = $segment === 'total' ? ['brand', 'industry'] : [$segment];
-        $current = $this->dimensionRows(SeoGscQueryDailyMetric::query(), $store, 'query_hash', 'query', $segments, $from, $to);
-        $previous = collect($this->dimensionRows(SeoGscQueryDailyMetric::query(), $store, 'query_hash', 'query', $segments, $previousFrom, $previousTo))->keyBy('hash');
-
-        return $this->compareDimensionRows($current, $previous);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function pageRows(Store $store, string $segment, CarbonImmutable $from, CarbonImmutable $to, CarbonImmutable $previousFrom, CarbonImmutable $previousTo): array
-    {
-        $current = $this->dimensionRows(SeoGscPageDailyMetric::query(), $store, 'page_hash', 'page', [$segment], $from, $to);
-        $previous = collect($this->dimensionRows(SeoGscPageDailyMetric::query(), $store, 'page_hash', 'page', [$segment], $previousFrom, $previousTo))->keyBy('hash');
-
-        return $this->compareDimensionRows($current, $previous);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function dimensionRows(Builder $query, Store $store, string $hashColumn, string $labelColumn, array $segments, CarbonImmutable $from, CarbonImmutable $to): array
-    {
-        return $this->dateRange($query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments), $from, $to)
-            ->selectRaw("{$hashColumn} hash, MAX({$labelColumn}) label, SUM(clicks) clicks, SUM(impressions) impressions")
-            ->selectRaw('CASE WHEN SUM(impressions) > 0 THEN SUM(average_position * impressions) / SUM(impressions) ELSE 0 END position')
-            ->groupBy($hashColumn)->orderByDesc('clicks')->limit(200)->get()->map(function ($row): array {
-                $impressions = (int) $row->impressions;
-                $clicks = (int) $row->clicks;
-
-                return ['hash' => (string) $row->hash, 'label' => (string) $row->label, 'clicks' => $clicks, 'impressions' => $impressions,
-                    'ctr' => $impressions > 0 ? round($clicks / $impressions * 100, 2) : 0.0, 'position' => round((float) $row->position, 2)];
-            })->values()->all();
-    }
-
-    /** @param list<array<string, mixed>> $current @param Collection<string, array<string, mixed>> $previous */
-    private function compareDimensionRows(array $current, Collection $previous): array
-    {
-        return collect($current)->map(function (array $row) use ($previous): array {
-            $prev = $previous->get($row['hash'], ['clicks' => 0, 'impressions' => 0, 'ctr' => 0, 'position' => 0]);
-
-            return [...$row, 'previous' => $prev, 'difference' => [
-                'clicks' => $row['clicks'] - $prev['clicks'], 'impressions' => $row['impressions'] - $prev['impressions'],
-                'ctr' => round($row['ctr'] - $prev['ctr'], 2), 'position' => round($row['position'] - $prev['position'], 2),
-            ]];
-        })->values()->all();
-    }
-
     /** @param list<int> $allowed @return array{int, int} */
     private function pageFilters(array $filters, array $allowed, int $default): array
     {
@@ -642,6 +653,7 @@ class SeoOverviewDashboardService
         CarbonImmutable $to,
         string $search = '',
         array $hashes = [],
+        string $requiredLabelContains = '',
     ): Builder {
         $query = $this->dateRange(
             $query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments),
@@ -650,6 +662,9 @@ class SeoOverviewDashboardService
         );
         if ($search !== '') {
             $query->where($labelColumn, 'like', '%'.$search.'%');
+        }
+        if ($requiredLabelContains !== '') {
+            $query->where($labelColumn, 'like', '%'.$requiredLabelContains.'%');
         }
         if ($hashes !== []) {
             $query->whereIn($hashColumn, $hashes);
@@ -702,6 +717,7 @@ class SeoOverviewDashboardService
         CarbonImmutable $from,
         CarbonImmutable $to,
         string $search = '',
+        string $requiredLabelContains = '',
     ): int {
         $query = $this->dateRange(
             $query->forOrganization($store->organization_id)->forStore($store->id)->whereIn('segment', $segments),
@@ -710,6 +726,9 @@ class SeoOverviewDashboardService
         );
         if ($search !== '') {
             $query->where($labelColumn, 'like', '%'.$search.'%');
+        }
+        if ($requiredLabelContains !== '') {
+            $query->where($labelColumn, 'like', '%'.$requiredLabelContains.'%');
         }
 
         return (int) $query->distinct()->count($hashColumn);

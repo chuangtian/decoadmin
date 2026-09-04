@@ -1,0 +1,69 @@
+{% liquid
+  assign configured_proxy_path = app.metafields.deco_personalization.proxy_path.value
+  assign proxy_path = block.settings.proxy_path_override | default: configured_proxy_path
+  assign current_product_id = ''
+  if product != blank
+    assign current_product_id = product.id
+  endif
+
+  capture cart_product_ids
+    for item in cart.items
+      echo item.product_id
+      unless forloop.last
+        echo ','
+      endunless
+    endfor
+  endcapture
+%}
+
+<div
+  class="deco-recommendations"
+  data-deco-recommendations
+  data-component-uuid="{{ block.settings.component_uuid | escape }}"
+  data-proxy-path="{{ proxy_path | escape }}"
+  data-product-id="{{ current_product_id | escape }}"
+  data-cart-product-ids="{{ cart_product_ids | strip | escape }}"
+  data-cart-subtotal-cents="{{ cart.total_price | default: 0 }}"
+  data-heading-override="{{ block.settings.heading_override | escape }}"
+  data-design-mode="{{ request.design_mode }}"
+  aria-live="polite"
+  {{ block.shopify_attributes }}
+>
+  <div class="deco-recommendations__status" data-deco-recommendations-status>
+    {% if block.settings.component_uuid == blank %}
+      Select a Deco recommendation component in this block's settings.
+    {% else %}
+      Loading recommendations…
+    {% endif %}
+  </div>
+  <div class="deco-recommendations__content" data-deco-recommendations-content hidden></div>
+</div>
+
+{% schema %}
+{
+  "name": "t:recommendations.name",
+  "target": "section",
+  "stylesheet": "recommendations.css",
+  "javascript": "recommendations.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "component_uuid",
+      "label": "t:recommendations.settings.component_uuid",
+      "info": "t:recommendations.settings.component_uuid_info"
+    },
+    {
+      "type": "text",
+      "id": "heading_override",
+      "label": "t:recommendations.settings.heading_override",
+      "info": "t:recommendations.settings.heading_override_info"
+    },
+    {
+      "type": "text",
+      "id": "proxy_path_override",
+      "label": "t:recommendations.settings.proxy_path_override",
+      "info": "t:recommendations.settings.proxy_path_override_info"
+    }
+  ]
+}
+{% endschema %}

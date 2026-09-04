@@ -122,8 +122,6 @@ class ShopifyOAuthTest extends TestCase
         $this->assertNotSame('shpat_sensitive_access_token', DB::table('shopify_connections')->value('access_token_encrypted'));
         $this->assertSame($connection->id, $installation->shopify_connection_id);
         $this->assertSame($app->id, $installation->app_id);
-        $this->assertCount(6, data_get($installation->settings, 'modules'));
-        $this->assertNotContains(false, data_get($installation->settings, 'modules'));
         $this->assertSame('test-client-secret', $app->client_secret_encrypted);
         $this->assertNotSame('test-client-secret', DB::table('apps')->value('client_secret_encrypted'));
         $this->assertArrayNotHasKey('access_token_encrypted', $connection->toArray());

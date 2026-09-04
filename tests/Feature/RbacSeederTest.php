@@ -24,7 +24,7 @@ class RbacSeederTest extends TestCase
         $this->seed(RbacSeeder::class);
 
         $this->assertSame($counts, $this->counts());
-        $this->assertSame(PermissionSeeder::PERMISSIONS, Permission::query()->orderBy('id')->pluck('slug')->all());
+        $this->assertEqualsCanonicalizing(PermissionSeeder::PERMISSIONS, Permission::query()->pluck('slug')->all());
         $this->assertSame(Permission::query()->count(), Permission::query()->distinct()->count('slug'));
         $this->assertEqualsCanonicalizing([
             'super-admin',

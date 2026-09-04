@@ -70,17 +70,11 @@ class ShopifyConnectionService
                 'app_id' => $state->app_id,
                 'store_id' => $store->getKey(),
             ]);
-            $installationSettings = $installation->settings ?? [];
-            $installationSettings['modules'] = array_replace(
-                array_fill_keys(array_keys(config('shopify.marketing_modules', [])), true),
-                is_array($installationSettings['modules'] ?? null) ? $installationSettings['modules'] : [],
-            );
             $installation->fill([
                 'shopify_connection_id' => $connection->getKey(),
                 'installed_by' => $state->user_id,
                 'status' => 'active',
                 'granted_scopes' => $scopes,
-                'settings' => $installationSettings,
                 'installed_at' => $installedAt,
                 'uninstalled_at' => null,
             ]);

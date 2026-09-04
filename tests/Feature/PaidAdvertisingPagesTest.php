@@ -9,6 +9,7 @@ use App\Jobs\SyncPaidAdvertisingGoalTarget;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
 use App\Models\AuditLog;
+use App\Models\FeishuBitableField;
 use App\Models\FeishuBitableRecord;
 use App\Models\FeishuBitableTable;
 use App\Models\GoogleAdsCampaignDailyMetric;
@@ -1115,6 +1116,19 @@ class PaidAdvertisingPagesTest extends TestCase
                 'last_seen_at' => now(),
                 'synced_at' => now(),
             ]);
+            DB::table('meta_ad_insight_entities')->insert([
+                'organization_id' => $organization->id,
+                'store_id' => $targetStore->id,
+                'level' => 'ad',
+                'entity_id' => $adId,
+                'account_name' => $targetAccount->name,
+                'meta_campaign_id' => 'campaign-'.$adId,
+                'campaign_name' => '系列 '.$title,
+                'meta_ad_id' => $adId,
+                'ad_name' => '广告 '.$title,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
             MetaAdInsight::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $targetStore->id,
@@ -1122,21 +1136,16 @@ class PaidAdvertisingPagesTest extends TestCase
                 'level' => 'ad',
                 'entity_id' => $adId,
                 'account_external_id' => $targetAccount->meta_account_id === 'act_current' ? 'current' : 'other',
-                'account_name' => $targetAccount->name,
                 'meta_campaign_id' => 'campaign-'.$adId,
-                'campaign_name' => '系列 '.$title,
                 'meta_ad_id' => $adId,
-                'ad_name' => '广告 '.$title,
                 'date_start' => '2026-08-22',
                 'date_stop' => '2026-08-22',
                 'granularity' => 'day',
-                'hourly_range' => '',
                 'spend' => $spend,
                 'purchase_value' => $revenue,
                 'purchases' => $purchases,
                 'impressions' => $impressions,
                 'clicks' => $clicks,
-                'raw_payload' => [],
                 'synced_at' => now(),
             ]);
         }
@@ -1528,6 +1537,109 @@ class PaidAdvertisingPagesTest extends TestCase
                     ->where('goalPage.metrics.cards.1.value', -10)
                     ->where('goalPage.metrics.cards.2.value', 250)
                     ->where('goalPage.metrics.cards.3.value', 25));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_overall_goal_metrics_prefer_the_latest_scoped_mf_data_table_archive(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $store->update(['timezone' => 'America/Los_Angeles', 'currency' => 'USD']);
+        $otherStore = $this->addStore($user, $organization, 'Other MF Store', 'other-mf.myshopify.com');
+        $latest = FeishuBitableTable::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'source_section' => 'paid-ad-goals:archive-copy',
+            'source_table_id' => 'tbl-mf-latest',
+            'name' => 'MF数据表',
+            'synced_at' => CarbonImmutable::parse('2026-08-30 19:42:54', 'UTC'),
+        ]);
+        $other = FeishuBitableTable::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'source_section' => 'paid-ad-goals:archive-copy',
+            'source_table_id' => 'tbl-mf-other',
+            'name' => 'MF数据表',
+            'synced_at' => CarbonImmutable::parse('2026-08-30 20:00:00', 'UTC'),
+        ]);
+
+        foreach (['日期', '总销售额', '退款', '月销售额总和', '月度目标销售额'] as $position => $name) {
+            foreach ([[$latest, $store], [$other, $otherStore]] as [$table, $sourceStore]) {
+                FeishuBitableField::query()->create([
+                    'organization_id' => $organization->id,
+                    'store_id' => $sourceStore->id,
+                    'feishu_bitable_table_id' => $table->id,
+                    'source_field_id' => 'field-'.$position,
+                    'name' => $name,
+                    'type' => $position === 0 ? 5 : 2,
+                    'field_order' => $position,
+                    'is_primary' => $position === 0,
+                    'synced_at' => now(),
+                ]);
+            }
+        }
+
+        FeishuBitableRecord::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'feishu_bitable_table_id' => $latest->id,
+            'source_record_id' => 'mf-2026-08-29',
+            'fields_encrypted' => [
+                '日期' => CarbonImmutable::parse('2026-08-29', 'Asia/Shanghai')->getTimestampMs(),
+                '总销售额' => '53178.34',
+                '退款' => '0',
+                '月销售额总和' => 1531452.77,
+                '月度目标销售额' => '3000000',
+                'X7销量' => 9,
+                '订单数' => 52,
+                'FB花费' => [7209.38],
+                'FB销售额' => [19949.97],
+                'FB的ROI' => 2.766,
+                '总花费' => 13782.926634,
+                '总ROI' => 3.86,
+                'ROI（预5%退款）' => 3.66536254175348,
+                '月总花费总和' => 357279.558574039,
+                '月总退款总和' => 79026.98,
+            ],
+            'synced_at' => $latest->synced_at,
+        ]);
+        FeishuBitableRecord::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+            'feishu_bitable_table_id' => $other->id,
+            'source_record_id' => 'other-mf-2026-08-29',
+            'fields_encrypted' => [
+                '日期' => CarbonImmutable::parse('2026-08-29', 'Asia/Shanghai')->getTimestampMs(),
+                '总销售额' => 999999,
+                '退款' => 999,
+                '月销售额总和' => 9999999,
+                '月度目标销售额' => 10000000,
+            ],
+            'synced_at' => $other->synced_at,
+        ]);
+        $this->createMetricFields($organization, $store, 'overall');
+        $this->createMetricRecord($organization, $store, 'overall', '2026-08-29', 1, -1, 1, 100);
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-30 12:00:00', 'America/Los_Angeles'));
+
+        try {
+            $this->actingAs($user)
+                ->withSession($this->contextSession($organization, $store))
+                ->get(route('paid-advertising.goals', ['period_mode' => 'month', 'month' => '2026-08']))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('goalPage.metrics.available', true)
+                    ->where('goalPage.metrics.as_of_date', '2026-08-29')
+                    ->where('goalPage.metrics.synced_at', '2026-08-30T19:42:54+00:00')
+                    ->where('goalPage.metrics.cards.0.value', 53178.34)
+                    ->where('goalPage.metrics.cards.1.value', null)
+                    ->where('goalPage.metrics.cards.2.value', 1531452.77)
+                    ->where('goalPage.metrics.cards.3.value', 51)
+                    ->where('goalPage.metrics.project_sales.products.0.value', 9)
+                    ->where('goalPage.metrics.project_sales.site_metrics.0.value', 52)
+                    ->where('goalPage.metrics.channel_performance.channels.0.spend', 7209.38)
+                    ->where('goalPage.metrics.channel_performance.summary.0.value', 13782.93)
+                    ->where('goalPage.metrics.progress.completion.monthly_refunds', -79026.98));
         } finally {
             CarbonImmutable::setTestNow();
         }
@@ -3053,6 +3165,21 @@ class PaidAdvertisingPagesTest extends TestCase
         ?float $frequency = null,
     ): void {
         $entityId = $level === 'account' ? $account->meta_account_id : ($campaignId ?? 'campaign-'.$date);
+        DB::table('meta_ad_insight_entities')->updateOrInsert(
+            [
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'level' => $level,
+                'entity_id' => $entityId,
+            ],
+            [
+                'account_name' => $account->name,
+                'meta_campaign_id' => $level === 'campaign' ? $entityId : null,
+                'campaign_name' => $level === 'campaign' ? $campaignName : null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
         MetaAdInsight::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -3060,13 +3187,10 @@ class PaidAdvertisingPagesTest extends TestCase
             'level' => $level,
             'entity_id' => $entityId,
             'account_external_id' => $account->meta_account_id,
-            'account_name' => $account->name,
             'meta_campaign_id' => $level === 'campaign' ? $entityId : null,
-            'campaign_name' => $level === 'campaign' ? $campaignName : null,
             'date_start' => $date,
             'date_stop' => $dateStop ?? $date,
             'granularity' => $granularity,
-            'hourly_range' => $granularity === 'hour' ? '00:00:00 - 00:59:59' : '',
             'spend' => $spend,
             'purchase_value' => $purchaseValue,
             'purchases' => $purchases,
@@ -3075,7 +3199,6 @@ class PaidAdvertisingPagesTest extends TestCase
             'clicks' => $clicks,
             'inline_link_clicks' => $linkClicks,
             'frequency' => $frequency,
-            'raw_payload' => [],
             'synced_at' => now(),
         ]);
     }

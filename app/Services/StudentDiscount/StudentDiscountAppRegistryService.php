@@ -52,6 +52,15 @@ class StudentDiscountAppRegistryService
                 'uninstalled_at' => $status === 'uninstalled' ? now() : null,
                 ...($externalInstallationId === null ? [] : ['external_installation_id' => $externalInstallationId]),
             ]);
+            if ($status === 'uninstalled') {
+                $installation->forceFill([
+                    'access_token_encrypted' => null,
+                    'refresh_token_encrypted' => null,
+                    'token_type' => null,
+                    'access_token_expires_at' => null,
+                    'refresh_token_expires_at' => null,
+                ]);
+            }
             $installation->deleted_at = null;
             $installation->save();
 

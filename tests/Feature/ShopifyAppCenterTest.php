@@ -9,6 +9,8 @@ use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\AppCenter\ApplicationCenterNavigationService;
+use App\Support\CurrentStore;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -56,31 +58,66 @@ class ShopifyAppCenterTest extends TestCase
                 ->component('Apps/Show')
                 ->where('app.data.id', $app->id)
                 ->where('app.data.name', 'Shopify Commerce Hub')
+                ->where('app.data.current_store_installation.status', 'not_installed')
+                ->where('app.data.current_store_installation.is_installed', false)
+                ->has('installations.data', 0)
+                ->missing('app.data.installations_count')
+                ->missing('app.data.installation_records_count')
                 ->missing('app.data.client_id')
                 ->missing('app.data.client_secret_encrypted'));
     }
 
-    public function test_installation_list_only_contains_stores_the_user_can_access(): void
+    public function test_app_detail_only_returns_the_current_store_and_follows_store_switches(): void
     {
         [$user, $organization] = $this->userWithRole('organization-admin');
-        $authorized = $this->store($organization, 'Macfox US', 'macfox-us.myshopify.com');
-        $unauthorized = $this->store($organization, 'Macfox EU', 'macfox-eu.myshopify.com');
-        $authorized->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $currentStore = $this->store($organization, 'macfox-test-app', 'macfox-test-app.myshopify.com');
+        $nextStore = $this->store($organization, 'macfox-test-app', 'macfox-test-app-copy.myshopify.com');
+        $unassignedStore = $this->store($organization, 'Macfox Bike De', 'macfox-bike-de.myshopify.com');
+        $currentStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $nextStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
         $app = $this->app($organization, 'Store Operations', 'store-operations');
-        $this->installation($app, $authorized, $user);
-        $this->installation($app, $unauthorized, $user);
+        $this->installation($app, $currentStore, $user);
+        $nextInstallation = $this->installation($app, $nextStore, $user);
+        $this->installation($app, $unassignedStore, User::factory()->create());
+        $nextInstallation->update([
+            'status' => 'uninstalled',
+            'uninstalled_at' => now(),
+        ]);
 
         $this->actingAs($user)
             ->withSession([
                 'current_organization_id' => $organization->id,
-                'current_store_id' => $authorized->id,
+                'current_store_id' => $currentStore->id,
             ])
-            ->get(route('apps.show', $app))
+            ->get(route('apps.show', [$app, 'store_id' => $nextStore->id]))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
+                ->where('currentStore.id', $currentStore->id)
                 ->has('installations.data', 1)
-                ->where('installations.data.0.store.id', $authorized->id)
-                ->where('app.data.installations_count', 1));
+                ->where('installations.data.0.store.id', $currentStore->id)
+                ->where('installations.data.0.store.shopify_domain', $currentStore->shopify_domain)
+                ->where('app.data.current_store_installation.status', 'active')
+                ->where('app.data.current_store_installation.is_installed', true)
+                ->missing('app.data.installations_count')
+                ->missing('app.data.installation_records_count'));
+
+        $this->from(route('apps.show', $app))
+            ->put(route('context.store.update'), ['store_id' => $nextStore->id])
+            ->assertRedirect(route('apps.show', $app))
+            ->assertSessionHas('current_store_id', $nextStore->id);
+        app(CurrentStore::class)->clear();
+
+        $this->get(route('apps.show', [$app, 'store_id' => $currentStore->id]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('currentStore.id', $nextStore->id)
+                ->has('installations.data', 1)
+                ->where('installations.data.0.store.id', $nextStore->id)
+                ->where('installations.data.0.store.shopify_domain', $nextStore->shopify_domain)
+                ->where('app.data.current_store_installation.status', 'uninstalled')
+                ->where('app.data.current_store_installation.is_installed', false)
+                ->missing('app.data.installations_count')
+                ->missing('app.data.installation_records_count'));
     }
 
     public function test_platform_app_is_visible_through_an_authorized_store_installation(): void
@@ -107,7 +144,13 @@ class ShopifyAppCenterTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->has('apps.data', 1)
                 ->where('apps.data.0.id', $platformApp->id)
-                ->where('apps.data.0.installations_count', 1));
+                ->where('apps.data.0.current_store_installation.status', 'active')
+                ->has('applicationNavigation', 1)
+                ->where('applicationNavigation.0.app_id', $platformApp->id)
+                ->where('applicationNavigation.0.name', 'Shopify Commerce Hub')
+                ->where('applicationNavigation.0.route', "/app-center/{$platformApp->id}")
+                ->missing('apps.data.0.installations_count')
+                ->missing('apps.data.0.installation_records_count'));
 
         $this->actingAs($user)
             ->withSession([
@@ -118,6 +161,70 @@ class ShopifyAppCenterTest extends TestCase
             ->assertOk();
     }
 
+    public function test_application_center_sidebar_uses_application_names_instead_of_generic_entries(): void
+    {
+        $menu = file_get_contents(resource_path('js/config/menu.ts'));
+
+        $this->assertIsString($menu);
+        $this->assertStringContainsString("dynamicChildren: 'applications'", $menu);
+        $this->assertStringNotContainsString("name: '应用列表'", $menu);
+        $this->assertStringNotContainsString("name: '应用配置'", $menu);
+        $this->assertStringNotContainsString("name: '应用日志'", $menu);
+        $this->assertStringNotContainsString("name: '学生优惠'", $menu);
+        $this->assertStringNotContainsString("name: '安装管理'", $menu);
+        $this->assertStringNotContainsString("route: '/app-installations'", $menu);
+    }
+
+    public function test_application_navigation_uses_dedicated_workspaces_and_current_store_scope(): void
+    {
+        [$user, $organization] = $this->userWithRole('organization-admin');
+        $store = $this->store($organization, 'Macfox', 'macfox.myshopify.com');
+        $otherStore = $this->store($organization, 'Macfox DE', 'macfox-de.myshopify.com');
+        $studentDiscount = $this->app($organization, 'Deco-学生优惠-test', 'deco-student-discount-test');
+        $instagram = $this->app($organization, 'Deco-Instagram-内容-test', 'deco-instagram-feed-test');
+        $personalization = $this->app($organization, 'Deco 个性化推荐测试', 'deco-personalization-test');
+        $generic = $this->app($organization, 'Commerce Hub', 'commerce-hub');
+        $otherStoreApp = $this->app($organization, 'Other Store App', 'other-store-app');
+        $studentInstallation = $this->installation($studentDiscount, $store, $user);
+
+        foreach ([$instagram, $personalization, $generic] as $app) {
+            AppInstallation::query()->create([
+                'app_id' => $app->id,
+                'store_id' => $store->id,
+                'shopify_connection_id' => $studentInstallation->shopify_connection_id,
+                'installed_by' => $user->id,
+                'status' => 'active',
+                'granted_scopes' => ['read_products'],
+                'installed_at' => now(),
+            ]);
+        }
+        $this->installation($otherStoreApp, $otherStore, $user);
+
+        $navigation = collect(app(ApplicationCenterNavigationService::class)->forStore(
+            $organization,
+            $store,
+            ['apps.view', 'student_discount.claim.read', 'instagram_feed.view', 'personalization.view'],
+        ))->keyBy('app_id');
+
+        $this->assertCount(4, $navigation);
+        $this->assertSame('学生优惠', $navigation[$studentDiscount->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/student-discounts", $navigation[$studentDiscount->id]['route']);
+        $this->assertSame('Instagram 内容', $navigation[$instagram->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/instagram-feed", $navigation[$instagram->id]['route']);
+        $this->assertSame('个性化推荐', $navigation[$personalization->id]['name']);
+        $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/personalization", $navigation[$personalization->id]['route']);
+        $this->assertSame("/app-center/{$generic->id}", $navigation[$generic->id]['route']);
+        $this->assertFalse($navigation->has($otherStoreApp->id));
+
+        $studentOnly = app(ApplicationCenterNavigationService::class)->forStore(
+            $organization,
+            $store,
+            ['student_discount.claim.read'],
+        );
+
+        $this->assertSame([$studentDiscount->id], collect($studentOnly)->pluck('app_id')->all());
+    }
+
     public function test_precreated_store_shows_configured_app_as_not_installed(): void
     {
         config()->set('shopify.app_handle', 'shopify-commerce-hub');
@@ -126,7 +233,7 @@ class ShopifyAppCenterTest extends TestCase
         $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
         App::query()->create([
             'organization_id' => null,
-            'name' => 'Deco Marketing',
+            'name' => 'Shopify Commerce Hub',
             'handle' => 'shopify-commerce-hub',
             'distribution' => 'custom',
             'status' => 'active',
@@ -142,7 +249,7 @@ class ShopifyAppCenterTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Stores/Show')
                 ->has('storeApps', 1)
-                ->where('storeApps.0.name', 'Deco Marketing')
+                ->where('storeApps.0.name', 'Shopify Commerce Hub')
                 ->where('storeApps.0.status', 'uninstalled'));
     }
 

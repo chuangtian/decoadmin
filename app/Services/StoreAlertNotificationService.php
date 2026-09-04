@@ -90,7 +90,11 @@ class StoreAlertNotificationService
     private function enabledForType(StoreNotificationSetting $settings, string $type): bool
     {
         return match ($type) {
-            'sync' => $settings->notify_sync_failed,'webhook' => $settings->notify_webhook_failed,'connection' => $settings->notify_connection_unhealthy,default => false
+            'sync' => $settings->notify_sync_failed,
+            'webhook' => $settings->notify_webhook_failed,
+            'connection' => $settings->notify_connection_unhealthy,
+            'discount' => $settings->notify_discount_monitor,
+            default => false,
         };
     }
 

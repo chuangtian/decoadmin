@@ -13,15 +13,25 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
+use App\Http\Controllers\CodexApiTokenController;
+use App\Http\Controllers\CodexOAuthAuthorizationController;
+use App\Http\Controllers\CodexOAuthClientRegistrationController;
+use App\Http\Controllers\CodexOAuthMetadataController;
+use App\Http\Controllers\CodexOAuthTokenController;
+use App\Http\Controllers\CodexRemoteMcpController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DiscountController;
+use App\Http\Controllers\DiscountManagerOAuthController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
 use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
+use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
+use App\Http\Controllers\ModelAssetController;
 use App\Http\Controllers\NaturalTrafficController;
 use App\Http\Controllers\NotificationCenterController;
 use App\Http\Controllers\OrganizationContextController;
@@ -29,18 +39,24 @@ use App\Http\Controllers\PaidAdvertisingChannelController;
 use App\Http\Controllers\PaidAdvertisingFacebookController;
 use App\Http\Controllers\PaidAdvertisingGoalController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\PersonalizationCheckoutExtensionController;
+use App\Http\Controllers\PersonalizationController;
+use App\Http\Controllers\PersonalizationEventController;
+use App\Http\Controllers\PersonalizationStrategyWorkflowController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
-use App\Http\Controllers\ShopifyAppLaunchController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyInstagramFeedAppController;
 use App\Http\Controllers\ShopifyInstagramFeedWebhookController;
 use App\Http\Controllers\ShopifyOAuthController;
+use App\Http\Controllers\ShopifyPersonalizationAppController;
+use App\Http\Controllers\ShopifyPersonalizationWebhookController;
 use App\Http\Controllers\ShopifyStudentDiscountAppController;
 use App\Http\Controllers\ShopifyStudentDiscountWebhookController;
 use App\Http\Controllers\ShopifyWebhookController;
@@ -49,8 +65,6 @@ use App\Http\Controllers\StoreBusinessCredentialController;
 use App\Http\Controllers\StoreContextController;
 use App\Http\Controllers\StoreController;
 use App\Http\Controllers\StorefrontEventController;
-use App\Http\Controllers\StoreMarketingHomeController;
-use App\Http\Controllers\StoreMarketingModuleController;
 use App\Http\Controllers\StoreNotificationSettingsController;
 use App\Http\Controllers\StoreStatusController;
 use App\Http\Controllers\StudentDiscountController;
@@ -64,6 +78,27 @@ use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthCheckController::class)->name('health');
+
+Route::get('/.well-known/oauth-protected-resource', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.protected-resource');
+Route::get('/.well-known/oauth-protected-resource/mcp/decoadmin', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1');
+Route::get('/.well-known/oauth-authorization-server', [CodexOAuthMetadataController::class, 'authorizationServer'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.authorization-server');
+Route::post('/oauth/register', CodexOAuthClientRegistrationController::class)
+    ->middleware('throttle:10,1')
+    ->name('codex.oauth.register');
+Route::post('/oauth/token', [CodexOAuthTokenController::class, 'token'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.token');
+Route::post('/oauth/revoke', [CodexOAuthTokenController::class, 'revoke'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.revoke');
+Route::post('/mcp/decoadmin', CodexRemoteMcpController::class)
+    ->middleware(['codex.token', 'throttle:120,1'])
+    ->name('codex.mcp');
 
 Route::get('/', fn () => auth()->check()
     ? redirect()->route('dashboard')
@@ -104,12 +139,19 @@ Route::prefix('/api/shopify-app/student-discounts')->group(function (): void {
 });
 
 Route::prefix('/api/shopify-app/student-discounts/proxy')
-    ->middleware(['shopify.app-proxy', 'throttle:student-discount-public'])
+    ->middleware(['shopify.app-proxy', 'shopify.app-proxy-response', 'throttle:student-discount-public'])
     ->group(function (): void {
         Route::get('/', [PublicStudentDiscountController::class, 'info'])
             ->name('student-discounts.public.info');
-        Route::post('/', [PublicStudentDiscountController::class, 'store']);
+        Route::get('/verify', [PublicStudentDiscountController::class, 'retryPage'])
+            ->name('student-discounts.public.retry');
+        Route::post('/verify/claims', [PublicStudentDiscountController::class, 'retryStore'])
+            ->middleware('throttle:student-discount-submissions')
+            ->name('student-discounts.public.retry.store');
+        Route::post('/', [PublicStudentDiscountController::class, 'store'])
+            ->middleware('throttle:student-discount-submissions');
         Route::post('/claims', [PublicStudentDiscountController::class, 'store'])
+            ->middleware('throttle:student-discount-submissions')
             ->name('student-discounts.public.claims.store');
         Route::get('/claims/{claim}', [PublicStudentDiscountController::class, 'show'])
             ->name('student-discounts.public.claims.show');
@@ -132,6 +174,61 @@ Route::prefix('/api/shopify-app/instagram-feed')->group(function (): void {
         ->middleware(['shopify.id-token:instagram_feed', 'throttle:20,1'])
         ->name('instagram-feed.shopify-app.bootstrap');
 });
+
+Route::get('/shopify-app/personalization', [ShopifyPersonalizationAppController::class, 'management'])
+    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->name('personalization.shopify-app.management');
+
+Route::post('/api/shopify-app/personalization/webhooks', ShopifyPersonalizationWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.shopify-app.webhooks');
+
+Route::post('/api/shopify-app/personalization/events/{source}', PersonalizationEventController::class)
+    ->middleware('throttle:600,1')
+    ->name('personalization.events.receive');
+Route::options('/api/shopify-app/personalization/events/{source}', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.events.options');
+
+Route::prefix('/api/shopify-app/personalization')->group(function (): void {
+    Route::get('/connection', [ShopifyPersonalizationAppController::class, 'connection'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:60,1'])
+        ->name('personalization.shopify-app.connection');
+    Route::post('/bootstrap', [ShopifyPersonalizationAppController::class, 'bootstrap'])
+        ->middleware(['shopify.id-token:personalization', 'throttle:20,1'])
+        ->name('personalization.shopify-app.bootstrap');
+});
+
+Route::get('/api/shopify-app/personalization/checkout/configuration', PersonalizationCheckoutExtensionController::class)
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.configuration');
+Route::options('/api/shopify-app/personalization/checkout/configuration', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.configuration.options');
+Route::post('/api/shopify-app/personalization/checkout/recommendations', [PersonalizationCheckoutExtensionController::class, 'recommendations'])
+    ->middleware(['shopify.checkout-token:personalization', 'throttle:120,1'])
+    ->name('personalization.checkout.recommendations');
+Route::options('/api/shopify-app/personalization/checkout/recommendations', fn () => response('', 204, [
+    'Access-Control-Allow-Origin' => '*',
+    'Access-Control-Allow-Methods' => 'POST, OPTIONS',
+    'Access-Control-Allow-Headers' => 'Authorization, Content-Type',
+    'Cache-Control' => 'no-store',
+]))->name('personalization.checkout.recommendations.options');
+
+Route::prefix('/api/shopify-app/personalization/proxy')
+    ->middleware(['shopify.app-proxy:personalization,personalization_store', 'throttle:personalization-public'])
+    ->group(function (): void {
+        Route::get('/recommendations/{component}', [PublicPersonalizationController::class, 'recommendations'])
+            ->name('personalization.public.recommendations');
+        Route::get('/smart-cart', [PublicPersonalizationController::class, 'smartCart'])
+            ->name('personalization.public.smart-cart');
+    });
 
 // Meta 侧的公开回调：OAuth 靠一次性 state，合规回调靠 signed_request 验签。
 Route::prefix('/instagram-feed')->group(function (): void {
@@ -173,10 +270,15 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('throttle:6,1')
         ->name('verification.send');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
-    Route::get('/shopify/launch', ShopifyAppLaunchController::class)->name('shopify.app.launch');
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::get('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'show'])
+        ->middleware('throttle:60,1')
+        ->name('codex.oauth.authorize');
+    Route::post('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'store'])
+        ->middleware('throttle:30,1');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar'])->name('profile.avatar.update');
@@ -222,6 +324,24 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/natural-traffic/brand-media/import', [NaturalTrafficController::class, 'importBrandMedia'])
         ->middleware(['permission:sync.run', 'throttle:12,1'])
         ->name('natural-traffic.brand-media.import');
+    Route::get('/natural-traffic/brand-media/import-template', [NaturalTrafficController::class, 'downloadBrandMediaTemplate'])
+        ->middleware(['permission:reports.view', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.import-template');
+    Route::put('/natural-traffic/brand-media/posts/visibility', [NaturalTrafficController::class, 'updateBrandMediaPostVisibility'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.posts.visibility');
+    Route::put('/natural-traffic/brand-media/daily-reviews', [NaturalTrafficController::class, 'upsertBrandMediaDailyReview'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.daily-reviews.upsert');
+    Route::delete('/natural-traffic/brand-media/daily-reviews/{brandSocialDailyReview}', [NaturalTrafficController::class, 'deleteBrandMediaDailyReview'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.daily-reviews.destroy');
+    Route::put('/natural-traffic/brand-media/weekly-reports', [NaturalTrafficController::class, 'upsertBrandMediaWeeklyReport'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.weekly-reports.upsert');
+    Route::delete('/natural-traffic/brand-media/weekly-reports/{brandSocialWeeklyReport}', [NaturalTrafficController::class, 'deleteBrandMediaWeeklyReport'])
+        ->middleware(['permission:reports.manage', 'throttle:30,1'])
+        ->name('natural-traffic.brand-media.weekly-reports.destroy');
     Route::post('/natural-traffic/seo-geo/refresh', [NaturalTrafficController::class, 'refresh'])
         ->middleware(['permission:sync.run', 'throttle:6,1'])
         ->name('natural-traffic.seo-geo.refresh');
@@ -418,11 +538,22 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
 
     Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:roles.view')->name('permissions.index');
 
+    Route::get('/codex-tokens', [CodexApiTokenController::class, 'index'])
+        ->middleware('permission:codex.tokens.view')
+        ->name('codex-tokens.index');
+    Route::post('/codex-tokens', [CodexApiTokenController::class, 'store'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:10,1'])
+        ->name('codex-tokens.store');
+    Route::delete('/codex-tokens/{codexApiToken}', [CodexApiTokenController::class, 'destroy'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:20,1'])
+        ->name('codex-tokens.destroy');
+
     Route::get('/apps', [AppController::class, 'index'])->middleware('permission:apps.view')->name('apps.index');
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
 
     Route::get('/app-center', [AppController::class, 'index'])->middleware('permission:apps.view')->name('app-center.index');
-    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.install')->name('app-installations.index');
+    Route::get('/app-center/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('app-center.show');
+    Route::get('/app-installations', [ApplicationCenterController::class, 'installations'])->middleware('permission:apps.view')->name('app-installations.index');
     Route::get('/app-configurations', [ApplicationCenterController::class, 'configurations'])->middleware('permission:apps.configure')->name('app-configurations.index');
     Route::get('/app-logs', [ApplicationCenterController::class, 'logs'])->middleware('permission:audit.view')->name('app-logs.index');
 
@@ -476,18 +607,30 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
     Route::get('/customers', [ShopifyDataController::class, 'customers'])->middleware('permission:customers.view')->name('customers.index');
     Route::get('/customers/{customer}', [ShopifyDataController::class, 'customer'])->whereNumber('customer')->middleware('permission:customers.view')->name('customers.show');
-    Route::get('/inventory', [ShopifyDataController::class, 'inventory'])->middleware('permission:inventory.view')->name('inventory.index');
-    Route::get('/inventory/{inventoryItem}', [ShopifyDataController::class, 'inventoryItem'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
+    Route::get('/inventory', [InventoryController::class, 'index'])->middleware('permission:inventory.view')->name('inventory.index');
+    Route::get('/inventory/{inventoryItem}', [InventoryController::class, 'show'])->whereNumber('inventoryItem')->middleware('permission:inventory.view')->name('inventory.show');
     Route::get('/locations', [ShopifyDataController::class, 'locations'])->middleware('permission:inventory.view')->name('locations.index');
     Route::get('/locations/{location}', [ShopifyDataController::class, 'location'])->whereNumber('location')->middleware('permission:inventory.view')->name('locations.show');
+    Route::get('/model-assets', [ModelAssetController::class, 'index'])->middleware('permission:products.view')->name('model-assets.index');
+    Route::post('/model-assets/folders', [ModelAssetController::class, 'storeFolder'])->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.store');
+    Route::get('/model-assets/folders/{folder}', [ModelAssetController::class, 'showFolder'])->whereUuid('folder')->middleware('permission:products.view')->name('model-assets.folders.show');
+    Route::post('/model-assets/folders/{folder}/images', [ModelAssetController::class, 'upload'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:120,1'])->name('model-assets.images.store');
+    Route::delete('/model-assets/folders/{folder}/images', [ModelAssetController::class, 'clearFolder'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.clear');
+    Route::delete('/model-assets/folders/{folder}', [ModelAssetController::class, 'destroyFolder'])->whereUuid('folder')->middleware(['permission:products.update', 'throttle:30,1'])->name('model-assets.folders.destroy');
+    Route::get('/model-assets/images/{image}/thumbnail', [ModelAssetController::class, 'thumbnail'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.thumbnail');
+    Route::get('/model-assets/images/{image}', [ModelAssetController::class, 'image'])->whereUuid('image')->middleware('permission:products.view')->name('model-assets.images.content');
+    Route::delete('/model-assets/images/{image}', [ModelAssetController::class, 'destroyImage'])->whereUuid('image')->middleware(['permission:products.update', 'throttle:60,1'])->name('model-assets.images.destroy');
+    Route::get('/discounts', [DiscountController::class, 'index'])->middleware('permission:discounts.view')->name('discounts.index');
+    Route::post('/discounts/connect', [DiscountManagerOAuthController::class, 'redirect'])->middleware(['permission:discounts.manage', 'throttle:10,1'])->name('discounts.connect');
+    Route::get('/discounts/{discountId}', [DiscountController::class, 'show'])->whereNumber('discountId')->middleware(['permission:discounts.view', 'throttle:120,1'])->name('discounts.show');
+    Route::post('/discounts', [DiscountController::class, 'store'])->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.store');
+    Route::put('/discounts/{discountId}', [DiscountController::class, 'update'])->whereNumber('discountId')->middleware(['permission:discounts.manage', 'throttle:30,1'])->name('discounts.update');
+    Route::patch('/discounts/{discountId}/monitor', [DiscountController::class, 'updateMonitor'])->whereNumber('discountId')->middleware(['permission:discounts.manage', 'throttle:60,1'])->name('discounts.monitor.update');
 
     Route::get('/stores', [StoreController::class, 'index'])->middleware('permission:store.view')->name('stores.index');
     Route::get('/stores/create', [StoreController::class, 'create'])->middleware('permission:store.create')->name('stores.create');
     Route::post('/stores', [StoreController::class, 'store'])->middleware('permission:store.create')->name('stores.store');
     Route::get('/stores/{store}', [StoreController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.show');
-    Route::get('/stores/{store}/marketing', StoreMarketingHomeController::class)->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.home');
-    Route::get('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'show'])->middleware(['store.access', 'permission:store.view'])->name('stores.marketing.modules.show');
-    Route::put('/stores/{store}/marketing/{module}', [StoreMarketingModuleController::class, 'update'])->middleware(['store.access', 'permission:apps.configure'])->name('stores.marketing.modules.update');
     Route::post('/stores/{store}/connect', [StoreController::class, 'connect'])->middleware(['store.access', 'permission:apps.install'])->name('stores.connect');
     Route::post('/stores/{store}/shopify/verify', ShopifyConnectionHealthController::class)->middleware(['store.access', 'permission:store.connect'])->name('stores.shopify.verify');
     Route::post('/stores/{store}/shopify/uninstall', ShopifyAppUninstallController::class)->middleware(['store.access', 'permission:apps.uninstall'])->name('stores.shopify.uninstall');
@@ -506,15 +649,123 @@ Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
         Route::put('/campaign', [StudentDiscountController::class, 'updateCampaign'])
             ->middleware(['permission:student_discount.campaign.manage', 'throttle:30,1'])
             ->name('student-discounts.campaign.update');
+        Route::put('/email-templates', [StudentDiscountController::class, 'updateEmailTemplates'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:30,1'])
+            ->name('student-discounts.email-templates.update');
+        Route::post('/email-templates/test', [StudentDiscountController::class, 'testEmailTemplate'])
+            ->middleware(['permission:student_discount.email_template.manage', 'throttle:10,1'])
+            ->name('student-discounts.email-templates.test');
         Route::post('/claims/{claim}/approve', [StudentDiscountController::class, 'approve'])
             ->middleware(['permission:student_discount.approve', 'throttle:30,1'])
             ->name('student-discounts.claims.approve');
         Route::post('/claims/{claim}/reject', [StudentDiscountController::class, 'reject'])
             ->middleware(['permission:student_discount.reject', 'throttle:30,1'])
             ->name('student-discounts.claims.reject');
+        Route::post('/claims/bulk-approve', [StudentDiscountController::class, 'bulkApprove'])
+            ->middleware(['permission:student_discount.approve', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-approve');
+        Route::post('/claims/bulk-reject', [StudentDiscountController::class, 'bulkReject'])
+            ->middleware(['permission:student_discount.reject', 'throttle:10,1'])
+            ->name('student-discounts.claims.bulk-reject');
+        Route::post('/claims/usage-sync', [StudentDiscountController::class, 'syncUsage'])
+            ->middleware(['permission:student_discount.claim.read', 'throttle:10,1'])
+            ->name('student-discounts.claims.usage-sync');
+        Route::delete('/claims/{claim}', [StudentDiscountController::class, 'destroy'])
+            ->middleware(['permission:student_discount.claim.delete', 'throttle:30,1'])
+            ->name('student-discounts.claims.destroy');
         Route::get('/claims/{claim}/evidence', [StudentDiscountController::class, 'evidence'])
             ->middleware(['permission:student_discount.view_evidence', 'throttle:60,1'])
             ->name('student-discounts.claims.evidence');
+    });
+
+Route::prefix('/organizations/{organization}/stores/{store}/personalization')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [PersonalizationController::class, 'index'])
+            ->middleware('permission:personalization.view')
+            ->name('personalization.index');
+        Route::post('/strategies', [PersonalizationController::class, 'storeStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.store');
+        Route::post('/strategy-workflow/drafts', [PersonalizationStrategyWorkflowController::class, 'createDraft'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategy-workflow.drafts.create');
+        Route::get('/strategy-workflow/{strategy}', [PersonalizationStrategyWorkflowController::class, 'editor'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.editor');
+        Route::patch('/strategy-workflow/{strategy}/draft', [PersonalizationStrategyWorkflowController::class, 'autosave'])
+            ->middleware(['permission:personalization.manage', 'throttle:120,1'])
+            ->name('personalization.strategy-workflow.autosave');
+        Route::post('/strategy-workflow/{strategy}/publish', [PersonalizationStrategyWorkflowController::class, 'publish'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.publish');
+        Route::post('/strategy-workflow/{strategy}/duplicate', [PersonalizationStrategyWorkflowController::class, 'duplicate'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.duplicate');
+        Route::post('/strategy-workflow/{strategy}/disable', [PersonalizationStrategyWorkflowController::class, 'disable'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.disable');
+        Route::delete('/strategy-workflow/{strategyUuid}', [PersonalizationStrategyWorkflowController::class, 'destroy'])
+            ->whereUuid('strategyUuid')
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.destroy');
+        Route::post('/strategy-workflow/{strategy}/versions/{version}/restore', [PersonalizationStrategyWorkflowController::class, 'restoreVersion'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.strategy-workflow.versions.restore');
+        Route::post('/strategy-workflow/{strategy}/preview', [PersonalizationStrategyWorkflowController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.strategy-workflow.preview');
+        Route::put('/global-settings', [PersonalizationStrategyWorkflowController::class, 'saveGlobalSettings'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.global-settings.update');
+        Route::get('/discounts', [PersonalizationStrategyWorkflowController::class, 'discounts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.discounts.index');
+        Route::post('/discounts', [PersonalizationStrategyWorkflowController::class, 'createDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.store');
+        Route::patch('/discounts', [PersonalizationStrategyWorkflowController::class, 'updateDiscount'])
+            ->middleware(['permission:personalization.manage', 'throttle:10,1'])
+            ->name('personalization.discounts.update');
+        Route::put('/strategies/{strategy}', [PersonalizationController::class, 'updateStrategy'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.update');
+        Route::put('/strategies/{strategy}/rules', [PersonalizationController::class, 'updateRules'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.rules.update');
+        Route::put('/strategies/{strategy}/products', [PersonalizationController::class, 'updateProducts'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.strategies.products.update');
+        Route::post('/components', [PersonalizationController::class, 'storeComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.store');
+        Route::put('/components/{component}', [PersonalizationController::class, 'updateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.update');
+        Route::put('/components/{component}/style', [PersonalizationController::class, 'updateStyle'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.components.style.update');
+        Route::post('/components/{component}/activate', [PersonalizationController::class, 'activateComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.activate');
+        Route::post('/components/{component}/disable', [PersonalizationController::class, 'disableComponent'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.components.disable');
+        Route::get('/components/{component}/preview', [PersonalizationController::class, 'preview'])
+            ->middleware(['permission:personalization.view', 'throttle:60,1'])
+            ->name('personalization.components.preview');
+        Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.checkout.update');
+        Route::put('/thank-you', [PersonalizationController::class, 'saveThankYou'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.thank-you.update');
+        Route::put('/order-status', [PersonalizationController::class, 'saveOrderStatus'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.order-status.update');
+        Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCart'])
+            ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
+            ->name('personalization.smart-cart.update');
     });
 
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
