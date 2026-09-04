@@ -199,7 +199,14 @@ async function requestJson<T>(url: string, options: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
         const validation = payload.errors ? Object.values(payload.errors).flat().join('；') : '';
-        throw new Error(validation || payload.error?.message || 'Shopify 未能保存折扣。');
+        const fallback = response.status >= 500
+            ? '后台保存发生异常，请稍后重试；不能仅凭此提示判断 Shopify 是否已保存，请先刷新核对。'
+            : [401, 419].includes(response.status)
+                ? '登录状态已过期，请刷新页面后重试。'
+                : response.status === 403
+                    ? '当前账号没有操作此店铺折扣的权限。'
+                    : '请求未完成，请刷新页面后重试。';
+        throw new Error(validation || payload.error?.message || fallback);
     }
     return payload.data as T;
 }
