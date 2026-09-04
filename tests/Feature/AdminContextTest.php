@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\User;
+use App\Support\CurrentStore;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -124,6 +126,32 @@ class AdminContextTest extends TestCase
                 ->where('flash.error', '保存失败')
                 ->where('flash.warning', '请检查配置')
                 ->where('flash.info', '任务已排队'));
+    }
+
+    public function test_clock_shares_server_instant_and_follows_the_selected_store_timezone(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-04T07:14:46Z'));
+        $user = User::factory()->create();
+        $organization = $this->organization('Clock', 'clock', $user);
+        $first = $this->store($organization, 'Pacific Store', 'clock-pacific.myshopify.com');
+        $second = $this->store($organization, 'Eastern Store', 'clock-eastern.myshopify.com');
+        $first->update(['timezone' => 'America/Los_Angeles']);
+        $second->update(['timezone' => 'America/New_York']);
+        foreach ([$first, $second] as $store) {
+            $store->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        }
+        $this->actingAs($user)->withSession(['current_organization_id' => $organization->id, 'current_store_id' => $first->id])
+            ->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
+            ->where('serverTime', '2026-09-04T07:14:46+00:00')
+            ->where('currentStore.timezone', 'America/Los_Angeles'));
+        $this->put(route('context.store.update'), ['store_id' => $second->id])
+            ->assertRedirect()->assertSessionHas('current_store_id', $second->id);
+        // Feature requests reuse the container; PHP-FPM starts a fresh request scope.
+        app(CurrentStore::class)->clear();
+        $this->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
+            ->where('serverTime', '2026-09-04T07:14:46+00:00')
+            ->where('currentStore.timezone', 'America/New_York'));
+        $this->travelBack();
     }
 
     private function organization(string $name, string $code, User $user): Organization

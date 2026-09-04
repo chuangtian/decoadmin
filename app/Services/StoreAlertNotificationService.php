@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\StoreAlert;
 use App\Models\StoreNotificationSetting;
+use App\Support\StoreDateTime;
 use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -84,7 +85,7 @@ class StoreAlertNotificationService
 
     private function plainText(StoreAlert $alert): string
     {
-        return implode("\n", ['DecoAdmin 店铺异常告警', "店铺：{$alert->store->name}", "类型：{$alert->type}", "级别：{$alert->severity}", "标题：{$alert->title}", "说明：{$alert->message}", '时间：'.$alert->occurred_at?->toIso8601String()]);
+        return implode("\n", ['DecoAdmin 店铺异常告警', "店铺：{$alert->store->name}", "类型：{$alert->type}", "级别：{$alert->severity}", "标题：{$alert->title}", "说明：{$alert->message}", '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store)]);
     }
 
     private function enabledForType(StoreNotificationSetting $settings, string $type): bool

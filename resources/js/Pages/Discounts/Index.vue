@@ -2,6 +2,8 @@
 import { Head, router } from '@inertiajs/vue3';
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
+import { formatStoreDateTime, formatStoreDateTimeInput, safeTimezone } from '../../utils/storeDateTime';
 
 type Kind = 'product_amount' | 'order_amount' | 'bxgy' | 'free_shipping';
 interface DiscountRow {
@@ -92,7 +94,9 @@ const kindOptions: Array<{ value: Kind; title: string; description: string; icon
     { value: 'free_shipping', title: '免运费', description: '满足条件的订单免除运费', icon: '→' },
 ];
 
-const nowLocal = () => localDateTime(new Date().toISOString());
+const { now: storeNow } = useStoreDateTime();
+const storeTimezone = computed(() => safeTimezone(props.store.timezone));
+const nowLocal = () => localDateTime(storeNow().toISOString());
 const blankForm = (kind: Kind = 'product_amount') => ({
     idempotency_key: requestId(),
     store_id: props.store.id,
@@ -179,13 +183,7 @@ function edit(row: DiscountRow) {
     editorOpen.value = true;
 }
 function localDateTime(value: string | null) {
-    if (!value) return '';
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: props.store.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).formatToParts(new Date(value));
-    const field = (name: string) => parts.find(part => part.type === name)?.value ?? '';
-    return `${field('year')}-${field('month')}-${field('day')}T${field('hour')}:${field('minute')}`;
+    return formatStoreDateTimeInput(value, storeTimezone.value);
 }
 function numericId(gid: string) { return gid.split('/').pop() ?? ''; }
 function requestId() { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
@@ -259,7 +257,7 @@ function statusClass(status: string) {
     return status === 'active' ? 'bg-emerald-100 text-emerald-800' : status === 'scheduled' ? 'bg-sky-100 text-sky-800' : status === 'expired' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800';
 }
 function kindLabel(kind: DiscountRow['kind']) { return ({ product_amount: '产品金额减免', order_amount: '订单金额减免', bxgy: '买 X 送 Y', free_shipping: '免运费', app: '应用折扣' } as Record<string, string>)[kind] ?? '其他'; }
-function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: props.store.timezone, month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '无结束时间'; }
+function formatDate(value: string | null) { return value ? formatStoreDateTime(value, storeTimezone.value) : '无结束时间'; }
 function toggleProduct(field: 'product_ids' | 'buys_product_ids' | 'gets_product_ids', id: string) {
     const values = form[field];
     const index = values.indexOf(id);
@@ -284,6 +282,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                     <p class="text-sm font-semibold text-emerald-700">{{ store.name }} · {{ store.currency }}</p>
                     <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">折扣管理</h1>
                     <p class="mt-2 text-sm text-slate-500">直接查看、创建和修改当前店铺的 Shopify 折扣码。</p>
+                    <p class="mt-1 text-xs text-slate-500">店铺时间 · {{ storeTimezone }}（与 Shopify 一致）</p>
                 </div>
                 <button v-if="permissions.manage" type="button" :disabled="!connection.ready || !connection.can_write" class="h-11 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" @click="openCreate">＋ 创建折扣</button>
             </header>
@@ -345,7 +344,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="font-semibold text-slate-950">最低购买要求</h3><div class="mt-4 grid gap-4 sm:grid-cols-2"><select v-model="form.minimum_type" class="h-11 rounded-xl border-slate-300"><option value="none">无最低要求</option><option value="subtotal">最低购买金额</option><option value="quantity">最低商品数量</option></select><label v-if="form.minimum_type === 'subtotal'" class="relative"><input v-model="form.minimum_subtotal" type="number" min="0.01" step="0.01" required class="h-11 w-full rounded-xl border-slate-300 pr-16"><span class="absolute inset-y-0 right-4 flex items-center text-sm text-slate-500">{{ store.currency }}</span></label><input v-if="form.minimum_type === 'quantity'" v-model="form.minimum_quantity" type="number" min="1" required class="h-11 rounded-xl border-slate-300"></div></section>
 
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="font-semibold text-slate-950">有效时间</h3><div class="mt-4 grid gap-4 sm:grid-cols-2"><label class="text-sm font-medium text-slate-700">开始时间<input v-model="form.starts_at" required type="datetime-local" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label><label class="text-sm font-medium text-slate-700">结束时间（可选）<input v-model="form.ends_at" type="datetime-local" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label></div><p class="mt-3 text-xs text-slate-400">时间按照当前店铺时区 {{ store.timezone }} 保存到 Shopify。</p></section>
+                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="font-semibold text-slate-950">有效时间</h3><div class="mt-4 grid gap-4 sm:grid-cols-2"><label class="text-sm font-medium text-slate-700">开始时间<input v-model="form.starts_at" required type="datetime-local" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label><label class="text-sm font-medium text-slate-700">结束时间（可选）<input v-model="form.ends_at" type="datetime-local" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label></div><p class="mt-3 text-xs text-slate-400">店铺时间 · {{ storeTimezone }}。开始、结束时间均与 Shopify 店铺时区一致，保存时自动换算，不更改店铺时区。</p></section>
 
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="font-semibold text-slate-950">使用限制</h3><div class="mt-4 grid gap-4 sm:grid-cols-2"><label class="text-sm font-medium text-slate-700">总使用次数上限（可选）<input v-model="form.usage_limit" type="number" min="1" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label><label v-if="form.kind === 'bxgy'" class="text-sm font-medium text-slate-700">每个订单最多使用（可选）<input v-model="form.uses_per_order_limit" type="number" min="1" max="1000" class="mt-1.5 h-11 w-full rounded-xl border-slate-300"></label></div><label class="mt-4 flex items-center gap-3 text-sm text-slate-700"><input v-model="form.applies_once_per_customer" type="checkbox" class="rounded border-slate-300 text-slate-950">每位客户限用一次</label></section>
 
