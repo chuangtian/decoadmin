@@ -364,6 +364,7 @@ export interface ApplicationNavigationItem {
 }
 
 export interface SharedProps {
+    serverTime?: string;
     appName: string;
     auth: {
         user: { id: number; name: string; email: string; avatar_url: string | null } | null;

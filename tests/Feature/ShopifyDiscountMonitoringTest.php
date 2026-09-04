@@ -12,11 +12,13 @@ use App\Models\StoreNotificationSetting;
 use App\Models\User;
 use App\Services\Discounts\ShopifyDiscountMonitorService;
 use App\Services\StoreAlertNotificationService;
+use App\Support\StoreDateTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ShopifyDiscountMonitoringTest extends TestCase
@@ -109,6 +111,79 @@ class ShopifyDiscountMonitoringTest extends TestCase
 
         $this->assertSame('sent', $alert->fresh()->delivery_status);
         Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'content.text'), '折扣码：OLD50 → NEW50'));
+    }
+
+    #[DataProvider('storeTimezoneCases')]
+    public function test_discount_dates_and_feishu_use_the_store_timezone_without_changing_instants(string $timezone, string $instant, string $expected): void
+    {
+        Queue::fake();
+        CarbonImmutable::setTestNow($instant);
+        [$store, $monitor] = $this->monitor();
+        $store->update(['timezone' => $timezone]);
+        StoreNotificationSetting::query()->create([
+            'organization_id' => $store->organization_id, 'store_id' => $store->id,
+            'feishu_enabled' => true, 'notify_discount_monitor' => true,
+            'feishu_webhook_url' => 'https://open.feishu.cn/open-apis/bot/v2/hook/timezone-test',
+        ]);
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push($this->detail('FALL50', 'ACTIVE', null, '2026-01-01T00:00:00Z'))
+            ->push($this->detail('FALL50', 'ACTIVE', $instant, $instant));
+        $service = app(ShopifyDiscountMonitorService::class);
+        $this->assertSame(0, $service->scanStore($store)['alerts']);
+        $this->assertSame(1, $service->scanStore($store)['alerts']);
+        $alert = StoreAlert::query()->sole();
+        $this->assertStringContainsString('结束时间：无结束时间 → '.$expected, $alert->message);
+        $this->assertSame($instant, $monitor->snapshots()->latest('id')->first()->snapshot['ends_at']);
+
+        Http::fake(['open.feishu.cn/*' => Http::response(['code' => 0], 200)]);
+        app(StoreAlertNotificationService::class)->deliver($alert);
+        Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'content.text'), '店铺时间：'.$expected));
+        $this->assertSame(CarbonImmutable::parse($instant)->timestamp, $alert->fresh()->occurred_at->timestamp);
+        $this->assertSame($timezone, $store->fresh()->timezone);
+    }
+
+    public static function storeTimezoneCases(): array
+    {
+        return [
+            'Los Angeles summer' => ['America/Los_Angeles', '2026-09-05T00:00:00Z', '2026-09-04 17:00:00 (America/Los_Angeles, UTC-07:00)'],
+            'Los Angeles winter' => ['America/Los_Angeles', '2026-12-05T00:00:00Z', '2026-12-04 16:00:00 (America/Los_Angeles, UTC-08:00)'],
+            'New York summer' => ['America/New_York', '2026-09-05T00:00:00Z', '2026-09-04 20:00:00 (America/New_York, UTC-04:00)'],
+            'Shanghai' => ['Asia/Shanghai', '2026-09-05T00:00:00Z', '2026-09-05 08:00:00 (Asia/Shanghai, UTC+08:00)'],
+            'UTC' => ['UTC', '2026-09-05T00:00:00Z', '2026-09-05 00:00:00 (UTC, UTC+00:00)'],
+            'invalid timezone' => ['invalid/timezone', '2026-09-05T00:00:00Z', '2026-09-05 00:00:00 (UTC, UTC+00:00)'],
+        ];
+    }
+
+    public function test_countdown_keeps_utc_thresholds_but_displays_store_local_expiry(): void
+    {
+        Queue::fake();
+        CarbonImmutable::setTestNow('2026-09-01T00:00:00Z');
+        [$store] = $this->monitor();
+        $endsAt = '2026-09-09T00:00:00Z';
+        Http::fake(["https://{$store->shopify_domain}/*" => Http::response($this->detail('FALL50', 'ACTIVE', $endsAt, '2026-09-01T00:00:00Z'))]);
+        $service = app(ShopifyDiscountMonitorService::class);
+        $this->assertSame(0, $service->scanStore($store)['alerts']);
+        CarbonImmutable::setTestNow('2026-09-02T00:01:00Z');
+        $this->assertSame(1, $service->scanStore($store)['alerts']);
+        $this->assertSame(0, $service->scanStore($store)['alerts']);
+        $alert = StoreAlert::query()->sole();
+        $this->assertStringContainsString('到期时间：2026-09-08 17:00:00 (America/Los_Angeles, UTC-07:00)', $alert->message);
+        $this->assertSame('2026-09-09T00:00:00+00:00', $alert->context['ends_at']);
+        $this->assertSame('7d', $alert->context['threshold']);
+    }
+
+    public function test_timezone_only_change_does_not_expand_activation_alert_rules(): void
+    {
+        Queue::fake();
+        [$store] = $this->monitor();
+        Http::fakeSequence("https://{$store->shopify_domain}/*")
+            ->push($this->detail('FALL50', 'EXPIRED', null, '2026-09-01T00:00:00Z'))
+            ->push($this->detail('FALL50', 'ACTIVE', null, '2026-09-04T00:00:00Z'));
+        $service = app(ShopifyDiscountMonitorService::class);
+        $this->assertSame(0, $service->scanStore($store)['alerts']);
+        $this->assertSame(0, $service->scanStore($store)['alerts']);
+        Queue::assertNotPushed(DeliverStoreAlertNotificationJob::class);
+        $this->assertSame('无', StoreDateTime::format(null, $store));
     }
 
     /** @return array{Store, ShopifyDiscountMonitor} */

@@ -89,6 +89,7 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'appName' => config('app.name'),
+            'serverTime' => now()->utc()->toIso8601String(),
             'auth' => [
                 'user' => $user ? [
                     'id' => $user->id,

@@ -53,6 +53,8 @@ class DiscountManagementTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Discounts/Index')
                 ->where('store.id', $store->id)
+                ->where('store.timezone', 'America/Los_Angeles')
+                ->where('currentStore.timezone', 'America/Los_Angeles')
                 ->where('products.0.id', '101')
                 ->where('discounts.data.0.title', 'X1 九折')
                 ->where('discounts.data.0.product_ids.0', '101')
