@@ -37,7 +37,14 @@ export const menu: MenuItem[] = [
     {
         name: '应用中心',
         icon: 'app-center',
+        // children 是平台内置应用的固定入口，dynamicChildren 追加当前店铺已安装的应用。
+        // 两者按最终路由去重，所以内置应用装好之后不会出现两条。
+        // 保留固定入口的原因：应用中心的动态条目要求 app_installations 有 active 记录，
+        // 店铺还没装 App 时就没有任何入口，用户也就无从进去完成连接。
         dynamicChildren: 'applications',
+        children: [
+            { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
+        ],
     },
     {
         name: '数据分析',
@@ -87,7 +94,7 @@ export const menu: MenuItem[] = [
         icon: 'settings',
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
-            // Instagram Feed 是应用中心的应用，入口由 applicationNavigation 动态注入，不在这里重复挂。
+            // Instagram Feed 属于应用中心，入口挂在上面的「应用中心」分组，这里不重复挂。
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
             { name: '业务凭证', route: '/store-settings/credentials', icon: 'settings', permission: 'store.view' },
