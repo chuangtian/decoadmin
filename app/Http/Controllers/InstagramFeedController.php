@@ -23,7 +23,7 @@ use Inertia\Response;
 use Throwable;
 
 /**
- * Instagram 内容的 DecoAdmin 后台。
+ * Instagram Feed 的 DecoAdmin 后台。
  *
  * 路由已经带了 organization.access / store.access / permission 中间件，这里再做一次
  * 控制器内校验（双保险），并把所有业务动作转交给服务层。

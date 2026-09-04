@@ -92,7 +92,7 @@ class ApplicationCenterNavigationService
                 'permission' => 'student_discount.claim.read',
             ],
             str_starts_with($handle, 'deco-instagram-feed') => [
-                'name' => 'Instagram 内容',
+                'name' => 'Instagram Feed',
                 'route' => $base.'/instagram-feed',
                 'permission' => 'instagram_feed.view',
             ],

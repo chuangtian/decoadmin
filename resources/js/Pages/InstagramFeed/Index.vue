@@ -132,13 +132,13 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
 </script>
 
 <template>
-    <Head title="Instagram 内容" />
-    <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: 'Instagram 内容' }]">
+    <Head title="Instagram Feed" />
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: 'Instagram Feed' }]">
         <div class="mx-auto max-w-7xl space-y-7">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <p class="text-sm font-semibold text-emerald-700">{{ organization.name }} · {{ store.name }}</p>
-                    <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Instagram 内容</h1>
+                    <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Instagram Feed</h1>
                     <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
                         连接 Instagram 专业账号，把视频与图片同步到 Cloudflare R2 取得永久地址，按展示组编排后发布到店铺前台。
                     </p>
@@ -158,7 +158,7 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
             </div>
 
             <div v-if="!appSessionReady" class="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-sm text-sky-800">
-                还没有建立 Instagram 内容 App 的 Shopify 会话。请先在 Shopify 后台打开一次该应用完成初始化，之后才能发布到店铺前台。
+                还没有建立 Instagram Feed App 的 Shopify 会话。请先在 Shopify 后台打开一次该应用完成初始化，之后才能发布到店铺前台。
             </div>
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6">

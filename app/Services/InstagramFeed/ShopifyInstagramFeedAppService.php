@@ -9,6 +9,7 @@ use App\Models\Store;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Shopify Admin 里打开 instagram-feed App 时的入口服务。
@@ -45,7 +46,7 @@ class ShopifyInstagramFeedAppService
         $store = $this->activeStore($shop);
         if (! $user->canAccessStore($store)
             || ! $user->hasPermission('instagram_feed.view', $store->organization, $store)) {
-            throw new InstagramFeedException('STORE_ACCESS_DENIED', '无权访问该店铺的 Instagram 内容后台。', 403);
+            throw new InstagramFeedException('STORE_ACCESS_DENIED', '无权访问该店铺的 Instagram Feed 后台。', 403);
         }
 
         return $store;
@@ -81,7 +82,7 @@ class ShopifyInstagramFeedAppService
         if (! is_string($installationId) || $installationId === '') {
             throw new InstagramFeedException(
                 'SHOPIFY_APP_NOT_INSTALLED',
-                '未找到当前 Instagram 内容 App 的安装记录。',
+                '未找到当前 Instagram Feed App 的安装记录。',
                 409,
             );
         }
@@ -93,32 +94,44 @@ class ShopifyInstagramFeedAppService
             ->all();
         $this->registry->assertRequiredScopes($scopes);
 
-        $installation = InstagramFeedInstallation::query()->firstOrNew(['store_id' => $store->id]);
-        $installation->fill([
-            'organization_id' => $store->organization_id,
-            'store_id' => $store->id,
-            'environment' => $this->registry->environment(),
-            'app_installation_id' => $installationId,
-            'access_token_encrypted' => $token['access_token'],
-            'granted_scopes' => $scopes,
-            'installed_at' => $installation->installed_at ?? now(),
-            'last_verified_at' => now(),
-        ]);
-        $installation->save();
-
-        AuditLog::query()->create([
-            'organization_id' => $store->organization_id,
-            'store_id' => $store->id,
-            'action' => 'instagram_feed_shopify_app_bootstrapped',
-            'subject_type' => Store::class,
-            'subject_id' => $store->id,
-            'metadata' => [
-                'scope' => 'store',
+        DB::transaction(function () use ($store, $installationId, $scopes, $token): void {
+            $installation = InstagramFeedInstallation::query()->firstOrNew(['store_id' => $store->id]);
+            $installation->fill([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
                 'environment' => $this->registry->environment(),
                 'app_installation_id' => $installationId,
+                'access_token_encrypted' => $token['access_token'],
                 'granted_scopes' => $scopes,
-            ],
-        ]);
+                'installed_at' => $installation->installed_at ?? now(),
+                'last_verified_at' => now(),
+            ]);
+            $installation->save();
+
+            // 应用中心的列表、侧边栏条目和配置卡片都以 app_installations 为准，
+            // 这里必须一起写，否则店铺装了 App 也不会出现在应用中心。
+            $this->registry->synchronizeInstallation(
+                $store,
+                'active',
+                $scopes,
+                'instagram_feed_bootstrap',
+                $installationId,
+            );
+
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'action' => 'instagram_feed_shopify_app_bootstrapped',
+                'subject_type' => Store::class,
+                'subject_id' => $store->id,
+                'metadata' => [
+                    'scope' => 'store',
+                    'environment' => $this->registry->environment(),
+                    'app_installation_id' => $installationId,
+                    'granted_scopes' => $scopes,
+                ],
+            ]);
+        });
 
         return ['app_installation_id' => $installationId, 'granted_scopes' => $scopes];
     }

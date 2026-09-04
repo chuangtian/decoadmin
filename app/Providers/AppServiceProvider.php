@@ -16,6 +16,7 @@ use App\Policies\UserPolicy;
 use App\Policies\WebhookEventPolicy;
 use App\Services\AppCenter\AppConfigurationCatalog;
 use App\Services\AppCenter\GenericAppConfigurationProvider;
+use App\Services\AppCenter\InstagramFeedAppConfigurationProvider;
 use App\Services\AppCenter\PersonalizationAppConfigurationProvider;
 use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
@@ -49,9 +50,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
+        // 顺序有意义：AppConfigurationCatalog 取第一个 supports() 命中的 provider，
+        // GenericAppConfigurationProvider 无条件返回 true，必须永远排最后。
         $this->app->tag([
             StudentDiscountAppConfigurationProvider::class,
             PersonalizationAppConfigurationProvider::class,
+            InstagramFeedAppConfigurationProvider::class,
             GenericAppConfigurationProvider::class,
         ], 'app-center.configuration-providers');
         $this->app->singleton(AppConfigurationCatalog::class, fn ($app) => new AppConfigurationCatalog(
