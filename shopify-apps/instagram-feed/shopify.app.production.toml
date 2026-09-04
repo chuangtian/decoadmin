@@ -1,14 +1,20 @@
-# 生产环境是 Dev Dashboard 里独立的 Shopify App。
-# 该 App 尚未创建，所以 client_id 留空；创建后用 `npm run config:link:production` 写入。
-# 留空而不是预填，是为了避免误把生产配置指向其他环境的 App。
-client_id = ""
+# 生产环境使用 Dev Dashboard 里的 Shopify App「Instagram Feed (Deco)」。
+# local 与 test 配置已移除：Cloudflare 隧道不再维护，测试环境也不再单独占用一个 App，
+# 这个 App 现在只服务生产（https://admin.decomkt.com）。
+#
+# 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以不要再为它
+# 添加指向其他域名的配置文件，那会在发布时把生产地址覆盖掉。
+#
+# 不要用 `shopify app config link` 覆盖本文件：它会从 Dashboard 拉取配置，
+# 把下面的 scopes 和 webhook 订阅冲成 Dashboard 的默认值。
+# 配置一律以本文件为准，改完用 `npm run deploy:production` 推送。
+client_id = "d3446448682d2950aa75cea4a399d50f"
 name = "Instagram Feed (Deco)"
 handle = "deco-instagram-feed"
 application_url = "https://admin.decomkt.com/shopify-app/instagram-feed"
 embedded = true
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = false
 
 [webhooks]

@@ -13,28 +13,23 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const expectedScopes = 'read_products';
 
-// 每套配置对应的后端 origin。local 的隧道地址会变，改的时候三处（application_url、
-// webhook uri、redirect_urls）加上 Laravel 的 config/instagram_feed.php 必须同步。
+// 只保留生产一套环境：Cloudflare 隧道已废弃，测试环境不再单独占用 Shopify App。
+// 改动后端 origin 时，三处（application_url、webhook uri、redirect_urls）加上
+// Laravel 的 config/instagram_feed.php 必须同步。
+const productionOrigin = 'https://admin.decomkt.com';
 const configurations = new Map([
-  // 当前选中配置指向 test，避免漏写 --config 时把配置推到失效的隧道地址。
-  ['shopify.app.toml', 'https://testadmin.decomkt.com'],
-  // local 已停用，保留隧道地址仅为记录历史配置。
-  ['shopify.app.local.toml', 'https://wendy-interim-classic-segment.trycloudflare.com'],
-  ['shopify.app.test.toml', 'https://testadmin.decomkt.com'],
-  ['shopify.app.production.toml', 'https://admin.decomkt.com'],
+  // 当前选中配置与 production 保持一致，避免漏写 --config 时推错目标。
+  ['shopify.app.toml', productionOrigin],
+  ['shopify.app.production.toml', productionOrigin],
 ]);
 
-// local 与 test 共用同一个 Shopify App（隧道已废弃，local 不再单独维护），
-// 当前选中配置也指向同一个 App，这三份必须声明同一个 client_id。
-const requiresSharedClientId = new Set([
-  'shopify.app.toml',
-  'shopify.app.local.toml',
-  'shopify.app.test.toml',
-]);
+// 生产 App 的 client_id。两份配置指向同一个 App，必须都声明它。
+// 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以不要再新增
+// 指向其他域名的配置文件：发布时会把生产地址覆盖掉。
+const productionClientId = 'd3446448682d2950aa75cea4a399d50f';
 
-// local 与 test 共用的 client_id。生产必须是 Dev Dashboard 里另一个独立 App，
-// 绝不能等于这个值 —— 那意味着生产被指向了测试用的 App。
-const sharedClientId = 'd3446448682d2950aa75cea4a399d50f';
+// 非生产域名一旦出现在配置里，说明有人把生产 App 指向了别的环境。
+const forbiddenOrigins = /trycloudflare\.com|localhost|127\.0\.0\.1|testadmin\.decomkt\.com/i;
 
 // Remix / Prisma / Node 后端的残留物。任何一个存在都说明后端又被搬回来了。
 const forbiddenPaths = [
@@ -95,28 +90,19 @@ for (const [fileName, origin] of configurations) {
   check(!/client_secret|access_token/i.test(contents), `${fileName} contains a private credential field`);
 
   const clientId = /client_id\s*=\s*"(.*)"/.exec(contents)?.[1] ?? '';
-  if (requiresSharedClientId.has(fileName)) {
-    check(clientId === sharedClientId, `${fileName} must declare the shared local/test client_id`);
-  } else {
-    // 空表示 Dev Dashboard 里还没建这个 App，创建后填入即可。
-    check(
-      clientId === '' || /^[0-9a-f]{32}$/.test(clientId),
-      `${fileName} client_id must be empty or a 32-character Shopify client id`,
-    );
-    check(clientId !== sharedClientId, `${fileName} must not point at the shared local/test app`);
-    check(!/trycloudflare\.com|localhost|127\.0\.0\.1/i.test(contents), `${fileName} contains a forbidden local URL`);
-  }
+  check(/^[0-9a-f]{32}$/.test(clientId), `${fileName} client_id must be a 32-character Shopify client id`);
+  check(clientId === productionClientId, `${fileName} must declare the production client_id`);
+  check(!forbiddenOrigins.test(contents), `${fileName} contains a forbidden non-production URL`);
 }
 
-// 除 local/test 共用的那一个之外，其余环境必须各自绑定不同的 App。
-const linkedClientIds = [...configurations.keys()]
-  .filter((fileName) => !requiresSharedClientId.has(fileName))
-  .map((fileName) => /client_id\s*=\s*"(.*)"/.exec(readFileSync(join(projectRoot, fileName), 'utf8'))?.[1] ?? '')
-  .filter(Boolean);
-check(
-  new Set(linkedClientIds).size === linkedClientIds.length,
-  'Each remaining environment must be linked to a different Shopify app',
-);
+// 已移除的环境配置不能悄悄回来：它们与生产共用同一个 App，一旦被发布就会把生产的
+// application_url 与 webhook 地址覆盖成失效地址。
+for (const removed of ['shopify.app.local.toml', 'shopify.app.test.toml']) {
+  check(
+    !existsSync(join(projectRoot, removed)),
+    `${removed} was removed on purpose: it shares the production app and would overwrite its URLs on deploy`,
+  );
+}
 
 for (const path of forbiddenPaths) {
   check(!existsSync(join(projectRoot, path)), `Backend leftover found and must not return to this project: ${path}`);
