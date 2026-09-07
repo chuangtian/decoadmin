@@ -509,9 +509,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.feishu.update');
-    Route::get('/settings/instagram-feed', [SystemSettingsController::class, 'instagramFeed'])
-        ->middleware('permission:system.settings.view')
-        ->name('system.settings.instagram-feed');
+    // Instagram / Facebook 应用凭证与 R2 存储是平台级配置，界面放在
+    // 应用中心 → Instagram Feed 的「应用配置」页签里，这里只保留写入端点。
     Route::put('/settings/instagram-feed/meta', [SystemSettingsController::class, 'updateInstagramMeta'])
         ->middleware(['permission:system.settings.update', 'throttle:20,1'])
         ->name('system.settings.instagram-meta.update');
