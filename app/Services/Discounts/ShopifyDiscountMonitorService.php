@@ -9,6 +9,7 @@ use App\Models\ShopifyDiscountSnapshot;
 use App\Models\Store;
 use App\Models\User;
 use App\Services\StoreOperationalAlertService;
+use App\Support\StoreDateTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -100,7 +101,7 @@ class ShopifyDiscountMonitorService
         $hash = $this->hash($snapshot);
 
         /** @var array{created_snapshot: bool, alert_specs: list<array<string, mixed>>, countdown_state: array<string, mixed>} $prepared */
-        $prepared = DB::transaction(function () use ($monitor, $snapshot, $hash, $now): array {
+        $prepared = DB::transaction(function () use ($store, $monitor, $snapshot, $hash, $now): array {
             $locked = ShopifyDiscountMonitor::query()->lockForUpdate()->findOrFail($monitor->id);
             if (! $locked->is_enabled) {
                 return ['created_snapshot' => false, 'alert_specs' => [], 'countdown_state' => (array) $locked->countdown_state];
@@ -123,12 +124,13 @@ class ShopifyDiscountMonitorService
                 $createdSnapshot = true;
             }
 
-            $alertSpecs = $baseline || $previous === null ? [] : $this->changeAlerts($previous, $snapshot, $hash);
+            $alertSpecs = $baseline || $previous === null ? [] : $this->changeAlerts($previous, $snapshot, $hash, $store);
             [$countdownState, $countdownAlerts] = $this->countdownAlerts(
                 (array) $locked->countdown_state,
                 $snapshot,
                 $now,
                 $baseline || ($previous !== null && ($previous['ends_at'] ?? null) !== ($snapshot['ends_at'] ?? null)),
+                $store,
             );
             $alertSpecs = [...$alertSpecs, ...$countdownAlerts];
             $locked->forceFill([
@@ -164,17 +166,17 @@ class ShopifyDiscountMonitorService
     }
 
     /** @param array<string, mixed> $previous @param array<string, mixed> $current @return list<array<string, mixed>> */
-    private function changeAlerts(array $previous, array $current, string $hash): array
+    private function changeAlerts(array $previous, array $current, string $hash, Store $store): array
     {
         $changes = [];
         if (($previous['missing'] ?? false) !== true && ($current['missing'] ?? false) === true) {
             $changes[] = '折扣对象：存在 → Shopify 中已找不到';
         }
         if (($previous['ends_at'] ?? null) === null && ($current['ends_at'] ?? null) !== null) {
-            $changes[] = '结束时间：无结束时间 → '.$this->dateLabel($current['ends_at']);
+            $changes[] = '结束时间：无结束时间 → '.$this->dateLabel($current['ends_at'], $store);
         } elseif (filled($previous['ends_at'] ?? null) && filled($current['ends_at'] ?? null)
             && CarbonImmutable::parse($current['ends_at'])->lt(CarbonImmutable::parse($previous['ends_at']))) {
-            $changes[] = '结束时间：'.$this->dateLabel($previous['ends_at']).' → '.$this->dateLabel($current['ends_at']);
+            $changes[] = '结束时间：'.$this->dateLabel($previous['ends_at'], $store).' → '.$this->dateLabel($current['ends_at'], $store);
         }
         if (($previous['title'] ?? '') !== ($current['title'] ?? '')) {
             $changes[] = '标题：'.$this->textLabel($previous['title'] ?? null).' → '.$this->textLabel($current['title'] ?? null);
@@ -200,7 +202,7 @@ class ShopifyDiscountMonitorService
     }
 
     /** @param array<string, mixed> $state @param array<string, mixed> $snapshot @return array{array<string, mixed>, list<array<string, mixed>>} */
-    private function countdownAlerts(array $state, array $snapshot, CarbonImmutable $now, bool $reset): array
+    private function countdownAlerts(array $state, array $snapshot, CarbonImmutable $now, bool $reset, Store $store): array
     {
         $endsAt = filled($snapshot['ends_at'] ?? null) ? CarbonImmutable::parse($snapshot['ends_at'])->utc() : null;
         $scheduleKey = $endsAt?->toIso8601String();
@@ -228,7 +230,7 @@ class ShopifyDiscountMonitorService
         $alerts = [];
         if ($remaining <= 0 && empty($state['expired_priority'])) {
             $state['expired_priority'] = 'sent';
-            $alerts[] = $this->countdownSpec($snapshot, 'expired', $endsAt, '重点折扣已经到期但仍在监控列表中', 'critical');
+            $alerts[] = $this->countdownSpec($snapshot, 'expired', $endsAt, '重点折扣已经到期但仍在监控列表中', 'critical', $store);
 
             return [$state, $alerts];
         }
@@ -253,20 +255,21 @@ class ShopifyDiscountMonitorService
             $endsAt,
             '重点折扣将在 '.$labels[$selectedKey].'内到期',
             $selectedKey === '24h' ? 'critical' : 'warning',
+            $store,
         );
 
         return [$state, $alerts];
     }
 
     /** @param array<string, mixed> $snapshot @return array<string, mixed> */
-    private function countdownSpec(array $snapshot, string $key, CarbonImmutable $endsAt, string $title, string $severity): array
+    private function countdownSpec(array $snapshot, string $key, CarbonImmutable $endsAt, string $title, string $severity, Store $store): array
     {
         $scheduleHash = substr(hash('sha256', $endsAt->toIso8601String()), 0, 24);
 
         return [
             'code' => "discount_expiry_{$key}_{$scheduleHash}",
             'title' => $title,
-            'message' => "Shopify 折扣 ID：{$snapshot['shopify_discount_id']}\n折扣：{$this->textLabel($snapshot['title'] ?? null)}\n折扣码：{$this->codesLabel($snapshot['codes'] ?? [])}\n到期时间：{$this->dateLabel($endsAt)}",
+            'message' => "Shopify 折扣 ID：{$snapshot['shopify_discount_id']}\n折扣：{$this->textLabel($snapshot['title'] ?? null)}\n折扣码：{$this->codesLabel($snapshot['codes'] ?? [])}\n到期时间：{$this->dateLabel($endsAt, $store)}",
             'severity' => $severity,
             'context' => ['shopify_discount_id' => $snapshot['shopify_discount_id'], 'ends_at' => $endsAt->toIso8601String(), 'threshold' => $key],
         ];
@@ -341,9 +344,9 @@ class ShopifyDiscountMonitorService
         return hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
-    private function dateLabel(mixed $value): string
+    private function dateLabel(mixed $value, Store $store): string
     {
-        return filled($value) ? CarbonImmutable::parse($value)->utc()->format('Y-m-d H:i:s').' UTC' : '无';
+        return StoreDateTime::format($value, $store);
     }
 
     private function textLabel(mixed $value): string

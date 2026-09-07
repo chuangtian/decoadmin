@@ -584,15 +584,21 @@ class NaturalTrafficDashboardService
             && $this->hasAny($row['fields'], ['红人title', '红人']))
             ->map(fn (array $row): array => $this->kolRow($row));
         $viral = $this->sortRowsByDate($viral)->all();
+        $detailColumns = [
+            'influencer', 'platform', 'type', 'fee', 'date', 'average_views', 'views', 'likes', 'comments',
+            ...($clicksAvailable ? ['clicks'] : []),
+            'engagement_rate', 'link',
+        ];
 
         return [
             'schema' => 'natural-traffic-influencer-operations-v1',
             'title' => '红人运营',
-            'description' => '合作表现、红人资源和内容效率；不包含 AI 推荐与增长洞察。',
+            'description' => '合作表现与内容效率；不包含 AI 推荐与增长洞察。',
             'tabs' => [
                 ['key' => 'tracking', 'label' => '合作数据明细'],
-                ['key' => 'resources', 'label' => '资源库'],
             ],
+            'detail_columns' => $detailColumns,
+            'viral_columns' => array_values(array_diff($detailColumns, ['platform', 'type'])),
             'filters' => $period,
             'source' => $this->sourceSummary($source),
             'kpis' => collect([
@@ -617,18 +623,6 @@ class NaturalTrafficDashboardService
             'model_summary' => $yearly,
             'viral_content' => $viral,
             'details' => $current->take(1000)->values()->all(),
-            'resources' => $main->groupBy(fn (array $row): string => $row['influencer'].'|'.$row['platform'])
-                ->map(function (Collection $rows): array {
-                    $latest = $rows->sortByDesc('date')->first();
-
-                    return [
-                        'influencer' => $latest['influencer'], 'platform' => $latest['platform'],
-                        'type' => $latest['type'], 'average_views' => round($rows->avg('average_views') ?? 0, 2),
-                        'date' => $latest['date'],
-                        'fee' => $latest['fee'], 'engagement_rate' => round($rows->avg('engagement_rate') ?? 0, 2),
-                        'views' => round($rows->sum('views'), 2), 'collaborations' => $rows->count(), 'link' => $latest['link'],
-                    ];
-                })->sortByDesc('date')->values()->all(),
             'columns' => $this->columns($mainRaw->all()),
         ];
     }

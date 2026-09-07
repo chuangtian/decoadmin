@@ -1,19 +1,7 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import type { SharedProps } from '../types';
-
-const fallbackTimezone = 'UTC';
-
-const safeTimezone = (timezone?: string | null): string => {
-    if (!timezone) return fallbackTimezone;
-
-    try {
-        new Intl.DateTimeFormat('en', { timeZone: timezone }).format();
-        return timezone;
-    } catch {
-        return fallbackTimezone;
-    }
-};
+import { safeTimezone, serverTimeAfter } from '../utils/storeDateTime';
 
 const parseDate = (value: string | Date | null | undefined): Date | null => {
     if (!value) return null;
@@ -59,6 +47,8 @@ export const formatDateOnly = (value: string | null | undefined): string => {
 export const useStoreDateTime = () => {
     const page = usePage<SharedProps>();
     const timezone = computed(() => safeTimezone(page.props.currentStore?.timezone));
+    const clockAnchor = computed(() => ({ serverTime: page.props.serverTime, receivedAt: performance.now() }));
+    const now = () => serverTimeAfter(clockAnchor.value.serverTime, performance.now() - clockAnchor.value.receivedAt);
 
     const formatDateTime = (value: string | Date | null | undefined, overrideTimezone?: string | null): string =>
         formatDateTimeInTimezone(value, safeTimezone(overrideTimezone ?? timezone.value));
@@ -85,5 +75,5 @@ export const useStoreDateTime = () => {
         return formatDateTime(date);
     };
 
-    return { timezone, formatDateTime, formatOrderDateTime };
+    return { timezone, now, formatDateTime, formatOrderDateTime };
 };

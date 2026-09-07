@@ -1,29 +1,14 @@
 <script setup lang="ts">
-import { usePage } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { SharedProps } from '../../types';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useStoreDateTime } from '../../composables/useStoreDateTime';
+import { formatStoreClock } from '../../utils/storeDateTime';
 
 const currentTime = ref('');
-const page = usePage<SharedProps>();
-const timezone = computed(() => page.props.currentStore?.timezone || 'UTC');
+const { timezone, now } = useStoreDateTime();
 let timer: number | undefined;
 
 const updateTime = () => {
-    const formatter = new Intl.DateTimeFormat('zh-CN', {
-        timeZone: timezone.value,
-        month: 'numeric',
-        day: 'numeric',
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-    });
-    const parts = Object.fromEntries(
-        formatter.formatToParts(new Date()).map((part) => [part.type, part.value]),
-    );
-
-    currentTime.value = `${parts.month}月${parts.day}日 ${parts.weekday} ${parts.hour}:${parts.minute}:${parts.second}`;
+    currentTime.value = formatStoreClock(now(), timezone.value);
 };
 
 watch(timezone, updateTime);
@@ -39,7 +24,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <time class="whitespace-nowrap text-sm font-semibold tabular-nums text-slate-800" :aria-label="`${timezone} 当前时间`">
-        {{ currentTime }}
-    </time>
+    <div class="text-right" :title="`与当前 Shopify 店铺时区一致：${timezone}`">
+        <time class="block whitespace-nowrap text-sm font-semibold tabular-nums text-slate-800" :aria-label="`${timezone} 当前时间`">{{ currentTime }}</time>
+        <span class="mt-0.5 block whitespace-nowrap text-[11px] text-slate-500">店铺时间 · {{ timezone }}</span>
+    </div>
 </template>

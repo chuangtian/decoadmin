@@ -219,7 +219,8 @@ class NaturalTrafficPagesTest extends TestCase
             ->where('dashboard.kpis.2.value', 20000)
             ->where('dashboard.kpis.4.value', 5.3)
             ->has('dashboard.scatter', 1)
-            ->has('dashboard.tabs', 2)
+            ->where('dashboard.tabs', [['key' => 'tracking', 'label' => '合作数据明细']])
+            ->missing('dashboard.resources')
             ->missing('dashboard.ai'));
 
         $this->archiveRecord($organization, $store, 'natural-traffic:sequence', '序列表现', 'edm-current', [
@@ -327,10 +328,7 @@ class NaturalTrafficPagesTest extends TestCase
                 ->where('dashboard.details.1.source_fields.发布日期', '2026-08-17')
                 ->where('dashboard.viral_content.0.influencer', 'viral_newer')
                 ->where('dashboard.viral_content.1.influencer', 'viral_older')
-                ->where('dashboard.resources.0.influencer', 'newer_creator')
-                ->where('dashboard.resources.0.date', '2026-08-18')
-                ->where('dashboard.resources.1.influencer', 'older_creator')
-                ->where('dashboard.resources.1.date', '2026-08-17'));
+                ->missing('dashboard.resources'));
     }
 
     public function test_non_ai_dashboards_keep_source_semantics_for_outliers_links_and_missing_fields(): void
@@ -366,7 +364,46 @@ class NaturalTrafficPagesTest extends TestCase
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->has('dashboard.kpis', 5)
             ->where('dashboard.details.0.link', 'https://example.test/post')
-            ->where('dashboard.resources.0.link', 'https://example.test/post'));
+            ->missing('dashboard.resources'));
+    }
+
+    public function test_influencer_simplified_tables_keep_source_data_and_separate_viral_columns(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $fields = [
+            '发布日期' => '2026-08-18', '红人title' => 'creator', '平台' => 'IG',
+            '合作类型' => '红人', '浏览' => 20000, '互动率' => 0.05, '点击' => 12,
+            '合作链接' => 'https://example.test/post',
+            '佣金链接' => 'https://example.test/commission', '文案' => '保留的原始文案', '转化率' => 0.02,
+        ];
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'kol-trimmed', $fields);
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人爆款', 'viral-trimmed', $fields);
+
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->get(route('natural-traffic.influencer-operations', ['date_from' => '2026-08-18', 'date_to' => '2026-08-18']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.tabs', [['key' => 'tracking', 'label' => '合作数据明细']])
+            ->missing('dashboard.resources')
+            ->where('dashboard.detail_columns', [
+                'influencer', 'platform', 'type', 'fee', 'date', 'average_views', 'views', 'likes',
+                'comments', 'clicks', 'engagement_rate', 'link',
+            ])
+            ->where('dashboard.viral_columns', [
+                'influencer', 'fee', 'date', 'average_views', 'views', 'likes',
+                'comments', 'clicks', 'engagement_rate', 'link',
+            ])
+            ->where('dashboard.details.0.platform', 'IG')
+            ->where('dashboard.details.0.type', '红人')
+            ->where('dashboard.details.0.link', 'https://example.test/post')
+            ->has('dashboard.viral_content', 1));
+
+        $this->assertSame($fields, FeishuBitableRecord::query()->where('source_record_id', 'kol-trimmed')->sole()->fields_encrypted);
+        $this->assertSame($fields, FeishuBitableRecord::query()->where('source_record_id', 'viral-trimmed')->sole()->fields_encrypted);
+        $view = file_get_contents(resource_path('js/Pages/NaturalTraffic/InfluencerOperations.vue'));
+        foreach (['资源库', '筛选期完整源字段', '佣金链接', '转化率', '文案'] as $removed) {
+            $this->assertStringNotContainsString($removed, $view);
+        }
+        $this->assertStringContainsString(':columns="dashboard.viral_columns"', $view);
     }
 
     public function test_brand_media_content_details_filter_paginate_stably_and_remain_store_scoped(): void
