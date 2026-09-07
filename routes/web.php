@@ -321,6 +321,9 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
             ->middleware(['permission:sync.run', 'throttle:6,1'])
             ->name("natural-traffic.{$naturalTrafficChannel}.refresh");
     }
+    Route::put('/natural-traffic/influencer-operations/records/state', [NaturalTrafficController::class, 'updateInfluencerRecordState'])
+        ->middleware(['permission:reports.manage', 'throttle:60,1'])
+        ->name('natural-traffic.influencer-operations.records.state');
     Route::post('/natural-traffic/brand-media/import', [NaturalTrafficController::class, 'importBrandMedia'])
         ->middleware(['permission:sync.run', 'throttle:12,1'])
         ->name('natural-traffic.brand-media.import');

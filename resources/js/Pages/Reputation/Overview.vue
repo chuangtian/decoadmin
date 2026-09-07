@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import NaturalTrafficTrendChart from '../../Components/NaturalTraffic/NaturalTrafficTrendChart.vue';
 import Pagination from '../../Components/Navigation/Pagination.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -95,9 +96,9 @@ const sourceReady = computed(() => props.dashboard.source_status.has_configurati
 const socialWeeklyTrends = computed<WeeklyTrend[]>(() => {
     const weeks = new Map<string, WeeklyTrend>();
     props.dashboard.trends.forEach((row) => {
-        const date = new Date(`${row.date}T00:00:00`);
-        const weekday = (date.getDay() + 6) % 7;
-        date.setDate(date.getDate() - weekday);
+        const date = new Date(`${row.date}T00:00:00Z`);
+        const weekday = (date.getUTCDay() + 6) % 7;
+        date.setUTCDate(date.getUTCDate() - weekday);
         const week = date.toISOString().slice(0, 10);
         const current = weeks.get(week) ?? { week, label: week.slice(5), posts: 0, views: 0, comments: 0, upvotes: 0, likes: 0, replies: 0, reposts: 0, shares: 0, interactions: 0 };
         if (filters.value.tab === 'reddit') {
@@ -116,7 +117,7 @@ const socialWeeklyTrends = computed<WeeklyTrend[]>(() => {
         }
         weeks.set(week, current);
     });
-    return [...weeks.values()].slice(-12);
+    return [...weeks.values()].sort((a, b) => a.week.localeCompare(b.week)).slice(-12);
 });
 const socialMetricMax = computed(() => Math.max(1, ...socialWeeklyTrends.value.flatMap((row) => (
     filters.value.tab === 'reddit'
@@ -124,6 +125,8 @@ const socialMetricMax = computed(() => Math.max(1, ...socialWeeklyTrends.value.f
         : [row.likes ?? 0, row.replies ?? 0, row.interactions]
 ))));
 const redditTopicAverages = computed(() => props.dashboard.reddit_topics?.topic_averages.filter((row) => row.posts > 0) ?? []);
+const activeTopicWeek = ref<RedditTopicWeek | null>(null);
+watch(() => props.dashboard, () => { activeTopicWeek.value = null; });
 const redditTopicWeeks = computed(() => props.dashboard.reddit_topics?.weekly_trends.slice(-12) ?? []);
 const redditTopicNames = computed(() => Object.keys(redditTopicColors).filter((topic) => (
     redditTopicWeeks.value.some((week) => week.topic_distribution.some((item) => item.topic === topic && item.count > 0))
@@ -385,20 +388,30 @@ onBeforeUnmount(stopPolling);
                 <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                     <div><h2 class="text-lg font-black text-slate-950">{{ filters.tab === 'reddit' ? 'Reddit' : 'Threads' }} 趋势分析</h2><p class="mt-1 text-sm text-slate-500">按周汇总平台原始互动指标。</p></div>
                     <div class="mt-6 grid gap-4" :class="filters.tab === 'reddit' ? 'lg:grid-cols-2' : 'grid-cols-1'">
-                        <article class="min-w-0 rounded-2xl border border-slate-200 p-4"><h3 class="font-bold text-slate-900">发帖及互动趋势（周度）</h3><div class="mt-2 flex flex-wrap gap-4 text-xs text-slate-500"><template v-if="filters.tab === 'reddit'"><span class="text-indigo-600">● 曝光</span><span class="text-emerald-600">● 评论</span><span class="text-amber-600">● Upvotes</span></template><template v-else><span class="text-violet-600">● 点赞</span><span class="text-emerald-600">● 回复</span><span class="text-amber-600">● 总互动</span></template></div><svg v-if="socialWeeklyTrends.length" class="mt-3 h-64 w-full" viewBox="0 0 720 210" role="img" aria-label="周度互动趋势"><line v-for="y in [42,86,130,174]" :key="y" x1="44" x2="696" :y1="y" :y2="y" stroke="#e2e8f0" stroke-width="1" /><template v-if="filters.tab === 'reddit'"><polyline :points="trendPoints('views')" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('comments')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('upvotes')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><template v-else><polyline :points="trendPoints('likes')" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('replies')" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><polyline :points="trendPoints('interactions')" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /></template><text v-for="(row, index) in socialWeeklyTrends" :key="`x-${row.week}`" :x="socialWeeklyTrends.length === 1 ? 360 : 44 + (index / (socialWeeklyTrends.length - 1)) * 632" y="202" text-anchor="middle" fill="#64748b" font-size="11">{{ row.label || row.week }}</text></svg><div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">暂无周度趋势数据。</div></article>
+                        <article class="min-w-0 rounded-2xl border border-slate-200 p-4">
+                            <h3 class="mb-3 font-bold text-slate-900">发帖及互动趋势（周度）</h3>
+                            <NaturalTrafficTrendChart :points="socialWeeklyTrends" x-key="week" interactive value-format="integer" :height="300" :series="filters.tab === 'reddit' ? [{key:'views',label:'曝光',color:'#4f46e5'},{key:'comments',label:'评论',color:'#10b981'},{key:'upvotes',label:'Upvotes',color:'#f59e0b'}] : [{key:'likes',label:'点赞',color:'#7c3aed'},{key:'replies',label:'回复',color:'#10b981'},{key:'interactions',label:'总互动',color:'#f59e0b'}]" />
+                        </article>
 
                         <article v-if="filters.tab === 'reddit'" class="min-w-0 rounded-2xl border border-slate-200 p-4">
                             <h3 class="font-bold text-slate-900">主题分布趋势（周度）</h3>
                             <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500"><span v-for="topic in redditTopicNames" :key="topic" class="inline-flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-sm" :style="{ backgroundColor: redditTopicColors[topic] }" />{{ topic }}</span></div>
+                            <div class="relative" @mouseleave="activeTopicWeek = null">
                             <svg v-if="redditTopicWeeks.some((week) => week.posts > 0)" class="mt-3 h-64 w-full" viewBox="0 0 688 210" role="img" aria-label="Reddit 主题分布趋势">
                                 <line v-for="percent in [0,25,50,75,100]" :key="percent" x1="38" x2="650" :y1="174 - percent * 1.32" :y2="174 - percent * 1.32" stroke="#e2e8f0" stroke-width="1" />
                                 <text v-for="percent in [0,25,50,75,100]" :key="`label-${percent}`" x="32" :y="178 - percent * 1.32" text-anchor="end" fill="#94a3b8" font-size="10">{{ percent }}%</text>
                                 <template v-for="(week, weekIndex) in redditTopicWeeks" :key="week.week">
                                     <rect v-for="(topic, topicIndex) in redditTopicNames" :key="`${week.week}-${topic}`" :x="topicWeekX(weekIndex) - 14" :y="174 - (topicStackBefore(week, topicIndex) + topicPercent(week, topic)) * 1.32" width="28" :height="topicPercent(week, topic) * 1.32" :fill="redditTopicColors[topic]" rx="2"><title>{{ week.label }} · {{ topic }}：{{ topicPercent(week, topic).toFixed(1) }}%</title></rect>
+                                    <rect :x="topicWeekX(weekIndex) - 20" y="42" width="40" height="132" fill="transparent" tabindex="0" role="button" :aria-label="`${week.label}，${week.posts} 篇帖子`" @mouseenter="activeTopicWeek = week" @focus="activeTopicWeek = week" @blur="activeTopicWeek = null" @click="activeTopicWeek = week" @keydown.esc="activeTopicWeek = null" />
                                     <text :x="topicWeekX(weekIndex)" y="202" text-anchor="middle" fill="#64748b" font-size="10">{{ week.label.split(' - ')[0] }}</text>
                                 </template>
                             </svg>
                             <div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">当前期间暂无可分类的 Reddit 帖子。</div>
+                            <div v-if="activeTopicWeek" role="tooltip" class="pointer-events-none absolute top-0 left-1/2 z-10 w-64 max-w-full -translate-x-1/2 rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-lg">
+                                <p class="mb-2 font-bold">{{ activeTopicWeek.label || activeTopicWeek.week }} · {{ activeTopicWeek.posts }} 篇帖子</p>
+                                <div v-for="item in activeTopicWeek.topic_distribution" :key="item.topic" class="mt-1 flex justify-between gap-2"><span>{{ item.topic }}</span><strong>{{ item.count }} · {{ item.percent.toFixed(1) }}%</strong></div>
+                            </div>
+                            </div>
                         </article>
                     </div>
                 </section>

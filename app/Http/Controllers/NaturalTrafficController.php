@@ -97,10 +97,51 @@ class NaturalTrafficController extends Controller
             ])),
             'configured' => $trafficSync->hasConfiguration($store, $channel),
             'canSync' => $request->user()?->hasPermission('sync.run', $organization, $store) ?? false,
-            ...($channel === 'brand-media' ? [
+            ...(in_array($channel, ['brand-media', 'influencer-operations'], true) ? [
                 'canManage' => $request->user()?->hasPermission('reports.manage', $organization, $store) ?? false,
             ] : []),
         ]);
+    }
+
+    public function updateInfluencerRecordState(Request $request, CurrentOrganization $currentOrganization, CurrentStore $currentStore): RedirectResponse
+    {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $data = $request->validate([
+            'source_table_key' => ['required', 'string', 'max:191'],
+            'source_record_id' => ['required', 'string', 'max:191'],
+            'status' => ['required', 'in:visible,hidden,deleted'],
+        ]);
+        $exists = \App\Models\FeishuBitableRecord::query()
+            ->where('organization_id', $organization->id)->where('store_id', $store->id)
+            ->where('source_record_id', $data['source_record_id'])
+            ->whereHas('table', fn ($query) => $query->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)->where('source_section', 'natural-traffic:kol')
+                ->where('source_table_id', $data['source_table_key']))->exists();
+        abort_unless($exists, 404);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($data, $store, $request): void {
+            $state = \App\Models\InfluencerRecordState::query()->firstOrNew([
+                'organization_id' => $store->organization_id, 'store_id' => $store->id,
+                'source_table_key' => $data['source_table_key'], 'source_record_id' => $data['source_record_id'],
+            ]);
+            $before = $state->status ?? 'visible';
+            $state->status = $data['status'];
+            $state->save();
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id, 'store_id' => $store->id,
+                'user_id' => $request->user()->id, 'action' => 'influencer_record_state_updated',
+                'subject_type' => $state::class, 'subject_id' => $state->id,
+                'metadata' => ['scope' => 'store', 'before' => $before, 'after' => $state->status],
+            ]);
+        });
+
+        return back()->with('success', match ($data['status']) {
+            'hidden' => '已隐藏，不再计入统计和对比。',
+            'deleted' => '已移入回收站，不再计入统计和对比。',
+            default => '已恢复，重新计入统计和对比。',
+        });
     }
 
     public function updateBrandMediaPostVisibility(

@@ -995,6 +995,39 @@ class NaturalTrafficPagesTest extends TestCase
         $this->assertGreaterThan($version, app(SeoAnalyticsCacheVersionService::class)->current($store->id));
     }
 
+    public function test_influencer_state_changes_are_store_scoped_and_preserve_source_records(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $fields = ['发布日期' => '2026-08-18', '红人title' => 'creator', '浏览' => 20000];
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'state-record', $fields);
+        $table = FeishuBitableTable::query()->where('store_id', $store->id)->sole();
+        $payload = ['source_table_key' => $table->source_table_id, 'source_record_id' => 'state-record'];
+        foreach (['hidden', 'deleted', 'visible'] as $status) {
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->put(route('natural-traffic.influencer-operations.records.state'), [...$payload, 'status' => $status])
+                ->assertRedirect();
+            $this->assertDatabaseHas('influencer_record_states', [...$payload, 'store_id' => $store->id,
+                'organization_id' => $organization->id, 'status' => $status]);
+        }
+        $this->assertSame($fields, FeishuBitableRecord::query()->where('source_record_id', 'state-record')->sole()->fields_encrypted);
+        $other = $organization->stores()->create(['name' => 'Other', 'shopify_domain' => 'other-state.myshopify.com', 'status' => 'active']);
+        $other->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $this->withSession($this->contextSession($organization, $other))
+            ->put(route('natural-traffic.influencer-operations.records.state'), [...$payload, 'status' => 'hidden'])
+            ->assertNotFound();
+        $this->assertDatabaseCount('influencer_record_states', 1);
+    }
+
+    public function test_influencer_state_changes_require_management_permission(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->put(route('natural-traffic.influencer-operations.records.state'), [
+                'source_table_key' => 'table', 'source_record_id' => 'record', 'status' => 'hidden',
+            ])->assertForbidden();
+        $this->assertDatabaseCount('influencer_record_states', 0);
+    }
+
     /** @return array<string, string> */
     private function pages(): array
     {

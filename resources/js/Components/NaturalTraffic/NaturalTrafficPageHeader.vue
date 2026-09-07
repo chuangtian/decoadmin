@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
     selectValue?: string;
     selectOptions?: string[];
     compact?: boolean;
+    largeFilters?: boolean;
 }>(), {
     accent: 'blue',
     selectLabel: '',
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
     selectValue: '',
     selectOptions: () => [],
     compact: false,
+    largeFilters: false,
 });
 
 const emit = defineEmits<{ tab: [key: string] }>();
@@ -40,6 +42,11 @@ const accentClasses = {
     emerald: { dot: 'bg-emerald-500', text: 'text-emerald-700', tab: 'border-emerald-500 text-emerald-700 bg-emerald-50/70' },
     amber: { dot: 'bg-amber-500', text: 'text-amber-700', tab: 'border-amber-500 text-amber-700 bg-amber-50/70' },
 };
+
+function openDatePicker(event: MouseEvent): void {
+    if (!props.largeFilters) return;
+    try { (event.target as HTMLInputElement).showPicker?.(); } catch { /* Native input remains usable. */ }
+}
 
 function applyFilters(): void {
     const query: Record<string, string> = {
@@ -98,12 +105,12 @@ function formatDateTime(value: string | null): string {
             </div>
         </div>
 
-        <form class="grid gap-3 border-t border-slate-100 bg-slate-50/70 sm:grid-cols-2 lg:grid-cols-[170px_170px_190px_minmax(0,180px)_auto]" :class="compact ? 'px-5 py-3 lg:px-6' : 'px-6 py-4 lg:px-8'" @submit.prevent="applyFilters">
-            <label class="text-xs font-bold text-slate-500">开始日期<input v-model="filters.date_from" type="date" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
-            <label class="text-xs font-bold text-slate-500">结束日期<input v-model="filters.date_to" type="date" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
-            <label class="text-xs font-bold text-slate-500">数据对比<select v-model="filters.comparison" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="previous">对比上一等长周期</option><option value="none">无对比</option></select></label>
-            <label v-if="selectParam" class="text-xs font-bold text-slate-500">{{ selectLabel }}<select v-model="filters.select" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="">全部</option><option v-for="option in selectOptions" :key="option" :value="option">{{ option }}</option></select></label>
-            <div class="flex items-end"><button type="submit" class="w-full rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-800 shadow-sm hover:border-slate-400" :class="compact ? 'h-9' : 'py-2.5'">应用筛选</button></div>
+        <form class="grid gap-3 border-t border-slate-100 bg-slate-50/70 sm:grid-cols-2" :class="[compact ? 'px-5 py-3 lg:px-6' : 'px-6 py-4 lg:px-8', largeFilters ? 'lg:grid-cols-[220px_220px_220px_180px] gap-4' : 'lg:grid-cols-[170px_170px_190px_minmax(0,180px)_auto]']" @submit.prevent="applyFilters">
+            <label class="text-xs font-bold text-slate-500">开始日期<input v-model="filters.date_from" type="date" @click="openDatePicker" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="largeFilters ? 'mt-2 h-12 text-base focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none' : compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
+            <label class="text-xs font-bold text-slate-500">结束日期<input v-model="filters.date_to" type="date" @click="openDatePicker" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="largeFilters ? 'mt-2 h-12 text-base focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none' : compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'" /></label>
+            <label class="text-xs font-bold text-slate-500">数据对比<select v-model="filters.comparison" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="largeFilters ? 'mt-2 h-12 text-base focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none' : compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="previous">对比上一等长周期</option><option value="none">无对比</option></select></label>
+            <label v-if="selectParam" class="text-xs font-bold text-slate-500">{{ selectLabel }}<select v-model="filters.select" class="w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800" :class="largeFilters ? 'mt-2 h-12 text-base focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none' : compact ? 'mt-1 h-9' : 'mt-1.5 py-2.5'"><option value="">全部</option><option v-for="option in selectOptions" :key="option" :value="option">{{ option }}</option></select></label>
+            <div class="flex items-end"><button type="submit" class="w-full rounded-xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-800 shadow-sm hover:border-slate-400" :class="largeFilters ? 'h-12' : compact ? 'h-9' : 'py-2.5'">应用筛选</button></div>
         </form>
 
         <div class="flex gap-1 overflow-x-auto border-t border-slate-100" :class="compact ? 'px-5 pt-1 lg:px-6' : 'px-5 pt-3 lg:px-8'">

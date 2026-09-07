@@ -12,7 +12,7 @@ import type { NaturalTrafficDashboardBase } from '../../types/naturalTraffic';
 type TargetSheet = { name: string; columns: string[]; rows: Array<Record<string, unknown>> };
 type TargetProgress = { key: string; label: string; actual: number | null; target: number | null; progress: number | null; format: 'number' | 'percent'; status: 'unconfigured' | 'complete' | 'attention' | 'behind' };
 type EdmDashboard = NaturalTrafficDashboardBase & {
-    trends: Array<Record<string, unknown>>; sequences: Array<Record<string, unknown>>;
+    trend_history?: Array<Record<string, unknown>>; trends: Array<Record<string, unknown>>; sequences: Array<Record<string, unknown>>;
     top_flows: Array<Record<string, unknown>>;
     sequence_columns: string[]; sequence_rows: Array<Record<string, unknown>>;
     segments: Array<{ key: string; label: string; count: number; description: string; average_lifetime_value?: number }>;
@@ -20,6 +20,8 @@ type EdmDashboard = NaturalTrafficDashboardBase & {
 };
 const props = defineProps<{ store: { id: number; name: string; currency: string }; dashboard: EdmDashboard; configured: boolean; canSync: boolean }>();
 const activeTab = ref('overview');
+const trendScope = ref('history');
+const visibleTrends = computed(() => trendScope.value === 'history' ? (props.dashboard.trend_history ?? props.dashboard.trends) : props.dashboard.trends);
 const targetSheet = ref(props.dashboard.target_sheets[0]?.name ?? '');
 const activeTarget = computed(() => props.dashboard.target_sheets.find((sheet) => sheet.name === targetSheet.value) ?? props.dashboard.target_sheets[0]);
 const sequenceRowsWithShare = computed(() => props.dashboard.sequences.map((row) => ({
@@ -37,14 +39,15 @@ function targetStatusClass(item: TargetProgress): string { return item.status ==
     <Head title="EDM 邮件" />
     <AppLayout :breadcrumbs="[{ label: '自然流量' }, { label: 'EDM 邮件' }]">
         <div class="mx-auto w-full max-w-[1680px] space-y-6">
-            <NaturalTrafficPageHeader :dashboard="dashboard" :store="store" :configured="configured" :can-sync="canSync" route-path="/natural-traffic/edm-email" refresh-path="/natural-traffic/edm-email/refresh" :active-tab="activeTab" accent="emerald" @tab="activeTab = $event" />
+            <NaturalTrafficPageHeader :dashboard="dashboard" :store="store" :configured="configured" :can-sync="canSync" route-path="/natural-traffic/edm-email" refresh-path="/natural-traffic/edm-email/refresh" :active-tab="activeTab" accent="emerald" large-filters @tab="activeTab = $event" />
             <NaturalTrafficEmptyState v-if="!dashboard.source.ready" :configured="configured" :can-sync="canSync" />
             <template v-else>
                 <template v-if="activeTab === 'overview'">
                     <NaturalTrafficKpiGrid :kpis="dashboard.kpis" :currency="store.currency" :columns="6" />
-                    <div class="grid gap-6 xl:grid-cols-2">
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">Email Revenue Trend</h2><p class="mt-1 mb-5 text-xs text-slate-500">按周汇总邮件营收</p><NaturalTrafficTrendChart :points="dashboard.trends" x-key="label" :series="[{ key: 'revenue', label: '邮件营收', color: '#059669' }]" /></section>
-                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">核心比率趋势</h2><p class="mt-1 mb-5 text-xs text-slate-500">打开率、点击率、转化率和退订率</p><NaturalTrafficTrendChart :points="dashboard.trends" x-key="label" :series="[{ key: 'open_rate', label: '打开率', color: '#2563eb' }, { key: 'click_rate', label: '点击率', color: '#7c3aed' }, { key: 'conversion_rate', label: '转化率', color: '#10b981' }, { key: 'unsubscribe_rate', label: '退订率', color: '#ef4444' }]" /></section>
+                    <div class="flex flex-wrap items-center justify-between gap-3"><p class="text-sm text-slate-500">趋势范围：{{ trendScope === 'history' ? '截至所选结束日期的最近 20 周；其他指标仍按顶部日期筛选' : '当前筛选日期范围' }}</p><select v-model="trendScope" aria-label="趋势展示范围" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="history">最近 20 周</option><option value="selected">当前筛选范围</option></select></div>
+                    <div class="grid gap-6">
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">Email Revenue Trend</h2><p class="mt-1 mb-5 text-xs text-slate-500">按周汇总邮件营收</p><NaturalTrafficTrendChart :points="visibleTrends" x-key="label" interactive weekly-labels fill-area :height="320" value-format="currency" :currency="store.currency" :series="[{ key: 'revenue', label: '邮件营收', color: '#059669' }]" /></section>
+                        <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-black text-slate-950">核心比率趋势</h2><p class="mt-1 mb-5 text-xs text-slate-500">打开率、点击率、转化率和退订率</p><NaturalTrafficTrendChart :points="visibleTrends" x-key="label" interactive weekly-labels :height="320" value-format="percent" :series="[{ key: 'open_rate', label: '打开率', color: '#2563eb' }, { key: 'click_rate', label: '点击率', color: '#7c3aed' }, { key: 'conversion_rate', label: '转化率', color: '#10b981' }, { key: 'unsubscribe_rate', label: '退订率', color: '#ef4444' }]" /></section>
                     </div>
                     <div class="grid gap-6 xl:grid-cols-2">
                         <section class="rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">

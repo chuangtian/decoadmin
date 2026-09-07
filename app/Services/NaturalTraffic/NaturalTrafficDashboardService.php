@@ -528,14 +528,21 @@ class NaturalTrafficDashboardService
     private function influencerOperations(Store $store, array $period): array
     {
         $source = $this->source($store, ['natural-traffic:kol']);
-        $records = collect($source['records']);
+        $states = \App\Models\InfluencerRecordState::query()
+            ->where('organization_id', $store->organization_id)->where('store_id', $store->id)->get()
+            ->keyBy(fn ($state) => json_encode([$state->source_table_key, $state->source_record_id]));
+        $records = collect($source['records'])->map(function (array $row) use ($states): array {
+            $row['status'] = $states->get(json_encode([$row['source_table_key'], $row['record_id']]))?->status ?? 'visible';
+            return $row;
+        });
         $namedMain = $records->filter(fn (array $row): bool => trim($row['table_name']) === '红人数据');
         $mainRaw = $namedMain->isNotEmpty() ? $namedMain : $records->filter(fn (array $row): bool => $this->hasAny($row['fields'], ['红人title', '红人', 'influencer'])
             && $this->hasAny($row['fields'], ['浏览', '浏览量', 'views'])
             && ! str_contains($row['table_name'], '爆款'));
-        $main = $mainRaw->map(fn (array $row): array => $this->kolRow($row));
+        $allMain = $mainRaw->map(fn (array $row): array => $this->kolRow($row));
+        $main = $allMain->where('status', 'visible');
         $clicksAvailable = $mainRaw->contains(fn (array $row): bool => $this->hasAny($row['fields'], ['clicks', '点击', '点击数']));
-        $period = $this->latestAvailablePeriod($period, $main, ['views', 'likes', 'comments', 'clicks']);
+        $period = $this->latestAvailablePeriod($period, $allMain, ['views', 'likes', 'comments', 'clicks']);
         $current = $this->sortRowsByDate($this->within($main, $period['date_from'], $period['date_to']));
         $previous = $this->within($main, $period['compare_from'], $period['compare_to']);
         $totals = $this->kolTotals($current);
@@ -583,7 +590,7 @@ class NaturalTrafficDashboardService
             && $this->hasAny($row['fields'], ['浏览', '浏览量'])
             && $this->hasAny($row['fields'], ['红人title', '红人']))
             ->map(fn (array $row): array => $this->kolRow($row));
-        $viral = $this->sortRowsByDate($viral)->all();
+        $viral = $this->sortRowsByDate($viral->where('status', 'visible'))->all();
         $detailColumns = [
             'influencer', 'platform', 'type', 'fee', 'date', 'average_views', 'views', 'likes', 'comments',
             ...($clicksAvailable ? ['clicks'] : []),
@@ -622,7 +629,8 @@ class NaturalTrafficDashboardService
             ])->take(500)->values()->all(),
             'model_summary' => $yearly,
             'viral_content' => $viral,
-            'details' => $current->take(1000)->values()->all(),
+            'details' => $current->values()->all(),
+            'excluded_details' => $this->sortRowsByDate($this->within($allMain->where('status', '!=', 'visible'), $period['date_from'], $period['date_to']))->values()->all(),
             'columns' => $this->columns($mainRaw->all()),
         ];
     }
@@ -660,12 +668,25 @@ class NaturalTrafficDashboardService
                 'average_lifetime_value' => $this->number($this->pick($row['fields'], ['平均LTV', 'LTV'])),
             ])->values()->all();
         $segments = $syncedSegments !== [] ? $syncedSegments : $databaseSegments;
-        $trends = $current->groupBy(fn (array $row): string => $row['week'] ?: ($row['date'] ?? '未标注'))
+        // Use the reporting date, not spreadsheet formula text, as the trend key.
+        $buildTrends = fn (Collection $items): array => $items->groupBy(fn (array $row): string => $row['date']
+            ? CarbonImmutable::parse($row['date'])->startOfWeek()->toDateString()
+            : (preg_match('/^(?:W)?\d{1,2}(?:周)?$/i', $row['week']) ? 'W'.str_pad(preg_replace('/\D/', '', $row['week']), 2, '0', STR_PAD_LEFT) : '未标注日期'))
             ->map(function (Collection $rows, string $label): array {
                 $totals = $this->edmTotals($rows);
+                $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $label) ? $label : null;
+                $dateTo = $rows->pluck('date_to')->filter()->max();
 
-                return ['label' => $label, ...$totals];
+                return [
+                    'label' => $label,
+                    'date' => $date,
+                    'date_to' => $dateTo ?: ($date ? CarbonImmutable::parse($date)->addDays(6)->toDateString() : null),
+                    ...$totals,
+                ];
             })->sortKeys()->values()->all();
+        $trends = $buildTrends($current);
+        $historyFrom = CarbonImmutable::parse($period['date_to'])->subWeeks(19)->startOfWeek()->toDateString();
+        $trendHistory = $buildTrends($this->within($sequences, $historyFrom, $period['date_to']));
         $sequenceSummaryCollection = $current->groupBy(fn (array $row): string => $row['name'] ?: '未命名序列')
             ->map(function (Collection $rows, string $name): array {
                 $totals = $this->edmTotals($rows);
@@ -716,6 +737,7 @@ class NaturalTrafficDashboardService
                 return [...$definition, 'value' => $value, 'previous' => $previous, 'change' => $this->change($value, $previous)];
             })->all(),
             'trends' => $trends,
+            'trend_history' => $trendHistory,
             'sequences' => $sequenceSummary,
             'top_flows' => $topFlows,
             'sequence_columns' => $this->columns($sequenceRaw->all()),
@@ -968,6 +990,7 @@ class NaturalTrafficDashboardService
 
         return [
             'record_id' => $row['record_id'], 'table_name' => $row['table_name'],
+            'source_table_key' => $row['source_table_key'], 'status' => $row['status'] ?? 'visible',
             'source_order' => $row['source_order'] ?? PHP_INT_MAX,
             'influencer' => $this->text($this->pick($fields, ['红人title', '红人', 'influencer', '达人'])),
             'platform' => $this->text($this->pick($fields, ['平台', 'platform'])),
