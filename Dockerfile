@@ -14,6 +14,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY --from=vendor /app/vendor ./vendor
 COPY resources ./resources
+COPY shopify-apps/community-reviews ./shopify-apps/community-reviews
 COPY vite.config.ts tsconfig.json ./
 RUN npm run build
 
@@ -46,6 +47,7 @@ COPY docker/php/entrypoint.sh /usr/local/bin/app-entrypoint
 RUN mkdir -p public/build \
     && cp -a /opt/app-build/. public/build/ \
     && chmod +x /usr/local/bin/app-entrypoint \
+    && chmod -R a+rX app bootstrap config database public resources routes shopify-apps \
     && chown -R www-data:www-data storage bootstrap/cache
 
 ENTRYPOINT ["app-entrypoint"]

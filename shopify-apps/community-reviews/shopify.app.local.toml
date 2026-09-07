@@ -1,0 +1,27 @@
+client_id = ""
+name = "Community Reviews (local)"
+handle = "deco-community-reviews-local"
+application_url = "https://projectors-vast-couple-expand.trycloudflare.com/shopify-app/community-reviews"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "https://projectors-vast-couple-expand.trycloudflare.com/api/shopify-app/community-reviews/webhooks"
+
+[access_scopes]
+scopes = "read_products,write_app_proxy"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = ["https://projectors-vast-couple-expand.trycloudflare.com/shopify-app/community-reviews"]
+
+[app_proxy]
+url = "https://projectors-vast-couple-expand.trycloudflare.com/api/shopify-app/community-reviews/proxy"
+subpath = "community-reviews"
+prefix = "apps"
