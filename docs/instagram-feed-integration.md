@@ -27,13 +27,13 @@
 
 这是 Meta 后台里两组不同的凭证，不要混用。回调地址默认由当前环境应用域名推导，可用 `INSTAGRAM_FEED_INSTAGRAM_REDIRECT_URI` 与 `INSTAGRAM_FEED_FACEBOOK_REDIRECT_URI` 覆盖，且必须与 Meta 后台登记的地址完全一致。
 
-App ID、App Secret 和 Facebook 登录配置 ID 现在也可以在后台「系统管理 → Instagram 与存储」页面维护（`system_settings` 的 `instagram_meta` 分组，需要 `system.settings.update` 权限）。后台有值时覆盖 `.env`，后台留空则回退到 `.env`。App Secret 加密保存且保存后不再回显，留空提交表示保持原值。
+App ID、App Secret 和 Facebook 登录配置 ID 现在也可以在后台「应用中心 → Instagram Feed → 应用配置」页签维护（`system_settings` 的 `instagram_meta` 分组）。凭证是平台级的、对所有店铺共享，因此页签的可见性由 `system.settings.view` 决定、保存由 `system.settings.update` 决定，与 `instagram_feed.*` 店铺权限无关。后台有值时覆盖 `.env`，后台留空则回退到 `.env`。App Secret 加密保存且保存后不再回显，留空提交表示保持原值。
 
 ## Cloudflare R2
 
 Instagram CDN 链接带签名会过期，同步后必须把视频与封面转存到 R2，对外用绑定在桶上的自定义域名给永久地址。相关变量：`INSTAGRAM_FEED_R2_ACCOUNT_ID`、`INSTAGRAM_FEED_R2_ACCESS_KEY_ID`、`INSTAGRAM_FEED_R2_SECRET_ACCESS_KEY`、`INSTAGRAM_FEED_R2_BUCKET`、`INSTAGRAM_FEED_R2_PUBLIC_BASE_URL`。
 
-这五项同样可以在后台「系统管理 → Instagram 与存储」维护（`system_settings` 的 `instagram_r2` 分组），优先级与回退规则同上：后台有值覆盖 `.env`，留空回退 `.env`。Secret Access Key 加密保存、不回显。改动保存后立即生效，不需要重新构建镜像或重启容器。
+这五项同样可以在后台「应用中心 → Instagram Feed → 应用配置」页签维护（`system_settings` 的 `instagram_r2` 分组），优先级与回退规则同上：后台有值覆盖 `.env`，留空回退 `.env`。Secret Access Key 加密保存、不回显。改动保存后立即生效，不需要重新构建镜像或重启容器。
 
 R2 未配置时同步只拉取元数据、不转存，且未转存的内容不会发布到前台。对象 key 为 `{环境}/{店铺域名}/videos/{ig_media_id}.mp4` 与 `{环境}/{店铺域名}/posters/{ig_media_id}.jpg`，按环境与店铺隔离，重复转存是覆盖而不是堆积。
 

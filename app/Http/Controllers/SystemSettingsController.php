@@ -45,26 +45,6 @@ class SystemSettingsController extends Controller
         return $this->render($request, 'System/FeishuSettings', 'feishu');
     }
 
-    public function instagramFeed(Request $request): Response
-    {
-        $canUpdate = $request->user()->hasPermission(
-            'system.settings.update',
-            $this->currentOrganization->require(),
-            $this->currentStore->get(),
-        );
-
-        return Inertia::render('System/InstagramFeedSettings', [
-            'metaSettings' => $this->settings->sectionForFrontend('instagram_meta', $canUpdate),
-            'r2Settings' => $this->settings->sectionForFrontend('instagram_r2', $canUpdate),
-            'canUpdate' => $canUpdate,
-            'environment' => (string) config('instagram_feed.environment'),
-            'callbacks' => [
-                'instagram' => (string) config('instagram_feed.instagram.redirect_uri'),
-                'facebook' => (string) config('instagram_feed.facebook.redirect_uri'),
-            ],
-        ]);
-    }
-
     /** @param array<string, mixed> $extra */
     private function render(Request $request, string $component, string $section, array $extra = []): Response
     {
