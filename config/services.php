@@ -74,6 +74,7 @@ return [
         'history_months' => (int) env('ADVERTISING_CHANNEL_HISTORY_MONTHS', 6),
         'priority_days' => (int) env('ADVERTISING_CHANNEL_PRIORITY_DAYS', 7),
         'rolling_days' => (int) env('ADVERTISING_CHANNEL_ROLLING_DAYS', 3),
+        'google_reconcile_days' => (int) env('GOOGLE_ADS_RECONCILE_DAYS', 90),
         'chunk_days' => (int) env('ADVERTISING_CHANNEL_CHUNK_DAYS', 30),
     ],
 

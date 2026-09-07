@@ -18,7 +18,8 @@ class SyncAdvertisingChannels extends Command
         $channel = trim((string) $this->argument('channel'));
         $mode = trim((string) $this->option('mode'));
         if (! isset(AdvertisingChannelSyncService::CHANNELS[$channel])
-            || ! in_array($mode, ['priority', 'backfill', 'incremental'], true)) {
+            || ! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile'], true)
+            || ($mode === 'reconcile' && $channel !== 'google')) {
             $this->components->error('广告渠道或同步模式无效。');
 
             return self::INVALID;

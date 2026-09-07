@@ -27,10 +27,14 @@ class GoogleAdsWeeklyReportService
     /** @param array{week?: string} $filters */
     public function forStore(Store $store, array $filters = []): array
     {
+        $values = app(\App\Services\StoreFeishuDataLinkService::class)->valuesForSync($store, 'advertising_google_weekly');
+        $configuredTableId = trim((string) ($values['advertising_google_weekly_table_id'] ?? ''));
         $table = FeishuBitableTable::query()
             ->forOrganization((int) $store->organization_id)
             ->forStore((int) $store->getKey())
-            ->whereIn('name', self::SOURCE_TABLE_NAMES)
+            ->when($configuredTableId !== '',
+                fn ($query) => $query->where('source_section', 'paid-ad-goals:google-weekly')->where('source_table_id', $configuredTableId),
+                fn ($query) => $query->whereIn('name', self::SOURCE_TABLE_NAMES))
             ->latest('synced_at')
             ->first();
 
