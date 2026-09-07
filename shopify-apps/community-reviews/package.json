@@ -1,0 +1,17 @@
+{
+  "name": "community-reviews",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build:test": "npm run build:assets && shopify app build --config test",
+    "check:config:test": "shopify app config validate --config test --json",
+    "deploy:test": "npm run build:assets && shopify app deploy --config test",
+    "build:production": "shopify app build --config production",
+    "deploy:production": "shopify app deploy --config production",
+    "build:assets": "node scripts/build-assets.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

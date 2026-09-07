@@ -37,7 +37,15 @@ export const menu: MenuItem[] = [
     {
         name: '应用中心',
         icon: 'app-center',
+        // children 是平台内置应用的固定入口，dynamicChildren 追加当前店铺已安装的应用。
+        // 两者按最终路由去重，所以内置应用装好之后不会出现两条。
+        // 保留固定入口的原因：应用中心的动态条目要求 app_installations 有 active 记录，
+        // 店铺还没装 App 时就没有任何入口，用户也就无从进去完成连接。
         dynamicChildren: 'applications',
+        children: [
+            { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
+            { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
+        ],
     },
     {
         name: '数据分析',
@@ -87,7 +95,7 @@ export const menu: MenuItem[] = [
         icon: 'settings',
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
-            { name: 'Instagram 内容', route: '/instagram-feed', icon: 'campaign', permission: 'instagram_feed.view' },
+            // Instagram Feed 属于应用中心，入口挂在上面的「应用中心」分组，这里不重复挂。
             { name: '飞书设置', route: '/store-settings/feishu', icon: 'settings', permission: 'store.view' },
             { name: '邮箱设置', route: '/store-settings/mail', icon: 'settings', permission: 'store.view' },
             { name: '业务凭证', route: '/store-settings/credentials', icon: 'settings', permission: 'store.view' },
@@ -139,6 +147,7 @@ export const menu: MenuItem[] = [
         name: '系统管理',
         icon: 'system',
         children: [
+            { name: 'Codex 插件授权', route: '/codex-tokens', icon: 'apps', permission: 'codex.tokens.view' },
             { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },

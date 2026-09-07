@@ -1,0 +1,27 @@
+client_id = "486e97d18c4153e6b06ccb8f5d5c62f8"
+name = "Community Reviews (Test)"
+handle = "deco-community-reviews-test"
+application_url = "https://testadmin.decomkt.com/shopify-app/community-reviews"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "https://testadmin.decomkt.com/api/shopify-app/community-reviews/webhooks"
+
+[access_scopes]
+scopes = "read_products,write_app_proxy"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = ["https://testadmin.decomkt.com/shopify-app/community-reviews"]
+
+[app_proxy]
+url = "https://testadmin.decomkt.com/api/shopify-app/community-reviews/proxy"
+subpath = "community-reviews"
+prefix = "apps"
