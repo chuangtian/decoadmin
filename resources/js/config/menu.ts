@@ -37,6 +37,10 @@ export const menu: MenuItem[] = [
         name: '应用中心',
         icon: 'app-center',
         dynamicChildren: 'applications',
+        children: [
+            { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
+            { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
+        ],
     },
     {
         name: '数据分析',

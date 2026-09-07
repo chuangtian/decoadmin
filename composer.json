@@ -25,6 +25,7 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "CommunityReviews\\": "shopify-apps/community-reviews/backend/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }
