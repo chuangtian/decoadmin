@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import DashboardComparisonPicker from '../../Components/Dashboard/DashboardComparisonPicker.vue';
 import DashboardDateRangePicker from '../../Components/Dashboard/DashboardDateRangePicker.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useDeferredReport } from '../../composables/useDeferredReport';
 import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 type ComparisonMode = 'none' | 'previous' | 'year' | 'year_weekday' | 'custom';
@@ -52,6 +53,11 @@ const props = defineProps<{
         generated_at: string;
     };
 }>();
+
+const { refreshing, timedOut, retry } = useDeferredReport(() => ({
+    key: `${props.store.id}:${props.insights.period.from}:${props.insights.period.to}:${props.insights.comparison.mode}:${props.insights.comparison.period?.from ?? ''}`,
+    pending: Boolean(props.insights.data_source.storage.pending || props.insights.data_source.comparison_storage?.pending),
+}), ['insights']);
 
 const copied = ref(false);
 const loading = ref(false);
@@ -144,13 +150,15 @@ async function copyPixel() {
                 </article>
                 <article class="flex items-start gap-4 rounded-2xl border bg-white p-5 shadow-sm" :class="insights.integration.reports_ready ? 'border-emerald-200' : 'border-amber-200'">
                     <span class="mt-0.5 h-3 w-3 rounded-full" :class="insights.integration.reports_ready ? 'bg-emerald-500' : 'bg-amber-500'" />
-                    <div><h2 class="font-semibold text-slate-900">Shopify 原生报表</h2><p class="mt-1 text-sm text-slate-500">{{ insights.integration.reports_ready ? 'read_reports 已生效，当前数据优先使用 ShopifyQL 口径' : (insights.integration.report_scope_granted ? '权限已存在，但部分报表查询失败，失败项已使用本地数据' : '缺少 read_reports，请重新授权后同步 Shopify 原生统计') }}</p><p v-if="insights.data_source.storage.persisted" class="mt-1 text-xs font-semibold" :class="insights.data_source.storage.stale ? 'text-amber-600' : 'text-emerald-600'">{{ insights.data_source.storage.pending ? 'Shopify 数据正在后台加载，当前先显示本地同步数据' : (insights.data_source.storage.stale ? '正在使用数据库中的最近一次快照' : '数据已保存到本地数据库') }}<span v-if="insights.data_source.storage.fetched_at && !insights.data_source.storage.pending" class="font-normal text-slate-400"> · {{ formatDateTime(insights.data_source.storage.fetched_at) }}</span></p></div>
+                    <div><h2 class="font-semibold text-slate-900">Shopify 原生报表</h2><p class="mt-1 text-sm text-slate-500">{{ refreshing ? 'Shopify 数据正在加载，完成后会自动显示' : timedOut ? '加载时间较长，请重试' : insights.integration.reports_ready ? 'read_reports 已生效，当前数据优先使用 ShopifyQL 口径' : (insights.integration.report_scope_granted ? '权限已存在，但部分报表查询失败，失败项已使用本地数据' : '缺少 read_reports，请重新授权后同步 Shopify 原生统计') }}</p><p v-if="insights.data_source.storage.persisted" class="mt-1 text-xs font-semibold" :class="insights.data_source.storage.stale ? 'text-amber-600' : 'text-emerald-600'">{{ insights.data_source.storage.pending ? 'Shopify 数据正在后台加载，当前先显示本地同步数据' : (insights.data_source.storage.stale ? '正在使用数据库中的最近一次快照' : '数据已保存到本地数据库') }}<span v-if="insights.data_source.storage.fetched_at && !insights.data_source.storage.pending" class="font-normal text-slate-400"> · {{ formatDateTime(insights.data_source.storage.fetched_at) }}</span></p></div>
                 </article>
                 <article class="flex items-start gap-4 rounded-2xl border bg-white p-5 shadow-sm" :class="insights.integration.pixel_receiving ? 'border-emerald-200' : 'border-amber-200'">
                     <span class="mt-0.5 h-3 w-3 rounded-full" :class="insights.integration.pixel_receiving ? 'bg-emerald-500' : 'bg-amber-500'" />
                     <div><h2 class="font-semibold text-slate-900">店面客户事件（备用）</h2><p class="mt-1 text-sm text-slate-500">{{ insights.integration.pixel_receiving ? `正在接收，最近事件 ${formatDateTime(insights.integration.last_event_at)}` : (insights.integration.reports_ready ? '原生报表已可用，无需额外 Pixel 也能显示 Session、搜索和漏斗' : '尚未收到事件，可按页面底部步骤接入 Shopify Customer Events') }}</p></div>
                 </article>
             </section>
+
+            <button v-if="timedOut" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold" @click="retry">重试加载</button>
 
             <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <article v-for="card in metricCards" :key="card.label" class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

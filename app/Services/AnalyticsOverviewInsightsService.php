@@ -311,6 +311,8 @@ class AnalyticsOverviewInsightsService
             'mobile' => '移动设备',
             'desktop' => '桌面设备',
             'tablet' => '平板设备',
+            'game_console' => '游戏主机',
+            'smart_tv' => '智能电视',
             default => $value !== '' ? $value : '未知设备',
         };
     }

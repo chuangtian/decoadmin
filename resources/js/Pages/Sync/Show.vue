@@ -7,7 +7,8 @@ import type { SyncJobDetail } from '../../types';
 import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 const props = defineProps<{ syncJob: { data: SyncJobDetail } }>();
-const { formatDateTime: dateLabel } = useStoreDateTime();
+const { formatDateTime } = useStoreDateTime();
+const dateLabel = (value: string | null) => formatDateTime(value, props.syncJob.data.store.timezone);
 const typeLabel = (type: string) => ({ products: '商品', orders: '订单', customers: '客户', inventory: '库存' }[type] ?? type);
 const modeLabel = (mode: string) => ({ full: '全量同步', incremental: '增量同步', reconcile: '一致性校准' }[mode] ?? mode);
 const statusLabel = (status: string) => ({ pending: '待处理', queued: '已入队', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' }[status] ?? status);

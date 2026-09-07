@@ -13,6 +13,18 @@ The production Compose file does not mount the repository into containers. Only 
 
 ## VPS prerequisites
 
+### Configured SSH access (local workstation)
+
+- Host: `45.76.77.146`, SSH user: `root`, port: `22`.
+- User-provided private-key path: `/Users/tianchuang/Downloads/key-uh9wq9m7.pem`.
+- Record the path only. Never copy private-key contents into this repository, logs, chat, or committed configuration. Keep file permissions restricted to the current user (`0600`).
+- This path is workstation-specific. Use it for already-authorized deployments without asking for the key again; if authentication fails, diagnose and report the failure without exposing the key.
+- Select the requested environment before any server write. Test: `/opt/decoadmin/staging`, environment file `/opt/decoadmin/staging/.env.staging`, Compose project `decoadmin-staging`, URL `https://testadmin.decomkt.com`. Production: `/opt/decoadmin/production`; a test deployment never authorizes production changes.
+
+```bash
+ssh -i /Users/tianchuang/Downloads/key-uh9wq9m7.pem -o IdentitiesOnly=yes root@45.76.77.146
+```
+
 1. Install Docker Engine with the Compose plugin.
 2. Clone the private repository on the VPS.
 3. Configure DNS for the Staging or Production hostname.

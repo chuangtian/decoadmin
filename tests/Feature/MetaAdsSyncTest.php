@@ -689,6 +689,29 @@ class MetaAdsSyncTest extends TestCase
         ));
     }
 
+    public function test_three_day_failed_report_can_recover_as_single_days_with_production_tuning(): void
+    {
+        config(['services.meta_ads.async_min_window_days' => 1, 'services.meta_ads.async_max_resubmissions' => 2]);
+        $store = $this->configuredStore('Daily Recovery Org', 'daily-recovery', 'Daily Recovery', 'daily-recovery.myshopify.com', 'test-token');
+        $service = app(MetaAdsSyncService::class);
+        $run = $service->orchestrate($store, 'full');
+        $shard = MetaAdSyncShard::query()->where('kind', 'insights')->where('level', 'account')->sole();
+        $shard->forceFill([
+            'since_date' => '2026-08-20', 'until_date' => '2026-08-22',
+            'result' => ['async_report_id' => '7003', 'async_failure_count' => 2],
+        ])->save();
+        $http = new HttpFactory;
+        $http->fake(fn () => Http::response(['async_status' => 'Job Failed', 'async_percent_completion' => 0]));
+        $recovery = new MetaAdsSyncService(new MetaAdsApiClient($http, app(StoreBusinessCredentialService::class)), app(CurrentYearSyncWindow::class));
+        $result = $recovery->runShard($shard);
+        $children = MetaAdSyncShard::query()->whereIn('id', $result['replacement_shard_ids'])->orderBy('since_date')->get();
+        $this->assertCount(3, $children);
+        $this->assertSame(['2026-08-20', '2026-08-21', '2026-08-22'], $children->map(fn ($row) => $row->since_date->toDateString())->all());
+        $this->assertTrue($children->every(fn ($row) => $row->since_date->eq($row->until_date) && $row->sync_job_id === $run['sync_job_id'] && $row->store_id === $store->id));
+        $this->assertSame('completed', $shard->fresh()->status);
+        $this->assertTrue($children->every(fn ($row) => data_get($row->result, 'async_report_id') === null));
+    }
+
     public function test_small_failed_async_report_has_bounded_resubmissions(): void
     {
         config()->set('services.meta_ads.async_recovery_window_days', 31);

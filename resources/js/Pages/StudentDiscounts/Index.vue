@@ -545,7 +545,7 @@ const recognitionFields = (result: Record<string, unknown>) => [
 
 <template>
     <Head title="学生优惠" />
-    <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: '学生优惠' }]">
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '学生优惠' }]">
         <div class="mx-auto max-w-7xl space-y-7">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>

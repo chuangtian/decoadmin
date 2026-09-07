@@ -4,6 +4,7 @@ import { computed, reactive } from 'vue';
 import DateRangeFilters from '../../Components/Analytics/DateRangeFilters.vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useDeferredReport, type ReportStorage } from '../../composables/useDeferredReport';
 import { useStoreDateTime } from '../../composables/useStoreDateTime';
 
 interface Option { key: string; label: string; format?: string }
@@ -36,11 +37,20 @@ const props = defineProps<{
             available: boolean;
             scope_granted: boolean | null;
             error: string | null;
+            storage?: ReportStorage | null;
         };
         generated_at: string;
     };
     canExport: boolean;
 }>();
+
+const { refreshing, timedOut, retry } = useDeferredReport(() => ({
+    key: `${props.store.id}:${props.report.slug}:${props.report.period.from}:${props.report.period.to}`,
+    pending: props.report.integration.source === 'shopifyql' && !props.report.integration.available
+        && Boolean(props.report.integration.storage?.pending || props.report.integration.storage?.refreshing),
+}), ['report']);
+const reportMessage = computed(() => refreshing.value ? '数据正在加载，完成后会自动显示。'
+    : timedOut.value ? '加载时间较长，请重试。' : props.report.integration.error);
 
 const controls = reactive({ ...props.report.selected });
 const { formatDateTime } = useStoreDateTime();
@@ -118,9 +128,11 @@ const exportUrl = (type: string) => {
             </section>
 
             <section v-if="report.integration.source === 'shopifyql' && !report.integration.available" class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-sm">
-                <p class="font-semibold">Shopify 原生报告暂不可用</p>
-                <p class="mt-1 text-amber-800">{{ report.integration.error || '请检查 Shopify 连接，并重新授权 read_reports 权限。' }}</p>
+                <p class="font-semibold">{{ refreshing ? '正在加载 Shopify 报告' : 'Shopify 原生报告暂不可用' }}</p>
+                <p class="mt-1 text-amber-800">{{ reportMessage || '请检查 Shopify 连接，并重新授权 read_reports 权限。' }}</p>
             </section>
+
+            <button v-if="timedOut" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold" @click="retry">重试加载</button>
 
             <section v-if="report.integration.source !== 'shopify_internal'" class="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3">
                 <label class="text-xs font-semibold text-slate-500">指标<select v-model="controls.metric" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800" @change="applyControls"><option v-for="item in report.metrics" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
@@ -152,7 +164,7 @@ const exportUrl = (type: string) => {
                 <div class="border-b border-slate-100 px-5 py-4"><h2 class="font-semibold text-slate-950">报告明细</h2><p class="mt-1 text-sm text-slate-500">共 {{ report.rows.length }} 条结果，按当前店铺和统计周期生成。</p></div>
                 <div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs font-semibold text-slate-500"><tr><th v-for="header in report.headers" :key="header.key" class="whitespace-nowrap px-5 py-4">{{ header.label }}</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="(row,index) in report.rows" :key="index" class="hover:bg-slate-50"><td v-for="header in report.headers" :key="header.key" class="whitespace-nowrap px-5 py-4 text-slate-700">{{ format(row[header.key], header.format) }}</td></tr></tbody></table></div>
             </section>
-            <EmptyState v-else-if="report.integration.source !== 'shopify_internal'" :title="report.integration.available ? '当前报告暂无数据' : '当前报告暂不可用'" :description="report.integration.error || (report.integration.source === 'shopifyql' ? '调整统计周期，或确认 Shopify 原生报告中已有数据。' : '调整统计周期，或先同步当前店铺的 Shopify 数据。')" icon="reports" />
+            <EmptyState v-else-if="report.integration.source !== 'shopify_internal'" :title="refreshing ? '正在加载报告' : report.integration.available ? '当前报告暂无数据' : '当前报告暂不可用'" :description="reportMessage || (report.integration.source === 'shopifyql' ? '调整统计周期，或确认 Shopify 原生报告中已有数据。' : '调整统计周期，或先同步当前店铺的 Shopify 数据。')" icon="reports" />
         </div>
     </AppLayout>
 </template>

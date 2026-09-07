@@ -59,6 +59,7 @@ class PersonalizationStrategyWorkflowTest extends TestCase
             'lock_version' => $draft['lock_version'],
             'draft' => $draft,
         ]);
+        $this->travel(2)->seconds();
         $sameSave = $service->autosave($store, PersonalizationRecommendationStrategy::query()->sole(), $actor, [
             'idempotency_key' => $saveKey,
             'lock_version' => $draft['lock_version'],

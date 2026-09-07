@@ -364,8 +364,8 @@ const sparklinePoints = (values: number[]) => {
 const advertisingChannels = computed(() => props.performance.advertising.channels.filter((channel) => channel.available).map((channel) => channel.name));
 
 const statusLabel: Record<string, string> = {
-    paid: '已付款', pending: '待付款', refunded: '已退款', partially_refunded: '部分退款',
-    fulfilled: '已发货', partial: '部分发货', unfulfilled: '未发货', unknown: '未设置',
+    paid: '已付款', pending: '待付款', authorized: '已授权', partially_paid: '部分付款', voided: '已作废', refunded: '已退款', partially_refunded: '部分退款',
+    fulfilled: '已发货', partial: '部分发货', unfulfilled: '未发货', restocked: '已重新入库', unknown: '未设置',
 };
 const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock: '低库存', slow_moving: '滞销风险', healthy: '健康' };
 </script>
