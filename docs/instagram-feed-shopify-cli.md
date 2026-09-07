@@ -23,17 +23,28 @@ the already deployed Laravel environment.
 
 ## Supported targets
 
-- `local`: `https://wendy-interim-classic-segment.trycloudflare.com`, a temporary
-  Cloudflare tunnel used for development only.
-- `test`: `https://testadmin.decomkt.com`, used for acceptance. The Shopify App
-  does not exist yet, so `client_id` is intentionally empty.
-- `production`: `https://admin.decomkt.com`, used only after explicit approval.
-  The Shopify App does not exist yet, so `client_id` is intentionally empty.
+There is a single Shopify App (`deco-instagram-feed`, client id
+`d3446448682d2950aa75cea4a399d50f`) shared by both targets:
 
-Create the test and production apps in the Dev Dashboard first, then run
-`npm run config:link:test` or `npm run config:link:production` to populate
-`client_id`. Until then the backend refuses to call Shopify and returns
-`INSTAGRAM_FEED_APP_NOT_CONFIGURED`.
+- `test`: `https://testadmin.decomkt.com`, declared in `shopify.app.test.toml`.
+  Currently the live target.
+- `production`: `https://admin.decomkt.com`, declared in
+  `shopify.app.production.toml`. Currently parked.
+
+Because one Shopify App holds one `application_url`, one webhook endpoint set and
+one OAuth redirect list, the two targets are mutually exclusive: `deploy:test`
+parks production and `deploy:production` parks test. The local Cloudflare tunnel
+target was removed and `shopify.app.local.toml` must not come back.
+
+`shopify.app.toml` is the CLI selected configuration and must mirror whichever
+target is live. `scripts/validate-project.mjs` enforces that, and also that
+`extensions/app-home/src/runtime.mjs` points at the same origin. Running the app
+against a target whose `INSTAGRAM_FEED_<ENV>_CLIENT_ID` and `_CLIENT_SECRET` are
+missing makes the backend return `INSTAGRAM_FEED_APP_NOT_CONFIGURED`.
+
+Do not use `shopify app config link`: it overwrites the local TOML with Dev
+Dashboard defaults. The repository TOML files are the source of truth and are
+pushed by `deploy:test` / `deploy:production`.
 
 The test-first operating sequence is code change, root and child validation,
 commit to Git `test`, deploy the root Laravel application to the test site,

@@ -4,13 +4,13 @@
 
 | 环境 | Client ID | Handle | 应用域名 |
 | --- | --- | --- | --- |
-| `local` | `d3446448682d2950aa75cea4a399d50f` | `deco-instagram-feed-local` | `https://wendy-interim-classic-segment.trycloudflare.com`（当前临时地址） |
-| `test` | 由 `INSTAGRAM_FEED_TEST_CLIENT_ID` 提供，尚未创建 | `deco-instagram-feed-test` | `https://testadmin.decomkt.com` |
-| `production` | 由 `INSTAGRAM_FEED_PRODUCTION_CLIENT_ID` 提供，尚未创建 | `deco-instagram-feed` | `https://admin.decomkt.com` |
+| `local` | 已废弃（隧道环境不再维护） | — | — |
+| `test` | `d3446448682d2950aa75cea4a399d50f`（由 `INSTAGRAM_FEED_TEST_CLIENT_ID` 提供） | `deco-instagram-feed` | `https://testadmin.decomkt.com` |
+| `production` | `d3446448682d2950aa75cea4a399d50f`（由 `INSTAGRAM_FEED_PRODUCTION_CLIENT_ID` 提供） | `deco-instagram-feed` | `https://admin.decomkt.com` |
 
 运行环境通过 `INSTAGRAM_FEED_ENVIRONMENT=local|test|production` 选择。对应 Client Secret 只放在未跟踪的环境变量中：`INSTAGRAM_FEED_<ENV>_CLIENT_SECRET`，也可使用当前环境公共回退变量 `INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET`。
 
-测试与生产是 Dev Dashboard 里各自独立的 Shopify App，尚未创建，因此 `client_id` 默认留空；配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
+测试与生产目前是**同一个** Shopify App：一个 App 只有一份 `application_url`、一组 webhook 地址和一组 OAuth redirect，所以两个环境不能同时生效，发布哪一套配置就等于停用另一套。当前该 App 指向测试服，生产入口停用。切换步骤见 `shopify-apps/instagram-feed/README.md` 的「切换环境」。配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
 
 三套 App 的固定授权集合均为：`read_products`。App 只需要解析关联商品的标题与 handle；写入自己的 app-data metafield 不需要额外 scope。后台 token exchange 后校验响应 `scope`，并通过 `currentAppInstallation.accessScopes` 再次核验安装权限；缺少必要权限时返回 `SHOPIFY_REQUIRED_SCOPES_MISSING`，不会继续建立会话。
 

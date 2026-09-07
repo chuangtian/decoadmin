@@ -1,11 +1,13 @@
-# Shopify CLI 的「当前选中配置」，由 `shopify app config use` 维护。
+# 测试环境配置。注意：这里用的是与生产同一个 Shopify App
+# （client_id d3446448682d2950aa75cea4a399d50f，handle deco-instagram-feed）。
 #
-# 当前镜像的是 shopify.app.test.toml：该 Shopify App 已临时指向测试服
-# （https://testadmin.decomkt.com），生产入口同时停用。生产与测试共用同一个
-# client_id，一个 App 只有一份 application_url 与一组 webhook 地址，两者不能同时生效。
+# 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以生产与测试
+# 不能同时生效：发布这份配置＝把该 App 指向测试服，生产入口同时停用。
+# 这是经用户确认的临时安排（生产侧当前没有任何店铺安装）。
 #
-# 这里与选中的那套环境配置保持逐字一致，避免漏写 --config 时推错目标。
-# 切回生产的步骤见 README「切换环境」。
+# 要切回生产：改 extensions/app-home/src/runtime.mjs 的 appOrigin 与 environment、
+# 把 shopify.app.toml 换成 production 镜像，然后 `npm run deploy:production`。
+# shopify.app.production.toml 保持生产地址不动，就是这个还原点。
 client_id = "d3446448682d2950aa75cea4a399d50f"
 name = "Instagram Feed (Deco)"
 handle = "deco-instagram-feed"
@@ -13,7 +15,6 @@ application_url = "https://testadmin.decomkt.com/shopify-app/instagram-feed"
 embedded = true
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = false
 
 [webhooks]
