@@ -151,6 +151,7 @@ export const menu: MenuItem[] = [
             { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },
+            { name: 'Instagram 与存储', route: '/settings/instagram-feed', icon: 'settings', permission: 'system.settings.view' },
             { name: '飞书设置', route: '/settings/feishu', icon: 'settings', permission: 'system.settings.view' },
             { name: '邮箱设置', route: '/settings/mail', icon: 'settings', permission: 'system.settings.view' },
             { name: '系统设置', route: '/settings', icon: 'settings', permission: 'system.settings.view' },

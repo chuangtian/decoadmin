@@ -509,6 +509,15 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.feishu.update');
+    Route::get('/settings/instagram-feed', [SystemSettingsController::class, 'instagramFeed'])
+        ->middleware('permission:system.settings.view')
+        ->name('system.settings.instagram-feed');
+    Route::put('/settings/instagram-feed/meta', [SystemSettingsController::class, 'updateInstagramMeta'])
+        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
+        ->name('system.settings.instagram-meta.update');
+    Route::put('/settings/instagram-feed/r2', [SystemSettingsController::class, 'updateInstagramR2'])
+        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
+        ->name('system.settings.instagram-r2.update');
     Route::get('/audit-logs', [AuditLogController::class, 'index'])
         ->middleware('permission:audit.view')
         ->name('audit-logs.index');
