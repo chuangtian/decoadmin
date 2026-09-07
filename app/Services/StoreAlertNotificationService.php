@@ -16,6 +16,12 @@ class StoreAlertNotificationService
 
     public function deliver(StoreAlert $alert): void
     {
+        if ($alert->type === 'product' && ! \App\Models\ShopifyProductMonitor::whereKey($alert->source_id)
+            ->where('organization_id', $alert->organization_id)->where('store_id', $alert->store_id)
+            ->where('is_enabled', true)->where('generation', data_get($alert->context, 'generation'))->exists()) {
+            $alert->update(['delivery_status' => 'skipped', 'delivery_error' => null]);
+            return;
+        }
         $alert->loadMissing('store.notificationSetting');
         $settings = $alert->store->notificationSetting;
         $alert->increment('delivery_attempts');
@@ -95,6 +101,7 @@ class StoreAlertNotificationService
             'webhook' => $settings->notify_webhook_failed,
             'connection' => $settings->notify_connection_unhealthy,
             'discount' => $settings->notify_discount_monitor,
+            'product' => $settings->notify_product_monitor,
             default => false,
         };
     }

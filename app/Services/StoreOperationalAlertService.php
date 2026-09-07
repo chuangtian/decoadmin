@@ -68,7 +68,7 @@ class StoreOperationalAlertService
         );
 
         if ($alert->wasRecentlyCreated) {
-            DeliverStoreAlertNotificationJob::dispatch($alert->id)->onQueue('notifications');
+            DeliverStoreAlertNotificationJob::dispatch($alert->id)->onQueue('notifications')->afterCommit();
         }
 
         return $alert->wasRecentlyCreated;

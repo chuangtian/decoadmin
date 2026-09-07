@@ -10,6 +10,9 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
+if (config('product_monitoring.enabled', true)) {
+    Schedule::command('shopify:monitor-products')->everyFiveMinutes()->onOneServer()->withoutOverlapping(60);
+}
 Schedule::call([SystemStatusService::class, 'recordSchedulerHeartbeat'])
     ->name('system:scheduler-heartbeat')
     ->everyMinute()

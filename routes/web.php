@@ -613,6 +613,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/sync/{syncJob}/retry', [SyncJobController::class, 'retry'])->middleware('permission:sync.retry')->name('sync.retry');
 
     Route::get('/products', [ShopifyDataController::class, 'products'])->middleware('permission:products.view')->name('products.index');
+    Route::patch('/products/{product}/monitor', [\App\Http\Controllers\ProductMonitorController::class, 'update'])
+        ->whereNumber('product')->middleware(['permission:products.update', 'throttle:60,1'])->name('products.monitor.update');
     Route::get('/products/{product}', [ShopifyDataController::class, 'product'])->whereNumber('product')->middleware('permission:products.view')->name('products.show');
     Route::get('/orders', [ShopifyDataController::class, 'orders'])->middleware('permission:orders.view')->name('orders.index');
     Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
