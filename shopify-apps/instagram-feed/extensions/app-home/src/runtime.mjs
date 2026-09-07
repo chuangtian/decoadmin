@@ -9,10 +9,13 @@
  * 只解码、不验签。后端中间件会用 client_secret 重新验签并逐项校验 claim。
  */
 const APP_ENVIRONMENTS = Object.freeze({
-  // 只保留生产一套环境：隧道已废弃，测试环境不再单独占用 Shopify App。
+  // 生产与测试共用同一个 Shopify App，client_id 区分不出环境，
+  // 所以这里只能有一条记录：它必须与 shopify.app.toml 当前选中的环境一致。
+  // 当前指向测试服；切回生产时同时改 environment 与 appOrigin。
+  // validate-project.mjs 会校验这里与选中配置是否匹配。
   d3446448682d2950aa75cea4a399d50f: Object.freeze({
-    environment: 'production',
-    appOrigin: 'https://admin.decomkt.com',
+    environment: 'test',
+    appOrigin: 'https://testadmin.decomkt.com',
   }),
 });
 
