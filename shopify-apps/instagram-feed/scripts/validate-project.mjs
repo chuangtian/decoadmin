@@ -3,7 +3,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * 结构闸门：确保这个目录始终是「纯 Shopify CLI 项目」。
+ * 结构闸门：确保这个目录始终是「纯 Shopify CLI 项目」，且当前选中的环境自上而下一致。
  *
  * 业务后端已经全部搬到 DecoAdmin（Laravel），这里只保留 App 配置和扩展。
  * 一旦有人把 Remix / Prisma / Node 后端重新塞回来，或把某个环境的 URL 指错，
@@ -13,28 +13,30 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const expectedScopes = 'read_products';
 
-// 每套配置对应的后端 origin。local 的隧道地址会变，改的时候三处（application_url、
-// webhook uri、redirect_urls）加上 Laravel 的 config/instagram_feed.php 必须同步。
+// 生产与测试是同一个 Shopify App（同一个 client_id）。一个 App 只有一份
+// application_url 与一组 webhook 地址，所以两套配置永远只能有一套生效：
+// 发布测试配置＝生产入口停用，反之亦然。改动某套环境的 origin 时，
+// 三处（application_url、webhook uri、redirect_urls）加上 Laravel 的
+// config/instagram_feed.php 必须同步。
+const productionOrigin = 'https://admin.decomkt.com';
+const testOrigin = 'https://testadmin.decomkt.com';
+const environmentByOrigin = new Map([
+  [productionOrigin, 'production'],
+  [testOrigin, 'test'],
+]);
 const configurations = new Map([
-  // 当前选中配置指向 test，避免漏写 --config 时把配置推到失效的隧道地址。
-  ['shopify.app.toml', 'https://testadmin.decomkt.com'],
-  // local 已停用，保留隧道地址仅为记录历史配置。
-  ['shopify.app.local.toml', 'https://wendy-interim-classic-segment.trycloudflare.com'],
-  ['shopify.app.test.toml', 'https://testadmin.decomkt.com'],
-  ['shopify.app.production.toml', 'https://admin.decomkt.com'],
+  ['shopify.app.production.toml', productionOrigin],
+  ['shopify.app.test.toml', testOrigin],
 ]);
 
-// local 与 test 共用同一个 Shopify App（隧道已废弃，local 不再单独维护），
-// 当前选中配置也指向同一个 App，这三份必须声明同一个 client_id。
-const requiresSharedClientId = new Set([
-  'shopify.app.toml',
-  'shopify.app.local.toml',
-  'shopify.app.test.toml',
-]);
+// CLI 当前选中配置。它必须逐项镜像上面某一套环境，避免漏写 --config 时推错目标。
+const selectedConfiguration = 'shopify.app.toml';
 
-// local 与 test 共用的 client_id。生产必须是 Dev Dashboard 里另一个独立 App，
-// 绝不能等于这个值 —— 那意味着生产被指向了测试用的 App。
+// 生产与测试共用的 client_id。所有配置文件都必须声明它。
 const sharedClientId = 'd3446448682d2950aa75cea4a399d50f';
+
+// 隧道与本地地址一律不允许出现：对应的环境配置已删除，且它们会覆盖线上地址。
+const forbiddenOrigins = /trycloudflare\.com|localhost|127\.0\.0\.1/i;
 
 // Remix / Prisma / Node 后端的残留物。任何一个存在都说明后端又被搬回来了。
 const forbiddenPaths = [
@@ -71,7 +73,8 @@ function walk(directory) {
   });
 }
 
-for (const [fileName, origin] of configurations) {
+/** 一份配置文件必须完整指向同一个 origin，并保持安装方式与授权集合不变。 */
+function assertConfiguration(fileName, origin) {
   const filePath = join(projectRoot, fileName);
   check(existsSync(filePath), `${fileName} is missing`);
 
@@ -95,27 +98,57 @@ for (const [fileName, origin] of configurations) {
   check(!/client_secret|access_token/i.test(contents), `${fileName} contains a private credential field`);
 
   const clientId = /client_id\s*=\s*"(.*)"/.exec(contents)?.[1] ?? '';
-  if (requiresSharedClientId.has(fileName)) {
-    check(clientId === sharedClientId, `${fileName} must declare the shared local/test client_id`);
-  } else {
-    // 空表示 Dev Dashboard 里还没建这个 App，创建后填入即可。
-    check(
-      clientId === '' || /^[0-9a-f]{32}$/.test(clientId),
-      `${fileName} client_id must be empty or a 32-character Shopify client id`,
-    );
-    check(clientId !== sharedClientId, `${fileName} must not point at the shared local/test app`);
-    check(!/trycloudflare\.com|localhost|127\.0\.0\.1/i.test(contents), `${fileName} contains a forbidden local URL`);
+  check(/^[0-9a-f]{32}$/.test(clientId), `${fileName} client_id must be a 32-character Shopify client id`);
+  check(clientId === sharedClientId, `${fileName} must declare the shared Instagram Feed client_id`);
+  check(!forbiddenOrigins.test(contents), `${fileName} contains a forbidden tunnel or localhost URL`);
+
+  // 一份配置里不能混进另一套环境的地址，否则发布出去的地址是两个环境的拼接。
+  for (const [otherOrigin] of environmentByOrigin) {
+    if (otherOrigin !== origin) {
+      check(!contents.includes(otherOrigin), `${fileName} must not mix in the ${environmentByOrigin.get(otherOrigin)} origin`);
+    }
   }
+
+  return contents;
 }
 
-// 除 local/test 共用的那一个之外，其余环境必须各自绑定不同的 App。
-const linkedClientIds = [...configurations.keys()]
-  .filter((fileName) => !requiresSharedClientId.has(fileName))
-  .map((fileName) => /client_id\s*=\s*"(.*)"/.exec(readFileSync(join(projectRoot, fileName), 'utf8'))?.[1] ?? '')
-  .filter(Boolean);
+for (const [fileName, origin] of configurations) {
+  assertConfiguration(fileName, origin);
+}
+
+// 选中配置：先判断它指向哪套环境，再用同一套规则校验，保证它是某套环境的完整镜像。
+const selectedContents = readFileSync(join(projectRoot, selectedConfiguration), 'utf8');
+const selectedOrigins = [...environmentByOrigin.keys()].filter((origin) => selectedContents.includes(origin));
 check(
-  new Set(linkedClientIds).size === linkedClientIds.length,
-  'Each remaining environment must be linked to a different Shopify app',
+  selectedOrigins.length === 1,
+  `${selectedConfiguration} must mirror exactly one environment origin, found ${selectedOrigins.length}`,
+);
+const selectedOrigin = selectedOrigins[0];
+const selectedEnvironment = environmentByOrigin.get(selectedOrigin);
+assertConfiguration(selectedConfiguration, selectedOrigin);
+
+// 扩展里的 appOrigin 是构建期常量，会随 App 版本一起发布，
+// 因此必须与选中配置指向同一个环境，否则商家会被引导到另一个后端。
+const runtimePath = join(projectRoot, 'extensions/app-home/src/runtime.mjs');
+check(existsSync(runtimePath), 'extensions/app-home/src/runtime.mjs is missing');
+const runtimeContents = readFileSync(runtimePath, 'utf8');
+check(
+  runtimeContents.includes(`appOrigin: '${selectedOrigin}'`),
+  `runtime.mjs appOrigin must match ${selectedConfiguration} (${selectedEnvironment}: ${selectedOrigin})`,
+);
+check(
+  runtimeContents.includes(`environment: '${selectedEnvironment}'`),
+  `runtime.mjs environment must match ${selectedConfiguration} (${selectedEnvironment})`,
+);
+check(
+  runtimeContents.includes(sharedClientId),
+  'runtime.mjs must map the shared Instagram Feed client_id',
+);
+
+// 本地隧道环境已废弃：配置文件不能悄悄回来。
+check(
+  !existsSync(join(projectRoot, 'shopify.app.local.toml')),
+  'shopify.app.local.toml was removed on purpose: the Cloudflare tunnel environment is no longer maintained',
 );
 
 for (const path of forbiddenPaths) {
@@ -136,4 +169,4 @@ for (const filePath of walk(projectRoot)) {
   );
 }
 
-console.log('instagram-feed Shopify CLI project structure is valid.');
+console.log(`instagram-feed Shopify CLI project structure is valid. Selected environment: ${selectedEnvironment} (${selectedOrigin}).`);

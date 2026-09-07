@@ -13,6 +13,12 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
+use App\Http\Controllers\CodexApiTokenController;
+use App\Http\Controllers\CodexOAuthAuthorizationController;
+use App\Http\Controllers\CodexOAuthClientRegistrationController;
+use App\Http\Controllers\CodexOAuthMetadataController;
+use App\Http\Controllers\CodexOAuthTokenController;
+use App\Http\Controllers\CodexRemoteMcpController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiscountController;
 use App\Http\Controllers\DiscountManagerOAuthController;
@@ -72,6 +78,27 @@ use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthCheckController::class)->name('health');
+
+Route::get('/.well-known/oauth-protected-resource', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.protected-resource');
+Route::get('/.well-known/oauth-protected-resource/mcp/decoadmin', [CodexOAuthMetadataController::class, 'protectedResource'])
+    ->middleware('throttle:120,1');
+Route::get('/.well-known/oauth-authorization-server', [CodexOAuthMetadataController::class, 'authorizationServer'])
+    ->middleware('throttle:120,1')
+    ->name('codex.oauth.authorization-server');
+Route::post('/oauth/register', CodexOAuthClientRegistrationController::class)
+    ->middleware('throttle:10,1')
+    ->name('codex.oauth.register');
+Route::post('/oauth/token', [CodexOAuthTokenController::class, 'token'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.token');
+Route::post('/oauth/revoke', [CodexOAuthTokenController::class, 'revoke'])
+    ->middleware('throttle:60,1')
+    ->name('codex.oauth.revoke');
+Route::post('/mcp/decoadmin', CodexRemoteMcpController::class)
+    ->middleware(['codex.token', 'throttle:120,1'])
+    ->name('codex.mcp');
 
 Route::get('/', fn () => auth()->check()
     ? redirect()->route('dashboard')
@@ -246,6 +273,12 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
+    Route::get('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'show'])
+        ->middleware('throttle:60,1')
+        ->name('codex.oauth.authorize');
+    Route::post('/oauth/authorize', [CodexOAuthAuthorizationController::class, 'store'])
+        ->middleware('throttle:30,1');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar'])->name('profile.avatar.update');
@@ -476,6 +509,14 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.feishu.update');
+    // Instagram / Facebook 应用凭证与 R2 存储是平台级配置，界面放在
+    // 应用中心 → Instagram Feed 的「应用配置」页签里，这里只保留写入端点。
+    Route::put('/settings/instagram-feed/meta', [SystemSettingsController::class, 'updateInstagramMeta'])
+        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
+        ->name('system.settings.instagram-meta.update');
+    Route::put('/settings/instagram-feed/r2', [SystemSettingsController::class, 'updateInstagramR2'])
+        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
+        ->name('system.settings.instagram-r2.update');
     Route::get('/audit-logs', [AuditLogController::class, 'index'])
         ->middleware('permission:audit.view')
         ->name('audit-logs.index');
@@ -504,6 +545,16 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions'])->middleware('permission:roles.update')->name('roles.permissions.update');
 
     Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:roles.view')->name('permissions.index');
+
+    Route::get('/codex-tokens', [CodexApiTokenController::class, 'index'])
+        ->middleware('permission:codex.tokens.view')
+        ->name('codex-tokens.index');
+    Route::post('/codex-tokens', [CodexApiTokenController::class, 'store'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:10,1'])
+        ->name('codex-tokens.store');
+    Route::delete('/codex-tokens/{codexApiToken}', [CodexApiTokenController::class, 'destroy'])
+        ->middleware(['permission:codex.tokens.manage', 'throttle:20,1'])
+        ->name('codex-tokens.destroy');
 
     Route::get('/apps', [AppController::class, 'index'])->middleware('permission:apps.view')->name('apps.index');
     Route::get('/apps/{app}', [AppController::class, 'show'])->middleware('permission:apps.view')->name('apps.show');
@@ -714,6 +765,12 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::put('/checkout', [PersonalizationController::class, 'saveCheckout'])
             ->middleware(['permission:personalization.manage', 'throttle:20,1'])
             ->name('personalization.checkout.update');
+        Route::put('/thank-you', [PersonalizationController::class, 'saveThankYou'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.thank-you.update');
+        Route::put('/order-status', [PersonalizationController::class, 'saveOrderStatus'])
+            ->middleware(['permission:personalization.manage', 'throttle:20,1'])
+            ->name('personalization.order-status.update');
         Route::put('/smart-cart', [PersonalizationController::class, 'saveSmartCart'])
             ->middleware(['permission:personalization.smart_cart.manage', 'throttle:20,1'])
             ->name('personalization.smart-cart.update');

@@ -98,6 +98,13 @@ if (config('services.meta_ads.sync_enabled', true)) {
 }
 
 if (config('services.advertising_sync.enabled', true)) {
+    Schedule::command('advertising-channels:sync google --mode=reconcile')
+        ->name('advertising-channels:google:daily-attribution-reconciliation')
+        ->dailyAt('04:47')
+        ->timezone('UTC')
+        ->onOneServer()
+        ->withoutOverlapping(120);
+
     foreach (['google' => 17, 'tiktok' => 29, 'bing' => 41, 'criteo' => 53] as $channel => $minute) {
         Schedule::command("advertising-channels:sync {$channel} --mode=incremental")
             ->name("advertising-channels:{$channel}:hourly-store-sync")

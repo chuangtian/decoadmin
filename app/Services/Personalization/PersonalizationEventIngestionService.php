@@ -41,6 +41,8 @@ class PersonalizationEventIngestionService
 
     public const CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED = 'deco_personalization:checkout_recommendation_sequence_completed';
 
+    public const PRODUCT_VIEWED = 'product_viewed';
+
     public const CHECKOUT_COMPLETED = 'checkout_completed';
 
     private const EVENTS = [
@@ -54,6 +56,7 @@ class PersonalizationEventIngestionService
         self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
         self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
         self::CHECKOUT_RECOMMENDATION_SEQUENCE_COMPLETED,
+        self::PRODUCT_VIEWED,
         self::CHECKOUT_COMPLETED,
     ];
 
@@ -99,9 +102,11 @@ class PersonalizationEventIngestionService
             throw new PersonalizationException('PERSONALIZATION_EVENT_TIME_INVALID', '推荐事件时间超出允许范围。');
         }
 
-        $context = $eventName === self::CHECKOUT_COMPLETED
-            ? $this->checkoutContext($payload)
-            : $this->recommendationContext($store, $eventName, $payload);
+        $context = match ($eventName) {
+            self::CHECKOUT_COMPLETED => $this->checkoutContext($payload),
+            self::PRODUCT_VIEWED => $this->productViewedContext($store, $payload),
+            default => $this->recommendationContext($store, $eventName, $payload),
+        };
         $payloadHash = hash('sha256', json_encode([
             'event_name' => $eventName,
             'occurred_at' => $occurredAt->toIso8601String(),
@@ -244,6 +249,19 @@ class PersonalizationEventIngestionService
         ];
     }
 
+    /** @param array<string, mixed> $payload @return array{component_id: null, strategy_id: null, strategy_version_id: null, placement: null, shopify_order_id: null, products: list<array<string, mixed>>} */
+    private function productViewedContext(Store $store, array $payload): array
+    {
+        return [
+            'component_id' => null,
+            'strategy_id' => null,
+            'strategy_version_id' => null,
+            'placement' => null,
+            'shopify_order_id' => null,
+            'products' => $this->products($store, self::PRODUCT_VIEWED, $payload['products'] ?? null),
+        ];
+    }
+
     /** @return list<array{product_id: int, shopify_product_id: string, shopify_variant_id: ?string, rank: ?int}> */
     private function products(Store $store, string $eventName, mixed $value): array
     {
@@ -262,6 +280,7 @@ class PersonalizationEventIngestionService
             self::CHECKOUT_RECOMMENDATION_CLICK,
             self::CHECKOUT_RECOMMENDATION_ADD_SUCCESS,
             self::CHECKOUT_RECOMMENDATION_ADD_FAILED,
+            self::PRODUCT_VIEWED,
         ], true) && count($value) !== 1) {
             throw new PersonalizationException('INVALID_PERSONALIZATION_EVENT_PRODUCTS', '点击或加购事件必须只包含一个商品。');
         }

@@ -4,13 +4,13 @@
 
 | 环境 | Client ID | Handle | 应用域名 |
 | --- | --- | --- | --- |
-| `local` | `d3446448682d2950aa75cea4a399d50f` | `deco-instagram-feed-local` | `https://wendy-interim-classic-segment.trycloudflare.com`（当前临时地址） |
-| `test` | 由 `INSTAGRAM_FEED_TEST_CLIENT_ID` 提供，尚未创建 | `deco-instagram-feed-test` | `https://testadmin.decomkt.com` |
-| `production` | 由 `INSTAGRAM_FEED_PRODUCTION_CLIENT_ID` 提供，尚未创建 | `deco-instagram-feed` | `https://admin.decomkt.com` |
+| `local` | 已废弃（隧道环境不再维护） | — | — |
+| `test` | `d3446448682d2950aa75cea4a399d50f`（由 `INSTAGRAM_FEED_TEST_CLIENT_ID` 提供） | `deco-instagram-feed` | `https://testadmin.decomkt.com` |
+| `production` | `d3446448682d2950aa75cea4a399d50f`（由 `INSTAGRAM_FEED_PRODUCTION_CLIENT_ID` 提供） | `deco-instagram-feed` | `https://admin.decomkt.com` |
 
 运行环境通过 `INSTAGRAM_FEED_ENVIRONMENT=local|test|production` 选择。对应 Client Secret 只放在未跟踪的环境变量中：`INSTAGRAM_FEED_<ENV>_CLIENT_SECRET`，也可使用当前环境公共回退变量 `INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET`。
 
-测试与生产是 Dev Dashboard 里各自独立的 Shopify App，尚未创建，因此 `client_id` 默认留空；配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
+测试与生产目前是**同一个** Shopify App：一个 App 只有一份 `application_url`、一组 webhook 地址和一组 OAuth redirect，所以两个环境不能同时生效，发布哪一套配置就等于停用另一套。当前该 App 指向测试服，生产入口停用。切换步骤见 `shopify-apps/instagram-feed/README.md` 的「切换环境」。配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
 
 三套 App 的固定授权集合均为：`read_products`。App 只需要解析关联商品的标题与 handle；写入自己的 app-data metafield 不需要额外 scope。后台 token exchange 后校验响应 `scope`，并通过 `currentAppInstallation.accessScopes` 再次核验安装权限；缺少必要权限时返回 `SHOPIFY_REQUIRED_SCOPES_MISSING`，不会继续建立会话。
 
@@ -27,9 +27,13 @@
 
 这是 Meta 后台里两组不同的凭证，不要混用。回调地址默认由当前环境应用域名推导，可用 `INSTAGRAM_FEED_INSTAGRAM_REDIRECT_URI` 与 `INSTAGRAM_FEED_FACEBOOK_REDIRECT_URI` 覆盖，且必须与 Meta 后台登记的地址完全一致。
 
+App ID、App Secret 和 Facebook 登录配置 ID 现在也可以在后台「应用中心 → Instagram Feed → 应用配置」页签维护（`system_settings` 的 `instagram_meta` 分组）。凭证是平台级的、对所有店铺共享，因此页签的可见性由 `system.settings.view` 决定、保存由 `system.settings.update` 决定，与 `instagram_feed.*` 店铺权限无关。后台有值时覆盖 `.env`，后台留空则回退到 `.env`。App Secret 加密保存且保存后不再回显，留空提交表示保持原值。
+
 ## Cloudflare R2
 
 Instagram CDN 链接带签名会过期，同步后必须把视频与封面转存到 R2，对外用绑定在桶上的自定义域名给永久地址。相关变量：`INSTAGRAM_FEED_R2_ACCOUNT_ID`、`INSTAGRAM_FEED_R2_ACCESS_KEY_ID`、`INSTAGRAM_FEED_R2_SECRET_ACCESS_KEY`、`INSTAGRAM_FEED_R2_BUCKET`、`INSTAGRAM_FEED_R2_PUBLIC_BASE_URL`。
+
+这五项同样可以在后台「应用中心 → Instagram Feed → 应用配置」页签维护（`system_settings` 的 `instagram_r2` 分组），优先级与回退规则同上：后台有值覆盖 `.env`，留空回退 `.env`。Secret Access Key 加密保存、不回显。改动保存后立即生效，不需要重新构建镜像或重启容器。
 
 R2 未配置时同步只拉取元数据、不转存，且未转存的内容不会发布到前台。对象 key 为 `{环境}/{店铺域名}/videos/{ig_media_id}.mp4` 与 `{环境}/{店铺域名}/posters/{ig_media_id}.jpg`，按环境与店铺隔离，重复转存是覆盖而不是堆积。
 

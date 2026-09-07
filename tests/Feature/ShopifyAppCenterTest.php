@@ -181,7 +181,7 @@ class ShopifyAppCenterTest extends TestCase
         $store = $this->store($organization, 'Macfox', 'macfox.myshopify.com');
         $otherStore = $this->store($organization, 'Macfox DE', 'macfox-de.myshopify.com');
         $studentDiscount = $this->app($organization, 'Deco-学生优惠-test', 'deco-student-discount-test');
-        $instagram = $this->app($organization, 'Deco-Instagram-内容-test', 'deco-instagram-feed-test');
+        $instagram = $this->app($organization, 'Instagram Feed (test)', 'deco-instagram-feed-test');
         $personalization = $this->app($organization, 'Deco 个性化推荐测试', 'deco-personalization-test');
         $generic = $this->app($organization, 'Commerce Hub', 'commerce-hub');
         $otherStoreApp = $this->app($organization, 'Other Store App', 'other-store-app');
@@ -209,7 +209,7 @@ class ShopifyAppCenterTest extends TestCase
         $this->assertCount(4, $navigation);
         $this->assertSame('学生优惠', $navigation[$studentDiscount->id]['name']);
         $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/student-discounts", $navigation[$studentDiscount->id]['route']);
-        $this->assertSame('Instagram 内容', $navigation[$instagram->id]['name']);
+        $this->assertSame('Instagram Feed', $navigation[$instagram->id]['name']);
         $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/instagram-feed", $navigation[$instagram->id]['route']);
         $this->assertSame('个性化推荐', $navigation[$personalization->id]['name']);
         $this->assertSame("/organizations/{$organization->id}/stores/{$store->id}/personalization", $navigation[$personalization->id]['route']);

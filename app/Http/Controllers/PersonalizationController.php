@@ -157,6 +157,18 @@ class PersonalizationController extends Controller
             'checkout' => [
                 'uuid' => $checkout?->uuid,
                 'strategy_uuid' => $checkout?->component?->strategy?->uuid,
+                'thank_you' => [
+                    'uuid' => $checkout?->thankYouComponent?->uuid,
+                    'strategy_uuid' => $checkout?->thankYouComponent?->strategy?->uuid,
+                    'heading' => $checkout?->thankYouComponent?->heading ?: 'Great Value Bundles for You',
+                    'enabled' => $checkout?->thankYouComponent?->status?->value === 'active',
+                ],
+                'order_status' => [
+                    'uuid' => $checkout?->orderStatusComponent?->uuid,
+                    'strategy_uuid' => $checkout?->orderStatusComponent?->strategy?->uuid,
+                    'heading' => $checkout?->orderStatusComponent?->heading ?: 'Great Value Bundles for You',
+                    'enabled' => $checkout?->orderStatusComponent?->status?->value === 'active',
+                ],
                 'trust_items' => $checkout?->trust_items ?? $this->checkout->defaultTrustItems(),
                 'icon_options' => array_map(fn (string $icon): array => [
                     'value' => $icon,
@@ -389,6 +401,34 @@ class PersonalizationController extends Controller
         );
     }
 
+    public function saveThankYou(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'strategy_uuid' => ['required', 'uuid'],
+            'heading' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        return $this->run(
+            fn () => $this->checkout->saveThankYou($store, $request->user(), $values),
+            '感谢页面推荐设置已保存。Shopify 感谢页面中的“Deco 推荐策略”区块会使用该策略。',
+        );
+    }
+
+    public function saveOrderStatus(Request $request, Organization $organization, Store $store): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            'strategy_uuid' => ['required', 'uuid'],
+            'heading' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        return $this->run(
+            fn () => $this->checkout->saveOrderStatus($store, $request->user(), $values),
+            '售后页面推荐设置已保存。Shopify 订单状态页面中的“Deco 推荐策略”区块会使用该策略。',
+        );
+    }
+
     private function assertUserScope(Request $request, Organization $organization, Store $store, string $permission): void
     {
         abort_unless($store->organization_id === $organization->id, 403);
@@ -473,11 +513,19 @@ class PersonalizationController extends Controller
     {
         return match ($algorithm) {
             PersonalizationAlgorithm::Manual => '手动推荐',
+            PersonalizationAlgorithm::NextLlm => 'Next LLM（智能混合）',
+            PersonalizationAlgorithm::FreeShippingUpsell => '免费送货追加销售',
+            PersonalizationAlgorithm::SimilarProducts => '类似产品',
+            PersonalizationAlgorithm::SubstituteProducts => '替代产品',
             PersonalizationAlgorithm::BestSeller => '畅销商品',
-            PersonalizationAlgorithm::NewArrivals => '新品',
+            PersonalizationAlgorithm::NewArrivals => '新品上市',
             PersonalizationAlgorithm::FrequentlyBoughtTogether => '经常一起购买',
+            PersonalizationAlgorithm::FrequentlyViewedTogether => '经常一起查看',
+            PersonalizationAlgorithm::ComplementaryProducts => '互补产品',
             PersonalizationAlgorithm::RecentlyViewed => '最近浏览',
-            PersonalizationAlgorithm::SimilarProducts => '相似商品',
+            PersonalizationAlgorithm::CompleteTheLook => '完成造型',
+            PersonalizationAlgorithm::SameProductUpsell => '同款产品追加销售',
+            PersonalizationAlgorithm::AllProducts => '所有产品',
         };
     }
 
@@ -489,6 +537,8 @@ class PersonalizationController extends Controller
             PersonalizationPlacement::CartPage => '购物车页面',
             PersonalizationPlacement::SmartCart => 'Smart Cart',
             PersonalizationPlacement::Checkout => 'Checkout',
+            PersonalizationPlacement::ThankYou => '感谢页面',
+            PersonalizationPlacement::OrderStatus => '售后页面',
         };
     }
 

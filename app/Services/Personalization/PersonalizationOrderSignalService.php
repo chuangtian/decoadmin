@@ -69,6 +69,71 @@ class PersonalizationOrderSignalService
             ]);
     }
 
+    /**
+     * Return anonymous co-view signals aggregated by the Web Pixel session hash.
+     * No customer, browser, or raw session identifiers are selected or returned.
+     *
+     * @return Collection<int, array{shopify_product_id: string, support_sessions: int, views: int}>
+     */
+    public function frequentlyViewedTogether(
+        Store $store,
+        int|string $shopifyProductId,
+        int $limit = 12,
+        int $lookbackDays = 30,
+    ): Collection {
+        $shopifyProductId = $this->numericId($shopifyProductId);
+        $limit = min(100, max(1, $limit));
+        $lookbackDays = min(90, max(1, $lookbackDays));
+        $eligibleSessions = DB::table('personalization_event_products as seed_product')
+            ->join('personalization_events as seed_event', 'seed_event.id', '=', 'seed_product.event_id')
+            ->where('seed_event.organization_id', $store->organization_id)
+            ->where('seed_event.store_id', $store->getKey())
+            ->where('seed_event.event_name', PersonalizationEventIngestionService::PRODUCT_VIEWED)
+            ->where('seed_event.occurred_at', '>=', now()->subDays($lookbackDays))
+            ->where('seed_product.shopify_product_id', $shopifyProductId)
+            ->select('seed_event.session_id_hash')
+            ->distinct();
+
+        return DB::query()
+            ->fromSub($eligibleSessions, 'eligible_sessions')
+            ->join('personalization_events as companion_event', function ($join) use ($store, $lookbackDays): void {
+                $join->on('companion_event.session_id_hash', '=', 'eligible_sessions.session_id_hash')
+                    ->where('companion_event.organization_id', '=', $store->organization_id)
+                    ->where('companion_event.store_id', '=', $store->getKey())
+                    ->where('companion_event.event_name', '=', PersonalizationEventIngestionService::PRODUCT_VIEWED)
+                    ->where('companion_event.occurred_at', '>=', now()->subDays($lookbackDays));
+            })
+            ->join('personalization_event_products as companion_product', 'companion_product.event_id', '=', 'companion_event.id')
+            ->join('products', function ($join) use ($store): void {
+                $join->on('products.id', '=', 'companion_product.product_id')
+                    ->where('products.organization_id', '=', $store->organization_id)
+                    ->where('products.store_id', '=', $store->getKey());
+            })
+            ->where('companion_product.shopify_product_id', '!=', $shopifyProductId)
+            ->where('products.status', 'active')
+            ->whereNotNull('products.published_at_shopify')
+            ->whereExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('product_variants')
+                ->whereColumn('product_variants.product_id', 'products.id')
+                ->where('product_variants.available_for_sale', true))
+            ->groupBy('products.shopify_product_id')
+            ->orderByDesc('support_sessions')
+            ->orderByDesc('views')
+            ->orderBy('products.shopify_product_id')
+            ->limit($limit)
+            ->get([
+                'products.shopify_product_id',
+                DB::raw('COUNT(DISTINCT companion_event.session_id_hash) as support_sessions'),
+                DB::raw('COUNT(DISTINCT companion_event.id) as views'),
+            ])
+            ->map(fn ($row): array => [
+                'shopify_product_id' => (string) $row->shopify_product_id,
+                'support_sessions' => (int) $row->support_sessions,
+                'views' => (int) $row->views,
+            ]);
+    }
+
     private function numericId(int|string $value): string
     {
         $value = (string) $value;

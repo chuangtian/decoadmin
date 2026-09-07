@@ -31,17 +31,38 @@ const applicationChildren = computed<MenuItem[]>(() => page.props.applicationNav
     permission: application.permission,
 })));
 
+// 同一个应用可能既有固定入口又有安装记录，按最终路由保留先出现的那条。
+const dedupeByRoute = (items: MenuItem[]) => {
+    const seen = new Set<string>();
+
+    return items.filter((item) => {
+        if (!item.route || seen.has(item.route)) return !item.route;
+        seen.add(item.route);
+
+        return true;
+    });
+};
+
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
     .map((item) => {
-        const children = item.dynamicChildren === 'applications' ? applicationChildren.value : item.children;
+        const isApplications = item.dynamicChildren === 'applications';
+        const children = isApplications
+            ? [...(item.children ?? []), ...applicationChildren.value]
+            : item.children;
+        const resolved = children
+            ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
+            .map((child) => ({ ...child, route: contextualRoute(child.route) }))
+            // 还没选店铺时店铺级路由补不出完整路径，先隐藏，避免点进去 404。
+            .filter((child) => !(child.route && storeScopedRoutes.includes(child.route)));
 
         return {
             ...item,
             route: contextualRoute(item.route),
-            children: children
-            ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
-            .map((child) => ({ ...child, route: contextualRoute(child.route) })),
+            children: isApplications && resolved
+                // 码点序，跟后端 ApplicationCenterNavigationService 的排序保持一致。
+                ? dedupeByRoute(resolved).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+                : resolved,
         };
     })
     .filter((item) => item.route

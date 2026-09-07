@@ -22,7 +22,7 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'codex.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
@@ -32,7 +32,7 @@ class RoleSeeder extends Seeder
         'developer' => [
             'name' => '开发人员',
             'description' => '管理集成、应用、Webhook、数据同步和日志。',
-            'permissions' => ['store.view', 'apps.view', 'apps.create', 'apps.update', 'apps.configure', 'shopify.*', 'webhooks.*', 'sync.*', 'alerts.view', 'audit.view', 'system.health.view'],
+            'permissions' => ['store.view', 'apps.view', 'apps.create', 'apps.update', 'apps.configure', 'shopify.*', 'webhooks.*', 'sync.*', 'alerts.view', 'audit.view', 'reports.refresh', 'system.health.view'],
         ],
         'operator' => [
             'name' => '运营人员',

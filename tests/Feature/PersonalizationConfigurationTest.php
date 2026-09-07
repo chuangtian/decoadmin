@@ -108,11 +108,19 @@ class PersonalizationConfigurationTest extends TestCase
     {
         $this->assertSame([
             'manual',
+            'next_llm',
+            'free_shipping_upsell',
+            'similar_products',
+            'substitute_products',
             'best_seller',
             'new_arrivals',
             'frequently_bought_together',
+            'frequently_viewed_together',
+            'complementary_products',
             'recently_viewed',
-            'similar_products',
+            'complete_the_look',
+            'same_product_upsell',
+            'all_products',
         ], array_column(PersonalizationAlgorithm::cases(), 'value'));
         $this->assertSame([
             'homepage',
@@ -120,6 +128,8 @@ class PersonalizationConfigurationTest extends TestCase
             'cart_page',
             'smart_cart',
             'checkout',
+            'thank_you',
+            'order_status',
         ], array_column(PersonalizationPlacement::cases(), 'value'));
     }
 

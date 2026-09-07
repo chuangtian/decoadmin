@@ -29,39 +29,43 @@ DecoAdmin（Laravel）根项目里，本目录没有独立的 Node / Remix / Pri
 
 ## 环境
 
-| 环境 | Handle | 应用域名 | client_id |
+| 环境 | 配置文件 | 应用域名 | client_id |
 | --- | --- | --- | --- |
-| `local`（已停用） | `deco-instagram-feed-local` | 隧道已废弃 | 与 `test` 共用同一个 App |
-| `test` | `deco-instagram-feed-test` | `https://testadmin.decomkt.com` | `d3446448682d2950aa75cea4a399d50f` |
-| `production` | `deco-instagram-feed` | `https://admin.decomkt.com` | 需创建独立 App 后填入 |
+| `test`（当前生效） | `shopify.app.test.toml` | `https://testadmin.decomkt.com` | `d3446448682d2950aa75cea4a399d50f` |
+| `production`（当前停用） | `shopify.app.production.toml` | `https://admin.decomkt.com` | `d3446448682d2950aa75cea4a399d50f` |
 
-`local` 环境已停用：Cloudflare 隧道不再维护，原本的本地开发 App 已转为测试环境专用，
-因此 `shopify.app.toml`、`shopify.app.local.toml`、`shopify.app.test.toml` 声明同一个
-`client_id`，`shopify.app.toml` 也改为指向 test。
+**生产与测试是同一个 Shopify App**（handle `deco-instagram-feed`，同一个 `client_id`）。
+一个 Shopify App 只有一份 `application_url`、一组 webhook 地址和一组 OAuth redirect，
+所以两套配置永远只能有一套生效：发布测试配置就等于把生产入口停用，反之亦然。
 
-一个 Shopify App 只有一份 `application_url` 与一组 webhook 地址，共用之后该 App 固定
-指向 `https://testadmin.decomkt.com`。**不要执行 `shopify app deploy --config local`**，
-那会把地址改回失效的隧道地址，直接打断测试环境；`deploy:local` 已从 npm scripts 移除。
-要恢复本地开发，必须先申请新的隧道地址并在 Dev Dashboard 新建一个独立 App。
+当前状态：该 App 已指向测试服用于联调，生产入口暂时停用（生产侧没有任何店铺安装）。
+`shopify.app.toml`（CLI 当前选中配置）是 `shopify.app.test.toml` 的逐字镜像；
+`shopify.app.production.toml` 保持生产地址不动，它就是切回生产的还原点。
 
-生产环境仍必须是 Dev Dashboard 里另一个独立的 Shopify App，App ID、Secret、URL、数据
-和发布动作都不可与测试互换。生产的 `client_id` 故意留空，避免误把生产配置指向测试 App。
+Cloudflare 隧道环境已废弃，`shopify.app.local.toml` 不允许重新出现。
+`validate-project.mjs` 的闸门：每份配置的三处地址必须同源、不得混入另一套环境的域名、
+不得出现隧道或本地地址，`shopify.app.toml` 必须完整镜像某一套环境，且
+`extensions/app-home/src/runtime.mjs` 的 `appOrigin` / `environment` 必须与选中环境一致。
+
+要让测试与生产真正并行（互不停用），必须先在 Dev Dashboard 新建一个**独立的** App，
+用它自己的 `client_id`，再把本目录的配置、`runtime.mjs` 的 `APP_ENVIRONMENTS` 映射
+和根项目 `config/instagram_feed.php` 按环境拆开。
 
 后端通过 `INSTAGRAM_FEED_ENVIRONMENT=local|test|production` 选择环境。Client Secret
-只放在未跟踪的环境变量里：`INSTAGRAM_FEED_<ENV>_CLIENT_SECRET`，或公共回退变量
+只放在未跟踪的环境变量里：`INSTAGRAM_FEED_PRODUCTION_CLIENT_SECRET`，或公共回退变量
 `INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET`。
 
 ## 常用命令
 
 ```bash
-# 结构闸门 + 构建 test。不依赖 Shopify 登录，随时可跑。
+# 结构闸门 + 构建当前选中环境（test）。不依赖 Shopify 登录，随时可跑。
 npm run check
 
 # Shopify 侧配置校验，需要已登录 CLI。
 npm run check:config:test
-npm run check:config:production   # 生产 App 创建并填入 client_id 后才能跑
+npm run check:config:production
 
-# 按环境构建
+# 构建
 npm run build:test
 npm run build:production
 ```
@@ -72,38 +76,61 @@ CLI 登录（已有会话时可非交互复用）：
 shopify auth login --alias <你的 Shopify 账号邮箱>
 ```
 
-发布需要显式指定环境，且必须先确认后端已就绪：
+发布前必须先确认对应环境的后端已就绪（先部署 DecoAdmin，再发布 Shopify 配置与扩展）：
 
 ```bash
+# 指向测试服（会同时停用生产入口）
 npm run deploy:test
+
+# 指向生产（会同时停用测试入口）
 npm run deploy:production
 ```
 
-`local` 相关命令（`dev`、`build:local`、`deploy:local`、`config:link:test`）已移除：
+`deploy:test` 与 `deploy:production` 是互斥的：它们推的是同一个 App，后执行的那个生效。
 
-- `deploy:local` 会把共用 App 的地址改回失效隧道，打断测试环境；
-- `config:link:*` 会从 Dev Dashboard 拉取配置覆盖本地 TOML，把 `scopes` 与 webhook
-  订阅冲成 Dashboard 默认值。新环境的 `client_id` 一律手动填进对应 TOML，
-  再用 `deploy:*` 反向推送（各配置都设了 `include_config_on_deploy = true`，
+以下命令仍然不提供，原因如下：
+
+- `dev`、`build:local`、`deploy:local`：对应的隧道配置文件已删除，且与线上共用同一个
+  App，一旦执行会把已发布的 `application_url` 与 webhook 地址覆盖成失效地址；
+- `config:link:*`：会从 Dev Dashboard 拉取配置覆盖本地 TOML，把 `scopes` 与 webhook
+  订阅冲成 Dashboard 默认值。`client_id` 一律手动填进 TOML，再用 `deploy:test` /
+  `deploy:production` 反向推送（配置里设了 `include_config_on_deploy = true`，
   以本仓库的 TOML 为唯一事实来源）。
 
-## 恢复本地开发
+## 切换环境
 
-`local` 已停用，与 `test` 共用同一个 Shopify App。恢复独立的本地环境需要按顺序做完
-以下几步，缺一步就会与测试环境互相干扰：
+因为两套配置共用一个 App，切换必须整套做完，缺一步就会出现「Shopify 指向 A、扩展跳 B」：
 
-1. 在 Dev Dashboard 新建一个独立 App，取得新的 `client_id`；
-2. 申请新的隧道地址，同步到 `shopify.app.local.toml` 的 3 处：`application_url`、
-   两条 `webhooks.subscriptions.uri`、`auth.redirect_urls`；
-3. `scripts/validate-project.mjs`：把 `shopify.app.local.toml` 从
-   `requiresSharedClientId` 中移出，并恢复它在 `configurations` 里的隧道 origin；
-4. 根项目 `config/instagram_feed.php` 的 local `app_url` 与 `client_id`；
-5. 在 `package.json` 中重新加入 `dev`、`build:local`、`deploy:local`；
-6. Meta 开发者后台补充该隧道地址的 OAuth redirect URI、Deauthorize 与
-   Data deletion 回调地址。
+切回生产（测试联调完成后）：
 
-在完成第 1 步之前，绝对不要对 `local` 执行 `shopify app deploy`：共用 App 的
-`application_url` 与 webhook 地址会被改回隧道地址，测试环境立即失效。
+1. `extensions/app-home/src/runtime.mjs`：`environment` 改 `production`、
+   `appOrigin` 改 `https://admin.decomkt.com`；
+2. `shopify.app.toml`：改成 `shopify.app.production.toml` 的逐字镜像；
+3. 先把 DecoAdmin 生产后端部署到包含目标改动的提交；
+4. `npm run check` 确认闸门通过（会打印当前选中环境）；
+5. `npm run check:config:production`；
+6. `npm run deploy:production`；
+7. 测试服 `.env.staging` 里的 `INSTAGRAM_FEED_TEST_CLIENT_ID` /
+   `INSTAGRAM_FEED_TEST_CLIENT_SECRET` 视情况清除，避免测试后端继续拿生产 App 凭证；
+8. Meta 后台把 OAuth redirect、Deauthorize、Data deletion 回调改回生产域名。
+
+切到测试是同样的步骤，把 production 与 test 互换即可。
+
+## 让测试与生产真正并行
+
+上面的「切换环境」是共用一个 App 的临时方案，同一时刻只有一个环境可用。要让两者互不影响，
+必须按顺序做完以下几步，缺一步就会互相干扰：
+
+1. 在 Dev Dashboard 新建一个**独立**的 App，取得新的 `client_id`（绝不能复用现在这个）；
+2. 把 `shopify.app.test.toml` 的 `client_id` 换成新 App 的；
+3. `scripts/validate-project.mjs`：把 `sharedClientId` 拆成按文件区分的 client_id 校验；
+4. `extensions/app-home/src/runtime.mjs` 的 `APP_ENVIRONMENTS`：两个 `client_id` 各登记
+   一条，这样扩展就能按 `aud` 自动识别环境，不再需要切换时改这个文件；
+5. 根项目 `config/instagram_feed.php` 对应环境档的 `client_id` 与 `app_url`，
+   以及该环境 `.env` 里的 `INSTAGRAM_FEED_<ENV>_CLIENT_ID` / `_CLIENT_SECRET`；
+6. Meta 开发者后台补充该域名的 OAuth redirect URI、Deauthorize 与 Data deletion 回调。
+
+在完成第 1 步拿到独立 `client_id` 之前，`deploy:test` 与 `deploy:production` 始终是互斥的。
 
 ## 安全约定
 

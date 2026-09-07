@@ -120,8 +120,8 @@ const typeLabel = (media: Media) => {
 </script>
 
 <template>
-    <Head :title="`${gallery.name} · Instagram 内容`" />
-    <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: 'Instagram 内容', href: baseUrl }, { label: gallery.name }]">
+    <Head :title="`${gallery.name} · Instagram Feed`" />
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: 'Instagram Feed', href: baseUrl }, { label: gallery.name }]">
         <div class="mx-auto max-w-7xl space-y-6">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>

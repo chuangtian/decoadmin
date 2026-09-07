@@ -21,10 +21,23 @@ class SystemSettingsService
         'mail' => ['enabled', 'host', 'port', 'encryption', 'username', 'password', 'from_address', 'from_name', 'timeout'],
         'feishu' => ['enabled', 'app_id', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url'],
         'student_ai' => ['gemini_api_key', 'gemini_model', 'auto_approval_threshold'],
+        'instagram_meta' => ['instagram_app_id', 'instagram_app_secret', 'facebook_app_id', 'facebook_app_secret', 'facebook_login_config_id'],
+        'instagram_r2' => ['account_id', 'access_key_id', 'secret_access_key', 'bucket', 'public_base_url'],
     ];
 
     /** @var list<string> */
-    private const SECRET_KEYS = ['password', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url', 'gemini_api_key'];
+    private const SECRET_KEYS = [
+        'password', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url', 'gemini_api_key',
+        'instagram_app_secret', 'facebook_app_secret', 'secret_access_key',
+    ];
+
+    /**
+     * 只写密钥：永不回显给前端（即使调用方有更新权限），
+     * 提交空值表示保持原值不变，只能整体覆盖、不能读取。
+     *
+     * @var list<string>
+     */
+    private const WRITE_ONLY_KEYS = ['gemini_api_key', 'instagram_app_secret', 'facebook_app_secret', 'secret_access_key'];
 
     /** @return array<string, mixed> */
     public function sectionForFrontend(string $section, bool $includeSecrets): array
@@ -32,6 +45,11 @@ class SystemSettingsService
         abort_unless(array_key_exists($section, self::KEYS), 404);
 
         $settings = $this->section($section);
+        // 生效值可能来自数据库，也可能来自 .env 兜底；配置状态必须在脱敏之前算。
+        $writeOnlyConfigured = collect(self::KEYS[$section])
+            ->filter(fn (string $key): bool => in_array($key, self::WRITE_ONLY_KEYS, true))
+            ->mapWithKeys(fn (string $key): array => [$key.'_configured' => filled($settings[$key] ?? null)])
+            ->all();
 
         if (! $includeSecrets) {
             foreach (self::SECRET_KEYS as $key) {
@@ -52,12 +70,13 @@ class SystemSettingsService
             $settings['bot_webhook_configured'] = filled($this->value('feishu', 'bot_webhook_url'));
         }
 
-        if ($section === 'student_ai') {
-            $settings['gemini_api_key'] = '';
-            $settings['gemini_api_key_configured'] = filled($this->value('student_ai', 'gemini_api_key'));
+        foreach (self::KEYS[$section] as $key) {
+            if (in_array($key, self::WRITE_ONLY_KEYS, true)) {
+                $settings[$key] = '';
+            }
         }
 
-        return $settings;
+        return [...$settings, ...$writeOnlyConfigured];
     }
 
     /** @return array{gemini_api_key: string, gemini_model: string, auto_approval_threshold: float} */
@@ -87,8 +106,11 @@ class SystemSettingsService
 
         $allowed = collect(self::KEYS[$section]);
         $clean = collect($values)->only($allowed)->all();
-        if ($section === 'student_ai' && blank($clean['gemini_api_key'] ?? null)) {
-            unset($clean['gemini_api_key']);
+        // 只写密钥留空表示保持原值，避免前端不回显时把已存的密钥清空。
+        foreach (self::WRITE_ONLY_KEYS as $key) {
+            if (array_key_exists($key, $clean) && blank($clean[$key])) {
+                unset($clean[$key]);
+            }
         }
         $before = collect($this->section($section))->only(array_keys($clean))->all();
         $changedKeys = collect($clean)
@@ -148,6 +170,7 @@ class SystemSettingsService
         ]);
         date_default_timezone_set('UTC');
         app()->setLocale((string) $general['locale']);
+        $this->applyInstagramFeedConfiguration($settings['instagram_meta'], $settings['instagram_r2']);
 
         if (! $settings['mail']['enabled']) {
             return;
@@ -172,6 +195,31 @@ class SystemSettingsService
         Mail::purge('system');
     }
 
+    /**
+     * Instagram Feed 的 Meta 应用凭证和 R2 存储凭证在后台维护，
+     * 数据库有值就覆盖 config，没值时保持 .env 兜底。
+     * R2Client / InstagramApiClient / FacebookApiClient 都是调用时才读 config，
+     * 所以这里覆盖后无需改动它们。
+     *
+     * @param  array<string, mixed>  $meta
+     * @param  array<string, mixed>  $r2
+     */
+    private function applyInstagramFeedConfiguration(array $meta, array $r2): void
+    {
+        config([
+            'instagram_feed.instagram.app_id' => trim((string) $meta['instagram_app_id']),
+            'instagram_feed.instagram.app_secret' => (string) $meta['instagram_app_secret'],
+            'instagram_feed.facebook.app_id' => trim((string) $meta['facebook_app_id']),
+            'instagram_feed.facebook.app_secret' => (string) $meta['facebook_app_secret'],
+            'instagram_feed.facebook.login_config_id' => trim((string) $meta['facebook_login_config_id']) ?: null,
+            'instagram_feed.r2.account_id' => trim((string) $r2['account_id']),
+            'instagram_feed.r2.access_key_id' => trim((string) $r2['access_key_id']),
+            'instagram_feed.r2.secret_access_key' => (string) $r2['secret_access_key'],
+            'instagram_feed.r2.bucket' => trim((string) $r2['bucket']),
+            'instagram_feed.r2.public_base_url' => rtrim(trim((string) $r2['public_base_url']), '/'),
+        ]);
+    }
+
     /** @return array<string, array<string, mixed>> */
     private function all(): array
     {
@@ -180,6 +228,8 @@ class SystemSettingsService
             'mail' => $this->section('mail'),
             'feishu' => $this->section('feishu'),
             'student_ai' => $this->section('student_ai'),
+            'instagram_meta' => $this->section('instagram_meta'),
+            'instagram_r2' => $this->section('instagram_r2'),
         ];
     }
 
@@ -257,6 +307,21 @@ class SystemSettingsService
                 'gemini_api_key' => '',
                 'gemini_model' => 'gemini-2.5-pro',
                 'auto_approval_threshold' => 80,
+            ],
+            // 未在后台配置时回退到 .env，保证迁移期间已有部署不中断。
+            'instagram_meta' => [
+                'instagram_app_id' => (string) config('instagram_feed.instagram.app_id', ''),
+                'instagram_app_secret' => (string) config('instagram_feed.instagram.app_secret', ''),
+                'facebook_app_id' => (string) config('instagram_feed.facebook.app_id', ''),
+                'facebook_app_secret' => (string) config('instagram_feed.facebook.app_secret', ''),
+                'facebook_login_config_id' => (string) config('instagram_feed.facebook.login_config_id', ''),
+            ],
+            'instagram_r2' => [
+                'account_id' => (string) config('instagram_feed.r2.account_id', ''),
+                'access_key_id' => (string) config('instagram_feed.r2.access_key_id', ''),
+                'secret_access_key' => (string) config('instagram_feed.r2.secret_access_key', ''),
+                'bucket' => (string) config('instagram_feed.r2.bucket', ''),
+                'public_base_url' => (string) config('instagram_feed.r2.public_base_url', ''),
             ],
             default => [],
         };

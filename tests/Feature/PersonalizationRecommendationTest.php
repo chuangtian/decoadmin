@@ -9,6 +9,8 @@ use App\Models\InventoryLevel;
 use App\Models\Location;
 use App\Models\Order;
 use App\Models\Organization;
+use App\Models\PersonalizationEvent;
+use App\Models\PersonalizationEventSource;
 use App\Models\Product;
 use App\Models\ProductCollection;
 use App\Models\ProductVariant;
@@ -16,6 +18,7 @@ use App\Models\Role;
 use App\Models\Store;
 use App\Models\User;
 use App\Services\Personalization\PersonalizationConfigurationService;
+use App\Services\Personalization\PersonalizationEventIngestionService;
 use App\Services\Personalization\PersonalizationRecommendationService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -98,6 +101,107 @@ class PersonalizationRecommendationTest extends TestCase
         $this->assertStringNotContainsString('ORDER-', $serialized);
         $this->assertArrayNotHasKey('description', $payload['items'][0]);
         $this->assertSame('frequently_bought_together', $payload['items'][0]['reason_code']);
+    }
+
+    public function test_extended_presets_use_real_signals_and_safe_deterministic_fallbacks(): void
+    {
+        [$actor, $organization, $store] = $this->context();
+        $seed = $this->product($organization, $store, 501, 'Trail Bike', 'Bike', 'Deco', ['Bike', 'Trail'], 100, now()->subDays(20));
+        $substitute = $this->product($organization, $store, 502, 'City Bike', 'Bike', 'Deco', ['Bike', 'Trail'], 110, now()->subDays(10));
+        $helmet = $this->product($organization, $store, 503, 'Trail Helmet', 'Accessory', 'Deco', ['Trail'], 35, now()->subDays(5));
+        $newest = $this->product($organization, $store, 504, 'New Light', 'Accessory', 'Deco', ['Trail'], 20, now());
+        $collection = ProductCollection::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'shopify_collection_id' => 5501,
+            'title' => 'Trail Kit',
+            'handle' => 'trail-kit',
+            'sort_order' => 'manual',
+            'sync_batch' => (string) Str::uuid(),
+            'synced_at' => now(),
+        ]);
+        foreach ([$seed, $substitute, $helmet, $newest] as $product) {
+            $product->collections()->attach($collection->id, [
+                'organization_id' => $organization->id,
+                'store_id' => $store->id,
+                'shopify_product_id' => $product->shopify_product_id,
+                'sync_batch' => (string) Str::uuid(),
+            ]);
+        }
+        $this->order($organization, $store, 7501, [[$seed, 1], [$helmet, 1]]);
+        $this->order($organization, $store, 7502, [[$seed, 1], [$helmet, 1], [$newest, 1]]);
+
+        $source = PersonalizationEventSource::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'status' => 'active',
+            'activated_at' => now(),
+        ]);
+        foreach ([
+            ['session-a', $seed], ['session-a', $helmet],
+            ['session-b', $seed], ['session-b', $helmet],
+            ['session-c', $seed], ['session-c', $substitute],
+        ] as $position => [$session, $product]) {
+            $this->viewedEvent($organization, $store, $source, $product, $session, 'view-'.$position);
+        }
+
+        ProductVariant::query()->create([
+            'product_id' => $seed->id,
+            'shopify_variant_id' => 5011,
+            'title' => 'Premium',
+            'sku' => 'SKU-501-PREMIUM',
+            'price' => 150,
+            'available_for_sale' => true,
+            'selected_options' => [],
+        ]);
+
+        $config = app(PersonalizationConfigurationService::class);
+        $engine = app(PersonalizationRecommendationService::class);
+        $strategy = fn (string $algorithm) => $config->createStrategy($store, $actor, [
+            'name' => $algorithm,
+            'algorithm' => $algorithm,
+            'item_limit' => 24,
+        ]);
+
+        $this->assertSame('503', $this->ids($engine->recommend($store, $strategy('frequently_viewed_together'), [
+            'seed_product_id' => 501,
+        ]))[0]);
+        $this->assertSame('502', $this->ids($engine->recommend($store, $strategy('substitute_products'), [
+            'seed_product_id' => 501,
+        ]))[0]);
+        $this->assertSame('503', $this->ids($engine->recommend($store, $strategy('complementary_products'), [
+            'seed_product_id' => 501,
+        ]))[0]);
+        $this->assertContains('503', $this->ids($engine->recommend($store, $strategy('complete_the_look'), [
+            'seed_product_id' => 501,
+        ])));
+        $this->assertNotEmpty($this->ids($engine->recommend($store, $strategy('next_llm'), [
+            'seed_product_id' => 501,
+            'recently_viewed_product_ids' => [504],
+        ])));
+        $this->assertSame('503', $this->ids($engine->recommend($store, $strategy('free_shipping_upsell'), [
+            'cart_product_ids' => [501],
+            'cart_subtotal_amount' => 75,
+        ]))[0]);
+        $this->assertSame([], $this->ids($engine->recommend($store, $strategy('free_shipping_upsell'), [
+            'cart_product_ids' => [501],
+            'cart_subtotal_amount' => 100,
+        ])));
+        $sameProduct = $engine->recommend($store, $strategy('same_product_upsell'), [
+            'cart_lines' => [['product_id' => 501, 'variant_id' => 5010, 'quantity' => 1]],
+        ]);
+        $this->assertSame(['501'], $this->ids($sameProduct));
+        $this->assertSame('gid://shopify/ProductVariant/5011', data_get($sameProduct, 'items.0.selected_variant_gid'));
+        $this->assertSame('504', $this->ids($engine->recommend($store, $strategy('all_products')))[0]);
+
+        $fallback = $engine->recommend($store, $strategy('frequently_viewed_together'), [
+            'seed_product_id' => 504,
+        ]);
+        $this->assertNotEmpty($this->ids($fallback));
+        $purchaseFallback = $engine->recommend($store, $strategy('frequently_bought_together'), [
+            'seed_product_id' => 504,
+        ]);
+        $this->assertNotEmpty($this->ids($purchaseFallback));
     }
 
     public function test_rules_pins_exclusions_and_inventory_are_applied_after_ranking(): void
@@ -350,6 +454,34 @@ class PersonalizationRecommendationTest extends TestCase
         }
 
         return $order;
+    }
+
+    private function viewedEvent(
+        Organization $organization,
+        Store $store,
+        PersonalizationEventSource $source,
+        Product $product,
+        string $session,
+        string $eventId,
+    ): void {
+        $event = PersonalizationEvent::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'event_source_id' => $source->id,
+            'event_id' => $eventId,
+            'event_name' => PersonalizationEventIngestionService::PRODUCT_VIEWED,
+            'client_id_hash' => hash('sha256', 'client-'.$session),
+            'session_id_hash' => hash('sha256', $session),
+            'payload_hash' => hash('sha256', $eventId),
+            'occurred_at' => now(),
+            'received_at' => now(),
+        ]);
+        $event->products()->create([
+            'product_id' => $product->id,
+            'shopify_product_id' => (string) $product->shopify_product_id,
+            'shopify_variant_id' => null,
+            'rank' => 1,
+        ]);
     }
 
     private function inventory(Organization $organization, Store $store, Product $product, int $available): void

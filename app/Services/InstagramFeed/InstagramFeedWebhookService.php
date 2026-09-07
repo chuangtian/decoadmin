@@ -59,7 +59,7 @@ class InstagramFeedWebhookService
             );
         }
         if (! in_array($topic, self::ALLOWED_TOPICS, true)) {
-            throw new InstagramFeedException('UNSUPPORTED_WEBHOOK_TOPIC', 'Instagram 内容 App 不处理该 Webhook 主题。');
+            throw new InstagramFeedException('UNSUPPORTED_WEBHOOK_TOPIC', 'Instagram Feed App 不处理该 Webhook 主题。');
         }
 
         try {
@@ -114,28 +114,13 @@ class InstagramFeedWebhookService
                 return ['event' => $event, 'created' => false];
             }
 
-            $installation = AppInstallation::withTrashed()
-                ->where('app_id', $app->id)
-                ->where('store_id', $store->id)
-                ->lockForUpdate()
-                ->first() ?? new AppInstallation;
-            $installation->fill([
-                'app_id' => $app->id,
-                'store_id' => $store->id,
-                'shopify_connection_id' => $store->shopifyConnection?->id,
-                'status' => $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
-                'granted_scopes' => $topic === 'app/scopes_update'
-                    ? $scopes
-                    : (is_array($installation->granted_scopes) ? $installation->granted_scopes : []),
-                'settings' => [
-                    'source' => 'instagram_feed_webhook',
-                    'environment' => $this->registry->environment(),
-                ],
-                'installed_at' => $installation->installed_at ?? $receivedAt,
-                'uninstalled_at' => $topic === 'app/uninstalled' ? $receivedAt : null,
-            ]);
-            $installation->deleted_at = null;
-            $installation->save();
+            // 与 bootstrap 共用同一个写入口，保证应用中心看到的状态和权限范围一致。
+            $installation = $this->registry->synchronizeInstallation(
+                $store,
+                $topic === 'app/uninstalled' ? 'uninstalled' : 'active',
+                $scopes,
+                'instagram_feed_webhook',
+            );
 
             $purged = ['records' => 0, 'objects' => 0, 'failed_keys' => []];
             if ($topic === 'app/uninstalled') {

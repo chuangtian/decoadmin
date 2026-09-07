@@ -2,6 +2,8 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import type { RequestPayload } from '@inertiajs/core';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import AppCredentialsPanel from '../../Components/InstagramFeed/AppCredentialsPanel.vue';
+import type { AppCredentials } from '../../Components/InstagramFeed/AppCredentialsPanel.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 interface Account {
@@ -46,9 +48,21 @@ const props = defineProps<{
     mirrorConfigured: boolean;
     appSessionReady: boolean;
     permissions: { connect: boolean; sync: boolean; manageGallery: boolean; publish: boolean };
+    credentials: AppCredentials | null;
 }>();
 
 const baseUrl = `/organizations/${props.organization.id}/stores/${props.store.id}/instagram-feed`;
+
+// 页签只影响本页展示，用查询参数记住当前位置，刷新和分享链接都能回到同一处。
+type Tab = 'content' | 'credentials';
+const initialTab = new URLSearchParams(window.location.search).get('tab');
+const tab = ref<Tab>(initialTab === 'credentials' && props.credentials ? 'credentials' : 'content');
+const switchTab = (next: Tab) => {
+    tab.value = next;
+    const url = new URL(window.location.href);
+    next === 'content' ? url.searchParams.delete('tab') : url.searchParams.set('tab', next);
+    window.history.replaceState({}, '', url);
+};
 const busy = ref(false);
 const nothingConfigured = computed(() => !props.providers.instagram_login && !props.providers.facebook_login);
 const usable = computed(() => props.account?.status === 'connected');
@@ -132,13 +146,13 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
 </script>
 
 <template>
-    <Head title="Instagram 内容" />
-    <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: 'Instagram 内容' }]">
+    <Head title="Instagram Feed" />
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: 'Instagram Feed' }]">
         <div class="mx-auto max-w-7xl space-y-7">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <p class="text-sm font-semibold text-emerald-700">{{ organization.name }} · {{ store.name }}</p>
-                    <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Instagram 内容</h1>
+                    <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Instagram Feed</h1>
                     <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
                         连接 Instagram 专业账号，把视频与图片同步到 Cloudflare R2 取得永久地址，按展示组编排后发布到店铺前台。
                     </p>
@@ -149,16 +163,41 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
                 </div>
             </section>
 
+            <nav v-if="credentials" class="flex gap-1 border-b border-slate-200" aria-label="Instagram Feed 页签">
+                <button
+                    type="button"
+                    class="-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                    :class="tab === 'content' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'"
+                    :aria-current="tab === 'content' ? 'page' : undefined"
+                    @click="switchTab('content')"
+                >
+                    内容管理
+                </button>
+                <button
+                    type="button"
+                    class="-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                    :class="tab === 'credentials' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'"
+                    :aria-current="tab === 'credentials' ? 'page' : undefined"
+                    @click="switchTab('credentials')"
+                >
+                    应用配置
+                </button>
+            </nav>
+
+            <template v-if="tab === 'content'">
             <div v-if="nothingConfigured" class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-                两种 Meta 授权方式都还没配置。请先在服务器环境变量里补齐 Instagram 或 Facebook 应用凭证，再回到这里连接账号。
+                两种 Meta 授权方式都还没配置。
+                <template v-if="credentials">请先在「应用配置」页签补齐 Instagram 或 Facebook 应用凭证，再回到这里连接账号。</template>
+                <template v-else>请联系拥有系统设置权限的成员补齐 Instagram 或 Facebook 应用凭证，再回到这里连接账号。</template>
             </div>
 
             <div v-if="!mirrorConfigured" class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
                 Cloudflare R2 尚未配置，同步只会拉取元数据、不会转存文件。未转存的内容不会发布到前台，因为 Instagram 的原始链接会过期。
+                <template v-if="credentials">配置入口在「应用配置」页签。</template>
             </div>
 
             <div v-if="!appSessionReady" class="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-sm text-sky-800">
-                还没有建立 Instagram 内容 App 的 Shopify 会话。请先在 Shopify 后台打开一次该应用完成初始化，之后才能发布到店铺前台。
+                还没有建立 Instagram Feed App 的 Shopify 会话。请先在 Shopify 后台打开一次该应用完成初始化，之后才能发布到店铺前台。
             </div>
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6">
@@ -349,6 +388,9 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
                     </li>
                 </ul>
             </section>
+            </template>
+
+            <AppCredentialsPanel v-else-if="credentials" :credentials="credentials" :environment="environment" />
         </div>
     </AppLayout>
 </template>

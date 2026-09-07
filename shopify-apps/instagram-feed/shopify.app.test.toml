@@ -1,15 +1,16 @@
-# 测试环境与 local 共用同一个 Shopify App（Cloudflare 隧道已废弃，local 不再单独维护）。
-# 因此这里的 client_id 与 shopify.app.toml、shopify.app.local.toml 相同。
-# 一个 App 只有一份 application_url 与一组 webhook 地址，共用后该 App 固定指向 testadmin，
-# 所以不要再执行 `deploy:local`：那会把地址改回隧道，直接打断测试环境。
-# 生产环境必须是 Dev Dashboard 里另一个独立 App，client_id 不可与此相同。
+# 测试环境配置。注意：这里用的是与生产同一个 Shopify App
+# （client_id d3446448682d2950aa75cea4a399d50f，handle deco-instagram-feed）。
 #
-# 不要用 `shopify app config link` 覆盖本文件：它会从 Dashboard 拉取配置，
-# 把下面的 scopes 和 webhook 订阅冲成 Dashboard 的默认值。
-# 配置一律以本文件为准，改完用 `npm run deploy:test` 推送。
+# 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以生产与测试
+# 不能同时生效：发布这份配置＝把该 App 指向测试服，生产入口同时停用。
+# 这是经用户确认的临时安排（生产侧当前没有任何店铺安装）。
+#
+# 要切回生产：改 extensions/app-home/src/runtime.mjs 的 appOrigin 与 environment、
+# 把 shopify.app.toml 换成 production 镜像，然后 `npm run deploy:production`。
+# shopify.app.production.toml 保持生产地址不动，就是这个还原点。
 client_id = "d3446448682d2950aa75cea4a399d50f"
 name = "Instagram Feed (Deco)"
-handle = "deco-instagram-feed-test"
+handle = "deco-instagram-feed"
 application_url = "https://testadmin.decomkt.com/shopify-app/instagram-feed"
 embedded = true
 
@@ -27,6 +28,7 @@ uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 topics = [ "app/scopes_update" ]
 uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 
+# 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
 [access_scopes]
 scopes = "read_products"
 use_legacy_install_flow = false

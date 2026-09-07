@@ -41,7 +41,8 @@ class AdvertisingChannelSyncService
     public function sync(Store $store, string $channel, string $mode, ?string $credentialVersion = null): void
     {
         $this->assertChannel($channel);
-        if (! in_array($mode, ['priority', 'backfill', 'incremental'], true)) {
+        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile'], true)
+            || ($mode === 'reconcile' && $channel !== 'google')) {
             throw new RuntimeException('广告渠道同步模式无效。');
         }
         if ($store->status !== 'active' || ! $this->configured($store, $channel)) {
@@ -145,6 +146,11 @@ class AdvertisingChannelSyncService
             'backfill' => [
                 $now->subMonthsNoOverflow(max(1, (int) config('services.advertising_sync.history_months', 6)))->startOfDay(),
                 $now->subDays($priorityDays)->endOfDay(),
+            ],
+            // Refresh historical attribution separately from the lightweight hourly sync.
+            'reconcile' => [
+                $now->subDays(max(1, (int) config('services.advertising_sync.google_reconcile_days', 90)) - 1)->startOfDay(),
+                $now,
             ],
             'incremental' => [
                 $now->subDays($rollingDays - 1)->startOfDay(),
@@ -515,6 +521,9 @@ class AdvertisingChannelSyncService
                 ->where('store_id', $store->getKey())
                 ->where('type', $this->syncType($channel))
                 ->where('mode', $mode)
+                ->when($mode === 'reconcile', fn ($query) => $query
+                    ->where('since_at', $since->utc())
+                    ->where('until_at', $until->utc()))
                 ->whereIn('status', ['running', 'failed'])
                 ->where('created_at', '>=', now()->subHours(48))
                 ->latest('id')
@@ -606,6 +615,10 @@ class AdvertisingChannelSyncService
                 $attributes['last_full_sync_at'] = $finishedAt;
             } elseif ($mode === 'incremental') {
                 $attributes['last_incremental_sync_at'] = $finishedAt;
+                if ($job->type !== $this->syncType('google')) {
+                    $attributes['last_reconciled_at'] = $finishedAt;
+                }
+            } elseif ($mode === 'reconcile') {
                 $attributes['last_reconciled_at'] = $finishedAt;
             }
             $state->forceFill($attributes)->save();

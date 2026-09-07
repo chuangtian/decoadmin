@@ -9,7 +9,7 @@ $environment = (string) env('INSTAGRAM_FEED_ENVIRONMENT', match ((string) env('A
 $environments = [
     'local' => [
         'client_id' => 'd3446448682d2950aa75cea4a399d50f',
-        'name' => 'Deco-Instagram-内容-local',
+        'name' => 'Instagram Feed (local)',
         'handle' => 'deco-instagram-feed-local',
         'app_url' => 'https://wendy-interim-classic-segment.trycloudflare.com',
         'client_secret' => env('INSTAGRAM_FEED_LOCAL_CLIENT_SECRET', env('INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET')),
@@ -18,14 +18,14 @@ $environments = [
     // client_id 留空表示尚未创建，配置校验会拒绝在该环境执行 Shopify 调用。
     'test' => [
         'client_id' => env('INSTAGRAM_FEED_TEST_CLIENT_ID', ''),
-        'name' => 'Deco-Instagram-内容-test',
+        'name' => 'Instagram Feed (test)',
         'handle' => 'deco-instagram-feed-test',
         'app_url' => 'https://testadmin.decomkt.com',
         'client_secret' => env('INSTAGRAM_FEED_TEST_CLIENT_SECRET', env('INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET')),
     ],
     'production' => [
         'client_id' => env('INSTAGRAM_FEED_PRODUCTION_CLIENT_ID', ''),
-        'name' => 'Deco-Instagram-内容',
+        'name' => 'Instagram Feed',
         'handle' => 'deco-instagram-feed',
         'app_url' => 'https://admin.decomkt.com',
         'client_secret' => env('INSTAGRAM_FEED_PRODUCTION_CLIENT_SECRET', env('INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET')),

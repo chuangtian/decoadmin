@@ -15,6 +15,7 @@ use App\Services\InstagramFeed\InstagramProductResolver;
 use App\Services\InstagramFeed\InstagramProviderService;
 use App\Services\InstagramFeed\InstagramSyncService;
 use App\Services\InstagramFeed\R2Client;
+use App\Services\SystemSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,7 +24,7 @@ use Inertia\Response;
 use Throwable;
 
 /**
- * Instagram 内容的 DecoAdmin 后台。
+ * Instagram Feed 的 DecoAdmin 后台。
  *
  * 路由已经带了 organization.access / store.access / permission 中间件，这里再做一次
  * 控制器内校验（双保险），并把所有业务动作转交给服务层。
@@ -41,6 +42,7 @@ class InstagramFeedController extends Controller
         private InstagramFeedPublisher $publisher,
         private InstagramProductResolver $productResolver,
         private R2Client $r2,
+        private SystemSettingsService $settings,
     ) {}
 
     public function index(Request $request, Organization $organization, Store $store): Response
@@ -124,6 +126,7 @@ class InstagramFeedController extends Controller
                 'manageGallery' => $request->user()->hasPermission('instagram_feed.gallery.manage', $organization, $store),
                 'publish' => $request->user()->hasPermission('instagram_feed.publish', $organization, $store),
             ],
+            'credentials' => $this->credentialsForFrontend($request, $organization, $store),
         ]);
     }
 
@@ -428,6 +431,36 @@ class InstagramFeedController extends Controller
             'like_count' => $media->like_count,
             'comments_count' => $media->comments_count,
             'products' => $products,
+        ];
+    }
+
+    /**
+     * 「应用配置」页签的数据。Meta 应用凭证和 R2 存储凭证是平台级配置，
+     * 不属于单个店铺，因此这里用系统设置权限而不是 instagram_feed.* 权限。
+     * 没有查看权限时返回 null，前端连页签都不显示。
+     *
+     * @return array<string, mixed>|null
+     */
+    private function credentialsForFrontend(Request $request, Organization $organization, Store $store): ?array
+    {
+        if (! $request->user()->hasPermission('system.settings.view', $organization, $store)) {
+            return null;
+        }
+
+        $canUpdate = $request->user()->hasPermission('system.settings.update', $organization, $store);
+
+        return [
+            'can_update' => $canUpdate,
+            'meta' => $this->settings->sectionForFrontend('instagram_meta', $canUpdate),
+            'r2' => $this->settings->sectionForFrontend('instagram_r2', $canUpdate),
+            'callbacks' => [
+                'instagram' => (string) config('instagram_feed.instagram.redirect_uri'),
+                'facebook' => (string) config('instagram_feed.facebook.redirect_uri'),
+            ],
+            'endpoints' => [
+                'meta' => route('system.settings.instagram-meta.update'),
+                'r2' => route('system.settings.instagram-r2.update'),
+            ],
         ];
     }
 

@@ -69,6 +69,38 @@ class PaidAdvertisingGoalSyncService
             'failures' => [],
         ];
 
+        Store::query()->where('status', 'active')
+            ->when($storeId !== null, fn (Builder $query): Builder => $query->whereKey($storeId))
+            ->whereHas('businessCredentials', fn (Builder $query): Builder => $query
+                ->where('provider', 'feishu_data_links')
+                ->where('credential_key', 'advertising_google_weekly_app_token'))
+            ->orderBy('id')->chunkById(50, function ($stores) use (&$summary): void {
+                foreach ($stores as $store) {
+                    $summary['sources']++;
+                    try {
+                        $values = $this->dataLinks->valuesForSync($store, 'advertising_google_weekly');
+                        $result = $this->archiveSync->syncTableById(
+                            $store,
+                            'paid-ad-goals:google-weekly',
+                            (string) ($values['advertising_google_weekly_app_token'] ?? ''),
+                            (string) ($values['advertising_google_weekly_table_id'] ?? ''),
+                            ($values['advertising_google_weekly_view_id'] ?? '') ?: null,
+                        );
+                        $summary['archived_tables']++;
+                        $summary['archived_fields'] += $result['fields'];
+                        $summary['archived_records'] += $result['records'];
+                    } catch (Throwable $exception) {
+                        $summary['failed']++;
+                        $summary['failures'][] = [
+                            'organization_id' => (int) $store->organization_id,
+                            'store_id' => (int) $store->id,
+                            'board_id' => null,
+                            'error' => 'Google 周报：'.$this->safeError($exception),
+                        ];
+                    }
+                }
+            });
+
         $this->configuredOverallStores($storeId)
             ->select(['id', 'organization_id', 'status'])
             ->orderBy('id')

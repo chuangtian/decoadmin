@@ -9,12 +9,14 @@
  * 只解码、不验签。后端中间件会用 client_secret 重新验签并逐项校验 claim。
  */
 const APP_ENVIRONMENTS = Object.freeze({
-  // local 与 test 共用同一个 Shopify App（Cloudflare 隧道已废弃）。
+  // 生产与测试共用同一个 Shopify App，client_id 区分不出环境，
+  // 所以这里只能有一条记录：它必须与 shopify.app.toml 当前选中的环境一致。
+  // 当前指向测试服；切回生产时同时改 environment 与 appOrigin。
+  // validate-project.mjs 会校验这里与选中配置是否匹配。
   d3446448682d2950aa75cea4a399d50f: Object.freeze({
     environment: 'test',
     appOrigin: 'https://testadmin.decomkt.com',
   }),
-  // 生产 App 尚未创建。创建后在此登记它的 client_id 与 https://admin.decomkt.com。
 });
 
 export function runtimeFromIdToken(token) {

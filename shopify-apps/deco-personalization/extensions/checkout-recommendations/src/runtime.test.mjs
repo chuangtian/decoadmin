@@ -3,8 +3,11 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   EVENTS,
+  cartPermalink,
   configurationEndpoint,
   eventPayload,
+  fetchOrderStatusConfiguration,
+  fetchRecommendations,
   formatMoney,
   normalizeConfiguration,
   normalizeServiceRecommendations,
@@ -33,6 +36,28 @@ test('configuration uses one backend strategy binding without merchant collectio
     component: configuration.component,
     recommendations_url: 'https://test.example/admin',
   }), null);
+});
+
+test('checkout recommendation requests include a bounded cart subtotal for free-shipping upsells', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (_endpoint, options) => {
+    requestBody = JSON.parse(options.body);
+    return {ok: true, json: async () => ({data: {enabled: true, items: []}})};
+  };
+  try {
+    await fetchRecommendations({sessionToken: {get: async () => 'token'}}, configuration, [], {
+      cartSubtotal: '75.25',
+      market: 'us',
+      currency: 'USD',
+      language: 'en',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestBody.cart_subtotal_amount, 75.25);
+  assert.equal(requestBody.surface, 'checkout');
+  assert.equal('customer' in requestBody, false);
 });
 
 test('sequential selection continues beyond three products until every eligible candidate is exhausted', () => {
@@ -72,6 +97,24 @@ test('cached candidates advance immediately when the Shopify cart line updates',
   }];
 
   assert.equal(selectNextCandidate(candidates, lines)?.variant_id, candidates[1].variant_id);
+});
+
+test('same-product upsell may offer a different variant of a product already in cart', () => {
+  const candidate = {
+    product_id: 'gid://shopify/Product/1',
+    variant_id: 'gid://shopify/ProductVariant/102',
+    reason_code: 'same_product_upsell',
+    available: true,
+  };
+  const lines = [{
+    quantity: 1,
+    merchandise: {
+      id: 'gid://shopify/ProductVariant/101',
+      product: {id: candidate.product_id},
+    },
+  }];
+
+  assert.equal(selectNextCandidate([candidate], lines)?.variant_id, candidate.variant_id);
 });
 
 test('the final candidate is no longer rendered after its cart line appears', () => {
@@ -181,4 +224,69 @@ test('configuration endpoint refuses non-HTTPS and arbitrary paths', () => {
   assert.equal(configurationEndpoint(entry('https://test.example/api/shopify-app/personalization/checkout/configuration')), 'https://test.example/api/shopify-app/personalization/checkout/configuration');
   assert.equal(configurationEndpoint(entry('http://test.example/api/shopify-app/personalization/checkout/configuration')), '');
   assert.equal(configurationEndpoint(entry('https://test.example/admin')), '');
+});
+
+test('thank-you recommendation creates a safe storefront cart permalink with the offer discount', () => {
+  assert.equal(cartPermalink('https://shop.example', {
+    variant_id: 'gid://shopify/ProductVariant/50144896450808',
+    minimum_purchase_quantity: 2,
+    discount: {code: 'DECO10'},
+  }), 'https://shop.example/cart/50144896450808:2?storefront=true&discount=DECO10');
+  assert.equal(cartPermalink('http://shop.example', {variant_id: 'gid://shopify/ProductVariant/1'}), '');
+  assert.equal(cartPermalink('https://shop.example', {variant_id: 'invalid'}), '');
+});
+
+test('checkout extension exposes a separate thank-you target without checkout mutation APIs', async () => {
+  const config = await readFile(new URL('../shopify.extension.toml', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./ThankYouRecommendations.jsx', import.meta.url), 'utf8');
+  assert.match(config, /target = "purchase\.thank-you\.block\.render"/);
+  assert.match(config, /module = "\.\/src\/ThankYouRecommendations\.jsx"/);
+  assert.match(config, /target = "purchase\.thank-you\.block\.render"[\s\S]*?default_placement = "ORDER_SUMMARY2"/);
+  assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
+  assert.match(source, /href=\{addUrl\}/);
+  assert.match(source, /target="_blank"/);
+  assert.match(source, /fetchThankYouConfiguration\(shopify/);
+  assert.match(source, /surface: 'thank_you'/);
+  assert.match(source, /shopify\.shop\?\.myshopifyDomain/);
+  assert.match(source, /useCartLines\(\)/);
+  assert.doesNotMatch(source, /useApplyCartLinesChange/);
+  assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
+});
+
+test('order-status extension uses its own backend configuration and never mutates the completed order', async () => {
+  const config = await readFile(new URL('../shopify.extension.toml', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./OrderStatusRecommendations.jsx', import.meta.url), 'utf8');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({data: {order_status: {
+      enabled: true,
+      component: {...configuration.component, placement: 'order_status'},
+      strategy: {version_uuid: 'c3519389-ef0a-4f52-9b30-b600d05e51ef'},
+      recommendations_url: configuration.recommendations_url,
+    }}}),
+  });
+  let orderStatusConfiguration;
+  try {
+    orderStatusConfiguration = await fetchOrderStatusConfiguration({sessionToken: {get: async () => 'token'}}, [{
+      metafield: {
+        namespace: '$app:deco_personalization',
+        key: 'checkout_configuration_url',
+        value: 'https://test.example/api/shopify-app/personalization/checkout/configuration',
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(orderStatusConfiguration.component.placement, 'order_status');
+  assert.match(config, /target = "customer-account\.order-status\.block\.render"/);
+  assert.match(config, /module = "\.\/src\/OrderStatusRecommendations\.jsx"/);
+  assert.match(source, /@shopify\/ui-extensions\/customer-account\/preact/);
+  assert.match(source, /surface: 'order_status'/);
+  assert.match(source, /gridTemplateColumns="96px 1fr auto"/);
+  assert.match(source, /href=\{addUrl\}/);
+  assert.match(source, /target="_blank"/);
+  assert.doesNotMatch(source, /useApplyCartLinesChange/);
+  assert.doesNotMatch(source, /useApplyDiscountCodeChange/);
 });
