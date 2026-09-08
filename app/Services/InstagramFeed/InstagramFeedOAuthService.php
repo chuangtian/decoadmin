@@ -14,6 +14,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * instagram-feed App 的 Shopify 授权码授权。
@@ -39,6 +40,7 @@ class InstagramFeedOAuthService
         private ShopifyOAuthHmacValidator $hmacValidator,
         private InstagramFeedAppRegistry $registry,
         private InstagramFeedShopifyClient $client,
+        private InstagramFeedWebhookSubscriptionService $webhooks,
     ) {}
 
     /**
@@ -150,6 +152,21 @@ class InstagramFeedOAuthService
             $this->recordFailure($store, $exception);
 
             throw $exception;
+        }
+
+        // 授权码安装流程下 webhook 只能按店铺注册。注册失败不能推翻已经完成的授权，
+        // 记一条可见的错误原因即可，之后重新授权或「检查连接」会再试一次。
+        try {
+            $this->webhooks->reconcile($store, $token['access_token']);
+        } catch (Throwable $exception) {
+            $this->recordFailure($store, $exception instanceof InstagramFeedException
+                ? $exception
+                : new InstagramFeedException(
+                    'INSTAGRAM_FEED_WEBHOOK_SUBSCRIPTION_FAILED',
+                    'Webhook 订阅注册失败：'.$exception->getMessage(),
+                    502,
+                ));
+            report($exception);
         }
 
         return [
