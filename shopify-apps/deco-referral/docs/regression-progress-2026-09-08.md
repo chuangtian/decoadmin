@@ -39,3 +39,20 @@ Use completion-checklist.md. Notification intents/templates, invitation/import, 
 - New customer scope approval requested asynchronously; no answer received at this checkpoint. Publishing remains blocked by automatic review. All new backend migrations remain local and undeployed.
 
 - Final local checkpoint after manual attribution: 640 tests, 9783 assertions passed. App-owned tracking Node tests and portal bundle build passed; backend UI build, manifest assets and Vite port 5173 confirmed. This is a local checkpoint, not completed staging acceptance.
+
+## Explicit authorization and live rollout
+
+- User explicitly approved persistent `read_customers` for Deco Referral Test and installation/testing exclusively on macfox-test-app.
+- Released `referral-tracking-20260908` version 1119836438529; accepted Shopify's customer-data update prompt on the named test store. Independent app reader then read order #1002 successfully.
+- Deployed backend images `decoadmin-app:referral-accounting-20260908-staging` and matching nginx image. Dedicated affiliate worker and maintenance use this image; production and unrelated workers were not restarted. Backups: `/opt/decoadmin/staging/.releases/referral-accounting-20260908/`.
+- Migrated only the five new Referral accounting/payout/portal/rule-history/notification migrations. Health application/database/Redis passed.
+- #1002 live attribution: coupon, base 143910 cents, commission 17269 cents, pending until 2026-10-08T05:10:31Z. Repeated reconciliation preserved one conversion and one accrual.
+- Enabled and saved Referral tracking on test theme 165279695096 (Deco Smart Cart Test); reloaded editor confirmed enabled. Public unauthenticated HTML check hit the storefront password page, so it did not verify the tracking script in the authenticated storefront.
+- Registered five webhooks. Real shipping refund exposed CLI relative-URI resolution to the App Home path, returning 404. Corrected to explicit `https://testadmin.decomkt.com/api/shopify-app/referral/webhooks` and released `referral-webhooks-urlfix-20260908`, version 1119869272065. Verified all five manifest URLs match. Added project config guard against regression.
+- Refunded #1002 Bogus shipping 3.32 USD with notification off, then submitted remaining product refund 1439.10 USD with restock and notification off. Waiting to verify final actual webhook processing at this point. No real transfer occurred.
+
+## Concurrent staging replacement
+
+- During final #1002 refund verification, another deployment replaced staging with origin/test commit 315c7fef5d6fd813bc18c4049a186ac1f610fc41 (Instagram connection changes), removed Referral source and dedicated worker containers. The shared database retained Referral data. App/nginx recovered healthy on that different image.
+- Full #1002 Bogus refund is confirmed in Shopify (net payment zero). Its post-fix webhook result is NOT yet verified because the backend was replaced during the test.
+- Fetch origin/test and merge its existing upstream changes before reapplying Referral, so the Instagram work is preserved. Do not blindly restore the older source tree or overwrite environment secrets.

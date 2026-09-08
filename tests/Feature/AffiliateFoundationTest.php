@@ -235,14 +235,14 @@ class AffiliateFoundationTest extends TestCase
             'status' => 'active', 'token_type' => 'offline', 'settings' => ['environment' => 'test'],
             'access_token_encrypted' => 'old-referral-token', 'access_token_expires_at' => now()->subMinute(),
             'refresh_token_encrypted' => 'referral-refresh', 'refresh_token_expires_at' => now()->addMonth(),
-            'granted_scopes' => ['read_orders', 'read_products', 'write_discounts'],
+            'granted_scopes' => ['read_orders', 'read_customers', 'read_products', 'write_discounts'],
         ]);
         Http::preventStrayRequests();
         Http::fake([
             'https://macfox-test-app.myshopify.com/admin/oauth/access_token' => Http::response([
                 'access_token' => 'new-referral-token', 'refresh_token' => 'new-referral-refresh',
                 'expires_in' => 86400, 'refresh_token_expires_in' => 7776000,
-                'scope' => 'read_orders,read_products,write_discounts',
+                'scope' => 'read_orders,read_customers,read_products,write_discounts',
             ]),
         ]);
         $service = app(AffiliateAppTokenService::class);
@@ -270,11 +270,11 @@ class AffiliateFoundationTest extends TestCase
             'https://macfox-test-app.myshopify.com/admin/oauth/access_token' => Http::response([
                 'access_token' => 'referral-token', 'refresh_token' => 'referral-refresh',
                 'expires_in' => 86400, 'refresh_token_expires_in' => 7776000,
-                'scope' => 'read_orders,read_products,write_discounts',
+                'scope' => 'read_orders,read_customers,read_products,write_discounts',
             ]),
             'https://macfox-test-app.myshopify.com/admin/api/*' => Http::response(['data' => [
                 'currentAppInstallation' => ['id' => 'gid://shopify/AppInstallation/42', 'accessScopes' => [
-                    ['handle' => 'read_orders'], ['handle' => 'read_products'], ['handle' => 'write_discounts'],
+                    ['handle' => 'read_orders'], ['handle' => 'read_customers'], ['handle' => 'read_products'], ['handle' => 'write_discounts'],
                 ]], 'shop' => ['myshopifyDomain' => 'macfox-test-app.myshopify.com'],
             ]]),
         ]);

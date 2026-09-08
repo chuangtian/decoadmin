@@ -12,3 +12,7 @@ redirect_urls = ["https://testadmin.decomkt.com/shopify-app/referral"]
 
 [webhooks]
 api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid", "orders/cancelled", "refunds/create", "app/uninstalled", "app/scopes_update"]
+uri = "https://testadmin.decomkt.com/api/shopify-app/referral/webhooks"

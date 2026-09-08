@@ -19,6 +19,6 @@ foreach (['local', 'test', 'production'] as $name) {
 return [
     'environment' => $environment,
     'active' => $environments[$environment],
-    'required_scopes' => ['read_orders', 'read_products', 'write_discounts'],
+    'required_scopes' => ['read_orders', 'read_customers', 'read_products', 'write_discounts'],
     'id_token_leeway_seconds' => 5,
 ];

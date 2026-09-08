@@ -16,4 +16,6 @@ for (const file of ['shopify.app.local.toml', 'shopify.app.test.toml', 'shopify.
 for (const entry of readdirSync(root)) {
   if (/^\.env($|\.)/.test(entry)) throw new Error('Environment files must stay untracked');
 }
+const testConfig = readFileSync(join(root, 'shopify.app.test.toml'), 'utf8');
+if (testConfig.includes('[[webhooks.subscriptions]]') && !testConfig.includes('uri = \"https://testadmin.decomkt.com/api/shopify-app/referral/webhooks\"')) throw new Error('Referral webhook must use the absolute test URL; CLI joins relative paths to the App Home path');
 console.log('Deco Referral project foundation is valid.');
