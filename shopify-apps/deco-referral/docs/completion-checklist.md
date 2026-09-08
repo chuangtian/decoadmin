@@ -20,7 +20,9 @@ Checked items require implementation and stated evidence, not placeholders.
 - [x] Customer referral eligibility, friend incentive, advocate reward lifecycle and milestones.
 - [x] Notification templates and safe test delivery.
 - [x] Uninstall/reinstall, data-retention cleanup and operational retry/reconciliation. Full App Store privacy request/redact callbacks are not implemented.
-- [x] Full automated regression including cross-tenant access, duplicate/out-of-order events, money/refunds and payout concurrency.
+- [x] Full automated regression including cross-tenant access, duplicate/out-of-order events, money/refunds and payout reservation/idempotency. Locking is implemented; this does not claim a multi-process contention or load test.
 - [x] End-to-end staging regression covering installed extensions, application/portal, paid order, partial/full refund, cancellation, payout and uninstall/reinstall.
 
-Final evidence and concrete limitations are recorded in [acceptance-2026-09-08.md](acceptance-2026-09-08.md). Checked means the stated internal core behavior is implemented and verified; it does not mark future P2/P3 or the explicitly disclosed unsupported paths complete.
+Final evidence and concrete limitations are recorded in [acceptance-2026-09-08.md](acceptance-2026-09-08.md). These checks combine evidence from multiple rounds, rather than asserting every external flow was rerun on each revision. Checked means the stated internal core behavior is implemented and verified; it does not mark future P2/P3 or the explicitly disclosed unsupported paths complete.
+
+For the current grouped test matrix, see [sixth-regression-matrix-2026-09-08.md](sixth-regression-matrix-2026-09-08.md). Test counts distinguish the full backend suite from Referral-specific cases.
