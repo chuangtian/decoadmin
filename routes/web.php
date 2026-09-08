@@ -52,6 +52,7 @@ use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\ShopifyAffiliateAppController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
@@ -79,6 +80,9 @@ use App\Http\Controllers\WebhookEventController;
 use App\Http\Controllers\YouTubeAnalyticsOAuthController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
+
+Route::post('/api/shopify-app/referral/bootstrap', [ShopifyAffiliateAppController::class, 'bootstrap'])
+    ->middleware(['shopify.id-token:referral', 'throttle:20,1'])->name('affiliate.shopify.bootstrap');
 
 Route::get('/health', HealthCheckController::class)->name('health');
 Route::get('/r/{link}', AffiliateTrackingController::class)

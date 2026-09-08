@@ -9,6 +9,7 @@ use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateTrackingTokenService;
+use App\Domain\ReferralAffiliate\Services\ShopifyAffiliateAppService;
 use App\Exceptions\AffiliateException;
 use App\Models\App;
 use App\Models\AppInstallation;
@@ -228,6 +229,40 @@ class AffiliateFoundationTest extends TestCase
         $installation->update(['settings' => ['environment' => 'production']]);
         $this->expectException(AffiliateException::class);
         $service->accessTokenFor($store);
+    }
+
+    public function test_bootstrap_records_only_referral_installation_and_preserves_commerce_token(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        config(['referral.environment' => 'test', 'referral.active.client_id' => 'referral-test-client',
+            'referral.active.client_secret' => 'referral-test-secret', 'referral.active.handle' => 'deco-referral-test']);
+        $connection = ShopifyConnection::query()->create([
+            'store_id' => $store->id, 'shop_domain' => $store->shopify_domain, 'status' => 'connected',
+            'access_token_encrypted' => 'commerce-token', 'scopes' => ['read_orders'], 'api_version' => '2026-07',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://macfox-test-app.myshopify.com/admin/oauth/access_token' => Http::response([
+                'access_token' => 'referral-token', 'refresh_token' => 'referral-refresh',
+                'expires_in' => 86400, 'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_orders,read_products,write_discounts',
+            ]),
+            'https://macfox-test-app.myshopify.com/admin/api/*' => Http::response(['data' => [
+                'currentAppInstallation' => ['id' => 'gid://shopify/AppInstallation/42', 'accessScopes' => [
+                    ['handle' => 'read_orders'], ['handle' => 'read_products'], ['handle' => 'write_discounts'],
+                ]], 'shop' => ['myshopifyDomain' => 'macfox-test-app.myshopify.com'],
+            ]]),
+        ]);
+        $service = app(ShopifyAffiliateAppService::class);
+        $result = $service->bootstrap($store, 'mock-verified-id-token');
+        $this->assertSame('gid://shopify/AppInstallation/42', $result['app_installation_id']);
+        $installation = AppInstallation::query()->sole();
+        $this->assertSame('referral-token', $installation->access_token_encrypted);
+        $this->assertSame('test', $installation->settings['environment']);
+        $this->assertSame('referral_config', $installation->app->settings['managed_by']);
+        $this->assertSame('commerce-token', $connection->fresh()->access_token_encrypted);
+        $this->postJson(route('affiliate.shopify.bootstrap', ['shop' => 'macfox-test-app.myshopify.com']))->assertUnauthorized();
+        Http::assertSentCount(2);
     }
 
     /** @return array{User, Organization, Store} */

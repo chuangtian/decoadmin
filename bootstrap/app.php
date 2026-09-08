@@ -36,6 +36,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'shopify/pixels/*',
             'api/student-discounts/*',
             'api/shopify-app/webhooks',
+            'api/shopify-app/referral/bootstrap',
             'api/shopify-app/student-discounts/*',
             'api/shopify-app/instagram-feed/*',
             'api/shopify-app/personalization/*',
