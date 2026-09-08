@@ -22,6 +22,7 @@ use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManualAttributionService;
 use App\Domain\ReferralAffiliate\Services\AffiliateNotificationService;
 use App\Domain\ReferralAffiliate\Services\AffiliateOrderReader;
+use App\Domain\ReferralAffiliate\Services\AffiliatePayoutService;
 use App\Domain\ReferralAffiliate\Services\AffiliatePostPurchaseService;
 use App\Domain\ReferralAffiliate\Services\AffiliateReportService;
 use App\Domain\ReferralAffiliate\Services\AffiliateRetentionService;
@@ -120,6 +121,12 @@ class AffiliateFoundationTest extends TestCase
         $this->actingAs($actor)->withSession($session)->put(route('affiliate.settings.update', [$organization, $store]), [
             'affiliate_enabled' => true, 'customer_referral_enabled' => false,
         ])->assertRedirect();
+        foreach ([['/products'], 'https://example.invalid', '//example.invalid', '/%0d%0aLocation:bad', '/path%5cbad', '/'.str_repeat('a', 1000)] as $invalidPath) {
+            $this->get(route('affiliate.tracking.redirect', $link->public_id).'?'.http_build_query(['to' => $invalidPath]))->assertStatus(422);
+            $this->assertDatabaseCount('affiliate_clicks', 0);
+        }
+        $this->get(route('affiliate.tracking.redirect', $link->public_id).'?utm_source[]=invalid')->assertStatus(422);
+        $this->assertDatabaseCount('affiliate_clicks', 0);
         $redirect = $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.8', 'HTTP_USER_AGENT' => 'Affiliate Test'])
             ->get(route('affiliate.tracking.redirect', $link->public_id))
             ->assertRedirect();
@@ -688,8 +695,8 @@ class AffiliateFoundationTest extends TestCase
         $ledger = app(AffiliateLedgerService::class);
         $ledger->adjust($org, $store, $actor, $old->public_id, 500, 'Independent new earning', (string) Str::uuid());
         $ledger->release($store);
-        $payout = app(\App\Domain\ReferralAffiliate\Services\AffiliatePayoutService::class);
-        $batch = $payout->create($org, $store, $actor, 'USD', 100, \Carbon\CarbonImmutable::now());
+        $payout = app(AffiliatePayoutService::class);
+        $batch = $payout->create($org, $store, $actor, 'USD', 100, CarbonImmutable::now());
         $this->assertSame(500, $batch->items()->where('membership_id', $old->id)->sole()->amount_minor);
         $payout->transition($org, $store, $actor, $batch->public_id, 'cancelled');
         AffiliateLedgerEntry::query()->where('membership_id', $new->id)->update(['status' => 'settled']);

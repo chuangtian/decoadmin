@@ -28,6 +28,12 @@ class AffiliateTrackingService
             && $membership->store?->status === 'active'
             && AffiliateStoreSetting::query()->forStore($link->store_id)->where($membership->program->type->value === 'advocate' ? 'customer_referral_enabled' : 'affiliate_enabled', true)->exists(), 404);
 
+        $path = $request->query('to', $link->target_path);
+        abort_unless(is_string($path) && strlen($path) <= 1000 && str_starts_with($path, '/') && ! str_starts_with($path, '//')
+            && ! str_contains(rawurldecode($path), '\\') && ! preg_match('/[\x00-\x1f]/', rawurldecode($path)), 422);
+        $utmSource = $request->query('utm_source', data_get($link->utm, 'source', 'affiliate'));
+        abort_unless(is_string($utmSource), 422);
+
         $visitorToken = hash('sha256', Str::random(64));
         $referrerHost = $this->host($request->headers->get('referer'));
         $click = AffiliateClick::query()->create([
@@ -42,9 +48,6 @@ class AffiliateTrackingService
             'occurred_at' => now(),
         ]);
         $token = app(AffiliateTrackingTokenService::class)->issue($link, $click);
-        $path = (string) $request->query('to', $link->target_path);
-        abort_unless(strlen($path) <= 1000 && str_starts_with($path, '/') && ! str_starts_with($path, '//')
-            && ! str_contains(rawurldecode($path), '\\') && ! preg_match('/[\x00-\x1f]/', rawurldecode($path)), 422);
         $fragment = parse_url($path, PHP_URL_FRAGMENT);
         $path = explode('#', $path, 2)[0];
         $target = 'https://'.$membership->store->shopify_domain.$path;
@@ -53,7 +56,7 @@ class AffiliateTrackingService
         return redirect()->away($target.$separator.http_build_query([
             'ref' => $link->referral_code,
             'deco_aff' => $token,
-            'utm_source' => mb_substr((string) $request->query('utm_source', data_get($link->utm, 'source', 'affiliate')), 0, 100),
+            'utm_source' => mb_substr($utmSource, 0, 100),
             'utm_medium' => (string) data_get($link->utm, 'medium', 'referral'),
         ]).($fragment !== null ? '#'.rawurlencode($fragment) : ''), 302, ['Referrer-Policy' => 'no-referrer', 'Cache-Control' => 'no-store']);
     }

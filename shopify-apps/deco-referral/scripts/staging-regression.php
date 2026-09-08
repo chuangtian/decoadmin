@@ -80,6 +80,21 @@ try {
     $management->updateMembership($org, $store, $actor, $member->public_id, ['tier_key' => 'test', 'labels' => ['acceptance'], 'admin_notes' => 'TEST ONLY', 'commission_override' => null]);
     $assert($member->fresh()->labels === ['acceptance'], 'plan_rules_approval_and_member_profile');
 
+    $clickCount = AffiliateClick::query()->forStore($store)->count();
+    foreach (['https://example.invalid', '//example.invalid', '/%0a', ['/products']] as $path) {
+        try {
+            app(\App\Domain\ReferralAffiliate\Services\AffiliateTrackingService::class)->redirect(Request::create('/r/test', 'GET', ['to' => $path]), $member->link->public_id);
+            throw new RuntimeException('Invalid tracking destination accepted.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            $assert($e->getStatusCode() === 422 && AffiliateClick::query()->forStore($store)->count() === $clickCount, 'invalid_tracking_destination_does_not_count');
+        }
+    }
+    $originalLink = $member->link->public_id;
+    $management->transitionMembership($org, $store, $actor, $member->public_id, 'suspend');
+    $management->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+    $member->refresh();
+    $assert($member->link->public_id === $originalLink && $member->link->status === 'active', 'reapproval_restores_original_link');
+
     $csv = tempnam(sys_get_temp_dir(), 'referral-csv-');
     $files[] = $csv;
     file_put_contents($csv, "name,email\nAcceptance Import,acceptance-import-20260908@example.invalid\n");
@@ -204,6 +219,28 @@ try {
     $autoIntent = AffiliateNotificationIntent::query()->where('membership_id', $autoMember->id)->where('event_key', 'customer.invited')->sole();
     $notifications->send($autoIntent->id);
     $assert($autoIntent->fresh()->status === 'sent', 'invitation_rendered_into_memory_transport');
+    foreach (['template', 'store_setting', 'program_paused', 'auto_invite', 'member_rejected', 'promoter_disabled'] as $case) {
+        DB::beginTransaction();
+        try {
+            $queued = $autoIntent->replicate();
+            $queued->forceFill(['dedupe_key' => 'TEST-stop-invite:'.$case.':'.$autoMember->id, 'status' => 'queued', 'sent_at' => null])->save();
+            match ($case) {
+                'template' => DB::table('affiliate_message_templates')->where('store_id', $store->id)->where('key', 'customer.invited')->update(['enabled' => false]),
+                'store_setting' => \App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting::query()->forStore($store)->update(['customer_referral_enabled' => false]),
+                'program_paused' => $auto->update(['status' => 'paused']),
+                'auto_invite' => $auto->update(['settings' => ['auto_invite' => false]]),
+                'member_rejected' => $autoMember->update(['status' => 'rejected']),
+                'promoter_disabled' => $autoMember->promoter->update(['status' => 'disabled']),
+            };
+            $notifications->send($queued->id);
+            $notifications->send($queued->id);
+            $assert($queued->fresh()->status === 'suppressed' && $queued->fresh()->message_encrypted === [], 'queued_invitation_stopped_'.$case);
+        } finally {
+            DB::rollBack();
+            $auto->refresh();
+            $autoMember->refresh();
+        }
+    }
     $assert(Mail::mailer('array')->getSymfonyTransport()->messages()->count() === 2, 'no_external_mail_transport');
 
     $beforeClicks = app(AffiliateTrackingStatistics::class)->count($store);

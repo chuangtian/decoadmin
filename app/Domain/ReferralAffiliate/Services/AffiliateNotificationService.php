@@ -4,6 +4,7 @@ namespace App\Domain\ReferralAffiliate\Services;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateNotificationIntent;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
+use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Jobs\SendAffiliateNotification;
 use App\Models\AuditLog;
 use App\Models\Organization;
@@ -98,6 +99,15 @@ class AffiliateNotificationService
             }
             if ($record->event_key === 'customer.invited') {
                 $member = AffiliateProgramMembership::query()->forOrganization($store->organization_id)->forStore($store)->find($record->membership_id);
+                $enabled = DB::table('affiliate_message_templates')->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('key', 'customer.invited')->where('enabled', true)->exists()
+                    && AffiliateStoreSetting::query()->forOrganization($store->organization_id)->forStore($store)->where('customer_referral_enabled', true)->exists();
+                if (! $enabled || $store->status !== 'active' || $member?->status->value !== 'pending'
+                    || $member->promoter?->status !== 'active' || $member->program?->status->value !== 'active'
+                    || ! data_get($member->program->settings, 'auto_invite', false)) {
+                    $record->update(['status' => 'suppressed', 'message_encrypted' => [], 'error_summary' => '自动邀请已停用或推广者状态已变更。']);
+
+                    return;
+                }
                 $orderId = data_get($member?->application_encrypted, 'source_order_id');
                 $contact = $record->created_at->copy()->addDays(7)->isFuture() && $orderId ? app(AffiliateInvitationOrderReader::class)->eligibleContact($store, $orderId) : null;
                 if (! $contact || $contact['email'] !== data_get($record->message_encrypted, 'to')) {

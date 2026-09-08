@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
+use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
+use App\Domain\ReferralAffiliate\Services\AffiliateInvitationOrderReader;
 use App\Domain\ReferralAffiliate\Services\AffiliateNotificationService;
 use App\Jobs\SendAffiliateNotification;
 use App\Models\Organization;
@@ -12,6 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AffiliateNotificationTest extends TestCase
@@ -64,6 +67,40 @@ class AffiliateNotificationTest extends TestCase
         $service->send($intent->id);
         $this->assertSame('suppressed', $intent->fresh()->status);
         $this->assertSame([], $intent->fresh()->message_encrypted);
+    }
+
+    public static function stoppedInvitationCases(): array
+    {
+        return array_map(fn ($case) => [$case], ['template', 'store_setting', 'program_paused', 'auto_invite', 'member_rejected', 'promoter_disabled']);
+    }
+
+    #[DataProvider('stoppedInvitationCases')]
+    public function test_queued_invitation_is_suppressed_when_its_sending_conditions_change(string $case): void
+    {
+        Queue::fake();
+        config(['mail.default' => 'array']);
+        $member = $this->member();
+        $member->forceFill(['status' => 'pending', 'application_encrypted' => ['source_order_id' => 'gid://shopify/Order/80']])->save();
+        $member->program->update(['type' => 'advocate', 'status' => 'active', 'settings' => ['auto_invite' => true]]);
+        $setting = AffiliateStoreSetting::query()->create(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'customer_referral_enabled' => true]);
+        DB::table('affiliate_message_templates')->insert(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'key' => 'customer.invited', 'subject' => 'Invite', 'body' => '{invitation_url}', 'enabled' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        $service = app(AffiliateNotificationService::class);
+        $intent = $service->intent($member, 'customer.invited', 'queued-invite', ['invitation_url' => url('/referral-portal/invitation').'#token='.str_repeat('a', 64)]);
+        $this->assertSame('queued', $intent->status);
+        match ($case) {
+            'template' => DB::table('affiliate_message_templates')->where('key', 'customer.invited')->update(['enabled' => false]),
+            'store_setting' => $setting->update(['customer_referral_enabled' => false]),
+            'program_paused' => $member->program->update(['status' => 'paused']),
+            'auto_invite' => $member->program->update(['settings' => ['auto_invite' => false]]),
+            'member_rejected' => $member->update(['status' => 'rejected']),
+            'promoter_disabled' => $member->promoter->update(['status' => 'disabled']),
+        };
+        $this->mock(AffiliateInvitationOrderReader::class)->shouldReceive('eligibleContact')->zeroOrMoreTimes()->andReturn(['email' => 'mail@example.invalid']);
+        $service->send($intent->id);
+        $service->send($intent->id);
+        $this->assertSame('suppressed', $intent->fresh()->status);
+        $this->assertSame([], $intent->fresh()->message_encrypted);
+        $this->assertCount(0, Mail::mailer('array')->getSymfonyTransport()->messages());
     }
 
     private function member(): AffiliateProgramMembership
