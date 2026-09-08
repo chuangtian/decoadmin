@@ -1,0 +1,53 @@
+# 保留数据的电脑实测
+
+用户要求：通过电脑实际测试 macfox-test-app 店铺及测试后台的设置和用户使用；测试数据不得删除或回滚清理。本轮不用带清理逻辑的既有集成测试脚本替代 UI 实操。
+
+已操作：
+- 测试后台开启联盟营销及顾客推荐，页面复选框均选中。
+- 创建 TEST KEEP 20260908 Affiliate E2E；空白名称先被浏览器拦截。
+- 计划创建后启用，列表 active；编辑回显默认佣金 12%、顾客优惠 10%、等待期 0 天、归因窗口 30 天、优惠码优先。
+- 搜索 Macfox，选择 Macfox Bar Pad，添加专属佣金 15% 规则，已点保存，待再打开核对持久化。
+- 未删除测试数据。
+
+待完成：规则回读、成员创建与用户申请、邀请、审批与暂停恢复、门户登录及收款资料、推广链接/二维码/优惠码、测试结账、归因/退款/奖励、账本/结算/凭证、风险、素材/通知、报表、Shopify 配置页面复核。
+
+输入工具注意：Chrome 原生中文 typeText、paste 和数字 setValue 出现输入不符，不能据此认定产品问题。采用英文 TEST KEEP 标记；数字用逐键输入后读回，确认后才提交。链接点击常只聚焦，需要当前 AX 确认焦点后 Return。
+
+进度更新：
+- Macfox Bar Pad 的 15% 规则已重新打开确认持久化。
+- 管理员添加 TEST KEEP Alice Affiliate，合成邮箱 keep-alice-20260908@example.invalid。成员 public_id 01M20RRVVS9QGJSAR7FJHNSJ3G，计划 public_id 01M20R76Y05A9614SJERVS6Q62。
+- 邀请表单无效 URL 被拦截；正确 URL 与说明提交后显示“邀请已接受，请等待店铺审核”，后台仍 pending。
+- 同一邀请二次提交被 410 拒绝，但呈现英文框架错误页，没有面向用户的说明。需修复门户错误页面，不改变拒绝状态码。
+- Alice 经候补 waitlisted、拒绝原因必填验证、填写 TEST 原因后 rejected、再批准 approved；历史保留。链接 /r/01M20SEQ2JJJPEH8TSDX67DW25，优惠码 DECO-PLKV4RAU 已生效。
+- Alice 正常 UI 请求登录邮件，应用记录 sent（mailer system，通知 188）；合成邮箱不能验证收信。尝试直接读取服务器内的一次性登录 URL 被自动审批拒绝，未执行，不再尝试。改为用户提供的真实邮箱正常收信。
+- 用户已明确提供自己的 Gmail 作为测试收件邮箱，已用它在门户提交 TEST KEEP Mail User 自主申请；成功提示、后台 pending 已确认，刚点击批准，待核对后请求登录邮件。真实邮箱不写入仓库文档；见当前对话用户授权。
+- 所有本轮测试数据保留，没有删除或回滚。
+
+电脑输入经验：切换 Ctrl+Space 至英文输入后，typeText 的 https:// 和标点恢复正常。导航需先核对地址，防止 Chrome 自动补全到旧 invitation 链接。cua.createBrowserTab chrome 超时重置，继续用原生 Chrome getApp。原生复制邀请按钮 + Super+V 可用；工具 paste 曾回填旧剪贴板。遇到 user changed Chrome 必须重新 getApp；最近用户已打开 Gmail 测试收件箱。
+
+真实邮件及门户进度：
+- TEST KEEP Mail User 自主申请成功、后台批准 approved；链接 /r/01M20T6502XCHRMTYV92GFZS4G，优惠码 DECO-8RAF7FDS 已生效。
+- 在门户向用户授权 Gmail 请求登录邮件；Gmail 收件箱确实收到“推广者门户登录”，点击邮件中的链接、再点继续登录，成功进入 TEST KEEP Mail User 门户。
+- 发现第二项体验问题：Referral 登录邮件沿用了系统 SMTP 发件人显示名 Student Discount，需要只在 Referral 邮件中覆盖显示名，不能改动其他插件邮件配置。
+- 门户显示专属链接、有效优惠码、二维码，初始余额和点击为 0。
+- 收款资料留空被浏览器拦截；已填写国家 TEST、银行偏好、TEST ONLY - DO NOT PAY - Reference KEEP-20260908 并点击保存，待回读确认。
+
+修复与进一步进度：
+- 浏览器保存资料跳到了 /referral-portal/portal.js；重新进入门户后已确认银行偏好和 TEST ONLY 资料保存成功，故是返回地址问题。复现原因：no-referrer 页面使用 back()，会话上一 URL 可被门户脚本请求覆盖。
+- 修复 c9ce9ea：表单成功与验证错误使用明确门户返回地址；门户 4xx/503 HTML 显示中文说明及返回入口，保留状态码和 JSON；仅 Referral 邮件覆盖发件人显示名为 Deco Referral，发件地址与系统配置不变。
+- 三项新增回归先失败后通过，完整本地 693 passed / 10091 assertions；前端构建通过、vite 重启。本轮仍未使用 staging 回滚脚本。
+- c9ce9ea 已部署测试 app/nginx/Horizon/scheduler，健康检查通过，待浏览器逐项复验。
+- 深链拒绝店外地址；正确 /collections/all 与来源 test-keep-ui 生成成功，实际打开测试店列表；二维码已下载到浏览器默认下载目录并保留。
+- Macfox Bar Pad 缺货，未改其库存；改用 Macfox X7 测试结账。已加入一台 Black/X7/Single，购物车1599 USD。
+- 结账应用 DECO-8RAF7FDS 成功，折扣159.90、商品应付1439.10 USD。当前无付款网关，正在 Shopify macfox-test-app 支付设置中开启官方 Bogus 测试网关。尚未付款，不可记为订单已创建。
+
+当前暂停点（2026-09-09）：
+- Shopify 官方 Bogus Gateway 已通过 UI 重新激活；结账显示测试说明，真实付款方式未启用。
+- 结账保留一台 X7、DECO-8RAF7FDS 10% 折扣、标准运费3.32，合计1442.42 USD。合成收货人为 TEST KEEP Buyer，香港九龙，地址含 TEST ORDER DO NOT SHIP；营销订阅关闭。
+- 已输入 Bogus 卡号2、12/29、123并点击 Pay now，但被 Shopify 邮箱域名不可解析拦截，尚未触发成功订单；不能把它记为已通过付款拒绝测试。
+- 已将邮箱修正并读回 keep-buyer-20260909@example.com；随后电脑工具无法读取 Chrome，getApp 只有窗口标题，getScreenshot 明确 Screenshot unavailable。尚未再次点 Pay now。
+- 已请用户解锁电脑并把测试结账窗口放到前台。工具恢复后先重新读取页面/卡号/订单状态，再继续测试拒绝及成功假付款，避免盲目重复付款。
+- 仍需浏览器复验 c9ce9ea 的资料保存返回、中文错误页、邮件发件名；后续订单归因、退款、结算、奖励、素材/通知、报表、成员暂停恢复等 UI 情况未完成。不得称为“所有功能实测完成”。
+- 所有本轮计划、成员、邀请、审核、资料与下载文件均保留，没有删除或回滚。不要运行旧 staging 回滚/清理测试脚本。
+
+工具连接复核：用户已确认结账窗口打开。重置 CUA 后，原生 Chrome 仍只返回窗口标题、无 AX 内容；cua.getState 能列出该结账标签页（说明窗口确实存在），直接 getTab 同一已知标签页仍超时并重置。故当前为电脑工具连接故障，不归因为用户未打开窗口，也不计为插件失败。最后确认的操作仍是修正邮箱，未再次付款。需要电脑工具恢复后从该结账继续，不重建或删除已有测试数据。
