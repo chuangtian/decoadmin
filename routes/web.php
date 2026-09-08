@@ -665,10 +665,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
             ->middleware('permission:affiliate.programs.view')->name('affiliate.programs.index');
         Route::post('/programs', [AffiliateController::class, 'storeProgram'])
             ->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.store');
+        Route::post('/programs/{program}/transition', [AffiliateController::class, 'transitionProgram'])
+            ->whereUlid('program')->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.transition');
         Route::get('/promoters', [AffiliateController::class, 'promoters'])
             ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
         Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
             ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
+        Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])
+            ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.memberships.transition');
         Route::put('/settings', [AffiliateController::class, 'settings'])
             ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
     });

@@ -79,6 +79,24 @@ class AffiliateController extends Controller
         return back()->with('success', '推广者已加入计划，等待审核。');
     }
 
+    public function transitionProgram(Request $request, Organization $organization, Store $store, string $program): RedirectResponse
+    {
+        $this->assertScope($request, $organization, $store, 'affiliate.programs.manage');
+        $values = $request->validate(['action' => ['required', Rule::in(['activate', 'pause'])]]);
+        $this->management->transitionProgram($organization, $store, $request->user(), $program, $values['action']);
+
+        return back()->with('success', $values['action'] === 'activate' ? '推广计划已启用。' : '推广计划已暂停。');
+    }
+
+    public function transitionMembership(Request $request, Organization $organization, Store $store, string $membership): RedirectResponse
+    {
+        $this->assertScope($request, $organization, $store, 'affiliate.promoters.manage');
+        $values = $request->validate(['action' => ['required', Rule::in(['approve', 'suspend'])]]);
+        $this->management->transitionMembership($organization, $store, $request->user(), $membership, $values['action']);
+
+        return back()->with('success', $values['action'] === 'approve' ? '推广者已通过审核。' : '推广者已暂停。');
+    }
+
     private function assertScope(Request $request, Organization $organization, Store $store, string $permission): void
     {
         abort_unless($store->organization_id === $organization->id, 403);

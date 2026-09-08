@@ -3,6 +3,7 @@
 namespace App\Domain\ReferralAffiliate\Services;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
+use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Models\AuditLog;
@@ -13,6 +14,49 @@ use Illuminate\Support\Facades\DB;
 
 class AffiliateManagementService
 {
+    public function transitionProgram(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgram
+    {
+        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgram {
+            $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)
+                ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
+            $from = $program->status->value;
+            $to = match ($action) {
+                'activate' => in_array($from, ['draft', 'paused'], true) ? 'active' : null,
+                'pause' => $from === 'active' ? 'paused' : null,
+                default => null,
+            };
+            abort_unless($to !== null, 409, '当前计划状态不允许执行此操作。');
+            $program->forceFill(['status' => $to, 'updated_by' => $actor->id])->save();
+            $this->audit($organization, $store, $actor, 'affiliate_program_status_changed', $program, ['status' => $from], ['status' => $to]);
+
+            return $program;
+        });
+    }
+
+    public function transitionMembership(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgramMembership
+    {
+        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgramMembership {
+            $membership = AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)
+                ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
+            $from = $membership->status->value;
+            $to = match ($action) {
+                'approve' => in_array($from, ['pending', 'waitlisted', 'suspended'], true) ? 'approved' : null,
+                'suspend' => $from === 'approved' ? 'suspended' : null,
+                default => null,
+            };
+            abort_unless($to !== null, 409, '当前推广者状态不允许执行此操作。');
+            $membership->forceFill([
+                'status' => $to,
+                'approved_at' => $to === 'approved' ? now() : $membership->approved_at,
+                'approved_by' => $to === 'approved' ? $actor->id : $membership->approved_by,
+                'suspended_at' => $to === 'suspended' ? now() : null,
+            ])->save();
+            $this->audit($organization, $store, $actor, 'affiliate_membership_status_changed', $membership, ['status' => $from], ['status' => $to]);
+
+            return $membership;
+        });
+    }
+
     /** @param array<string, mixed> $values */
     public function updateSettings(Organization $organization, Store $store, User $actor, array $values): AffiliateStoreSetting
     {

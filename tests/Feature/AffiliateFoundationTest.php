@@ -49,6 +49,21 @@ class AffiliateFoundationTest extends TestCase
         $this->assertNotSame('alice@example.com', $promoter->getRawOriginal('email_encrypted'));
         $membership = AffiliateProgramMembership::query()->sole();
         $this->assertSame($store->id, $membership->store_id);
+        $this->actingAs($actor)->withSession($session)
+            ->post(route('affiliate.programs.transition', [$organization, $store, $program->public_id]), ['action' => 'activate'])
+            ->assertRedirect();
+        $this->assertSame('active', $program->fresh()->status->value);
+        $this->actingAs($actor)->withSession($session)
+            ->post(route('affiliate.memberships.transition', [$organization, $store, $membership->public_id]), ['action' => 'approve'])
+            ->assertRedirect();
+        $this->assertSame('approved', $membership->fresh()->status->value);
+        $this->assertNotNull($membership->fresh()->approved_at);
+        $this->actingAs($actor)->withSession($session)
+            ->post(route('affiliate.memberships.transition', [$organization, $store, $membership->public_id]), ['action' => 'suspend'])
+            ->assertRedirect();
+        $this->assertSame('suspended', $membership->fresh()->status->value);
+        $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_program_status_changed']);
+        $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_membership_status_changed']);
         $this->actingAs($actor)->withSession($session)->get(route('affiliate.promoters.index', [$organization, $store]))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Affiliate/Index')
@@ -81,8 +96,8 @@ class AffiliateFoundationTest extends TestCase
         $session = $this->contextSession($organization, $store);
         $this->actingAs($viewer)->withSession($session)->get(route('affiliate.index', [$organization, $store]))
             ->assertOk()->assertInertia(fn (Assert $page) => $page
-                ->component('Affiliate/Index')->where('settings.affiliate_enabled', false)
-                ->where('permissions.manageSettings', false));
+            ->component('Affiliate/Index')->where('settings.affiliate_enabled', false)
+            ->where('permissions.manageSettings', false));
         $this->assertDatabaseCount('affiliate_store_settings', 0);
         $this->actingAs($viewer)->withSession($session)->put(route('affiliate.settings.update', [$organization, $store]), [
             'affiliate_enabled' => true, 'customer_referral_enabled' => false,

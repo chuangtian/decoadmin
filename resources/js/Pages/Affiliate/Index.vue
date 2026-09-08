@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -28,6 +28,8 @@ const submitProgram = () => programForm.post(`${baseUrl}/programs`, { preserveSc
 const submitPromoter = () => promoterForm.post(`${baseUrl}/promoters`, { preserveScroll: true, onSuccess: () => { promoterForm.reset('display_name', 'email'); showPromoterForm.value = false; } });
 const saveSettings = () => settingsForm.put(`${baseUrl}/settings`, { preserveScroll: true });
 const typeLabel = (value: string) => ({ affiliate: '联盟客', influencer: '达人', ambassador: '品牌大使', advocate: '顾客推荐', partner: '合作伙伴' }[value] ?? value);
+const transitionProgram = (program: Program, action: 'activate' | 'pause') => router.post(`${baseUrl}/programs/${program.public_id}/transition`, { action }, { preserveScroll: true });
+const transitionMembership = (membership: Membership, action: 'approve' | 'suspend') => router.post(`${baseUrl}/memberships/${membership.public_id}/transition`, { action }, { preserveScroll: true });
 </script>
 
 <template>
@@ -71,7 +73,7 @@ const typeLabel = (value: string) => ({ affiliate: '联盟客', influencer: '达
                     <div class="sm:col-span-2"><button class="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white" :disabled="programForm.processing">创建计划</button><p v-if="Object.keys(programForm.errors).length" class="mt-2 text-sm text-rose-600">{{ Object.values(programForm.errors)[0] }}</p></div>
                 </form>
                 <EmptyState v-if="!programs.length" title="还没有推广计划" description="创建第一个计划，设置归因窗口、等待期和默认佣金。" icon="campaign" />
-                <div v-else class="overflow-hidden rounded-2xl border border-slate-200 bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">计划</th><th class="p-4">归因</th><th class="p-4">等待期</th><th class="p-4">推广者</th><th class="p-4">状态</th></tr></thead><tbody><tr v-for="program in programs" :key="program.public_id" class="border-t border-slate-100"><td class="p-4"><b>{{ program.name }}</b><span class="ml-2 text-xs text-slate-500">{{ typeLabel(program.type) }}</span></td><td class="p-4">{{ program.attribution_model }} · {{ program.attribution_window_days }} 天</td><td class="p-4">{{ program.hold_days }} 天</td><td class="p-4">{{ program.memberships_count }}</td><td class="p-4">{{ program.status }}</td></tr></tbody></table></div>
+                <div v-else class="overflow-hidden rounded-2xl border border-slate-200 bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">计划</th><th class="p-4">归因</th><th class="p-4">等待期</th><th class="p-4">推广者</th><th class="p-4">状态</th><th v-if="permissions.managePrograms" class="p-4">操作</th></tr></thead><tbody><tr v-for="program in programs" :key="program.public_id" class="border-t border-slate-100"><td class="p-4"><b>{{ program.name }}</b><span class="ml-2 text-xs text-slate-500">{{ typeLabel(program.type) }}</span></td><td class="p-4">{{ program.attribution_model }} · {{ program.attribution_window_days }} 天</td><td class="p-4">{{ program.hold_days }} 天</td><td class="p-4">{{ program.memberships_count }}</td><td class="p-4">{{ program.status }}</td><td v-if="permissions.managePrograms" class="p-4"><button v-if="program.status !== 'active'" class="font-semibold text-emerald-700" @click="transitionProgram(program, 'activate')">启用</button><button v-else class="font-semibold text-amber-700" @click="transitionProgram(program, 'pause')">暂停</button></td></tr></tbody></table></div>
             </template>
 
             <template v-else>
@@ -83,7 +85,7 @@ const typeLabel = (value: string) => ({ affiliate: '联盟客', influencer: '达
                     <div class="sm:col-span-2"><button class="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white" :disabled="promoterForm.processing">添加推广者</button><p v-if="Object.keys(promoterForm.errors).length" class="mt-2 text-sm text-rose-600">{{ Object.values(promoterForm.errors)[0] }}</p></div>
                 </form>
                 <EmptyState v-if="!memberships.length" title="还没有推广者" :description="programs.length ? '添加推广者并分配到当前店铺的推广计划。' : '请先创建推广计划，再添加推广者。'" icon="users" />
-                <div v-else class="overflow-hidden rounded-2xl border border-slate-200 bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">推广者</th><th class="p-4">计划</th><th class="p-4">身份</th><th class="p-4">状态</th></tr></thead><tbody><tr v-for="membership in memberships" :key="membership.public_id" class="border-t border-slate-100"><td class="p-4"><b>{{ membership.promoter.display_name }}</b><p class="text-xs text-slate-500">{{ membership.promoter.email }}</p></td><td class="p-4">{{ membership.program?.name }}</td><td class="p-4">{{ typeLabel(membership.promoter.type) }}</td><td class="p-4">{{ membership.status }}</td></tr></tbody></table></div>
+                <div v-else class="overflow-hidden rounded-2xl border border-slate-200 bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">推广者</th><th class="p-4">计划</th><th class="p-4">身份</th><th class="p-4">状态</th><th v-if="permissions.managePromoters" class="p-4">操作</th></tr></thead><tbody><tr v-for="membership in memberships" :key="membership.public_id" class="border-t border-slate-100"><td class="p-4"><b>{{ membership.promoter.display_name }}</b><p class="text-xs text-slate-500">{{ membership.promoter.email }}</p></td><td class="p-4">{{ membership.program?.name }}</td><td class="p-4">{{ typeLabel(membership.promoter.type) }}</td><td class="p-4">{{ membership.status }}</td><td v-if="permissions.managePromoters" class="p-4"><button v-if="membership.status !== 'approved'" class="font-semibold text-emerald-700" @click="transitionMembership(membership, 'approve')">通过</button><button v-else class="font-semibold text-amber-700" @click="transitionMembership(membership, 'suspend')">暂停</button></td></tr></tbody></table></div>
             </template>
         </div>
     </AppLayout>
