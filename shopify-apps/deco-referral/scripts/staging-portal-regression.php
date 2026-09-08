@@ -3,7 +3,7 @@
 /** Exercise public portal HTTP with isolated cookies and synthetic invitations only. */
 require dirname(__DIR__, 3).'/vendor/autoload.php';
 $app = require dirname(__DIR__, 3).'/bootstrap/app.php';
-$app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$app->make(Kernel::class)->bootstrap();
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;
@@ -37,7 +37,7 @@ $csrf = function (string $body) {
         throw new RuntimeException('Missing CSRF');
     }
 
-return html_entity_decode($m[1]);
+    return html_entity_decode($m[1]);
 };
 $makeClient = fn ($jar) => new Client(['base_uri' => 'https://testadmin.decomkt.com', 'cookies' => $jar, 'http_errors' => false, 'timeout' => 25]);
 $jar = new CookieJar;
@@ -54,6 +54,16 @@ $assert($jar->getCookieByName('deco_referral_portal')?->getPath() === '/referral
 $bundle = $client->get('/referral-portal/portal.js');
 $assert($bundle->getStatusCode() === 200 && strlen((string) $bundle->getBody()) > 1000, 'portal bundle');
 
+$originalProfile = $member->promoter->profile_encrypted;
+try {
+    $saved = $client->post('/referral-portal/profile', ['headers' => ['Referer' => 'https://testadmin.decomkt.com/referral-portal'], 'form_params' => ['_token' => $csrf($body), 'country' => 'TEST', 'payment_method' => 'bank', 'payment_reference' => 'TEST-NO-TRANSFER-PROFILE']]);
+    $savedBody = (string) $saved->getBody();
+    $assert($saved->getStatusCode() === 200 && preg_match('/<option value="bank"[^>]*selected/', $savedBody) === 1, 'saved bank method is selected');
+    $assert(data_get($member->promoter->fresh()->profile_encrypted, 'payment_method') === 'bank', 'profile persisted');
+} finally {
+    $member->promoter->forceFill(['profile_encrypted' => $originalProfile])->save();
+}
+
 $management = app(AffiliateManagementService::class);
 $oldSettings = AffiliateStoreSetting::query()->forStore($store)->firstOrFail()->only(['affiliate_enabled', 'customer_referral_enabled']);
 $program = null;
@@ -69,7 +79,10 @@ try {
     $inviteToken = substr($url, -64);
     $guest = $makeClient(new CookieJar);
     $landing = $guest->get('/referral-portal/invitation');
-    $accepted = $guest->post('/referral-portal/invitation', ['form_params' => ['_token' => $csrf((string) $landing->getBody()), 'token' => $inviteToken, 'terms' => '1', 'notes' => 'TEST HTTP invitation acceptance']]);
+    $invalid = $guest->post('/referral-portal/invitation', ['headers' => ['Referer' => 'https://testadmin.decomkt.com/referral-portal/invitation'], 'form_params' => ['_token' => $csrf((string) $landing->getBody()), 'token' => $inviteToken, 'terms' => '1', 'website' => 'ftp://invalid.example.com', 'notes' => 'TEST invitation correction']]);
+    $invalidBody = (string) $invalid->getBody();
+    $assert($invalid->getStatusCode() === 200 && str_contains($invalidBody, 'value="'.$inviteToken.'"') && str_contains($invalidBody, 'TEST invitation correction'), 'invalid invitation retains retry fields');
+    $accepted = $guest->post('/referral-portal/invitation', ['form_params' => ['_token' => $csrf($invalidBody), 'token' => $inviteToken, 'terms' => '1', 'notes' => 'TEST HTTP invitation acceptance']]);
     $acceptedBody = (string) $accepted->getBody();
     $assert($accepted->getStatusCode() === 200 && str_contains($acceptedBody, '邀请已接受'), 'invitation HTTP acceptance');
     $assert(data_get($invited->fresh()->application_encrypted, 'notes') === 'TEST HTTP invitation acceptance' && $invited->fresh()->status->value === 'pending', 'invitation notes and review gate');
@@ -84,4 +97,4 @@ try {
     }
     $management->updateSettings($org, $store, $actor, $oldSettings);
 }
-echo json_encode(['shop' => $store->shopify_domain, 'dashboard_http' => 200, 'portal_replay_http' => 401, 'isolated_cookie' => true, 'portal_bundle' => true, 'invitation_http' => 200, 'invitation_replay_http' => 410, 'invited_membership_pending_until_review' => true, 'test_invitation_cleaned_up' => true, 'settings_restored' => true, 'external_mail_sent' => false],JSON_PRETTY_PRINT).PHP_EOL;
+echo json_encode(['shop' => $store->shopify_domain, 'dashboard_http' => 200, 'portal_replay_http' => 401, 'isolated_cookie' => true, 'portal_bundle' => true, 'invitation_http' => 200, 'invitation_replay_http' => 410, 'invited_membership_pending_until_review' => true, 'test_invitation_cleaned_up' => true, 'settings_restored' => true, 'payment_method_roundtrip' => true, 'profile_restored' => true, 'invitation_validation_retry' => true, 'external_mail_sent' => false], JSON_PRETTY_PRINT).PHP_EOL;

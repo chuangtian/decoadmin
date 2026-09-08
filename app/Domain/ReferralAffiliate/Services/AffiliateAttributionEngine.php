@@ -57,7 +57,9 @@ class AffiliateAttributionEngine
         $winner = $candidates[0] ?? null;
         $membership = $winner['membership'] ?? null;
         $risks = [];
-        $sourceClick = $clicks->last();
+        $sourceClick = isset($winner['click_id'])
+            ? $clicks->firstWhere('id', $winner['click_id'])
+            : $clicks->filter(fn ($click) => $membership && (int) $click->membership_id === (int) $membership->id)->last();
         $evidence = [];
         if ($membership) {
             if ($membership->program->type->value === 'advocate') {

@@ -6,10 +6,14 @@ use App\Domain\ReferralAffiliate\Models\AffiliatePortalToken;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
+use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Services\AffiliatePortalService;
+use App\Http\Middleware\ConfigureAffiliatePortalSession;
 use App\Models\Organization;
+use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
@@ -70,6 +74,35 @@ class AffiliatePortalTest extends TestCase
         $member->update(['status' => 'suspended']);
         $this->expectException(ModelNotFoundException::class);
         $service->consume($store, $token);
+    }
+
+    public function test_payment_method_is_restored_and_old_verification_cannot_change_profile(): void
+    {
+        $this->withoutMiddleware(ConfigureAffiliatePortalSession::class);
+        [$store, $member] = $this->context();
+        $this->withSession(['affiliate_member' => $member->id, 'affiliate_verified_at' => now()->timestamp])
+            ->from('/referral-portal')->post('/referral-portal/profile', ['country' => 'Test', 'payment_method' => 'bank', 'payment_reference' => 'TEST-NO-TRANSFER'])->assertRedirect('/referral-portal');
+        $this->assertSame('bank', data_get($member->promoter->fresh()->profile_encrypted, 'payment_method'));
+        $html = $this->get('/referral-portal')->assertOk()->getContent();
+        $this->assertMatchesRegularExpression('/<option value="bank"[^>]*selected/', $html);
+        $this->travel(16)->minutes();
+        $this->post('/referral-portal/profile', ['payment_method' => 'paypal', 'payment_reference' => 'SHOULD-NOT-SAVE'])->assertForbidden();
+        $this->assertSame('bank', data_get($member->promoter->fresh()->profile_encrypted, 'payment_method'));
+    }
+
+    public function test_invalid_invitation_submission_keeps_token_for_correction_without_accepting(): void
+    {
+        $this->withoutMiddleware(ConfigureAffiliatePortalSession::class);
+        [$store, $member] = $this->context();
+        $member->update(['status' => 'pending']);
+        AffiliateStoreSetting::query()->create(['organization_id' => $store->organization_id, 'store_id' => $store->id, 'affiliate_enabled' => true]);
+        $token = bin2hex(random_bytes(32));
+        DB::table('affiliate_invitations')->insert(['organization_id' => $store->organization_id, 'store_id' => $store->id, 'membership_id' => $member->id, 'created_by' => User::factory()->create()->id, 'token_hash' => hash('sha256', $token), 'expires_at' => now()->addDays(7), 'created_at' => now(), 'updated_at' => now()]);
+        $this->from('/referral-portal/invitation')->post('/referral-portal/invitation', ['token' => $token, 'terms' => '1', 'website' => 'ftp://invalid.example.com', 'notes' => 'Retain my notes'])->assertSessionHasErrors('website');
+        $this->get('/referral-portal/invitation')->assertOk()->assertSee('value="'.$token.'"', false)->assertSee('Retain my notes');
+        $this->assertNull(DB::table('affiliate_invitations')->value('accepted_at'));
+        $this->post('/referral-portal/invitation', ['token' => $token, 'terms' => '1', 'website' => 'https://example.com'])->assertRedirect('/referral-portal');
+        $this->assertNotNull(DB::table('affiliate_invitations')->value('accepted_at'));
     }
 
     private function context(): array
