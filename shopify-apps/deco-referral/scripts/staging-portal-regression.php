@@ -1,9 +1,7 @@
 <?php
 
 /** Exercise public portal HTTP with isolated cookies and synthetic invitations only. */
-require dirname(__DIR__, 3).'/vendor/autoload.php';
-$app = require dirname(__DIR__, 3).'/bootstrap/app.php';
-$app->make(Kernel::class)->bootstrap();
+
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;
@@ -17,6 +15,10 @@ use GuzzleHttp\Cookie\CookieJar;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+
+require dirname(__DIR__, 3).'/vendor/autoload.php';
+$app = require dirname(__DIR__, 3).'/bootstrap/app.php';
+$app->make(Kernel::class)->bootstrap();
 
 if (! $app->environment('staging') || rtrim((string) config('app.url'), '/') !== 'https://testadmin.decomkt.com') {
     throw new RuntimeException('Staging only');
