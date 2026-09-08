@@ -16,6 +16,12 @@ class AffiliateWorkspaceService
     /** @return array<string, mixed> */
     public function dashboard(Organization $organization, Store $store, User $actor, string $section): array
     {
+        app(AffiliateShopGuard::class)->actor($organization, $store, $actor, match ($section) {
+            'programs' => 'affiliate.programs.view',
+            'promoters' => 'affiliate.promoters.view',
+            default => 'affiliate.dashboard.view',
+        });
+
         $settings = AffiliateStoreSetting::query()
             ->forOrganization($organization)->forStore($store)->first();
         $programs = AffiliateProgram::query()

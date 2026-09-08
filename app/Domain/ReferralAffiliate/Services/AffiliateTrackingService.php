@@ -15,9 +15,14 @@ class AffiliateTrackingService
     {
         $link = AffiliateLink::query()->where('public_id', $publicId)
             ->where('status', 'active')
-            ->with(['membership.program', 'membership.store'])
+            ->with(['membership.program', 'membership.store', 'membership.promoter'])
             ->firstOrFail();
         $membership = $link->membership;
+        app(AffiliateShopGuard::class)->store($membership->store);
+        abort_unless((int) $link->store_id === (int) $membership->store_id
+            && (int) $link->organization_id === (int) $membership->store->organization_id
+            && (int) $membership->program->store_id === (int) $link->store_id
+            && $membership->promoter?->status === 'active', 404);
         abort_unless($membership->status->value === 'approved'
             && $membership->program?->status->value === 'active'
             && $membership->store?->status === 'active'
@@ -36,24 +41,14 @@ class AffiliateTrackingService
             'ua_hash' => $this->hash($request->userAgent()),
             'occurred_at' => now(),
         ]);
-        $token = $this->signedToken($link, $click);
+        $token = app(AffiliateTrackingTokenService::class)->issue($link, $click);
         $target = 'https://'.$membership->store->shopify_domain.$link->target_path;
         $separator = str_contains($target, '?') ? '&' : '?';
 
         return redirect()->away($target.$separator.http_build_query([
             'ref' => $link->referral_code,
             'deco_aff' => $token,
-        ]), 302, ['Referrer-Policy' => 'strict-origin-when-cross-origin']);
-    }
-
-    private function signedToken(AffiliateLink $link, AffiliateClick $click): string
-    {
-        $payload = $this->base64Url(json_encode([
-            'v' => 1, 'store' => $link->store_id, 'membership' => $link->membership->public_id,
-            'click' => $click->public_id, 'exp' => now()->addDays(90)->timestamp,
-        ], JSON_THROW_ON_ERROR));
-
-        return $payload.'.'.$this->base64Url(hash_hmac('sha256', $payload, (string) config('app.key'), true));
+        ]), 302, ['Referrer-Policy' => 'no-referrer', 'Cache-Control' => 'no-store']);
     }
 
     private function dailyHash(?string $value): ?string
@@ -74,10 +69,5 @@ class AffiliateTrackingService
         $host = parse_url($value, PHP_URL_HOST);
 
         return is_string($host) ? mb_strtolower(mb_substr($host, 0, 255)) : null;
-    }
-
-    private function base64Url(string $value): string
-    {
-        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 }

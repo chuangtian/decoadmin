@@ -8,3 +8,9 @@
 - Never hardcode a store domain. Resolve the store, Organization, installation, and permissions from verified Shopify identity or signatures.
 - Publishing, installing, changing scopes, or modifying a Shopify environment requires explicit authorization for this App and that environment.
 - Never commit Client Secrets, access tokens, refresh tokens, cookies, webhook payloads containing customer data, or environment credentials.
+
+## Authorized test scope
+
+- Only `macfox-test-app.myshopify.com` is authorized for this App's backend testing, installation, theme changes, webhook operations, and Shopify writes.
+- Production and all other stores are excluded, including other stores in the same Plus organization.
+- Verify the trusted Shopify identity and backend Store mapping before any operation; a browser-provided shop name is not authorization.

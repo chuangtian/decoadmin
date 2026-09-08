@@ -6,15 +6,24 @@ use App\Domain\ReferralAffiliate\Models\AffiliateClick;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
+use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
+use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
+use App\Domain\ReferralAffiliate\Services\AffiliateTrackingTokenService;
+use App\Exceptions\AffiliateException;
+use App\Models\App;
+use App\Models\AppInstallation;
 use App\Models\Organization;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 class AffiliateFoundationTest extends TestCase
@@ -70,9 +79,20 @@ class AffiliateFoundationTest extends TestCase
         $redirect = $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.8', 'HTTP_USER_AGENT' => 'Affiliate Test'])
             ->get(route('affiliate.tracking.redirect', $link->public_id))
             ->assertRedirect();
-        $this->assertStringStartsWith('https://affiliate-store.myshopify.com/?ref=', (string) $redirect->headers->get('Location'));
+        $this->assertStringStartsWith('https://macfox-test-app.myshopify.com/?ref=', (string) $redirect->headers->get('Location'));
         $click = AffiliateClick::query()->sole();
         $this->assertNotSame('203.0.113.8', $click->ip_hash);
+        parse_str(parse_url((string) $redirect->headers->get('Location'), PHP_URL_QUERY), $query);
+        $tokens = app(AffiliateTrackingTokenService::class);
+        $this->assertSame($click->id, $tokens->verify($store, $query['deco_aff'])?->id);
+        $this->assertNull($tokens->verify($store, $query['deco_aff'].'tampered'));
+        $payload = json_decode(base64_decode(strtr(explode('.', $query['deco_aff'])[0], '-_', '+/')), true);
+        $this->assertArrayNotHasKey('store', $payload);
+        $this->assertSame($click->occurred_at->copy()->addDays(30)->timestamp, $payload['exp']);
+        $this->travel(31)->days();
+        $this->assertNull($tokens->verify($store, $query['deco_aff']));
+        $this->travelBack();
+
         $this->assertStringNotContainsString('203.0.113.8', json_encode($click->toArray(), JSON_THROW_ON_ERROR));
         $this->actingAs($actor)->withSession($session)
             ->post(route('affiliate.memberships.transition', [$organization, $store, $membership->public_id]), ['action' => 'suspend'])
@@ -133,6 +153,83 @@ class AffiliateFoundationTest extends TestCase
         $this->assertSame(7, Role::query()->whereBelongsTo($organization)->where('slug', 'viewer')->sole()->permissions()->where('group', 'affiliate')->count());
     }
 
+    public function test_other_store_is_blocked_even_for_a_super_admin_and_direct_service_calls(): void
+    {
+        [$actor, $organization, $store] = $this->context('super-admin');
+        $other = $this->store($organization, $actor, 'Unauthorized fixture', 'unauthorized-fixture.myshopify.com');
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $other))
+            ->get(route('affiliate.index', [$organization, $other]))->assertForbidden();
+        $this->actingAs($actor)->put(route('affiliate.settings.update', [$organization, $other]), [
+            'affiliate_enabled' => true, 'customer_referral_enabled' => false,
+        ])->assertForbidden();
+        try {
+            app(AffiliateManagementService::class)
+                ->updateSettings($organization, $other, $actor, ['affiliate_enabled' => true, 'customer_referral_enabled' => false]);
+            $this->fail('A direct service call bypassed the pilot boundary');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+        $this->assertDatabaseCount('affiliate_store_settings', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_production_runtime_is_blocked_even_for_the_authorized_test_shop(): void
+    {
+        [$actor, $organization, $store] = $this->context('super-admin');
+        $previous = app()->environment();
+        app()->instance('env', 'production');
+        try {
+            app(AffiliateManagementService::class)
+                ->updateSettings($organization, $store, $actor, ['affiliate_enabled' => true, 'customer_referral_enabled' => false]);
+            $this->fail('Production was allowed');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        } finally {
+            app()->instance('env', $previous);
+        }
+        $this->assertDatabaseCount('affiliate_store_settings', 0);
+    }
+
+    public function test_referral_refresh_uses_only_matching_app_installation_credentials(): void
+    {
+        [, $organization, $store] = $this->context('store-admin');
+        config(['referral.environment' => 'test', 'referral.active.client_id' => 'referral-test-client',
+            'referral.active.client_secret' => 'referral-test-secret', 'referral.active.handle' => 'deco-referral-test']);
+        $connection = ShopifyConnection::query()->create([
+            'store_id' => $store->id, 'shop_domain' => $store->shopify_domain,
+            'status' => 'connected', 'access_token_encrypted' => 'commerce-fixture-token', 'scopes' => ['read_orders'], 'api_version' => '2026-07',
+        ]);
+        $registeredApp = App::query()->create([
+            'name' => 'Referral fixture', 'handle' => 'deco-referral-test', 'client_id' => 'referral-test-client',
+            'distribution' => 'custom', 'status' => 'active',
+            'settings' => ['environment' => 'test', 'managed_by' => 'referral_config'],
+        ]);
+        $installation = AppInstallation::query()->create([
+            'app_id' => $registeredApp->id, 'store_id' => $store->id, 'shopify_connection_id' => $connection->id,
+            'status' => 'active', 'token_type' => 'offline', 'settings' => ['environment' => 'test'],
+            'access_token_encrypted' => 'old-referral-token', 'access_token_expires_at' => now()->subMinute(),
+            'refresh_token_encrypted' => 'referral-refresh', 'refresh_token_expires_at' => now()->addMonth(),
+            'granted_scopes' => ['read_orders', 'read_products', 'write_discounts'],
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://macfox-test-app.myshopify.com/admin/oauth/access_token' => Http::response([
+                'access_token' => 'new-referral-token', 'refresh_token' => 'new-referral-refresh',
+                'expires_in' => 86400, 'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_orders,read_products,write_discounts',
+            ]),
+        ]);
+        $service = app(AffiliateAppTokenService::class);
+        $this->assertSame('new-referral-token', $service->accessTokenFor($store));
+        Http::assertSent(fn ($request) => $request['client_id'] === 'referral-test-client'
+            && $request['refresh_token'] === 'referral-refresh');
+        $this->assertSame('commerce-fixture-token', $connection->fresh()->access_token_encrypted);
+        $this->assertSame('new-referral-refresh', $installation->fresh()->refresh_token_encrypted);
+        $installation->update(['settings' => ['environment' => 'production']]);
+        $this->expectException(AffiliateException::class);
+        $service->accessTokenFor($store);
+    }
+
     /** @return array{User, Organization, Store} */
     private function context(string $role): array
     {
@@ -140,7 +237,7 @@ class AffiliateFoundationTest extends TestCase
         $organization = Organization::query()->create(['name' => 'Affiliate Organization', 'code' => 'affiliate-org']);
         $user = User::factory()->create(['email_verified_at' => now()]);
         $organization->users()->attach($user, ['status' => 'active', 'joined_at' => now()]);
-        $store = $this->store($organization, $user, 'Affiliate Store', 'affiliate-store.myshopify.com');
+        $store = $this->store($organization, $user, 'Affiliate Store', 'macfox-test-app.myshopify.com');
         $this->seed(RoleSeeder::class);
         $systemRole = Role::query()->whereBelongsTo($organization)->where('slug', $role)->firstOrFail();
         $user->roles()->attach($systemRole, ['organization_id' => $organization->id, 'store_id' => null]);

@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\DB;
 
 class AffiliateManagementService
 {
-    public function __construct(private AffiliateAssetService $assets) {}
+    public function __construct(private AffiliateAssetService $assets, private AffiliateShopGuard $guard) {}
 
     public function transitionProgram(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgram
     {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.programs.manage');
+
         return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgram {
             $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)
                 ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
@@ -37,6 +39,8 @@ class AffiliateManagementService
 
     public function transitionMembership(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgramMembership
     {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.promoters.manage');
+
         return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgramMembership {
             $membership = AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)
                 ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
@@ -68,6 +72,8 @@ class AffiliateManagementService
     /** @param array<string, mixed> $values */
     public function updateSettings(Organization $organization, Store $store, User $actor, array $values): AffiliateStoreSetting
     {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.settings.manage');
+
         return DB::transaction(function () use ($organization, $store, $actor, $values): AffiliateStoreSetting {
             $settings = AffiliateStoreSetting::query()->firstOrNew([
                 'organization_id' => $organization->id,
@@ -88,6 +94,8 @@ class AffiliateManagementService
     /** @param array<string, mixed> $values */
     public function createProgram(Organization $organization, Store $store, User $actor, array $values): AffiliateProgram
     {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.programs.manage');
+
         return DB::transaction(function () use ($organization, $store, $actor, $values): AffiliateProgram {
             $program = AffiliateProgram::query()->create([
                 'organization_id' => $organization->id,
@@ -127,6 +135,8 @@ class AffiliateManagementService
     /** @param array<string, mixed> $values */
     public function createPromoter(Organization $organization, Store $store, User $actor, array $values): AffiliatePromoter
     {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.promoters.manage');
+
         return DB::transaction(function () use ($organization, $store, $actor, $values): AffiliatePromoter {
             $email = mb_strtolower(trim((string) $values['email']));
             $emailHash = hash_hmac('sha256', $organization->id.'|'.$email, (string) config('app.key'));

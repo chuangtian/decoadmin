@@ -12,7 +12,11 @@ class AffiliateAssetService
     /** @return array{link: AffiliateLink, coupon: AffiliateCoupon|null} */
     public function provisionDefaults(AffiliateProgramMembership $membership): array
     {
-        $membership->loadMissing(['program', 'promoter']);
+        $membership->loadMissing(['program', 'promoter', 'store']);
+        app(AffiliateShopGuard::class)->store($membership->store);
+        abort_unless((int) $membership->organization_id === (int) $membership->store->organization_id
+            && (int) $membership->program->store_id === (int) $membership->store_id
+            && (int) $membership->promoter->organization_id === (int) $membership->organization_id, 403);
         $link = AffiliateLink::withTrashed()->firstOrNew(['membership_id' => $membership->id]);
         if (! $link->exists) {
             $link->fill([
