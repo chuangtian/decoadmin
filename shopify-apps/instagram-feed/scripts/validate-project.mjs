@@ -83,10 +83,13 @@ function assertConfiguration(fileName, origin) {
     contents.includes(`application_url = "${origin}/shopify-app/instagram-feed"`),
     `${fileName} has the wrong Shopify-facing application URL`,
   );
+  // 授权码安装流程下 Shopify 拒绝 app 级 webhook 订阅：
+  // app/uninstalled 与 app/scopes_update 由 DecoAdmin 按店铺注册。
   check(
-    contents.includes(`uri = "${origin}/api/shopify-app/instagram-feed/webhooks"`),
-    `${fileName} has the wrong webhook endpoint`,
+    ! contents.includes('[[webhooks.subscriptions]]'),
+    `${fileName} must not declare app-specific webhook subscriptions while use_legacy_install_flow is enabled`,
   );
+  check(contents.includes('api_version = "'), `${fileName} must pin the webhook api_version`);
   check(
     contents.includes(`"${origin}/shopify-app/instagram-feed/oauth/callback"`),
     `${fileName} has the wrong Shopify OAuth callback URL`,

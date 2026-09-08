@@ -17,16 +17,11 @@ embedded = true
 [build]
 automatically_update_urls_on_dev = false
 
+# 授权码安装流程不接受 app 级 webhook 订阅，所以这里只声明 api_version，
+# app/uninstalled 与 app/scopes_update 由 DecoAdmin 在授权成功后按店铺注册
+# （InstagramFeedWebhookSubscriptionService），与 Commerce Hub 一致。
 [webhooks]
 api_version = "2026-07"
-
-[[webhooks.subscriptions]]
-topics = [ "app/uninstalled" ]
-uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
-
-[[webhooks.subscriptions]]
-topics = [ "app/scopes_update" ]
-uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 
 [access_scopes]
 scopes = "read_products"
