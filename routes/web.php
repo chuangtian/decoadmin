@@ -83,6 +83,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/api/shopify-app/referral/bootstrap', [ShopifyAffiliateAppController::class, 'bootstrap'])
     ->middleware(['shopify.id-token:referral', 'throttle:20,1'])->name('affiliate.shopify.bootstrap');
+Route::get('/shopify-app/referral', [ShopifyAffiliateAppController::class, 'home'])
+    ->name('affiliate.shopify.home');
+Route::get('/shopify-app/referral/manage', [ShopifyAffiliateAppController::class, 'management'])
+    ->middleware(['auth', 'verified'])->name('affiliate.shopify.management');
 
 Route::get('/health', HealthCheckController::class)->name('health');
 Route::get('/r/{link}', AffiliateTrackingController::class)

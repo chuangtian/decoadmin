@@ -6,9 +6,7 @@ DecoAdmin owns programs, promoters, attribution, commission and reward ledgers, 
 
 ## Environment status
 
-Local, Test, and Production are intentionally separate. Their TOML files are structural placeholders until the corresponding App is created or selected in the E-LINK Dev Dashboard and the matching DecoAdmin backend endpoints are available.
-
-No Shopify version is published from this foundation stage.
+Local, Test, and Production are intentionally separate. Local and Production remain non-runnable placeholders. Test uses the independent `Deco Referral Test` App (Dev Dashboard ID `420468817921`) and the staging URL. Version `referral-test-home-20260908` was published on 2026-09-08. Installation is pending explicit approval of its scopes; no store installation has completed.
 
 ## Validation
 
@@ -27,6 +25,8 @@ Only `macfox-test-app.myshopify.com` may be used for backend and Shopify testing
 App credentials use environment-specific `REFERRAL_LOCAL_CLIENT_ID`, `REFERRAL_LOCAL_CLIENT_SECRET`, `REFERRAL_TEST_CLIENT_ID`, and `REFERRAL_TEST_CLIENT_SECRET` secret configuration. No cross-environment fallback is allowed. Each installation and registered App must match `referral.environment`; the registered App must have `settings.managed_by = referral_config`. Token refresh updates only the matching Referral installation and never falls back to the Commerce Hub token.
 
 The backend installation bootstrap endpoint is implemented at `POST /api/shopify-app/referral/bootstrap`. It requires a verified Referral App identity token, exchanges it for an independent offline token, verifies Shopify's returned shop identity and scopes, and records only the matching Referral installation. The test App's own credentials must be configured before real installation can be verified.
+
+The Shopify embedded entry is `GET /shopify-app/referral`; its public shell exposes no store records and the bootstrap endpoint verifies identity separately. `GET /shopify-app/referral/manage` requires DecoAdmin login and store permission. App Home source lives in this App's `resources/` directory.
 
 Discount synchronization is not yet implemented. Coupon records remain pending and cannot currently be redeemed in Shopify. Checkout attribution, paid-order processing, commission/refund ledgers, payouts, and the customer portal are also unfinished.
 

@@ -37,6 +37,17 @@ class AffiliateFoundationTest extends TestCase
         config(['inertia.ssr.enabled' => false]);
     }
 
+    public function test_shopify_home_is_a_public_shell_restricted_to_the_pilot_store(): void
+    {
+        config(['referral.active.client_id' => 'test-referral-client']);
+        $this->get('/shopify-app/referral?shop=macfox-test-app.myshopify.com')
+            ->assertOk()->assertSee('test-referral-client')
+            ->assertHeader('Content-Security-Policy', 'frame-ancestors https://admin.shopify.com https://macfox-test-app.myshopify.com;');
+        $this->get('/shopify-app/referral?shop=another-shop.myshopify.com')->assertForbidden();
+        $this->get('/shopify-app/referral')->assertForbidden();
+        $this->get('/shopify-app/referral/manage?shop=macfox-test-app.myshopify.com')->assertRedirect(route('login'));
+    }
+
     public function test_store_admin_can_create_store_scoped_program_and_promoter_without_exposing_email_hash(): void
     {
         [$actor, $organization, $store] = $this->context('store-admin');

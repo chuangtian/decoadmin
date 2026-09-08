@@ -1,2 +1,14 @@
-# Non-runnable Test Shopify App placeholder.
-# Pull the E-LINK Dev Dashboard Test App configuration after backend App identity routes are ready.
+client_id = "44ddcba51c2e4f3eec425aae1d2cbe22"
+name = "Deco Referral Test"
+application_url = "https://testadmin.decomkt.com/shopify-app/referral"
+embedded = true
+
+[access_scopes]
+scopes = "read_orders,read_products,write_discounts"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = ["https://testadmin.decomkt.com/shopify-app/referral"]
+
+[webhooks]
+api_version = "2026-07"
