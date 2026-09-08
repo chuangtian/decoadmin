@@ -49,4 +49,4 @@ The first script rolls back synthetic business fixtures and uses an in-memory ma
 
 Credentials are environment-specific `REFERRAL_LOCAL_*`, `REFERRAL_TEST_*`, `REFERRAL_PRODUCTION_*`; no cross-environment fallback or shared Shopify App tokens. Never commit secrets or session tokens.
 
-See [regression progress](docs/regression-progress-2026-09-08.md) and [completion checklist](docs/completion-checklist.md) for evidence and remaining acceptance status.
+See [final acceptance](docs/acceptance-2026-09-08.md), [regression progress](docs/regression-progress-2026-09-08.md) and [completion checklist](docs/completion-checklist.md) for evidence and remaining acceptance status.

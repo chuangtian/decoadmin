@@ -92,3 +92,7 @@ Use completion-checklist.md. Notification intents/templates, invitation/import, 
 - Actual #1005 (7085340819704) Bogus payment used the owner-restricted reward. Its refund and cancellation callbacks processed separately at 09:45:05Z and 09:45:06Z, with one complete commission reversal and no duplicate debit.
 - Actual uninstall processed once: installation uninstalled, access/refresh tokens absent, 10 ledger entries and 6 reward-history entries retained. Reinstallation restored active installation with both encrypted credentials present, App Home connected. Theme embed reloaded enabled. Bogus Gateway deactivated afterwards.
 - Full staging business/portal integration scripts are prepared under scripts/. Their execution and final release verification remain pending at this checkpoint.
+
+## 最终收尾
+
+新增邀请、报表、保留清理、归属修正及结算边界已发布并复验。23 项测试服业务检查、真实门户邀请/登录复验通过。当前结论以 [最终验收记录](acceptance-2026-09-08.md) 为准，前文“待发布/待验收”是阶段记录。
