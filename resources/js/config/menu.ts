@@ -83,6 +83,15 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '推荐与联盟',
+        icon: 'campaign',
+        children: [
+            { name: '概览', route: '/affiliate', icon: 'dashboard', permission: 'affiliate.dashboard.view' },
+            { name: '推广计划', route: '/affiliate/programs', icon: 'campaign', permission: 'affiliate.programs.view' },
+            { name: '推广者', route: '/affiliate/promoters', icon: 'users', permission: 'affiliate.promoters.view' },
+        ],
+    },
+    {
         name: '舆情监控',
         icon: 'reports',
         children: [

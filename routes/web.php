@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AffiliateController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\ApplicationCenterController;
@@ -43,6 +44,7 @@ use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\PersonalizationStrategyWorkflowController;
+use App\Http\Controllers\ProductMonitorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
@@ -613,7 +615,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/sync/{syncJob}/retry', [SyncJobController::class, 'retry'])->middleware('permission:sync.retry')->name('sync.retry');
 
     Route::get('/products', [ShopifyDataController::class, 'products'])->middleware('permission:products.view')->name('products.index');
-    Route::patch('/products/{product}/monitor', [\App\Http\Controllers\ProductMonitorController::class, 'update'])
+    Route::patch('/products/{product}/monitor', [ProductMonitorController::class, 'update'])
         ->whereNumber('product')->middleware(['permission:products.update', 'throttle:60,1'])->name('products.monitor.update');
     Route::get('/products/{product}', [ShopifyDataController::class, 'product'])->whereNumber('product')->middleware('permission:products.view')->name('products.show');
     Route::get('/orders', [ShopifyDataController::class, 'orders'])->middleware('permission:orders.view')->name('orders.index');
@@ -653,6 +655,23 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->middleware(['store.access', 'permission:store.view'])
         ->name('stores.access-check');
 });
+
+Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [AffiliateController::class, 'overview'])
+            ->middleware('permission:affiliate.dashboard.view')->name('affiliate.index');
+        Route::get('/programs', [AffiliateController::class, 'programs'])
+            ->middleware('permission:affiliate.programs.view')->name('affiliate.programs.index');
+        Route::post('/programs', [AffiliateController::class, 'storeProgram'])
+            ->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.store');
+        Route::get('/promoters', [AffiliateController::class, 'promoters'])
+            ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
+        Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
+            ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
+        Route::put('/settings', [AffiliateController::class, 'settings'])
+            ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
+    });
 
 Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
     ->middleware(['auth', 'verified', 'organization.access', 'store.access'])

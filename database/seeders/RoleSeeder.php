@@ -22,12 +22,12 @@ class RoleSeeder extends Seeder
         'organization-admin' => [
             'name' => '组织管理员',
             'description' => '管理组织内的用户、角色、店铺及组织资料。',
-            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'codex.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
+            'permissions' => ['organization.*', 'store.*', 'users.*', 'roles.*', 'apps.*', 'webhooks.*', 'sync.*', 'alerts.*', 'finance.*', 'reports.*', 'codex.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*', 'affiliate.*', 'products.sync', 'orders.sync', 'customers.sync', 'inventory.sync', '*.view'],
         ],
         'store-admin' => [
             'name' => '店铺管理员',
             'description' => '管理指定店铺及其日常业务运营。',
-            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*', 'alerts.*', 'reports.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*'],
+            'permissions' => ['store.view', 'store.update', 'store.connect', 'store.disconnect', 'orders.*', 'products.*', 'customers.*', 'inventory.*', 'webhooks.*', 'sync.*', 'alerts.*', 'reports.*', 'student_discount.*', 'instagram_feed.*', 'personalization.*', 'discounts.*', 'affiliate.*'],
         ],
         'developer' => [
             'name' => '开发人员',
@@ -37,7 +37,7 @@ class RoleSeeder extends Seeder
         'operator' => [
             'name' => '运营人员',
             'description' => '负责店铺的日常运营工作。',
-            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'reports.manage', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read', 'discounts.view', 'discounts.manage'],
+            'permissions' => ['orders.view', 'orders.update', 'products.view', 'products.update', 'customers.view', 'inventory.view', 'sync.view', 'reports.view', 'reports.export', 'reports.manage', 'student_discount.claim.read', 'student_discount.view_evidence', 'student_discount.approve', 'student_discount.reject', 'student_discount.analytics.read', 'instagram_feed.view', 'instagram_feed.sync', 'instagram_feed.gallery.manage', 'instagram_feed.publish', 'personalization.view', 'personalization.manage', 'personalization.analytics.read', 'discounts.view', 'discounts.manage', 'affiliate.dashboard.view', 'affiliate.programs.view', 'affiliate.promoters.view', 'affiliate.promoters.manage', 'affiliate.conversions.view', 'affiliate.commissions.view', 'affiliate.payouts.view', 'affiliate.fraud.view', 'affiliate.fraud.review'],
         ],
         'marketing' => [
             'name' => '营销人员',
@@ -57,6 +57,8 @@ class RoleSeeder extends Seeder
                 'customers.view', 'inventory.view', 'users.view',
                 'roles.view', 'audit.view', 'system.settings.view', 'system.health.view',
                 'reports.view',
+                'affiliate.dashboard.view', 'affiliate.programs.view', 'affiliate.promoters.view',
+                'affiliate.conversions.view', 'affiliate.commissions.view', 'affiliate.payouts.view', 'affiliate.fraud.view',
             ],
         ],
     ];
