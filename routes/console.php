@@ -200,3 +200,12 @@ if (config('shopify.scheduled_sync.enabled')) {
         ->onOneServer()
         ->withoutOverlapping(60);
 }
+
+// The pilot's queue and maintenance must survive the standard staging deployment.
+if (app()->environment('staging')) {
+    Schedule::command('affiliate:maintenance')
+        ->name('affiliate:pilot-maintenance')
+        ->everyMinute()
+        ->onOneServer()
+        ->withoutOverlapping(5);
+}

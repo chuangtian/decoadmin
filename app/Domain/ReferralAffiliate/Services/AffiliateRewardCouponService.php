@@ -66,14 +66,14 @@ GRAPHQL;
             'context' => ['customers' => ['add' => [$reward->customer_id]]], 'usageLimit' => 1, 'appliesOncePerCustomer' => true,
             'combinesWith' => ['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false]];
         if ($rule['type'] === 'free_shipping') {
-            $input += ['destination' => ['all' => true], 'appliesOnOneTimePurchase' => true, 'appliesOnSubscription' => false];
+            $input += ['destination' => ['all' => true]];
             $id = $this->result($call(self::SHIPPING, ['input' => $input]), 'discountCodeFreeShippingCreate');
         } else {
             $items = match ($rule['scope'] ?? 'all') {
                 'product' => ['products' => ['productsToAdd' => $rule['resource_ids']]],'collection' => ['collections' => ['add' => $rule['resource_ids']]],default => ['all' => true]
             };
             $value = $rule['type'] === 'percentage' ? ['percentage' => $rule['basis_points'] / 10000] : ['discountAmount' => ['amount' => Money::decimal($rule['amount_minor'], $store->currency), 'appliesOnEachItem' => false]];
-            $input['customerGets'] = ['items' => $items, 'value' => $value, 'appliesOnOneTimePurchase' => true, 'appliesOnSubscription' => false];
+            $input['customerGets'] = ['items' => $items, 'value' => $value];
             $id = $this->result($call(self::BASIC, ['input' => $input]), 'discountCodeBasicCreate');
         }
 

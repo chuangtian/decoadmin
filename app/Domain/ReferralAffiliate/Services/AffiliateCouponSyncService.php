@@ -120,7 +120,7 @@ GRAPHQL;
                         'appliesOncePerCustomer' => $program->type->value === 'advocate',
                         'combinesWith' => ['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false]];
                     if ($shipping) {
-                        $input += ['destination' => ['all' => true], 'appliesOnOneTimePurchase' => true, 'appliesOnSubscription' => false];
+                        $input += ['destination' => ['all' => true]];
                         $operation = $id ? 'discountCodeFreeShippingUpdate' : 'discountCodeFreeShippingCreate';
                         $query = $id ? self::UPDATE_SHIPPING : self::CREATE_SHIPPING;
                     } else {

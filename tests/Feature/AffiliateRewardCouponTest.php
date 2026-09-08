@@ -32,6 +32,8 @@ class AffiliateRewardCouponTest extends TestCase
                 $this->assertSame(['customers' => ['add' => ['gid://shopify/Customer/1']]], $input['context']);
                 $this->assertSame(1, $input['usageLimit']);
                 $this->assertTrue($input['appliesOncePerCustomer']);
+                $this->assertArrayNotHasKey('appliesOnSubscription', $input['customerGets']);
+                $this->assertArrayNotHasKey('appliesOnOneTimePurchase', $input['customerGets']);
                 $this->assertSame('10.00', $input['customerGets']['value']['discountAmount']['amount']);
                 $remote = ['id' => 'gid://shopify/DiscountCodeNode/1', 'codeDiscount' => ['title' => 'Deco Referral Reward '.$reward->public_id, 'status' => 'ACTIVE', 'asyncUsageCount' => 0]];
 
