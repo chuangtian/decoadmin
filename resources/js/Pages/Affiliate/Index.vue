@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import axios from 'axios';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
@@ -40,7 +39,16 @@ function addRule(){const item=catalog.value.find(x=>x.id===selectedCatalog.value
 const localDate=(value:string|null)=>{if(!value)return '';const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 function editProgram(p:Program){editingProgram.value=p.public_id;showProgramForm.value=true;Object.assign(programForm,{auto_invite:p.auto_invite,starts_at:localDate(p.starts_at),ends_at:localDate(p.ends_at),reward:p.reward?JSON.parse(JSON.stringify(p.reward)):newReward(),milestones:JSON.parse(JSON.stringify(p.milestones??[])),name:p.name,type:p.type,attribution_model:p.attribution_model,attribution_window_days:p.attribution_window_days,hold_days:p.hold_days,coupon_enabled:p.coupon_enabled,customer_discount_type:p.customer_discount_type??"percentage",customer_discount_rate_basis_points:p.customer_discount_rate_basis_points??1000,customer_discount_amount_minor:p.customer_discount_amount_minor,commission_type:p.default_rule?.commission_type??"percentage",rate_basis_points:p.default_rule?.rate_basis_points??1000,amount_minor:p.default_rule?.amount_minor??null});}
 const invitation=ref<{url:string;name:string}|null>(null);const inviteError=ref('');
-async function inviteMember(member:Membership){inviteError.value='';try{const {data}=await axios.post(`${baseUrl}/memberships/${member.public_id}/invite`);invitation.value={url:data.url,name:member.promoter.display_name};}catch(e){inviteError.value=axios.isAxiosError(e)?(e.response?.data?.message??'邀请创建失败'):'邀请创建失败';}}
+async function inviteMember(member:Membership){
+    inviteError.value='';
+    try {
+        const cookie=document.cookie.split('; ').find(value=>value.startsWith('XSRF-TOKEN='));
+        const response=await fetch(`${baseUrl}/memberships/${member.public_id}/invite`,{method:'POST',credentials:'same-origin',headers:{Accept:'application/json','X-Requested-With':'XMLHttpRequest','X-XSRF-TOKEN':cookie?decodeURIComponent(cookie.slice('XSRF-TOKEN='.length)):''}});
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.message??'邀请创建失败');
+        invitation.value={url:data.url,name:member.promoter.display_name};
+    }catch(e){inviteError.value=e instanceof Error?e.message:'邀请创建失败';}
+}
 function copyInvitation(){if(invitation.value)navigator.clipboard.writeText(invitation.value.url).catch(()=>inviteError.value='请选中链接手动复制。');}
 
 const editingMember = ref<Membership|null>(null);
