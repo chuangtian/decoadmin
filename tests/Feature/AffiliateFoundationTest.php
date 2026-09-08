@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Domain\ReferralAffiliate\Models\AffiliateClick;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
@@ -34,6 +35,8 @@ class AffiliateFoundationTest extends TestCase
             'name' => 'Creator 12%', 'type' => 'influencer', 'attribution_model' => 'coupon_wins',
             'attribution_window_days' => 30, 'hold_days' => 30,
             'commission_type' => 'percentage', 'rate_basis_points' => 1200,
+            'coupon_enabled' => true, 'customer_discount_type' => 'percentage',
+            'customer_discount_rate_basis_points' => 1000,
         ])->assertRedirect();
 
         $program = AffiliateProgram::query()->sole();
@@ -58,10 +61,26 @@ class AffiliateFoundationTest extends TestCase
             ->assertRedirect();
         $this->assertSame('approved', $membership->fresh()->status->value);
         $this->assertNotNull($membership->fresh()->approved_at);
+        $this->assertDatabaseCount('affiliate_links', 1);
+        $this->assertDatabaseHas('affiliate_coupons', ['membership_id' => $membership->id, 'status' => 'provisioning']);
+        $link = $membership->fresh()->link;
+        $this->actingAs($actor)->withSession($session)->put(route('affiliate.settings.update', [$organization, $store]), [
+            'affiliate_enabled' => true, 'customer_referral_enabled' => false,
+        ])->assertRedirect();
+        $redirect = $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.8', 'HTTP_USER_AGENT' => 'Affiliate Test'])
+            ->get(route('affiliate.tracking.redirect', $link->public_id))
+            ->assertRedirect();
+        $this->assertStringStartsWith('https://affiliate-store.myshopify.com/?ref=', (string) $redirect->headers->get('Location'));
+        $click = AffiliateClick::query()->sole();
+        $this->assertNotSame('203.0.113.8', $click->ip_hash);
+        $this->assertStringNotContainsString('203.0.113.8', json_encode($click->toArray(), JSON_THROW_ON_ERROR));
         $this->actingAs($actor)->withSession($session)
             ->post(route('affiliate.memberships.transition', [$organization, $store, $membership->public_id]), ['action' => 'suspend'])
             ->assertRedirect();
         $this->assertSame('suspended', $membership->fresh()->status->value);
+        $this->assertSame('disabled', $link->fresh()->status);
+        $this->assertSame('disable_pending', $membership->fresh()->coupon->status);
+        $this->get(route('affiliate.tracking.redirect', $link->public_id))->assertNotFound();
         $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_program_status_changed']);
         $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_membership_status_changed']);
         $this->actingAs($actor)->withSession($session)->get(route('affiliate.promoters.index', [$organization, $store]))

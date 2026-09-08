@@ -23,7 +23,12 @@ class AffiliateWorkspaceService
             ->withCount('memberships')->latest()->limit(100)->get();
         $memberships = AffiliateProgramMembership::query()
             ->forOrganization($organization)->forStore($store)
-            ->with(['program:id,public_id,name', 'promoter:id,public_id,display_name,email_encrypted,type,status'])
+            ->with([
+                'program:id,public_id,name',
+                'promoter:id,public_id,display_name,email_encrypted,type,status',
+                'link:id,public_id,membership_id,referral_code,status',
+                'coupon:id,membership_id,code,status,last_error',
+            ])
             ->latest()->limit(100)->get();
 
         return [
@@ -49,6 +54,10 @@ class AffiliateWorkspaceService
                 'attribution_window_days' => $program->attribution_window_days,
                 'hold_days' => $program->hold_days,
                 'currency' => $program->currency,
+                'coupon_enabled' => $program->coupon_enabled,
+                'customer_discount_type' => $program->customer_discount_type,
+                'customer_discount_rate_basis_points' => $program->customer_discount_rate_basis_points,
+                'customer_discount_amount_minor' => $program->customer_discount_amount_minor,
                 'memberships_count' => $program->memberships_count,
                 'created_at' => $program->created_at?->toIso8601String(),
             ])->values(),
@@ -63,6 +72,12 @@ class AffiliateWorkspaceService
                     'type' => $membership->promoter->type,
                     'status' => $membership->promoter->status,
                 ],
+                'link' => $membership->link ? [
+                    'url' => url('/r/'.$membership->link->public_id),
+                    'code' => $membership->link->referral_code,
+                    'status' => $membership->link->status,
+                ] : null,
+                'coupon' => $membership->coupon?->only(['code', 'status', 'last_error']),
                 'created_at' => $membership->created_at?->toIso8601String(),
             ])->values(),
             'permissions' => [

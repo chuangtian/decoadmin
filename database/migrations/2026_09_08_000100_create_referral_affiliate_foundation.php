@@ -31,6 +31,10 @@ return new class extends Migration
             $table->unsignedSmallInteger('attribution_window_days')->default(30);
             $table->unsignedSmallInteger('hold_days')->default(30);
             $table->char('currency', 3);
+            $table->boolean('coupon_enabled')->default(true);
+            $table->string('customer_discount_type', 24)->nullable();
+            $table->unsignedInteger('customer_discount_rate_basis_points')->nullable();
+            $table->unsignedBigInteger('customer_discount_amount_minor')->nullable();
             $table->json('settings')->nullable();
             $table->timestamp('starts_at')->nullable();
             $table->timestamp('ends_at')->nullable();

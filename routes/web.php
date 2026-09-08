@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AffiliateController;
+use App\Http\Controllers\AffiliateTrackingController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\ApplicationCenterController;
@@ -80,6 +81,8 @@ use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthCheckController::class)->name('health');
+Route::get('/r/{link}', AffiliateTrackingController::class)
+    ->whereUlid('link')->middleware('throttle:120,1')->name('affiliate.tracking.redirect');
 
 Route::get('/.well-known/oauth-protected-resource', [CodexOAuthMetadataController::class, 'protectedResource'])
     ->middleware('throttle:120,1')

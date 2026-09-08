@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
 
 class AffiliateManagementService
 {
+    public function __construct(private AffiliateAssetService $assets) {}
+
     public function transitionProgram(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgram
     {
         return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgram {
@@ -51,6 +53,12 @@ class AffiliateManagementService
                 'approved_by' => $to === 'approved' ? $actor->id : $membership->approved_by,
                 'suspended_at' => $to === 'suspended' ? now() : null,
             ])->save();
+            if ($to === 'approved') {
+                $this->assets->provisionDefaults($membership);
+            } else {
+                $membership->link()->update(['status' => 'disabled']);
+                $membership->coupon()->whereIn('status', ['provisioning', 'active'])->update(['status' => 'disable_pending']);
+            }
             $this->audit($organization, $store, $actor, 'affiliate_membership_status_changed', $membership, ['status' => $from], ['status' => $to]);
 
             return $membership;
@@ -91,6 +99,10 @@ class AffiliateManagementService
                 'attribution_window_days' => (int) $values['attribution_window_days'],
                 'hold_days' => (int) $values['hold_days'],
                 'currency' => strtoupper((string) ($store->currency ?: 'USD')),
+                'coupon_enabled' => (bool) $values['coupon_enabled'],
+                'customer_discount_type' => $values['coupon_enabled'] ? $values['customer_discount_type'] : null,
+                'customer_discount_rate_basis_points' => $values['coupon_enabled'] && $values['customer_discount_type'] === 'percentage' ? (int) $values['customer_discount_rate_basis_points'] : null,
+                'customer_discount_amount_minor' => $values['coupon_enabled'] && $values['customer_discount_type'] === 'fixed' ? (int) $values['customer_discount_amount_minor'] : null,
                 'settings' => ['customer_scope' => 'store'],
                 'created_by' => $actor->id,
                 'updated_by' => $actor->id,

@@ -59,6 +59,10 @@ class AffiliateController extends Controller
             'commission_type' => ['required', Rule::in(['percentage', 'fixed'])],
             'rate_basis_points' => ['nullable', 'integer', 'between:1,10000', 'required_if:commission_type,percentage'],
             'amount_minor' => ['nullable', 'integer', 'between:1,1000000000', 'required_if:commission_type,fixed'],
+            'coupon_enabled' => ['required', 'boolean'],
+            'customer_discount_type' => ['nullable', Rule::in(['percentage', 'fixed']), 'required_if:coupon_enabled,true'],
+            'customer_discount_rate_basis_points' => ['nullable', 'integer', 'between:1,10000', 'required_if:customer_discount_type,percentage'],
+            'customer_discount_amount_minor' => ['nullable', 'integer', 'between:1,1000000000', 'required_if:customer_discount_type,fixed'],
         ]);
         $this->management->createProgram($organization, $store, $request->user(), $values);
 

@@ -1,0 +1,83 @@
+<?php
+
+namespace App\Domain\ReferralAffiliate\Services;
+
+use App\Domain\ReferralAffiliate\Models\AffiliateClick;
+use App\Domain\ReferralAffiliate\Models\AffiliateLink;
+use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+
+class AffiliateTrackingService
+{
+    public function redirect(Request $request, string $publicId): RedirectResponse
+    {
+        $link = AffiliateLink::query()->where('public_id', $publicId)
+            ->where('status', 'active')
+            ->with(['membership.program', 'membership.store'])
+            ->firstOrFail();
+        $membership = $link->membership;
+        abort_unless($membership->status->value === 'approved'
+            && $membership->program?->status->value === 'active'
+            && $membership->store?->status === 'active'
+            && AffiliateStoreSetting::query()->forStore($link->store_id)->where('affiliate_enabled', true)->exists(), 404);
+
+        $visitorToken = hash('sha256', Str::random(64));
+        $referrerHost = $this->host($request->headers->get('referer'));
+        $click = AffiliateClick::query()->create([
+            'organization_id' => $link->organization_id,
+            'store_id' => $link->store_id,
+            'link_id' => $link->id,
+            'membership_id' => $membership->id,
+            'visitor_token' => $visitorToken,
+            'referrer_host' => $referrerHost,
+            'ip_hash' => $this->dailyHash($request->ip()),
+            'ua_hash' => $this->hash($request->userAgent()),
+            'occurred_at' => now(),
+        ]);
+        $token = $this->signedToken($link, $click);
+        $target = 'https://'.$membership->store->shopify_domain.$link->target_path;
+        $separator = str_contains($target, '?') ? '&' : '?';
+
+        return redirect()->away($target.$separator.http_build_query([
+            'ref' => $link->referral_code,
+            'deco_aff' => $token,
+        ]), 302, ['Referrer-Policy' => 'strict-origin-when-cross-origin']);
+    }
+
+    private function signedToken(AffiliateLink $link, AffiliateClick $click): string
+    {
+        $payload = $this->base64Url(json_encode([
+            'v' => 1, 'store' => $link->store_id, 'membership' => $link->membership->public_id,
+            'click' => $click->public_id, 'exp' => now()->addDays(90)->timestamp,
+        ], JSON_THROW_ON_ERROR));
+
+        return $payload.'.'.$this->base64Url(hash_hmac('sha256', $payload, (string) config('app.key'), true));
+    }
+
+    private function dailyHash(?string $value): ?string
+    {
+        return $value ? hash_hmac('sha256', now()->toDateString().'|'.$value, (string) config('app.key')) : null;
+    }
+
+    private function hash(?string $value): ?string
+    {
+        return $value ? hash_hmac('sha256', $value, (string) config('app.key')) : null;
+    }
+
+    private function host(?string $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+        $host = parse_url($value, PHP_URL_HOST);
+
+        return is_string($host) ? mb_strtolower(mb_substr($host, 0, 255)) : null;
+    }
+
+    private function base64Url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+}

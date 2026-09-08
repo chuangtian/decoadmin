@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
-#[Fillable(['public_id', 'organization_id', 'store_id', 'name', 'type', 'status', 'attribution_model', 'attribution_window_days', 'hold_days', 'currency', 'settings', 'starts_at', 'ends_at', 'created_by', 'updated_by'])]
+#[Fillable(['public_id', 'organization_id', 'store_id', 'name', 'type', 'status', 'attribution_model', 'attribution_window_days', 'hold_days', 'currency', 'coupon_enabled', 'customer_discount_type', 'customer_discount_rate_basis_points', 'customer_discount_amount_minor', 'settings', 'starts_at', 'ends_at', 'created_by', 'updated_by'])]
 class AffiliateProgram extends Model
 {
     use ScopesToOrganizationStore, SoftDeletes;
@@ -50,6 +50,8 @@ class AffiliateProgram extends Model
             'type' => ProgramType::class, 'status' => ProgramStatus::class,
             'settings' => 'array', 'starts_at' => 'datetime', 'ends_at' => 'datetime',
             'attribution_window_days' => 'integer', 'hold_days' => 'integer',
+            'coupon_enabled' => 'boolean', 'customer_discount_rate_basis_points' => 'integer',
+            'customer_discount_amount_minor' => 'integer',
         ];
     }
 }
