@@ -23,6 +23,7 @@ class AffiliateAccountingService
         return DB::transaction(function () use ($store, $order) {
             // The same tenant lock is used by settlement and manual accounting operations.
             Store::query()->where('organization_id', $store->organization_id)->whereKey($store->id)->lockForUpdate()->firstOrFail();
+            app(AffiliateRewardService::class)->recordRedemptions($store, $order);
             $conversion = AffiliateConversion::query()->forOrganization($store->organization_id)->forStore($store)
                 ->where('shopify_order_id', $order['id'])->lockForUpdate()->first();
             if (! $conversion) {

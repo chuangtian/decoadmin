@@ -67,6 +67,22 @@ class AffiliateRewardCouponTest extends TestCase
         $this->assertSame('issued', app(AffiliateRewardCouponService::class)->synchronize($store, $reward, false)['status']);
     }
 
+    public function test_verified_redemption_is_not_lost_when_shopify_usage_counter_lags(): void
+    {
+        [$store, $reward] = $this->fixture('fixed');
+        $reward->update(['status' => 'redeemed', 'redeemed_order_id' => 'gid://shopify/Order/10', 'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/1']);
+        Http::fake(function ($request) use ($reward) {
+            if (str_contains($request['query'], 'ReferralRewardCode')) {
+                return Http::response(['data' => ['codeDiscountNodeByCode' => ['id' => $reward->shopify_discount_id, 'codeDiscount' => ['title' => 'Deco Referral Reward '.$reward->public_id, 'status' => 'ACTIVE', 'asyncUsageCount' => 0]]]]);
+            }
+
+            return Http::response(['data' => ['discountCodeDeactivate' => ['codeDiscountNode' => ['id' => $reward->shopify_discount_id], 'userErrors' => []]]]);
+        });
+        $service = app(AffiliateRewardCouponService::class);
+        $this->assertSame('redeemed', $service->synchronize($store, $reward, false)['status']);
+        $this->assertSame('redeemed', $service->synchronize($store, $reward, true)['status']);
+    }
+
     private function fixture(string $type): array
     {
         $org = Organization::query()->create(['name' => 'Reward code', 'code' => 'reward-code']);

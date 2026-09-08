@@ -7,6 +7,7 @@ use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Models\AffiliateReward;
+use App\Domain\ReferralAffiliate\Models\AffiliateRewardLedgerEntry;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Services\AffiliateAccountingService;
 use App\Domain\ReferralAffiliate\Services\AffiliateRewardCouponService;
@@ -45,6 +46,9 @@ class AffiliateRewardTest extends TestCase
         $accounting->reconcile($store, $order);
         $service->sync($store->organization_id, $store->id, $reward->id);
         $this->assertSame('revoked', $reward->fresh()->status);
+        $history = AffiliateRewardLedgerEntry::query()->where('reward_id', $reward->id)->orderBy('id')->get();
+        $this->assertSame(['earned', 'issued', 'revoked'], $history->pluck('event')->all());
+        $this->assertSame(1000, $history->first()->rule_snapshot['amount_minor']);
         $this->assertSame('refunded', $conversion->fresh()->status);
         $this->assertDatabaseCount('affiliate_ledger_entries', 0);
     }
@@ -90,6 +94,23 @@ class AffiliateRewardTest extends TestCase
         $service->sync($store->organization_id, $store->id, $pending->id);
         $this->assertSame('pending', $pending->fresh()->status);
         $this->assertDatabaseCount('affiliate_ledger_entries', 0);
+    }
+
+    public function test_paid_order_records_reward_use_before_async_counter_updates(): void
+    {
+        [$store, $member, $order] = $this->fixture();
+        app(AffiliateAccountingService::class)->reconcile($store, $order);
+        $reward = AffiliateReward::query()->sole();
+        $reward->update(['status' => 'issued', 'shopify_discount_id' => 'gid://shopify/DiscountCodeNode/500']);
+        $purchase = $order;
+        $purchase['id'] = 'gid://shopify/Order/500';
+        $purchase['customer_id'] = $member->shopify_customer_id;
+        $purchase['discount_codes'] = [$reward->code];
+        app(AffiliateAccountingService::class)->reconcile($store, $purchase);
+        app(AffiliateAccountingService::class)->reconcile($store, $purchase);
+        $this->assertSame('redeemed', $reward->fresh()->status);
+        $this->assertSame($purchase['id'], $reward->fresh()->redeemed_order_id);
+        $this->assertSame(1, AffiliateRewardLedgerEntry::query()->where('reward_id', $reward->id)->where('event', 'redeemed')->count());
     }
 
     private function fixture(): array

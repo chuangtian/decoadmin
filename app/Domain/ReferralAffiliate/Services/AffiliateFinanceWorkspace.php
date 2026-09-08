@@ -26,6 +26,9 @@ class AffiliateFinanceWorkspace
             'conversions','reports' => AffiliateConversion::class,'commissions' => AffiliateLedgerEntry::class,'rewards' => AffiliateReward::class, 'payouts' => AffiliatePayoutBatch::class,'risks' => AffiliateRiskFlag::class
         };
         $query = $model::query()->where('organization_id', $org->id)->where('store_id', $store->id);
+        if ($section === 'rewards') {
+            $query->with('history:id,reward_id,event,occurred_at');
+        }
         if ($status) {
             $query->where('status', $status);
         }
@@ -41,7 +44,7 @@ class AffiliateFinanceWorkspace
                     'currency' => $record->currency, 'reason' => $record->reason, 'available_at' => $record->available_at?->toIso8601String()],
                 'payouts' => ['label' => $record->public_id, 'amount' => Money::decimal($record->total_minor, $record->currency),
                     'currency' => $record->currency, 'reference' => $record->external_reference, 'has_proof' => (bool) $record->proof_path, 'paid_at' => $record->paid_at?->toIso8601String()],
-                'rewards' => ['label' => $record->code, 'amount' => match (data_get($record->rule_snapshot, 'type')) {
+                'rewards' => ['history' => $record->history->map(fn ($entry) => ['event' => $entry->event, 'at' => $entry->occurred_at->toIso8601String()])->all(), 'label' => $record->code, 'amount' => match (data_get($record->rule_snapshot, 'type')) {
                     'percentage' => (data_get($record->rule_snapshot, 'basis_points', 0) / 100).'%', 'free_shipping' => '免邮', default => Money::decimal((int) data_get($record->rule_snapshot, 'amount_minor', 0), (string) data_get($record->rule_snapshot, 'currency', 'USD'))
                 }, 'currency' => data_get($record->rule_snapshot, 'type') === 'fixed' ? data_get($record->rule_snapshot, 'currency', 'USD') : '', 'reason' => $record->last_error ?? ($record->threshold ? '累计推荐 '.$record->threshold.' 单奖励' : '好友订单奖励'), 'available_at' => $record->available_at?->toIso8601String()],
                 'risks' => ['label' => $record->rule, 'reason' => $record->review_reason, 'details' => $record->evidence],

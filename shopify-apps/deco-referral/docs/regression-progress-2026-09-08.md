@@ -66,3 +66,16 @@ Use completion-checklist.md. Notification intents/templates, invitation/import, 
 - New-customer friend coupons require an existing Shopify segment with the exact rule number_of_orders = 0. No write_customers scope was added. Incomplete order history is held for review rather than assumed eligible.
 - Local full backend regression after rewards: 650 tests, 9827 assertions passed. Three tracking tests and application structure validation passed; frontend build passed. Reward API operations were schema validated against 2026-07. Live reward checkout and remaining completion-checklist items are still pending.
 - Expired portal login notifications are suppressed and their encrypted message removed; used milestone rewards after a refunded source create a review flag and hold subsequent rewards.
+
+## Live checkout and settlement regression, later checkpoint
+
+- #1003 (7085291471096), Bogus Gateway, quantity two, goods USD3198, shipping3.32. Actual paid webhook attributed signed_cart_token to the synthetic member, commission31980 cents. No affiliate coupon was used.
+- Partial product refund1599 automatically appended15990 cents commission reversal. Registered the remaining15990 cents as TEST-NO-TRANSFER-ORDER1003; repeated confirmation preserved one settlement.
+- Final product+shipping refund1602.32 automatically reversed the remaining15990 cents. Member net became -15990 cents, preserving the prior payout record.
+- New paid test customer verification succeeded. Existing new-customer segment570764984568 allowed friend coupon DECO-R7A3ME8H (fixed USD10) without any extra scope.
+- Friend order7085299269880 used this coupon, passed new-customer checks and generated fixed USD10 plus one-order free-shipping milestone rewards. No cash commission was created for the advocate program.
+- Live Shopify rejected explicit subscription fields on a store without subscriptions. Removed those optional fields, verified both reward types were issued successfully.
+- Reward checkout rejected a different synthetic buyer email; changing to the reward owner restored the USD10 discount and Bogus payment completed. Subsequent affiliate earnings offset the earlier negative balance, leaving -100 cents.
+- Standard staging deployment removed separate affiliate containers. Added staging-only Horizon supervisor and scheduled maintenance; confirmed both affiliate queues running under Horizon. Old dedicated processes were stopped. Production is not enabled.
+- Shopify asyncUsageCount lagged a completed checkout. Added verified-paid-order redemption recording and immutable reward event history to prevent delayed counters from misclassifying used rewards after a source refund. These latest changes are local pending final deployment at this checkpoint.
+- Native browser automation is interrupted if another operator switches Chrome; independent browser-tab control timed out. Refresh the app binding after any such interruption before taking another action.

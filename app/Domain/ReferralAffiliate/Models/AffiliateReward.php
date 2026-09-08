@@ -18,6 +18,17 @@ class AffiliateReward extends Model
             $row->public_id ??= (string) Str::ulid();
             $row->code ??= 'DECO-R-'.Str::upper(Str::random(12));
         });
+        static::updating(function ($row) {
+            if ($row->isDirty(['organization_id', 'store_id', 'membership_id', 'conversion_id', 'dedupe_key', 'threshold', 'customer_id', 'code', 'rule_snapshot'])) {
+                throw new \LogicException('Reward grant facts are immutable.');
+            }
+        });
+        static::deleting(fn () => throw new \LogicException('Reward grants cannot be deleted.'));
+    }
+
+    public function history()
+    {
+        return $this->hasMany(AffiliateRewardLedgerEntry::class, 'reward_id')->orderBy('id');
     }
 
     public function membership()

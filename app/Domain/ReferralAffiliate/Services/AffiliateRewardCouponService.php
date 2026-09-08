@@ -48,15 +48,16 @@ GRAPHQL;
         if ($node && (data_get($node, 'codeDiscount.title') !== $title || ($reward->shopify_discount_id && $node['id'] !== $reward->shopify_discount_id))) {
             throw new AffiliateException('REWARD_CODE_CONFLICT', '同名奖励码不属于此记录，未修改。', 409);
         }
+        $used = $reward->redeemed_order_id || $reward->status === 'redeemed' || (int) data_get($node, 'codeDiscount.asyncUsageCount', 0) > 0;
         if ($revoke) {
             if ($node && data_get($node, 'codeDiscount.status') !== 'EXPIRED') {
                 $this->result($call(self::DISABLE, ['id' => $node['id']]), 'discountCodeDeactivate');
             }
 
-            return ['id' => $node['id'] ?? $reward->shopify_discount_id, 'status' => (int) data_get($node, 'codeDiscount.asyncUsageCount', 0) > 0 ? 'redeemed' : 'revoked'];
+            return ['id' => $node['id'] ?? $reward->shopify_discount_id, 'status' => $used ? 'redeemed' : 'revoked'];
         }
         if ($node) {
-            return ['id' => $node['id'], 'status' => (int) data_get($node, 'codeDiscount.asyncUsageCount', 0) > 0 ? 'redeemed' : (data_get($node, 'codeDiscount.status') === 'EXPIRED' ? 'expired' : 'issued')];
+            return ['id' => $node['id'], 'status' => $used ? 'redeemed' : (data_get($node, 'codeDiscount.status') === 'EXPIRED' ? 'expired' : 'issued')];
         }
         if ($reward->shopify_discount_id) {
             throw new AffiliateException('REWARD_REMOVED', '奖励码已在 Shopify 被移除，需要人工检查。', 409);
@@ -84,7 +85,7 @@ GRAPHQL;
     {
         $id = data_get($data, 'data.'.$operation.'.codeDiscountNode.id');
         if (! $id || data_get($data, 'data.'.$operation.'.userErrors')) {
-            throw new AffiliateException('REWARD_DISCOUNT_REJECTED','Shopify 未接受奖励码设置，请检查后重试。',502);
+            throw new AffiliateException('REWARD_DISCOUNT_REJECTED', 'Shopify 未接受奖励码设置，请检查后重试。', 502);
         }
 
         return $id;
