@@ -7,10 +7,12 @@ use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
+use App\Domain\ReferralAffiliate\Services\AffiliateCouponSyncService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateTrackingTokenService;
 use App\Domain\ReferralAffiliate\Services\ShopifyAffiliateAppService;
 use App\Exceptions\AffiliateException;
+use App\Jobs\SyncAffiliateCoupon;
 use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\Organization;
@@ -23,6 +25,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
@@ -35,6 +38,7 @@ class AffiliateFoundationTest extends TestCase
     {
         parent::setUp();
         config(['inertia.ssr.enabled' => false]);
+        Queue::fake([SyncAffiliateCoupon::class]);
     }
 
     public function test_shopify_home_is_a_public_shell_restricted_to_the_pilot_store(): void
@@ -83,7 +87,7 @@ class AffiliateFoundationTest extends TestCase
         $this->assertSame('approved', $membership->fresh()->status->value);
         $this->assertNotNull($membership->fresh()->approved_at);
         $this->assertDatabaseCount('affiliate_links', 1);
-        $this->assertDatabaseHas('affiliate_coupons', ['membership_id' => $membership->id, 'status' => 'provisioning']);
+        $this->assertDatabaseHas('affiliate_coupons', ['membership_id' => $membership->id, 'status' => 'sync_pending']);
         $link = $membership->fresh()->link;
         $this->actingAs($actor)->withSession($session)->put(route('affiliate.settings.update', [$organization, $store]), [
             'affiliate_enabled' => true, 'customer_referral_enabled' => false,
@@ -111,7 +115,7 @@ class AffiliateFoundationTest extends TestCase
             ->assertRedirect();
         $this->assertSame('suspended', $membership->fresh()->status->value);
         $this->assertSame('disabled', $link->fresh()->status);
-        $this->assertSame('disable_pending', $membership->fresh()->coupon->status);
+        $this->assertSame('sync_pending', $membership->fresh()->coupon->status);
         $this->get(route('affiliate.tracking.redirect', $link->public_id))->assertNotFound();
         $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_program_status_changed']);
         $this->assertDatabaseHas('audit_logs', ['store_id' => $store->id, 'action' => 'affiliate_membership_status_changed']);
@@ -274,6 +278,68 @@ class AffiliateFoundationTest extends TestCase
         $this->assertSame('commerce-token', $connection->fresh()->access_token_encrypted);
         $this->postJson(route('affiliate.shopify.bootstrap', ['shop' => 'macfox-test-app.myshopify.com']))->assertUnauthorized();
         Http::assertSentCount(2);
+    }
+
+    public function test_coupon_sync_retries_without_duplicate_and_disables_after_suspension(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $management = app(AffiliateManagementService::class);
+        $program = $management->createProgram($organization, $store, $actor, [
+            'name' => 'Coupon sync test', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins',
+            'attribution_window_days' => 30, 'hold_days' => 30, 'commission_type' => 'percentage',
+            'rate_basis_points' => 1200, 'coupon_enabled' => true, 'customer_discount_type' => 'percentage',
+            'customer_discount_rate_basis_points' => 1000,
+        ]);
+        $management->transitionProgram($organization, $store, $actor, $program->public_id, 'activate');
+        $management->updateSettings($organization, $store, $actor, ['affiliate_enabled' => true, 'customer_referral_enabled' => false]);
+        $management->createPromoter($organization, $store, $actor, ['display_name' => 'Sync test', 'email' => 'sync@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $management->transitionMembership($organization, $store, $actor, $member->public_id, 'approve');
+        $coupon = $member->coupon()->sole();
+        $this->mock(AffiliateAppTokenService::class)->shouldReceive('accessTokenFor')->andReturn('isolated-referral-token');
+        $remote = null;
+        $creates = 0;
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use (&$remote, &$creates, $coupon) {
+            $this->assertTrue($request->hasHeader('X-Shopify-Access-Token', 'isolated-referral-token'));
+            $this->assertStringContainsString('macfox-test-app.myshopify.com/admin/api/2026-07/', $request->url());
+            if (str_contains($request['query'], 'query ReferralCoupon')) {
+                return Http::response(['data' => ['codeDiscountNodeByCode' => $remote]]);
+            }
+            if (str_contains($request['query'], 'CreateReferralCoupon')) {
+                $creates++;
+                $this->assertEquals(0.1, $request['variables']['input']['customerGets']['value']['percentage']);
+                $remote = ['id' => 'gid://shopify/DiscountCodeNode/999', 'codeDiscount' => ['title' => 'Deco Referral '.$coupon->public_id, 'status' => 'ACTIVE']];
+                $operation = 'discountCodeBasicCreate';
+            } elseif (str_contains($request['query'], 'UpdateReferralCoupon')) {
+                $operation = 'discountCodeBasicUpdate';
+            } else {
+                $operation = 'discountCodeDeactivate';
+                $remote['codeDiscount']['status'] = 'EXPIRED';
+            }
+
+            return Http::response(['data' => [$operation => ['codeDiscountNode' => ['id' => $remote['id']], 'userErrors' => []]]]);
+        });
+        $sync = app(AffiliateCouponSyncService::class);
+        $this->assertSame('active', $sync->sync($organization->id, $store->id, $coupon->id)->status);
+        // Simulate a lost DB acknowledgement after Shopify created the code.
+        $coupon->forceFill(['shopify_discount_id' => null])->save();
+        $this->assertSame('active', $sync->sync($organization->id, $store->id, $coupon->id)->status);
+        $this->assertSame(1, $creates);
+        $management->transitionMembership($organization, $store, $actor, $member->public_id, 'suspend');
+        $this->assertSame('disabled', $sync->sync($organization->id, $store->id, $coupon->id)->status);
+        $this->assertSame('EXPIRED', $remote['codeDiscount']['status']);
+        // A pre-existing unrelated code must never be adopted or modified.
+        $remote['codeDiscount']['title'] = 'Another app discount';
+        $count = count(Http::recorded());
+        try {
+            $sync->sync($organization->id, $store->id, $coupon->id);
+            $this->fail('Expected collision protection');
+        } catch (AffiliateException $exception) {
+            $this->assertStringContainsString('不属于', $exception->getMessage());
+        }
+        $this->assertCount($count + 1, Http::recorded());
+        $this->assertNotNull($coupon->fresh()->last_error);
     }
 
     /** @return array{User, Organization, Store} */

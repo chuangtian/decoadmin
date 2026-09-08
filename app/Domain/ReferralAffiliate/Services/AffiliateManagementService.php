@@ -32,6 +32,7 @@ class AffiliateManagementService
             abort_unless($to !== null, 409, '当前计划状态不允许执行此操作。');
             $program->forceFill(['status' => $to, 'updated_by' => $actor->id])->save();
             $this->audit($organization, $store, $actor, 'affiliate_program_status_changed', $program, ['status' => $from], ['status' => $to]);
+            app(AffiliateCouponDispatchService::class)->dispatch($store, programId: $program->id);
 
             return $program;
         });
@@ -64,6 +65,7 @@ class AffiliateManagementService
                 $membership->coupon()->whereIn('status', ['provisioning', 'active'])->update(['status' => 'disable_pending']);
             }
             $this->audit($organization, $store, $actor, 'affiliate_membership_status_changed', $membership, ['status' => $from], ['status' => $to]);
+            app(AffiliateCouponDispatchService::class)->dispatch($store, membershipId: $membership->id);
 
             return $membership;
         });
@@ -86,6 +88,7 @@ class AffiliateManagementService
                 'updated_by' => $actor->id,
             ])->save();
             $this->audit($organization, $store, $actor, 'affiliate_settings_updated', $settings, $old, $settings->only(['affiliate_enabled', 'customer_referral_enabled']));
+            app(AffiliateCouponDispatchService::class)->dispatch($store);
 
             return $settings;
         });

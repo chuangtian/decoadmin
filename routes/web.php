@@ -684,6 +684,8 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
             ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
         Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])
             ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.memberships.transition');
+        Route::post('/memberships/{membership}/sync-coupon', [AffiliateController::class, 'syncCoupon'])
+            ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:10,1'])->name('affiliate.coupons.sync');
         Route::put('/settings', [AffiliateController::class, 'settings'])
             ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
     });

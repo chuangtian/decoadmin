@@ -19,7 +19,7 @@
         <s-link href="{{ route('affiliate.shopify.management', ['shop' => $shop]) }}" target="_blank">打开 DecoAdmin 后台</s-link>
     </s-section>
     <s-section heading="当前测试范围">
-        <s-paragraph>仅限 macfox-test-app。优惠码同步、订单归因和佣金结算尚未完成，当前版本不可用于正式推广。</s-paragraph>
+        <s-paragraph>仅限 macfox-test-app。优惠码同步已接通；订单归因和佣金结算尚未完成，当前版本不可用于正式推广。</s-paragraph>
     </s-section>
 </s-page>
 <script>

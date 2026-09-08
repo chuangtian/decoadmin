@@ -28,6 +28,10 @@ The backend installation bootstrap endpoint is implemented at `POST /api/shopify
 
 The Shopify embedded entry is `GET /shopify-app/referral`; its public shell exposes no store records and the bootstrap endpoint verifies identity separately. `GET /shopify-app/referral/manage` requires DecoAdmin login and store permission. App Home source lives in this App's `resources/` directory.
 
-Discount synchronization is not yet implemented. Coupon records remain pending and cannot currently be redeemed in Shopify. Checkout attribution, paid-order processing, commission/refund ledgers, payouts, and the customer portal are also unfinished.
+Discount synchronization is implemented for the test pilot. Approval, membership/program transitions, and store feature changes enqueue reconciliation on the dedicated `affiliate` queue. A manual retry is available on the promoter page. Synchronization uses only the Referral installation token, recovers an existing owned code after an interrupted create, and refuses unrelated code collisions. The worker retries failures four times; exhausted failures remain visible for manual retry. Checkout attribution, paid-order processing, commission/refund ledgers, payouts, and the customer portal remain unfinished.
+
+The pilot currently creates non-combinable discounts for all products and customers; fixed amounts support USD, CAD, EUR, GBP, AUD and HKD in the matching store currency. Changes are asynchronous: a pending state means the Shopify state has not yet been confirmed. Do not treat a pending disable as already disabled.
+
+The dedicated test worker requires both Compose files, run from the repository root with the staging environment explicitly selected: `-f compose.production.yaml -f shopify-apps/deco-referral/compose.worker.test.yaml`. It consumes only `affiliate`; existing Horizon services are not changed.
 
 The current backend foundation was deployed to staging on 2026-09-08. See [the staging verification record](docs/staging-2026-09-08.md).

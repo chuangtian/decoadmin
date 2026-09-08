@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
+use App\Domain\ReferralAffiliate\Services\AffiliateCouponDispatchService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
+use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Domain\ReferralAffiliate\Services\AffiliateWorkspaceService;
 use App\Models\Organization;
 use App\Models\Store;
@@ -14,6 +17,16 @@ use Inertia\Response;
 
 class AffiliateController extends Controller
 {
+    public function syncCoupon(Request $request, Organization $organization, Store $store, string $membership): RedirectResponse
+    {
+        app(AffiliateShopGuard::class)->actor($organization, $store, $request->user(), 'affiliate.promoters.manage');
+        $record = AffiliateProgramMembership::query()
+            ->forOrganization($organization)->forStore($store)->where('public_id', $membership)->firstOrFail();
+        app(AffiliateCouponDispatchService::class)->dispatch($store, membershipId: $record->id);
+
+        return back()->with('success', '优惠码同步已提交，请稍后刷新查看结果。');
+    }
+
     public function __construct(private AffiliateWorkspaceService $workspace, private AffiliateManagementService $management) {}
 
     public function overview(Request $request, Organization $organization, Store $store): Response
