@@ -14,6 +14,8 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
@@ -124,6 +126,24 @@ class AffiliatePortalTest extends TestCase
         $this->post('/referral-portal/invitation', $values)->assertStatus(410)
             ->assertSee('邀请已使用或失效')->assertSee('返回推广者门户')->assertDontSee('Something is broken');
         $this->postJson('/referral-portal/invitation', $values)->assertStatus(410);
+    }
+
+    public function test_material_download_adds_type_extension_without_duplicating_it(): void
+    {
+        $this->withoutMiddleware(ConfigureAffiliatePortalSession::class);
+        [$store, $member] = $this->context();
+        Storage::fake('local');
+        Storage::disk('local')->put('affiliate-assets/test.png', 'test-image');
+        $id = (string) Str::ulid();
+        DB::table('affiliate_assets')->insert(['public_id' => $id, 'organization_id' => $store->organization_id,
+            'store_id' => $store->id, 'title' => 'Test material', 'path' => 'affiliate-assets/test.png',
+            'mime' => 'image/png', 'created_by' => User::factory()->create()->id, 'created_at' => now(), 'updated_at' => now()]);
+        $this->withSession(['affiliate_member' => $member->id])->get('/referral-portal/assets/'.$id)
+            ->assertOk()->assertDownload('Test material.png')->assertHeader('X-Content-Type-Options', 'nosniff');
+        DB::table('affiliate_assets')->where('public_id', $id)->update(['title' => 'Test material.PNG']);
+        $this->get('/referral-portal/assets/'.$id)->assertDownload('Test material.PNG');
+        $member->update(['status' => 'suspended']);
+        $this->get('/referral-portal/assets/'.$id)->assertNotFound();
     }
 
     private function context(): array

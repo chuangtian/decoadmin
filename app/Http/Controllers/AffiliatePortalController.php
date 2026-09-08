@@ -118,6 +118,15 @@ class AffiliatePortalController extends Controller
         $row = DB::table('affiliate_assets')->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('public_id', $asset)->first();
         abort_unless($row, 404);
 
-        return Storage::disk('local')->download($row->path, $row->title, ['X-Content-Type-Options' => 'nosniff']);
+        $extension = match ($row->mime) {
+            'image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp',
+            'application/pdf' => 'pdf', 'text/plain' => 'txt', default => null,
+        };
+        $name = $row->title;
+        if ($extension && ! preg_match('/\.'.($extension === 'jpg' ? 'jpe?g' : $extension).'$/i', $name)) {
+            $name .= '.'.$extension;
+        }
+
+        return Storage::disk('local')->download($row->path, $name, ['X-Content-Type-Options' => 'nosniff']);
     }
 }
