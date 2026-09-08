@@ -92,6 +92,13 @@ class AffiliateNotificationService
             if ($record->status === 'sent' || $record->status === 'suppressed') {
                 return;
             }
+            if (isset(self::DEFAULTS[$record->event_key]) && ! DB::table('affiliate_message_templates')
+                ->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->where('key', $record->event_key)->where('enabled', true)->exists()) {
+                $record->update(['status' => 'suppressed', 'message_encrypted' => [], 'error_summary' => '通知模板已停用。']);
+
+                return;
+            }
             if ($record->event_key === 'portal.login' && $record->created_at->addMinutes(15)->lte(now())) {
                 $record->update(['status' => 'suppressed', 'error_summary' => '登录链接已过期，请重新申请。', 'message_encrypted' => []]);
 
@@ -99,8 +106,7 @@ class AffiliateNotificationService
             }
             if ($record->event_key === 'customer.invited') {
                 $member = AffiliateProgramMembership::query()->forOrganization($store->organization_id)->forStore($store)->find($record->membership_id);
-                $enabled = DB::table('affiliate_message_templates')->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('key', 'customer.invited')->where('enabled', true)->exists()
-                    && AffiliateStoreSetting::query()->forOrganization($store->organization_id)->forStore($store)->where('customer_referral_enabled', true)->exists();
+                $enabled = AffiliateStoreSetting::query()->forOrganization($store->organization_id)->forStore($store)->where('customer_referral_enabled', true)->exists();
                 if (! $enabled || $store->status !== 'active' || $member?->status->value !== 'pending'
                     || $member->promoter?->status !== 'active' || $member->program?->status->value !== 'active'
                     || ! data_get($member->program->settings, 'auto_invite', false)) {

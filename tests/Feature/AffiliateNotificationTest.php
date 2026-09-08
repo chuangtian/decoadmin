@@ -45,8 +45,9 @@ class AffiliateNotificationTest extends TestCase
         Queue::fake();
         $member = $this->member();
         $svc = app(AffiliateNotificationService::class);
+        DB::table('affiliate_message_templates')->insert(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'key' => 'conversion.created', 'subject' => 'Notice', 'body' => 'Test notice', 'enabled' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now()]);
         $intent = $svc->intent($member, 'conversion.created', 'order:1');
-        $intent->update(['status' => 'queued']);
+        $this->assertSame('queued', $intent->status);
         config(['mail.default' => 'smtp']);
         Mail::shouldReceive('raw')->once()->withArgs(fn ($body, $callback) => is_string($body) && is_callable($callback))->andReturn(null);
         $svc->send($intent->id);
@@ -67,6 +68,51 @@ class AffiliateNotificationTest extends TestCase
         $service->send($intent->id);
         $this->assertSame('suppressed', $intent->fresh()->status);
         $this->assertSame([], $intent->fresh()->message_encrypted);
+    }
+
+    public static function businessNotificationCases(): array
+    {
+        return array_map(fn ($key) => [$key], array_values(array_diff(array_keys(AffiliateNotificationService::DEFAULTS), ['customer.invited'])));
+    }
+
+    #[DataProvider('businessNotificationCases')]
+    public function test_disabling_template_stops_queued_business_notification_and_retry(string $event): void
+    {
+        Queue::fake();
+        config(['mail.default' => 'array']);
+        $member = $this->member();
+        DB::table('affiliate_message_templates')->insert(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'key' => $event, 'subject' => 'Notice', 'body' => 'Test notice', 'enabled' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        $service = app(AffiliateNotificationService::class);
+        $queued = $service->intent($member, $event, 'queued:'.$event);
+        $failed = $service->intent($member, $event, 'failed:'.$event);
+        $failed->update(['status' => 'failed']);
+        DB::table('affiliate_message_templates')->where('key', $event)->update(['enabled' => false]);
+        foreach ([$queued, $failed] as $intent) {
+            $service->send($intent->id);
+            $this->assertSame('suppressed', $intent->fresh()->status);
+            $this->assertSame([], $intent->fresh()->message_encrypted);
+        }
+        DB::table('affiliate_message_templates')->where('key', $event)->update(['enabled' => true]);
+        $service->send($queued->id);
+        $service->send($failed->id);
+        $this->assertCount(0, Mail::mailer('array')->getSymfonyTransport()->messages());
+        $new = $service->intent($member, $event, 'new:'.$event);
+        $service->send($new->id);
+        $this->assertSame('sent', $new->fresh()->status);
+        $this->assertCount(1, Mail::mailer('array')->getSymfonyTransport()->messages());
+    }
+
+    public function test_fresh_portal_login_is_independent_of_business_templates(): void
+    {
+        Queue::fake();
+        config(['mail.default' => 'array']);
+        $member = $this->member();
+        $service = app(AffiliateNotificationService::class);
+        $intent = $service->intent($member, 'conversion.created', 'login:fresh');
+        $intent->update(['event_key' => 'portal.login', 'status' => 'queued']);
+        $service->send($intent->id);
+        $this->assertSame('sent', $intent->fresh()->status);
+        $this->assertCount(1, Mail::mailer('array')->getSymfonyTransport()->messages());
     }
 
     public static function stoppedInvitationCases(): array

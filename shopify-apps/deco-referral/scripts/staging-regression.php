@@ -241,6 +241,20 @@ try {
             $autoMember->refresh();
         }
     }
+    foreach (array_diff(array_keys(AffiliateNotificationService::DEFAULTS), ['customer.invited']) as $event) {
+        $notifications->save($org, $store, $actor, $event, ['subject' => 'TEST queue stop', 'body' => 'Test {program}', 'enabled' => true]);
+        $queued = $notifications->intent($member, $event, 'TEST-template-stop:'.$event.':'.$member->id);
+        $failed = $notifications->intent($member, $event, 'TEST-template-failed:'.$event.':'.$member->id);
+        $failed->update(['status' => 'failed']);
+        $notifications->save($org, $store, $actor, $event, ['subject' => 'TEST queue stop', 'body' => 'Test {program}', 'enabled' => false]);
+        $notifications->send($queued->id);
+        $notifications->send($failed->id);
+        $notifications->save($org, $store, $actor, $event, ['subject' => 'TEST queue stop', 'body' => 'Test {program}', 'enabled' => true]);
+        $notifications->send($queued->id);
+        $notifications->send($failed->id);
+        $assert($queued->fresh()->status === 'suppressed' && $failed->fresh()->status === 'suppressed'
+            && $queued->fresh()->message_encrypted === [] && $failed->fresh()->message_encrypted === [], 'business_notification_stopped_'.$event);
+    }
     $assert(Mail::mailer('array')->getSymfonyTransport()->messages()->count() === 2, 'no_external_mail_transport');
 
     $beforeClicks = app(AffiliateTrackingStatistics::class)->count($store);
