@@ -3,7 +3,7 @@
 /** Exercise public portal HTTP with isolated cookies and synthetic invitations only. */
 require dirname(__DIR__, 3).'/vendor/autoload.php';
 $app = require dirname(__DIR__, 3).'/bootstrap/app.php';
-$app->make(Kernel::class)->bootstrap();
+$app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;

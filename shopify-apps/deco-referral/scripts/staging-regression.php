@@ -3,7 +3,7 @@
 /** Staging-only integration checks. Business fixtures roll back; no external mail or Shopify mutations. */
 require dirname(__DIR__, 3).'/vendor/autoload.php';
 $app = require dirname(__DIR__, 3).'/bootstrap/app.php';
-$app->make(Kernel::class)->bootstrap();
+$app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
 use App\Domain\ReferralAffiliate\Models\AffiliateClick;
 use App\Domain\ReferralAffiliate\Models\AffiliateLedgerEntry;
@@ -174,6 +174,10 @@ try {
     $first = $ledger->adjust($org, $store, $actor, $member->public_id, 250, 'TEST adjustment', $adjustId);
     $second = $ledger->adjust($org, $store, $actor, $member->public_id, 250, 'TEST adjustment', $adjustId);
     $assert($first->id === $second->id, 'manual_adjustment_idempotency');
+    $ledger->release($store);
+    $laterBatch = $payout->create($org, $store, $actor, $store->currency, 100, CarbonImmutable::now());
+    $assert($laterBatch->items()->where('membership_id', $member->id)->sole()->amount_minor === 250, 'superseded_history_does_not_block_later_payout');
+    $payout->transition($org, $store, $actor, $laterBatch->public_id, 'cancelled');
     $report = app(AffiliateReportService::class)->metrics($org, $store, $actor, 7);
     $assert(is_array($report['ranking']) && is_array($report['trend']) && is_numeric($report['net_sales']), 'report_window_ranking_and_trend');
     ob_start();
