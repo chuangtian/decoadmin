@@ -106,6 +106,6 @@ GRAPHQL;
     {
         $token = app(AffiliateAppTokenService::class)->accessTokenFor($store);
 
-        return app(ShopifyGraphQLClient::class)->queryWithAccessToken($store->shopify_domain,$token,$query,$variables,20,'2026-07');
+        return app(ShopifyGraphQLClient::class)->queryWithAccessToken($store->shopify_domain, $token, $query, $variables, 20, '2026-07');
     }
 }

@@ -24,6 +24,7 @@ class AffiliateNotificationService
         'commission.adjusted' => ['佣金调整通知', '您好 {name}，您在 {program} 的佣金因退款或审核发生调整，请查看门户记录。'],
         'payout.paid' => ['付款已登记', '您好 {name}，您在 {program} 的付款已登记，请查看门户结算记录。'],
         'coupon.disabled' => ['推广优惠码已停用', '您好 {name}，您在 {program} 的优惠码已停用。'],
+        'customer.invited' => ['邀请您推荐好友', '您好 {name}，感谢您的购买。邀请您加入 {program}：{invitation_url}'],
         'advocate.reward_issued' => ['推荐奖励已发放', '您好 {name}，您在 {program} 的推荐奖励已发放，请前往门户查看。'],
     ];
 
@@ -45,7 +46,7 @@ class AffiliateNotificationService
         app(AffiliateShopGuard::class)->actor($org, $store, $actor, 'affiliate.settings.manage');
         abort_unless(isset(self::DEFAULTS[$key]), 422);
         preg_match_all('/\{([^{}]+)\}/', $values['subject'].' '.$values['body'], $variables);
-        abort_unless(! array_diff($variables[1], ['name', 'program']), 422, '仅支持 {name} 和 {program} 变量。');
+        abort_unless(! array_diff($variables[1], $key === 'customer.invited' ? ['name', 'program', 'invitation_url'] : ['name', 'program']), 422, '请使用此模板支持的变量。');
         DB::transaction(function () use ($org, $store, $actor, $key, $values) {
             Store::query()->whereKey($store->id)->lockForUpdate()->firstOrFail();
             $row = DB::table('affiliate_message_templates')->where('store_id', $store->id)->where('key', $key)->first();
@@ -55,7 +56,7 @@ class AffiliateNotificationService
         });
     }
 
-    public function intent(AffiliateProgramMembership $member, string $event, string $dedupe): AffiliateNotificationIntent
+    public function intent(AffiliateProgramMembership $member, string $event, string $dedupe, array $context = []): AffiliateNotificationIntent
     {
         $member->loadMissing('store', 'promoter', 'program');
         app(AffiliateShopGuard::class)->store($member->store);
@@ -63,6 +64,11 @@ class AffiliateNotificationService
         $template = DB::table('affiliate_message_templates')->where('organization_id', $member->organization_id)->where('store_id', $member->store_id)->where('key', $event)->first();
         [$subject,$body] = self::DEFAULTS[$event];
         $variables = ['{name}' => $member->promoter->display_name, '{program}' => $member->program->name];
+        if ($event === 'customer.invited') {
+            $url = (string) ($context['invitation_url'] ?? '');
+            abort_unless(str_starts_with($url, url('/referral-portal/invitation').'#token=') && preg_match('/[a-f0-9]{64}$/D', $url), 422);
+            $variables['{invitation_url}'] = $url;
+        }
         $intent = AffiliateNotificationIntent::query()->firstOrCreate(['store_id' => $member->store_id, 'dedupe_key' => $dedupe], [
             'organization_id' => $member->organization_id, 'membership_id' => $member->id, 'event_key' => $event, 'template_version' => $template->version ?? 1,
             'recipient_hash' => $member->promoter->email_hash, 'status' => ($template->enabled ?? false) ? 'queued' : 'suppressed',
@@ -80,7 +86,7 @@ class AffiliateNotificationService
         $store = Store::query()->where('organization_id', $record->organization_id)->findOrFail($record->store_id);
         app(AffiliateShopGuard::class)->store($store);
         $lock = Cache::lock('affiliate-mail:'.$id, 120);
-        $lock->block(5, function () use ($record) {
+        $lock->block(5, function () use ($record, $store) {
             $record->refresh();
             if ($record->status === 'sent' || $record->status === 'suppressed') {
                 return;
@@ -89,6 +95,16 @@ class AffiliateNotificationService
                 $record->update(['status' => 'suppressed', 'error_summary' => '登录链接已过期，请重新申请。', 'message_encrypted' => []]);
 
                 return;
+            }
+            if ($record->event_key === 'customer.invited') {
+                $member = AffiliateProgramMembership::query()->forOrganization($store->organization_id)->forStore($store)->find($record->membership_id);
+                $orderId = data_get($member?->application_encrypted, 'source_order_id');
+                $contact = $record->created_at->copy()->addDays(7)->isFuture() && $orderId ? app(AffiliateInvitationOrderReader::class)->eligibleContact($store, $orderId) : null;
+                if (! $contact || $contact['email'] !== data_get($record->message_encrypted, 'to')) {
+                    $record->update(['status' => 'suppressed', 'message_encrypted' => [], 'error_summary' => '邀请已过期或顾客不再符合接收条件。']);
+
+                    return;
+                }
             }
             if (config('mail.default') === 'log') {
                 throw new \RuntimeException('Configure a non-logging mail transport');

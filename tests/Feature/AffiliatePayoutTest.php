@@ -87,6 +87,20 @@ class AffiliatePayoutTest extends TestCase
         app(AffiliatePayoutService::class)->create($org, $store, $actor, 'USD', 5000, CarbonImmutable::now());
     }
 
+    public function test_proof_only_confirmation_can_be_retried_without_replacing_evidence(): void
+    {
+        [$org,$store,$actor,$member] = $this->context();
+        $this->entry($member, 10000, 'proof-earned');
+        $service = app(AffiliatePayoutService::class);
+        $batch = $service->create($org, $store, $actor, 'USD', 100, CarbonImmutable::now());
+        $service->transition($org, $store, $actor, $batch->public_id, 'paid', '', 'affiliate-proofs/test-original.png');
+        $service->transition($org, $store, $actor, $batch->public_id, 'paid');
+        $service->transition($org, $store, $actor, $batch->public_id, 'paid', '', 'affiliate-proofs/test-retry.png');
+        $this->assertSame('paid', $batch->fresh()->status);
+        $this->assertSame('affiliate-proofs/test-original.png', $batch->fresh()->proof_path);
+        $this->assertDatabaseCount('affiliate_ledger_entries', 2);
+    }
+
     private function entry($member, int $amount, string $key): void
     {
         AffiliateLedgerEntry::query()->create(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'membership_id' => $member->id, 'idempotency_key' => $key, 'type' => 'manual_adjustment', 'status' => 'available', 'currency' => 'USD', 'amount_minor' => $amount]);

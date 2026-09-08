@@ -3,21 +3,34 @@
 namespace Tests\Feature;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateClick;
+use App\Domain\ReferralAffiliate\Models\AffiliateConversion;
 use App\Domain\ReferralAffiliate\Models\AffiliateLedgerEntry;
+use App\Domain\ReferralAffiliate\Models\AffiliateNotificationIntent;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Services\AffiliateAccountingService;
 use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
+use App\Domain\ReferralAffiliate\Services\AffiliateAttributionEngine;
 use App\Domain\ReferralAffiliate\Services\AffiliateCatalogService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCouponSyncService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCustomerEligibilityService;
+use App\Domain\ReferralAffiliate\Services\AffiliateInvitationOrderReader;
+use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;
+use App\Domain\ReferralAffiliate\Services\AffiliateLedgerService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManualAttributionService;
+use App\Domain\ReferralAffiliate\Services\AffiliateNotificationService;
 use App\Domain\ReferralAffiliate\Services\AffiliateOrderReader;
+use App\Domain\ReferralAffiliate\Services\AffiliatePostPurchaseService;
+use App\Domain\ReferralAffiliate\Services\AffiliateReportService;
+use App\Domain\ReferralAffiliate\Services\AffiliateRetentionService;
+use App\Domain\ReferralAffiliate\Services\AffiliateRiskEngine;
+use App\Domain\ReferralAffiliate\Services\AffiliateTrackingStatistics;
 use App\Domain\ReferralAffiliate\Services\AffiliateTrackingTokenService;
 use App\Domain\ReferralAffiliate\Services\ShopifyAffiliateAppService;
 use App\Exceptions\AffiliateException;
+use App\Jobs\SendAffiliateNotification;
 use App\Jobs\SyncAffiliateCoupon;
 use App\Models\App;
 use App\Models\AppInstallation;
@@ -28,16 +41,20 @@ use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
@@ -491,6 +508,214 @@ class AffiliateFoundationTest extends TestCase
         $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
         $this->assertSame('gid://shopify/Customer/123', $member->fresh()->shopify_customer_id);
         $this->actingAs($actor)->withSession($this->contextSession($org, $store))->get(route('affiliate.finance.index', [$org, $store, 'rewards']))->assertOk();
+    }
+
+    public function test_invitation_is_hashed_one_time_and_does_not_approve_membership(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $svc = app(AffiliateManagementService::class);
+        $svc->updateSettings($org, $store, $actor, ['affiliate_enabled' => true, 'customer_referral_enabled' => false]);
+        $program = $svc->createProgram($org, $store, $actor, ['name' => 'Invite test', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false]);
+        $svc->transitionProgram($org, $store, $actor, $program->public_id, 'activate');
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Invited', 'email' => 'invited@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $response = $this->actingAs($actor)->withSession($this->contextSession($org, $store))->postJson('/organizations/'.$org->id.'/stores/'.$store->id.'/affiliate/memberships/'.$member->public_id.'/invite')->assertOk();
+        $token = substr($response->json('url'), -64);
+        $this->assertSame(hash('sha256', $token), DB::table('affiliate_invitations')->sole()->token_hash);
+        $invites = app(AffiliateInvitationService::class);
+        $invites->accept($store, $token, ['terms' => true, 'notes' => 'Synthetic invitation acceptance']);
+        $this->assertSame('pending', $member->fresh()->status->value);
+        $this->assertNotNull(DB::table('affiliate_invitations')->sole()->accepted_at);
+        $this->assertSame('Synthetic invitation acceptance', data_get($member->fresh()->application_encrypted, 'notes'));
+        $this->expectException(HttpException::class);
+        $invites->accept($store, $token, ['terms' => true]);
+    }
+
+    public function test_program_dates_can_be_cleared_without_changing_historical_eligibility(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $this->travelTo(now()->startOfSecond());
+        $svc = app(AffiliateManagementService::class);
+        $values = ['name' => 'Scheduled', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false, 'starts_at' => now()->addDays(1)->toIso8601String(), 'ends_at' => now()->addDays(2)->toIso8601String()];
+        $p = $svc->createProgram($org, $store, $actor, $values);
+        $before = CarbonImmutable::now();
+        $this->travel(1)->minutes();
+        $values['starts_at'] = null;
+        $values['ends_at'] = null;
+        $svc->updateProgram($org, $store, $actor, $p->public_id, $values);
+        $this->assertNull($p->fresh()->starts_at);
+        $this->assertNull($p->fresh()->ends_at);
+        $engine = app(AffiliateAttributionEngine::class);
+        $this->assertNotNull($engine->valueAt($p->fresh(), 'starts_at', $before));
+        $this->assertNull($engine->valueAt($p->fresh(), 'starts_at', CarbonImmutable::now()));
+        $values['starts_at'] = now()->toIso8601String();
+        $values['ends_at'] = now()->subHour()->toIso8601String();
+        $this->expectException(ValidationException::class);
+        $svc->updateProgram($org, $store, $actor, $p->public_id, $values);
+    }
+
+    public function test_report_window_and_ranking_use_refund_net_sales(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $svc = app(AffiliateManagementService::class);
+        $program = $svc->createProgram($org, $store, $actor, ['name' => 'Reports', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false]);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Report member', 'email' => 'report@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        foreach ([1, 40] as $age) {
+            AffiliateConversion::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'membership_id' => $member->id, 'shopify_order_id' => 'gid://shopify/Order/'.$age, 'order_name' => '#'.$age, 'reason' => 'report_fixture', 'status' => 'partially_refunded', 'source' => 'coupon', 'currency' => 'USD', 'base_minor' => 10000, 'refunded_base_minor' => 2000, 'commission_minor' => 1000, 'reversed_minor' => 200, 'rule_snapshot' => [], 'order_snapshot' => [], 'attribution_snapshot' => [], 'ordered_at' => now()->subDays($age), 'shopify_updated_at' => now()]);
+        }
+        $service = app(AffiliateReportService::class);
+        $recent = $service->metrics($org, $store, $actor, 7);
+        $this->assertSame(1, $recent['orders']);
+        $this->assertSame('80.00', $recent['net_sales']);
+        $this->assertSame('Report member', $recent['ranking'][0]['name']);
+        $this->assertSame('8.00', $recent['ranking'][0]['commission']);
+        $this->assertSame(100.0, $recent['refund_rate']);
+        $this->assertCount(1, $recent['trend']);
+        $this->assertSame(2, $service->metrics($org, $store, $actor, 90)['orders']);
+    }
+
+    public function test_retention_preserves_totals_and_financial_records(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $svc = app(AffiliateManagementService::class);
+        $program = $svc->createProgram($org, $store, $actor, ['name' => 'Retention', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false]);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Retention', 'email' => 'retention@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+        $member->refresh();
+        foreach ([1, 190] as $age) {
+            AffiliateClick::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'membership_id' => $member->id, 'link_id' => $member->link->id, 'visitor_token' => hash('sha256', (string) $age), 'occurred_at' => now()->subDays($age), 'ip_hash' => str_repeat('a', 64)]);
+        }
+        app(AffiliateLedgerService::class)->adjust($org, $store, $actor, $member->public_id, 100, 'retention fixture', (string) Str::uuid());
+        $mail = app(AffiliateNotificationService::class)->intent($member, 'conversion.created', 'retention:old');
+        $mail->update(['created_at' => now()->subDays(31)]);
+        DB::table('affiliate_portal_tokens')->insert(['organization_id' => $org->id, 'store_id' => $store->id, 'membership_id' => $member->id, 'token_hash' => str_repeat('f', 64), 'expires_at' => now()->subDays(31), 'created_at' => now()->subDays(32), 'updated_at' => now()]);
+        $retention = app(AffiliateRetentionService::class);
+        $counts = $retention->prune($store);
+        $this->assertSame(1, $counts['clicks']);
+        $this->assertSame(1, $counts['messages']);
+        $this->assertSame(1, $counts['affiliate_portal_tokens']);
+        $this->assertSame([], $mail->fresh()->message_encrypted);
+        $this->assertDatabaseCount('affiliate_clicks', 1);
+        $this->assertDatabaseCount('affiliate_ledger_entries', 1);
+        $stats = app(AffiliateTrackingStatistics::class);
+        $this->assertSame(2, $stats->count($store));
+        $this->assertSame(1, $stats->count($store, from: now()->subDays(7)));
+        $this->assertSame(0, $retention->prune($store)['clicks']);
+        $this->assertSame(2, $stats->count($store));
+    }
+
+    public function test_post_purchase_invitation_is_opt_in_and_deduplicated_with_safe_mail_delivery(): void
+    {
+        Queue::fake();
+        $this->travelTo(now()->startOfSecond());
+        [$actor,$org,$store] = $this->context('store-admin');
+        $svc = app(AffiliateManagementService::class);
+        $svc->updateSettings($org, $store, $actor, ['affiliate_enabled' => false, 'customer_referral_enabled' => true]);
+        $program = $svc->createProgram($org, $store, $actor, ['name' => 'Post purchase', 'type' => 'advocate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false, 'auto_invite' => true, 'reward' => ['type' => 'fixed', 'amount_minor' => 1000, 'valid_days' => 30, 'scope' => 'all', 'resource_ids' => []]]);
+        $svc->transitionProgram($org, $store, $actor, $program->public_id, 'activate');
+        $this->travel(2)->seconds();
+        $notifications = app(AffiliateNotificationService::class);
+        $notifications->save($org, $store, $actor, 'customer.invited', ['subject' => 'Invitation', 'body' => 'Join {program}: {invitation_url}', 'enabled' => true]);
+        $this->mock(AffiliateInvitationOrderReader::class)->shouldReceive('eligibleContact')->times(3)->andReturn(['customer_id' => 'gid://shopify/Customer/80', 'email' => 'post-purchase@example.invalid', 'ordered_at' => now()->toIso8601String()]);
+        $service = app(AffiliatePostPurchaseService::class);
+        $service->prepare($org->id, $store->id, 'gid://shopify/Order/80', $program->id);
+        $service->prepare($org->id, $store->id, 'gid://shopify/Order/80', $program->id);
+        $this->assertDatabaseCount('affiliate_program_memberships', 1);
+        $this->assertDatabaseCount('affiliate_invitations', 1);
+        $intent = AffiliateNotificationIntent::query()->where('event_key', 'customer.invited')->sole();
+        $this->assertSame('queued', $intent->status);
+        $this->assertStringNotContainsString('post-purchase@example.invalid', $intent->getRawOriginal('message_encrypted'));
+        Queue::assertPushed(SendAffiliateNotification::class, 1);
+        config(['mail.default' => 'array']);
+        $notifications->send($intent->id);
+        $this->assertSame('sent', $intent->fresh()->status);
+        $this->assertCount(1, Mail::mailer('array')->getSymfonyTransport()->messages());
+    }
+
+    public static function correctionCases(): array
+    {
+        return [[false], [true]];
+    }
+
+    #[DataProvider('correctionCases')]
+    public function test_unsettled_attribution_correction_preserves_history_and_routes_later_refunds(bool $initialRefund): void
+    {
+        Queue::fake();
+        [$actor,$org,$store] = $this->context('store-admin');
+        $this->travelTo(now()->startOfSecond());
+        $svc = app(AffiliateManagementService::class);
+        $svc->updateSettings($org, $store, $actor, ['affiliate_enabled' => true, 'customer_referral_enabled' => false]);
+        $members = [];
+        foreach ([1000, 2000] as $rate) {
+            $program = $svc->createProgram($org, $store, $actor, ['name' => 'Correction '.$rate, 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 0, 'commission_type' => 'percentage', 'rate_basis_points' => $rate, 'coupon_enabled' => true, 'customer_discount_type' => 'percentage', 'customer_discount_rate_basis_points' => 1000]);
+            $svc->transitionProgram($org, $store, $actor, $program->public_id, 'activate');
+            $promoter = $svc->createPromoter($org, $store, $actor, ['display_name' => 'Member '.$rate, 'email' => 'member'.$rate.'@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+            $member = $program->memberships()->where('promoter_id', $promoter->id)->firstOrFail();
+            $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+            $member->refresh();
+            $member->coupon->update(['status' => 'active', 'last_synced_at' => now()]);
+            $members[] = $member;
+        }
+        [$old,$new] = $members;
+        $this->travel(2)->seconds();
+        $order = ['id' => 'gid://shopify/Order/901', 'name' => '#CORRECTION', 'ordered_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(), 'paid' => true, 'cancelled' => false, 'is_test' => true, 'currency' => 'USD', 'customer_id' => 'gid://shopify/Customer/901', 'discount_codes' => [$old->coupon->code], 'lines' => [['id' => 'gid://shopify/LineItem/901', 'quantity' => 2, 'base_minor' => 20000]], 'refunds' => []];
+        $accounting = app(AffiliateAccountingService::class);
+        if ($initialRefund) {
+            $order['refunds'] = [['id' => 'gid://shopify/Refund/900', 'created_at' => now()->toIso8601String(), 'lines' => [['line_id' => 'gid://shopify/LineItem/901', 'quantity' => 1, 'base_minor' => 10000]]]];
+        }$c = $accounting->reconcile($store, $order);
+        $original = AffiliateLedgerEntry::query()->where('type', 'commission_accrual')->sole();
+        $reader = $this->mock(AffiliateOrderReader::class);
+        $reader->shouldReceive('read')->twice()->andReturn($order);
+        $manual = app(AffiliateManualAttributionService::class);
+        $request = (string) Str::uuid();
+        $manual->assign($org, $store, $actor, $c->public_id, $new->public_id, 'Correct verified ownership', $request);
+        $manual->assign($org, $store, $actor, $c->public_id, $new->public_id, 'Correct verified ownership', $request);
+        $this->assertSame(2000, $original->fresh()->amount_minor);
+        $this->assertSame('superseded', $original->fresh()->status);
+        $this->assertSame(0, (int) AffiliateLedgerEntry::query()->where('membership_id', $old->id)->sum('amount_minor'));
+        $this->assertSame(4000, $c->fresh()->commission_minor);
+        $this->assertDatabaseCount('affiliate_attribution_changes', 1);
+        $order['refunds'][] = ['id' => 'gid://shopify/Refund/901', 'created_at' => now()->toIso8601String(), 'lines' => [['line_id' => 'gid://shopify/LineItem/901', 'quantity' => 1, 'base_minor' => 10000]]];
+        $accounting->reconcile($store, $order);
+        $this->assertSame($initialRefund ? 0 : 2000, (int) AffiliateLedgerEntry::query()->where('membership_id', $new->id)->sum('amount_minor'));
+        $this->assertSame($initialRefund ? 4000 : 2000, $c->fresh()->reversed_minor);
+        $flag = $c->risks()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'rule' => 'order_velocity', 'status' => 'open', 'evidence' => []]);
+        app(AffiliateLedgerService::class)->review($org, $store, $actor, $flag->public_id, 'approved', 'Verified synthetic source');
+        $this->assertSame($initialRefund ? 'refunded' : 'partially_refunded', $c->fresh()->status);
+        $this->actingAs($actor)->withSession($this->contextSession($org, $store))->get(route('affiliate.finance.index', [$org, $store, 'conversions']))->assertOk();
+        AffiliateLedgerEntry::query()->where('membership_id', $new->id)->update(['status' => 'settled']);
+        $reader->shouldReceive('read')->once()->andReturn($order);
+        $this->expectException(HttpException::class);
+        $manual->assign($org, $store, $actor, $c->public_id, $old->public_id, 'Cannot rewrite a settled payout', (string) Str::uuid());
+    }
+
+    public function test_velocity_and_same_source_risks_exclude_duplicate_order_and_hide_hashes(): void
+    {
+        Queue::fake();
+        [$actor,$org,$store] = $this->context('store-admin');
+        $this->travelTo(now()->startOfSecond());
+        $svc = app(AffiliateManagementService::class);
+        $p = $svc->createProgram($org, $store, $actor, ['name' => 'Risk checks', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false]);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Risk member', 'email' => 'risk@example.invalid', 'type' => 'affiliate', 'program_public_id' => $p->public_id]);
+        $m = AffiliateProgramMembership::query()->sole();
+        $svc->transitionMembership($org, $store, $actor, $m->public_id, 'approve');
+        $m->refresh();
+        for ($i = 0; $i < 10; $i++) {
+            $click = AffiliateClick::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'membership_id' => $m->id, 'link_id' => $m->link->id, 'visitor_token' => hash('sha256', 'risk'.$i), 'occurred_at' => now()->subSeconds(20), 'ip_hash' => str_repeat('a', 64), 'ua_hash' => str_repeat('b', 64)]);
+        }
+        AffiliateConversion::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'membership_id' => $m->id, 'shopify_order_id' => 'gid://shopify/Order/500', 'order_name' => '#RISK', 'reason' => 'risk_fixture', 'status' => 'pending', 'source' => 'signed_cart_token', 'currency' => 'USD', 'base_minor' => 10000, 'commission_minor' => 1000, 'rule_snapshot' => [], 'order_snapshot' => [], 'attribution_snapshot' => ['source_click_id' => $click->id], 'ordered_at' => now()->subSeconds(10), 'shopify_updated_at' => now()]);
+        config(['referral.risk.order_velocity_limit' => 2, 'referral.risk.same_source_order_limit' => 2, 'referral.risk.click_burst_limit' => 10]);
+        $engine = app(AffiliateRiskEngine::class);
+        $order = ['id' => 'gid://shopify/Order/501', 'ordered_at' => now()->toIso8601String()];
+        $flags = $engine->evaluate($store, $m, $order, $click);
+        $this->assertSame(['order_velocity', 'same_source_orders', 'click_burst'], array_keys($flags));
+        $this->assertStringNotContainsString(str_repeat('a', 64), json_encode($flags));
+        $order['id'] = 'gid://shopify/Order/500';
+        $flags = $engine->evaluate($store, $m, $order, $click);
+        $this->assertArrayNotHasKey('order_velocity', $flags);
+        $this->assertArrayNotHasKey('same_source_orders', $flags);
     }
 
     /** @return array{User, Organization, Store} */

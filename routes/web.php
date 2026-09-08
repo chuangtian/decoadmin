@@ -98,6 +98,8 @@ Route::prefix('/referral-portal')->group(function (): void {
     Route::get('/', [AffiliatePortalController::class, 'index'])->name('affiliate.portal');
     Route::post('/apply', [AffiliatePortalController::class, 'apply'])->middleware('throttle:5,10');
     Route::post('/request-login', [AffiliatePortalController::class, 'requestLogin'])->middleware('throttle:5,10');
+    Route::get('/invitation', [AffiliatePortalController::class, 'invitation']);
+    Route::post('/invitation', [AffiliatePortalController::class, 'acceptInvitation'])->middleware('throttle:10,1');
     Route::get('/login', [AffiliatePortalController::class, 'login']);
     Route::post('/session', [AffiliatePortalController::class, 'session'])->middleware('throttle:10,1');
     Route::post('/logout', [AffiliatePortalController::class, 'logout']);
@@ -716,6 +718,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
         Route::get('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'index'])->middleware('permission:affiliate.promoters.view')->name('affiliate.materials.index');
         Route::post('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'upload'])->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.upload');
         Route::delete('/materials/{asset}', [\App\Http\Controllers\AffiliateMaterialController::class, 'remove'])->whereUlid('asset')->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.remove');
+        Route::post('/memberships/{membership}/invite', [AffiliateController::class, 'invite'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage');
         Route::put('/memberships/{membership}', [AffiliateController::class, 'updateMembership'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage')->name('affiliate.memberships.update');
         Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])
             ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.memberships.transition');

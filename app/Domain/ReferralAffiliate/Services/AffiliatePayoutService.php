@@ -55,16 +55,16 @@ class AffiliatePayoutService
     {
         app(AffiliateShopGuard::class)->actor($org, $store, $actor, $action === 'paid' ? 'affiliate.payouts.confirm' : 'affiliate.payouts.create');
         abort_unless(in_array($action, ['paid', 'cancelled', 'failed'], true), 422);
-        abort_if($action === 'paid' && trim($reference) === '' && ! $proofPath, 422, '请提供付款参考号或凭证。');
 
         return DB::transaction(function () use ($org, $store, $actor, $publicId, $action, $reference, $proofPath) {
             Store::query()->whereKey($store->id)->lockForUpdate()->firstOrFail();
             $batch = AffiliatePayoutBatch::query()->where('organization_id', $org->id)->where('store_id', $store->id)->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
             if ($batch->status === $action) {
-                abort_if($action === 'paid' && $batch->external_reference !== $reference, 409);
+                abort_if($action === 'paid' && ($batch->external_reference ?? '') !== $reference, 409);
 
                 return $batch;
             }
+            abort_if($action === 'paid' && trim($reference) === '' && ! $proofPath, 422, '请提供付款参考号或凭证。');
             abort_unless($batch->status === 'draft', 409, '此批次已处理，不能重复付款。');
             $items = $batch->items()->with('allocations', 'membership')->get();
             if ($action === 'paid') {

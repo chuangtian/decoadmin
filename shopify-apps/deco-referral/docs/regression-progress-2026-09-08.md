@@ -79,3 +79,16 @@ Use completion-checklist.md. Notification intents/templates, invitation/import, 
 - Standard staging deployment removed separate affiliate containers. Added staging-only Horizon supervisor and scheduled maintenance; confirmed both affiliate queues running under Horizon. Old dedicated processes were stopped. Production is not enabled.
 - Shopify asyncUsageCount lagged a completed checkout. Added verified-paid-order redemption recording and immutable reward event history to prevent delayed counters from misclassifying used rewards after a source refund. These latest changes are local pending final deployment at this checkpoint.
 - Native browser automation is interrupted if another operator switches Chrome; independent browser-tab control timed out. Refresh the app binding after any such interruption before taking another action.
+
+## Final development additions before staging acceptance
+
+- Added merchant one-time invitations and real portal acceptance; invite bodies are persisted through controlled model writes and accepting an invitation never approves the member.
+- Added optional subscribed-customer post-purchase invitations, checked against plan/store state at order time and current consent/payment status before delivery. Delivery tests use the in-memory transport, not real email.
+- Added campaign dates, historical date clearing, scheduled coupon status transitions, dated refund-net reports/ranking/daily results, and retention with preserved aggregate counts.
+- Added cash-attribution correction before settlement, immutable before/after snapshots, neutralized prior unsettled entries and correct routing of later refunds. Reserved/settled entries and reward ownership are protected from direct reassignment.
+- Added order-velocity, hashed-source and click-burst review flags without returning the hashes.
+- Latest complete backend suite before the final risk-review state correction: 662 tests, 9906 assertions passed. Latest scoped Referral suite after that correction: 59 tests, 374 assertions passed. Frontend production build passed.
+- Actual #1004 source refund processed on 2026-09-08T09:39:56Z. The used USD10 reward remains redeemed; unused free-shipping milestone revoked; reward_used_after_refund flag created.
+- Actual #1005 (7085340819704) Bogus payment used the owner-restricted reward. Its refund and cancellation callbacks processed separately at 09:45:05Z and 09:45:06Z, with one complete commission reversal and no duplicate debit.
+- Actual uninstall processed once: installation uninstalled, access/refresh tokens absent, 10 ledger entries and 6 reward-history entries retained. Reinstallation restored active installation with both encrypted credentials present, App Home connected. Theme embed reloaded enabled. Bogus Gateway deactivated afterwards.
+- Full staging business/portal integration scripts are prepared under scripts/. Their execution and final release verification remain pending at this checkpoint.

@@ -25,9 +25,9 @@ class AffiliateFinanceController extends Controller
 {
     public function index(Request $r, Organization $organization, Store $store, string $section, AffiliateFinanceWorkspace $workspace)
     {
-        $v = $r->validate(['status' => ['nullable', 'string', 'max:32', 'regex:/^[a-z_]+$/']]);
+        $v = $r->validate(['days' => ['nullable', 'integer', 'in:7,30,90'], 'status' => ['nullable', 'string', 'max:32', 'regex:/^[a-z_]+$/']]);
 
-        return Inertia::render('Affiliate/Finance', $workspace->page($organization, $store, $r->user(), $section, $v['status'] ?? null));
+        return Inertia::render('Affiliate/Finance', $workspace->page($organization, $store, $r->user(), $section, $v['status'] ?? null, (int) ($v['days'] ?? 30)));
     }
 
     public function retryReward(Request $r, Organization $organization, Store $store, string $reward)
@@ -103,7 +103,10 @@ class AffiliateFinanceController extends Controller
         app(AffiliateShopGuard::class)->actor($organization, $store, $r->user(), $v['action'] === 'paid' ? 'affiliate.payouts.confirm' : 'affiliate.payouts.create');
         $path = $r->hasFile('proof') ? $r->file('proof')->store('affiliate-proofs/'.$organization->id.'/'.$store->id, 'local') : null;
         try {
-            $service->transition($organization, $store, $r->user(), $batch, $v['action'], $v['reference'] ?? '', $path);
+            $record = $service->transition($organization, $store, $r->user(), $batch, $v['action'], $v['reference'] ?? '', $path);
+            if ($path && $record->proof_path !== $path) {
+                Storage::disk('local')->delete($path);
+            }
         } catch (\Throwable $e) {
             if ($path) {
                 Storage::disk('local')->delete($path);
@@ -124,7 +127,8 @@ class AffiliateFinanceController extends Controller
     public function reportCsv(Request $r, Organization $organization, Store $store)
     {
         app(AffiliateShopGuard::class)->actor($organization, $store, $r->user(), 'affiliate.reports.export');
-        $metrics = app(AffiliateReportService::class)->metrics($organization, $store, $r->user());
+        $v = $r->validate(['days' => ['nullable', 'integer', 'in:7,30,90']]);
+        $metrics = app(AffiliateReportService::class)->metrics($organization, $store, $r->user(), (int) ($v['days'] ?? 30));
         AuditLog::query()->create(['organization_id' => $organization->id, 'store_id' => $store->id, 'user_id' => $r->user()->id, 'action' => 'affiliate_report_exported', 'metadata' => ['currency' => $store->currency]]);
 
         return response()->streamDownload(function () use ($metrics, $store) {

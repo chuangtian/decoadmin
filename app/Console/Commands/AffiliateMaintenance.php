@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Domain\ReferralAffiliate\Models\AffiliateCoupon;
 use App\Domain\ReferralAffiliate\Services\AffiliateLedgerService;
 use App\Domain\ReferralAffiliate\Services\AffiliateReconciliationService;
+use App\Domain\ReferralAffiliate\Services\AffiliateRetentionService;
 use App\Domain\ReferralAffiliate\Services\AffiliateRewardService;
 use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Jobs\ProcessWebhookEventJob;
@@ -36,12 +37,27 @@ class AffiliateMaintenance extends Command
                                 SyncAffiliateCoupon::dispatch($coupon->organization_id, $coupon->store_id, $coupon->id);
                             }
                         });
+                    AffiliateCoupon::query()->forOrganization($store->organization_id)->forStore($store)->where(function ($q) {
+                        $q->where(fn ($q) => $q->where('status', 'scheduled')->where('starts_at', '<=', now()))
+                            ->orWhere(fn ($q) => $q->whereIn('status', ['active', 'scheduled'])->where('ends_at', '<=', now()));
+                    })->orderBy('id')->limit(100)->get()->each(fn ($coupon) => SyncAffiliateCoupon::dispatch($coupon->organization_id, $coupon->store_id, $coupon->id));
                     WebhookEvent::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
                         ->whereHas('app', fn ($q) => $q->where('handle', config('referral.active.handle')))->where('status', 'failed')
                         ->where('attempts', '<', 10)->where('next_retry_at', '<=', now())->orderBy('id')->limit(100)->get()->each(function ($event) {
                             $event->update(['status' => 'retrying']);
                             ProcessWebhookEventJob::dispatch($event->id)->onQueue('affiliate');
                         });
+                    if (Cache::add('affiliate-retention:'.$store->id, true, 86400)) {
+                        try {
+                            $pruned = app(AffiliateRetentionService::class)->prune($store);
+                            if (max($pruned) >= 1000) {
+                                Cache::forget('affiliate-retention:'.$store->id);
+                            }
+                        } catch (\Throwable $e) {
+                            Cache::forget('affiliate-retention:'.$store->id);
+                            $this->warn('Referral retention needs attention.');
+                        }
+                    }
                     $key = 'affiliate-recent-orders:'.$store->id;
                     if (Cache::add($key, true, 3600)) {
                         try {

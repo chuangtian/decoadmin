@@ -1,37 +1,52 @@
-# Deco Referral
+# Deco Referral & Affiliate Center
 
-Internal referral and affiliate marketing App for stores in the E-LINK TECHNOLOGY CO LTD Shopify Plus organization.
+Internal custom Shopify App for the E-LINK TECHNOLOGY CO LTD organization. The current release is a test pilot: Shopify and backend writes are restricted to `macfox-test-app.myshopify.com` and `https://testadmin.decomkt.com`. Production is disabled by the backend guard.
 
-DecoAdmin owns programs, promoters, attribution, commission and reward ledgers, risk review, reporting, and payouts. This directory owns only Shopify App configuration, dependencies, extensions, and release commands.
+## Implemented workflow
 
-## Environment status
+- Plans: create, edit, activate/pause, campaign dates, fixed/percentage commission, product/variant/collection rules, exclusions, member overrides, versioned rules and audit history.
+- Promoters: application, one-time invitation, approval/rejection/waitlist/suspension, labels, notes and duplicate-safe CSV import.
+- Tracking: short links, UTM, deep links, downloadable local QR codes, consent-aware first/last signed cart signals and affiliate coupons. Shopify coupon wins over click attribution; conflicting affiliate coupons require review.
+- Accounting: integer currency amounts, immutable financial entries, partial/full refund and cancellation reversals, waiting periods, manual adjustments and correction of unsettled cash attribution with preserved prior snapshots.
+- Settlement: reserved batches, cancellation, CSV, payment reference/private proof and idempotent paid confirmation. This records an external payment; it does not transfer money. Refunds after settlement create negative balances, offset before later payouts.
+- Customer referral: paid-customer verification, first-order friend incentives, single-use customer-specific fixed/percentage/free-shipping rewards, product/collection restrictions, milestones and refund recovery. Usage is recorded from paid orders rather than relying solely on delayed Shopify usage counters.
+- Invitations after purchase: opt-in per advocate plan, with a separate notification-template switch. Only currently paid, uncancelled orders with subscribed marketing consent qualify. Consent and order status are checked again before sending. Existing memberships are not repeatedly invited.
+- Portal: isolated one-time-link sessions, links/QR/deep links, orders, reward history, balances, payouts, private assets and recently verified payment-profile changes.
+- Reports: 7/30/90-day UTC ranges, refund-net sales, commissions, refund rates, top promoters, daily results and CSV. Organization aggregation is permission-scoped; live multi-store testing is intentionally prohibited in this pilot.
+- Risk and operations: self-purchase checks, duplicate/out-of-order handling, order velocity, same-source and click-burst review flags, queued retries, scheduled release/reconciliation and data retention. Raw clicks older than 180 days become anonymous daily counts; old login/invitation tokens and notification/webhook contents are pruned without deleting financial records.
 
-Local, Test, and Production are intentionally separate. Local and Production remain non-runnable placeholders. Test uses the independent `Deco Referral Test` App (Dev Dashboard ID `420468817921`) and the staging URL. Version `referral-test-home-20260908` was published on 2026-09-08. Installation on `macfox-test-app` and live independent authorization bootstrap were verified on that date; the Shopify App Home successfully opens the matching DecoAdmin store workspace.
+## Operating boundaries
 
-## Validation
+- An already settled payout is never rewritten. Correct it with audited ledger adjustments. Reserved batches must be cancelled before changing attribution. Reward-order ownership requires reward/risk handling rather than cash-attribution reassignment.
+- Incomplete historical customer data is held for review; it is not assumed to be a new customer. The App does not request `read_all_orders`.
+- Tracking requires the theme embed and the visitor's applicable consent. Cross-device attribution is not guaranteed. Coupons remain an independent attribution signal.
+- Email sending and post-purchase invitation are off by default. No real bank/PayPal transfers, cash/store-credit/gift-card/free-product automation, App Store listing or commercial billing is implemented in this internal scope.
+- Test fixtures and actual Bogus orders are labelled in the acceptance report. Test payments are disabled after checkout regression.
 
-```shell
+## Development and verification
+
+All App-owned dependencies, extension files and scripts live here. Backend business services live in `app/Domain/ReferralAffiliate` and enforce User, Organization, Store and permission boundaries.
+
+```sh
+npm ci
 npm run check
+npm run test:tracking
+npm run build:portal
+shopify app config validate --config test --json
+shopify app build --config test
 ```
 
-## Planned minimum scopes
+Use Docker for backend tests and frontend builds. Build `public/build`, restart Vite and verify readiness after frontend edits. Staging uses its normal Horizon `supervisor-referral` and scheduler; the old standalone worker override is a fallback and is not needed for ordinary staging deployment.
 
-The first working version is expected to need `read_orders`, `read_products`, `read_discounts`, `write_discounts`, and storefront extension scopes that are confirmed when the extensions are implemented. Customer scopes are added only when customer referral needs them.
+Staging-only integration scripts:
 
-## Current pilot boundary
+```sh
+php shopify-apps/deco-referral/scripts/staging-regression.php
+php shopify-apps/deco-referral/scripts/staging-portal-regression.php
+```
 
-Only `macfox-test-app.myshopify.com` may be used for backend and Shopify testing. All other stores and the production runtime are rejected by `AffiliateShopGuard`, including direct service calls. This guard does not replace User, Organization, Store, or RBAC authorization.
+The first script rolls back synthetic business fixtures and uses an in-memory mail transport. The second verifies real portal HTTP/session/invitation behavior, leaves a labelled rejected test applicant with a paused plan, and restores store settings. Neither sends external mail or performs a real transfer.
 
-App credentials use environment-specific `REFERRAL_LOCAL_CLIENT_ID`, `REFERRAL_LOCAL_CLIENT_SECRET`, `REFERRAL_TEST_CLIENT_ID`, and `REFERRAL_TEST_CLIENT_SECRET` secret configuration. No cross-environment fallback is allowed. Each installation and registered App must match `referral.environment`; the registered App must have `settings.managed_by = referral_config`. Token refresh updates only the matching Referral installation and never falls back to the Commerce Hub token.
+Credentials are environment-specific `REFERRAL_LOCAL_*`, `REFERRAL_TEST_*`, `REFERRAL_PRODUCTION_*`; no cross-environment fallback or shared Shopify App tokens. Never commit secrets or session tokens.
 
-The backend installation bootstrap endpoint is implemented at `POST /api/shopify-app/referral/bootstrap`. It requires a verified Referral App identity token, exchanges it for an independent offline token, verifies Shopify's returned shop identity and scopes, and records only the matching Referral installation. The test App's own credentials must be configured before real installation can be verified.
-
-The Shopify embedded entry is `GET /shopify-app/referral`; its public shell exposes no store records and the bootstrap endpoint verifies identity separately. `GET /shopify-app/referral/manage` requires DecoAdmin login and store permission. App Home source lives in this App's `resources/` directory.
-
-Discount synchronization is implemented for the test pilot. Approval, membership/program transitions, and store feature changes enqueue reconciliation on the dedicated `affiliate` queue. A manual retry is available on the promoter page. Synchronization uses only the Referral installation token, recovers an existing owned code after an interrupted create, and refuses unrelated code collisions. The worker retries failures four times; exhausted failures remain visible for manual retry. Checkout attribution, paid-order processing, commission/refund ledgers, payouts, and the customer portal remain unfinished.
-
-The pilot currently creates non-combinable discounts for all products and customers; fixed amounts support USD, CAD, EUR, GBP, AUD and HKD in the matching store currency. Changes are asynchronous: a pending state means the Shopify state has not yet been confirmed. Do not treat a pending disable as already disabled.
-
-The dedicated test worker requires both Compose files, run from the repository root with the staging environment explicitly selected: `-f compose.production.yaml -f shopify-apps/deco-referral/compose.worker.test.yaml`. It consumes only `affiliate`; existing Horizon services are not changed.
-
-The current backend foundation was deployed to staging on 2026-09-08. See [the staging verification record](docs/staging-2026-09-08.md).
+See [regression progress](docs/regression-progress-2026-09-08.md) and [completion checklist](docs/completion-checklist.md) for evidence and remaining acceptance status.

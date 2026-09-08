@@ -18,7 +18,7 @@ class AffiliateFinanceWorkspace
     public const PERMISSIONS = ['conversions' => 'affiliate.conversions.view', 'commissions' => 'affiliate.commissions.view',
         'payouts' => 'affiliate.payouts.view', 'risks' => 'affiliate.fraud.view', 'reports' => 'affiliate.dashboard.view', 'rewards' => 'affiliate.promoters.view'];
 
-    public function page(Organization $org, Store $store, User $actor, string $section, ?string $status = null): array
+    public function page(Organization $org, Store $store, User $actor, string $section, ?string $status = null, int $days = 30): array
     {
         abort_unless(isset(self::PERMISSIONS[$section]), 404);
         app(AffiliateShopGuard::class)->actor($org, $store, $actor, self::PERMISSIONS[$section]);
@@ -26,8 +26,15 @@ class AffiliateFinanceWorkspace
             'conversions','reports' => AffiliateConversion::class,'commissions' => AffiliateLedgerEntry::class,'rewards' => AffiliateReward::class, 'payouts' => AffiliatePayoutBatch::class,'risks' => AffiliateRiskFlag::class
         };
         $query = $model::query()->where('organization_id', $org->id)->where('store_id', $store->id);
+        if (in_array($section, ['conversions', 'reports'], true)) {
+            $query->with(['attributionChanges' => fn ($q) => $q->limit(10)->with('fromMembership.promoter:id,display_name', 'toMembership.promoter:id,display_name')]);
+        }
         if ($section === 'rewards') {
             $query->with('history:id,reward_id,event,occurred_at');
+        }
+        if ($section === 'reports') {
+            abort_unless(in_array($days, [7, 30, 90], true), 422);
+            $query->whereNotNull('membership_id')->whereNotIn('status', AffiliateReportService::EXCLUDED)->where('ordered_at', '>=', now()->subDays($days - 1)->startOfDay());
         }
         if ($status) {
             $query->where('status', $status);
@@ -36,7 +43,7 @@ class AffiliateFinanceWorkspace
             $base = ['public_id' => $record->public_id, 'status' => $record->status, 'created_at' => $record->created_at->toIso8601String()];
 
             return $base + match ($section) {
-                'conversions','reports' => ['label' => $record->order_name, 'source' => $record->source, 'reason' => $record->reason,
+                'conversions','reports' => ['changes' => $record->attributionChanges->map(fn ($c) => ['from' => $c->fromMembership?->promoter?->display_name ?? '未归因', 'to' => $c->toMembership?->promoter?->display_name ?? '已移除', 'reason' => $c->reason, 'at' => $c->created_at->toIso8601String()])->all(), 'label' => $record->order_name, 'source' => $record->source, 'reason' => $record->reason,
                     'base' => Money::decimal($record->base_minor, $record->currency), 'amount' => Money::decimal($record->commission_minor, $record->currency),
                     'reversed' => Money::decimal($record->reversed_minor, $record->currency), 'currency' => $record->currency, 'is_test' => $record->is_test,
                     'details' => ['rules' => $record->rule_snapshot, 'attribution' => $record->attribution_snapshot]],
@@ -59,11 +66,11 @@ class AffiliateFinanceWorkspace
             ->with('promoter:id,display_name', 'program:id,name')->limit(200)->get()->map(fn ($m) => ['public_id' => $m->public_id, 'name' => $m->promoter->display_name.' / '.$m->program->name])->all() : [];
         $totals = [];
         if ($section === 'reports') {
-            $totals = app(AffiliateReportService::class)->metrics($org, $store, $actor);
+            $totals = app(AffiliateReportService::class)->metrics($org, $store, $actor, $days);
         }
 
         return ['organization' => $org->only('id', 'name'), 'store' => $store->only('id', 'name', 'currency'), 'section' => $section,
-            'rows' => $rows, 'permissions' => $permissions, 'memberships' => $members, 'totals' => $totals, 'filters' => ['status' => $status]];
+            'rows' => $rows, 'permissions' => $permissions, 'memberships' => $members, 'totals' => $totals, 'filters' => ['status' => $status, 'days' => $days]];
     }
 
     public function batch(Organization $org, Store $store, User $actor, string $publicId): AffiliatePayoutBatch

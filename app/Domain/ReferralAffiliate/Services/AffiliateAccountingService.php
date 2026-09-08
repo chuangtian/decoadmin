@@ -44,7 +44,7 @@ class AffiliateAccountingService
                     'currency' => $order['currency'], 'is_test' => $order['is_test'],
                     'base_minor' => $calculation['base_minor'], 'commission_minor' => $hardBlocked ? 0 : $calculation['commission_minor'],
                     'reversed_minor' => 0, 'rule_snapshot' => $calculation['snapshot'],
-                    'attribution_snapshot' => ['candidates' => $choice['candidates'], 'risks' => $choice['risks'], 'version' => 1],
+                    'attribution_snapshot' => ['source_click_id' => $choice['source_click_id'] ?? null, 'candidates' => $choice['candidates'], 'risks' => $choice['risks'], 'version' => 1],
                     'order_snapshot' => $order, 'ordered_at' => $at,
                     'available_at' => $member ? $at->addDays($calculation['snapshot']['hold_days'] ?? $member->program->hold_days) : null,
                     'shopify_updated_at' => $order['updated_at'],
@@ -54,7 +54,7 @@ class AffiliateAccountingService
                 }
                 foreach ($choice['risks'] as $risk) {
                     $conversion->risks()->create(['organization_id' => $store->organization_id, 'store_id' => $store->id,
-                        'rule' => $risk, 'status' => 'open', 'evidence' => ['engine_version' => 1]]);
+                        'rule' => $risk, 'status' => 'open', 'evidence' => ($choice['risk_evidence'][$risk] ?? []) + ['engine_version' => 1]]);
                 }
                 if ($conversion->commission_minor > 0 && $member && ! $hardBlocked) {
                     $this->entry($conversion, 'accrual:'.$order['id'], 'commission_accrual', $conversion->commission_minor);
@@ -80,6 +80,7 @@ class AffiliateAccountingService
             $conversion->shopify_updated_at = $order['updated_at'];
             $conversion->save();
             app(AffiliateRewardService::class)->record($conversion);
+            app(AffiliatePostPurchaseService::class)->enqueue($store, $order);
 
             return $conversion->fresh();
         }, 3);

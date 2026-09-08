@@ -2,7 +2,6 @@
 
 namespace App\Domain\ReferralAffiliate\Services;
 
-use App\Domain\ReferralAffiliate\Models\AffiliateClick;
 use App\Domain\ReferralAffiliate\Models\AffiliateConversion;
 use App\Domain\ReferralAffiliate\Models\AffiliateLedgerEntry;
 use App\Domain\ReferralAffiliate\Models\AffiliateNotificationIntent;
@@ -42,7 +41,7 @@ class AffiliatePortalService
         return ['store' => $store, 'member' => $member, 'balances' => $balances, 'conversions' => $conversions,
             'entries' => (clone $entries)->latest('id')->limit(50)->get(['public_id', 'type', 'status', 'currency', 'amount_minor', 'created_at']),
             'payouts' => AffiliatePayoutItem::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('membership_id', $member->id)->latest('id')->limit(50)->get(['amount_minor', 'status', 'created_at']),
-            'clicks' => AffiliateClick::query()->forOrganization($store->organization_id)->forStore($store)->where('membership_id', $member->id)->count(),
+            'clicks' => app(AffiliateTrackingStatistics::class)->count($store, $member->id),
             'rewards' => AffiliateReward::query()->forOrganization($store->organization_id)->forStore($store)->where('membership_id', $member->id)->latest('id')->limit(100)->get()->map(fn ($r) => ['code' => in_array($r->status, ['issued', 'redeemed', 'expired'], true) ? $r->code : null, 'status' => $r->status, 'expires_at' => $r->expires_at?->format('Y-m-d'), 'threshold' => $r->threshold]),
             'assets' => DB::table('affiliate_assets')->where('organization_id', $store->organization_id)->where('store_id', $store->id)->latest('id')->limit(100)->get(['public_id', 'title'])];
     }

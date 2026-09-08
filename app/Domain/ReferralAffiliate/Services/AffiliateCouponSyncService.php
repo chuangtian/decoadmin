@@ -97,7 +97,7 @@ GRAPHQL;
                 }
                 $id = $node['id'] ?? null;
                 if ($enabled) {
-                    $coupon->starts_at ??= $program->starts_at ?? now();
+                    $coupon->starts_at = $program->starts_at ?? ($coupon->starts_at && $coupon->starts_at->isPast() ? $coupon->starts_at : now());
                     $coupon->save();
                     $shipping = $program->customer_discount_type === 'free_shipping';
                     $kind = data_get($node, 'codeDiscount.__typename');

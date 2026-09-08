@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
+use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;
 use App\Domain\ReferralAffiliate\Services\AffiliatePortalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +46,19 @@ class AffiliatePortalController extends Controller
         $this->portal->requestLogin($this->portal->store(), $v['email'], $v['program']);
 
         return back()->with('portal_message', '如果该邮箱已获批准，将收到一次性登录链接。');
+    }
+
+    public function invitation()
+    {
+        return $this->render('invitation');
+    }
+
+    public function acceptInvitation(Request $r)
+    {
+        $v = $r->validate(['token' => ['required', 'string', 'size:64'], 'terms' => ['accepted'], 'website' => ['nullable', 'url:http,https', 'max:500'], 'notes' => ['nullable', 'string', 'max:2000']]);
+        app(AffiliateInvitationService::class)->accept($this->portal->store(), $v['token'], $v);
+
+        return redirect('/referral-portal')->with('portal_message', '邀请已接受，请等待店铺审核。');
     }
 
     public function login()

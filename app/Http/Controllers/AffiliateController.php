@@ -6,6 +6,7 @@ use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Services\AffiliateCatalogService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCouponDispatchService;
 use App\Domain\ReferralAffiliate\Services\AffiliateImportService;
+use App\Domain\ReferralAffiliate\Services\AffiliateInvitationService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Domain\ReferralAffiliate\Services\AffiliateWorkspaceService;
@@ -19,6 +20,13 @@ use Inertia\Response;
 
 class AffiliateController extends Controller
 {
+    public function invite(Request $request, Organization $organization, Store $store, string $membership)
+    {
+        $url = app(AffiliateInvitationService::class)->issue($organization, $store, $request->user(), $membership);
+
+        return response()->json(['url' => $url])->header('Cache-Control', 'no-store');
+    }
+
     public function syncCoupon(Request $request, Organization $organization, Store $store, string $membership): RedirectResponse
     {
         app(AffiliateShopGuard::class)->actor($organization, $store, $request->user(), 'affiliate.promoters.manage');
@@ -74,6 +82,8 @@ class AffiliateController extends Controller
     private function validateProgram(Request $request): array
     {
         return $request->validate([
+            'auto_invite' => ['nullable', 'boolean'],
+            'starts_at' => ['nullable', 'date'], 'ends_at' => ['nullable', 'date'],
             'reward' => ['nullable', 'array'], 'milestones' => ['nullable', 'array', 'max:20'],
             'name' => ['required', 'string', 'max:120', 'regex:/\S/u'],
             'type' => ['required', Rule::in(['affiliate', 'influencer', 'ambassador', 'advocate', 'partner'])],

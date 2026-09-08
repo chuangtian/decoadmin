@@ -29,6 +29,11 @@ class AffiliateConversion extends Model
         return $this->belongsTo(AffiliateProgramMembership::class, 'membership_id');
     }
 
+    public function attributionChanges(): HasMany
+    {
+        return $this->hasMany(AffiliateAttributionChange::class, 'conversion_id')->latest('id');
+    }
+
     public function lines(): HasMany
     {
         return $this->hasMany(AffiliateConversionLine::class, 'conversion_id');

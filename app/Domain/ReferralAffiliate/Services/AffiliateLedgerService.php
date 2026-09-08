@@ -83,7 +83,8 @@ class AffiliateLedgerService
                 }
                 $conversion->status = 'rejected';
             } elseif (! $conversion->risks()->whereIn('status', ['open', 'reviewing', 'rejected'])->exists() && $conversion->membership_id) {
-                $conversion->status = 'pending';
+                $conversion->status = data_get($conversion->order_snapshot, 'cancelled', false) ? 'cancelled'
+                    : ($conversion->refunded_base_minor > 0 ? ($conversion->refunded_base_minor >= $conversion->base_minor ? 'refunded' : 'partially_refunded') : 'pending');
             }
             $conversion->save();
             app(AffiliateRewardService::class)->record($conversion);

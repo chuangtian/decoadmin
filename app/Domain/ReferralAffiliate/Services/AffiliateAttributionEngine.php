@@ -57,6 +57,8 @@ class AffiliateAttributionEngine
         $winner = $candidates[0] ?? null;
         $membership = $winner['membership'] ?? null;
         $risks = [];
+        $sourceClick = $clicks->last();
+        $evidence = [];
         if ($membership) {
             if ($membership->program->type->value === 'advocate') {
                 $eligible = data_get($order, 'customer_eligibility.eligible');
@@ -72,7 +74,12 @@ class AffiliateAttributionEngine
             }
         }
 
-        return ['membership' => $membership, 'source' => $winner['source'] ?? 'none',
+        if ($membership) {
+            $evidence = app(AffiliateRiskEngine::class)->evaluate($store, $membership, $order, $sourceClick);
+            $risks = array_values(array_unique(array_merge($risks, array_keys($evidence))));
+        }
+
+        return ['membership' => $membership, 'source_click_id' => $sourceClick?->id, 'risk_evidence' => $evidence, 'source' => $winner['source'] ?? 'none',
             'reason' => $winner ? ($winner['source'] === 'coupon' ? 'coupon_wins' : 'signed_cart_token') : 'no_eligible_signal',
             'candidates' => $this->safeCandidates($candidates), 'risks' => $risks];
     }
@@ -89,6 +96,8 @@ class AffiliateAttributionEngine
         }
         $membership->loadMissing('program', 'promoter');
         $program = $membership->program;
+        $starts = $program ? $this->valueAt($program, 'starts_at', $at) : null;
+        $ends = $program ? $this->valueAt($program, 'ends_at', $at) : null;
 
         return $program && $membership->promoter && (int) $program->store_id === (int) $store->id
             && (int) $membership->promoter->organization_id === (int) $store->organization_id
@@ -97,8 +106,8 @@ class AffiliateAttributionEngine
             && $this->valueAt($membership, 'status', $at) === 'approved'
             && $this->valueAt($program, 'status', $at) === 'active'
             && $this->valueAt($membership->promoter, 'status', $at) === 'active'
-            && (! $program->starts_at || $program->starts_at->lte($at))
-            && (! $program->ends_at || $program->ends_at->gt($at));
+            && (! $starts || CarbonImmutable::parse($starts)->lte($at))
+            && (! $ends || CarbonImmutable::parse($ends)->gt($at));
     }
 
     public function valueAt(Model $record, string $field, CarbonImmutable $at): mixed
@@ -108,7 +117,7 @@ class AffiliateAttributionEngine
         }
         $query = AuditLog::query()->where('organization_id', $record->organization_id)
             ->where('subject_type', $record::class)->where('subject_id', $record->id)
-            ->whereNotNull('new_values->'.$field);
+            ->whereJsonContainsKey('new_values->'.$field);
         $before = (clone $query)->where('created_at', '<=', $at)->orderByDesc('id')->first();
         if ($before) {
             return data_get($before->new_values, $field);

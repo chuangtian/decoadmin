@@ -13,8 +13,10 @@ use App\Models\ProductCollection;
 use App\Models\ProductVariant;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class AffiliateManagementService
 {
@@ -27,9 +29,10 @@ class AffiliateManagementService
             abort_if($program->status->value === 'archived', 409);
             abort_unless($program->type->value === $values['type'], 422, '创建后不能更改计划身份。');
             abort_if(($program->customer_discount_type === 'free_shipping') !== (($values['customer_discount_type'] ?? null) === 'free_shipping') && $program->memberships()->whereHas('coupon', fn ($q) => $q->whereNotNull('shopify_discount_id'))->exists(), 422, '已有优惠码时不能在免邮与商品优惠之间切换，请新建计划。');
+            $values = $this->schedule($values, $program);
             $values['settings'] = $this->rewardSettings($organization, $store, $actor, $values, $program->settings ?? []);
             app(AffiliateRuleHistory::class)->baseline($program);
-            $old = $program->only(['name', 'attribution_model', 'attribution_window_days', 'hold_days', 'coupon_enabled', 'customer_discount_type', 'customer_discount_rate_basis_points', 'customer_discount_amount_minor', 'settings']);
+            $old = $program->only(['name', 'attribution_model', 'attribution_window_days', 'hold_days', 'coupon_enabled', 'customer_discount_type', 'customer_discount_rate_basis_points', 'customer_discount_amount_minor', 'starts_at', 'ends_at', 'settings']);
             $program->forceFill(array_intersect_key($values, array_flip(array_keys($old))) + ['updated_by' => $actor->id])->save();
             $rule = $program->rules()->where('scope', 'program')->where('scope_reference', '*')->firstOrFail();
             $oldRule = $rule->only(['commission_type', 'rate_basis_points', 'amount_minor']);
@@ -186,6 +189,8 @@ class AffiliateManagementService
     {
         $this->guard->actor($organization, $store, $actor, 'affiliate.programs.manage');
 
+        $values = $this->schedule($values);
+
         return DB::transaction(function () use ($organization, $store, $actor, $values): AffiliateProgram {
             $program = AffiliateProgram::query()->create([
                 'organization_id' => $organization->id,
@@ -196,6 +201,7 @@ class AffiliateManagementService
                 'attribution_model' => $values['attribution_model'],
                 'attribution_window_days' => (int) $values['attribution_window_days'],
                 'hold_days' => (int) $values['hold_days'],
+                'starts_at' => $values['starts_at'], 'ends_at' => $values['ends_at'],
                 'currency' => strtoupper((string) ($store->currency ?: 'USD')),
                 'coupon_enabled' => (bool) $values['coupon_enabled'],
                 'customer_discount_type' => $values['coupon_enabled'] ? $values['customer_discount_type'] : null,
@@ -261,6 +267,10 @@ class AffiliateManagementService
         if ($values['type'] !== 'advocate') {
             return $existing;
         }
+        if (array_key_exists('auto_invite', $values)) {
+            Validator::make($values, ['auto_invite' => ['boolean']])->validate();
+            $existing['auto_invite'] = (bool) $values['auto_invite'];
+        }
         $rules = app(AffiliateRewardRules::class);
         $existing['reward'] = $rules->validate($org, $store, $actor, $values['reward'] ?? $existing['reward'] ?? []);
         $milestones = $values['milestones'] ?? $existing['milestones'] ?? [];
@@ -278,5 +288,24 @@ class AffiliateManagementService
             'action' => $action, 'subject_type' => $subject::class, 'subject_id' => $subject->id,
             'old_values' => $old, 'new_values' => $new,
         ]);
+    }
+
+    private function schedule(array $values, ?AffiliateProgram $program = null): array
+    {
+        $dates = ['starts_at' => $values['starts_at'] ?? null, 'ends_at' => $values['ends_at'] ?? null];
+        foreach (array_keys($dates) as $key) {
+            if (! array_key_exists($key, $values)) {
+                $dates[$key] = $program?->getAttribute($key)?->toIso8601String();
+            }
+        }
+        Validator::make($dates, ['starts_at' => ['nullable', 'date'], 'ends_at' => ['nullable', 'date']])->validate();
+        foreach ($dates as $key => $value) {
+            $dates[$key] = $value ? CarbonImmutable::parse($value)->utc() : null;
+        }
+        if ($dates['starts_at'] && $dates['ends_at'] && $dates['ends_at']->lte($dates['starts_at'])) {
+            throw ValidationException::withMessages(['ends_at' => '结束时间必须晚于开始时间。']);
+        }
+
+        return array_merge($values, $dates);
     }
 }

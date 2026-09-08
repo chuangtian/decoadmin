@@ -17,6 +17,7 @@ foreach (['local', 'test', 'production'] as $name) {
 }
 
 return [
+    'risk' => ['order_velocity_limit' => 10, 'same_source_order_limit' => 3, 'click_burst_limit' => 60],
     'environment' => $environment,
     'active' => $environments[$environment],
     'required_scopes' => ['read_orders', 'read_customers', 'read_products', 'write_discounts'],
