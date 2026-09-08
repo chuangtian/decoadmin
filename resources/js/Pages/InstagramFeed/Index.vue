@@ -35,6 +35,22 @@ interface Gallery {
     previews: string[];
 }
 
+interface AppSession {
+    status: 'not_authorized' | 'connected' | 'warning' | 'invalid' | 'disconnected';
+    usable: boolean;
+    environment: string | null;
+    environment_matches: boolean;
+    app_installation_id: string | null;
+    granted_scopes: string[];
+    installed_at: string | null;
+    uninstalled_at: string | null;
+    last_verified_at: string | null;
+    last_api_check: string | null;
+    last_published_at: string | null;
+    last_error: string | null;
+    last_error_at: string | null;
+}
+
 const props = defineProps<{
     organization: { id: number; name: string };
     store: { id: number; name: string; shopify_domain: string };
@@ -47,6 +63,7 @@ const props = defineProps<{
     galleries: Gallery[];
     mirrorConfigured: boolean;
     appSessionReady: boolean;
+    appSession: AppSession;
     permissions: { connect: boolean; sync: boolean; manageGallery: boolean; publish: boolean };
     credentials: AppCredentials | null;
 }>();
@@ -139,6 +156,19 @@ const deleteGallery = (gallery: Gallery) => {
 };
 
 const formatDate = (value: string | null) => (value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '从未');
+
+// Shopify App 自身的授权状态。与下面的 Meta 账号授权是两条独立链路：
+// 这条决定能不能把内容发布到店铺前台。
+const appSessionMeta = computed(() => ({
+    not_authorized: { label: '未授权', tone: 'bg-slate-100 text-slate-600 ring-slate-200', hint: '还没有完成 Shopify 授权，发布到前台不可用。' },
+    connected: { label: '已授权', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200', hint: '授权正常，可以发布到店铺前台。' },
+    warning: { label: '需关注', tone: 'bg-amber-50 text-amber-700 ring-amber-200', hint: '最近一次调用 Shopify 失败，可先点「检查连接」重试。' },
+    invalid: { label: '已失效', tone: 'bg-rose-50 text-rose-700 ring-rose-200', hint: '授权已失效，需要重新授权。' },
+    disconnected: { label: '已卸载', tone: 'bg-slate-100 text-slate-600 ring-slate-200', hint: '应用已从该店铺卸载，重新授权即可恢复。' },
+}[props.appSession.status]));
+
+const authorizeShopify = () => post('/shopify-authorize');
+const verifyShopify = () => post('/shopify-verify');
 const statusBadge = computed(() => usable.value
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
     : (needsPageSelection.value ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-slate-100 text-slate-600 ring-slate-200'));
@@ -196,9 +226,54 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
                 <template v-if="credentials">配置入口在「应用配置」页签。</template>
             </div>
 
-            <div v-if="!appSessionReady" class="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-sm text-sky-800">
-                还没有建立 Instagram Feed App 的 Shopify 会话。请先在 Shopify 后台打开一次该应用完成初始化，之后才能发布到店铺前台。
-            </div>
+            <section class="rounded-2xl border border-slate-200 bg-white p-6">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-lg font-semibold text-slate-950">Shopify 应用授权</h2>
+                            <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1" :class="appSessionMeta.tone">{{ appSessionMeta.label }}</span>
+                        </div>
+                        <p class="mt-1 text-sm text-slate-500">{{ appSessionMeta.hint }}</p>
+                        <dl class="mt-3 grid gap-x-6 gap-y-1 text-xs text-slate-500 sm:grid-cols-2">
+                            <div><dt class="inline">授权时间：</dt><dd class="inline font-medium text-slate-700">{{ formatDate(appSession.installed_at) }}</dd></div>
+                            <div><dt class="inline">最近校验：</dt><dd class="inline font-medium text-slate-700">{{ formatDate(appSession.last_verified_at) }}</dd></div>
+                            <div><dt class="inline">最近检测：</dt><dd class="inline font-medium text-slate-700">{{ formatDate(appSession.last_api_check) }}</dd></div>
+                            <div><dt class="inline">最近发布：</dt><dd class="inline font-medium text-slate-700">{{ formatDate(appSession.last_published_at) }}</dd></div>
+                            <div v-if="appSession.granted_scopes.length" class="sm:col-span-2">
+                                <dt class="inline">已授予权限：</dt><dd class="inline font-medium text-slate-700">{{ appSession.granted_scopes.join('、') }}</dd>
+                            </div>
+                            <div v-if="appSession.uninstalled_at"><dt class="inline">卸载时间：</dt><dd class="inline font-medium text-slate-700">{{ formatDate(appSession.uninstalled_at) }}</dd></div>
+                        </dl>
+                    </div>
+                    <div v-if="permissions.connect" class="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                            @click="authorizeShopify"
+                        >
+                            {{ appSession.status === 'connected' ? '重新授权' : '授权 Shopify' }}
+                        </button>
+                        <button
+                            v-if="appSession.status !== 'not_authorized'"
+                            type="button"
+                            class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            @click="verifyShopify"
+                        >
+                            检查连接
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="appSession.last_error" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                    <p class="font-semibold">最近一次失败原因</p>
+                    <p class="mt-1 break-words">{{ appSession.last_error }}</p>
+                    <p class="mt-1 text-xs text-rose-600">发生时间：{{ formatDate(appSession.last_error_at) }}</p>
+                </div>
+
+                <div v-if="appSession.environment && !appSession.environment_matches" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    这条授权记录属于 <span class="font-semibold">{{ appSession.environment }}</span> 环境，当前后端运行在 <span class="font-semibold">{{ environment }}</span>，需要在当前环境重新授权。
+                </div>
+            </section>
 
             <section class="rounded-2xl border border-slate-200 bg-white p-6">
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

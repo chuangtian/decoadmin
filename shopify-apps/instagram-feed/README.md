@@ -135,8 +135,9 @@ npm run deploy:production
 ## 安全约定
 
 - 不要把 Client Secret、Access Token、Meta 凭证或 R2 密钥写进 TOML、源码或文档。
-- 保持 `embedded = true` 与 `use_legacy_install_flow = false`：安装由 Shopify 托管，
-  会话通过 App Bridge session token 走 token exchange。
+- 保持 `embedded = true` 与 `use_legacy_install_flow = true`：DecoAdmin 用授权码回调
+  `/shopify-app/instagram-feed/oauth/callback` 建立本 App 的 offline token（与 Commerce Hub
+  同一套模式）。要改成 Shopify 托管安装，必须先把后端换回 session token exchange。
 - 保持自动改写 URL 关闭，避免 CLI 覆盖已部署地址。
 - 不要把学生优惠或其他 Shopify App 的代码与资源放进本目录。
 - 不要把 Laravel 应用、Node 后端、Prisma 或本地数据库放回本目录，
