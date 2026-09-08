@@ -30,7 +30,9 @@ uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 # 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
 [access_scopes]
 scopes = "read_products"
-use_legacy_install_flow = false
+# DecoAdmin 用授权码回调建立本 App 的 offline token（对齐 Commerce Hub），
+# 所以保持 legacy install flow；切成 Shopify 托管安装需要后端改回 token exchange。
+use_legacy_install_flow = true
 
 [auth]
-redirect_urls = [ "https://testadmin.decomkt.com/api/shopify-app/auth/callback" ]
+redirect_urls = [ "https://testadmin.decomkt.com/shopify-app/instagram-feed/oauth/callback" ]

@@ -120,6 +120,7 @@ class InstagramFeedController extends Controller
             'galleries' => $galleries,
             'mirrorConfigured' => $this->r2->isConfigured(),
             'appSessionReady' => $installation?->isUsable() ?? false,
+            'appSession' => $this->appSessionForFrontend($installation),
             'permissions' => [
                 'connect' => $request->user()->hasPermission('instagram_feed.connect', $organization, $store),
                 'sync' => $request->user()->hasPermission('instagram_feed.sync', $organization, $store),
@@ -431,6 +432,48 @@ class InstagramFeedController extends Controller
             'like_count' => $media->like_count,
             'comments_count' => $media->comments_count,
             'products' => $products,
+        ];
+    }
+
+    /**
+     * Shopify App 授权状态。给后台的连接状态卡片用，也是「安装了哪些店铺」的依据。
+     *
+     * @return array<string, mixed>
+     */
+    private function appSessionForFrontend(?InstagramFeedInstallation $installation): array
+    {
+        if (! $installation) {
+            return [
+                'status' => 'not_authorized',
+                'usable' => false,
+                'environment' => null,
+                'environment_matches' => false,
+                'app_installation_id' => null,
+                'granted_scopes' => [],
+                'installed_at' => null,
+                'uninstalled_at' => null,
+                'last_verified_at' => null,
+                'last_api_check' => null,
+                'last_published_at' => null,
+                'last_error' => null,
+                'last_error_at' => null,
+            ];
+        }
+
+        return [
+            'status' => (string) $installation->status,
+            'usable' => $installation->isUsable(),
+            'environment' => (string) $installation->environment,
+            'environment_matches' => $installation->environment === (string) config('instagram_feed.environment'),
+            'app_installation_id' => $installation->app_installation_id,
+            'granted_scopes' => is_array($installation->granted_scopes) ? $installation->granted_scopes : [],
+            'installed_at' => $installation->installed_at?->toIso8601String(),
+            'uninstalled_at' => $installation->uninstalled_at?->toIso8601String(),
+            'last_verified_at' => $installation->last_verified_at?->toIso8601String(),
+            'last_api_check' => $installation->last_api_check?->toIso8601String(),
+            'last_published_at' => $installation->last_published_at?->toIso8601String(),
+            'last_error' => $installation->last_error,
+            'last_error_at' => $installation->last_error_at?->toIso8601String(),
         ];
     }
 
