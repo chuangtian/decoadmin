@@ -111,7 +111,7 @@ class AffiliatePayoutService
         $membershipIds = AffiliateProgramMembership::query()->forOrganization($store->organization_id)->forStore($store)->where('promoter_id', $promoterId)->select('id');
 
         return AffiliateLedgerEntry::query()->forOrganization($store->organization_id)->forStore($store)
-            ->whereIn('membership_id', $membershipIds)->whereNotIn('id', $included)->where('status', '!=', 'settled')
+            ->whereIn('membership_id', $membershipIds)->whereNotIn('id', $included)->whereNotIn('status', ['settled', 'superseded'])
             ->where(fn ($q) => $q->where('amount_minor', '<', 0)->orWhereHas('conversion', fn ($c) => $c->where('status', 'review')->orWhereHas('risks', fn ($r) => $r->whereIn('status', ['open', 'reviewing']))))->exists();
     }
 

@@ -685,6 +685,13 @@ class AffiliateFoundationTest extends TestCase
         app(AffiliateLedgerService::class)->review($org, $store, $actor, $flag->public_id, 'approved', 'Verified synthetic source');
         $this->assertSame($initialRefund ? 'refunded' : 'partially_refunded', $c->fresh()->status);
         $this->actingAs($actor)->withSession($this->contextSession($org, $store))->get(route('affiliate.finance.index', [$org, $store, 'conversions']))->assertOk();
+        $ledger = app(AffiliateLedgerService::class);
+        $ledger->adjust($org, $store, $actor, $old->public_id, 500, 'Independent new earning', (string) Str::uuid());
+        $ledger->release($store);
+        $payout = app(\App\Domain\ReferralAffiliate\Services\AffiliatePayoutService::class);
+        $batch = $payout->create($org, $store, $actor, 'USD', 100, \Carbon\CarbonImmutable::now());
+        $this->assertSame(500, $batch->items()->where('membership_id', $old->id)->sole()->amount_minor);
+        $payout->transition($org, $store, $actor, $batch->public_id, 'cancelled');
         AffiliateLedgerEntry::query()->where('membership_id', $new->id)->update(['status' => 'settled']);
         $reader->shouldReceive('read')->once()->andReturn($order);
         $this->expectException(HttpException::class);
