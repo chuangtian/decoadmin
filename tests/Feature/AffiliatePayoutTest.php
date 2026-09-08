@@ -101,6 +101,20 @@ class AffiliatePayoutTest extends TestCase
         $this->assertDatabaseCount('affiliate_ledger_entries', 2);
     }
 
+    public function test_missing_payment_evidence_returns_form_error_without_settling(): void
+    {
+        [$org, $store, $actor, $member] = $this->context();
+        $this->entry($member, 10000, 'missing-evidence');
+        $batch = app(AffiliatePayoutService::class)->create($org, $store, $actor, 'USD', 100, CarbonImmutable::now());
+        $url = route('affiliate.finance.payout.transition', [$org, $store, $batch->public_id]);
+        $back = route('affiliate.finance.index', [$org, $store, 'payouts']);
+        $this->actingAs($actor)->withSession(['current_organization_id' => $org->id, 'current_store_id' => $store->id])
+            ->from($back)->post($url, ['action' => 'paid', 'reference' => ''])
+            ->assertRedirect($back)->assertSessionHasErrors(['reference' => '请提供付款参考号或凭证。']);
+        $this->assertSame('draft', $batch->fresh()->status);
+        $this->assertSame('reserved', AffiliateLedgerEntry::query()->sole()->status);
+    }
+
     private function entry($member, int $amount, string $key): void
     {
         AffiliateLedgerEntry::query()->create(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'membership_id' => $member->id, 'idempotency_key' => $key, 'type' => 'manual_adjustment', 'status' => 'available', 'currency' => 'USD', 'amount_minor' => $amount]);

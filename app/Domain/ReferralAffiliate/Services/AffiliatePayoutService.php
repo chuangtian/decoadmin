@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class AffiliatePayoutService
 {
@@ -64,7 +65,9 @@ class AffiliatePayoutService
 
                 return $batch;
             }
-            abort_if($action === 'paid' && trim($reference) === '' && ! $proofPath, 422, '请提供付款参考号或凭证。');
+            if ($action === 'paid' && trim($reference) === '' && ! $proofPath) {
+                throw ValidationException::withMessages(['reference' => '请提供付款参考号或凭证。']);
+            }
             abort_unless($batch->status === 'draft', 409, '此批次已处理，不能重复付款。');
             $items = $batch->items()->with('allocations', 'membership')->get();
             if ($action === 'paid') {
