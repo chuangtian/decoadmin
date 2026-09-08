@@ -85,6 +85,11 @@ class AffiliateNotificationService
             if ($record->status === 'sent' || $record->status === 'suppressed') {
                 return;
             }
+            if ($record->event_key === 'portal.login' && $record->created_at->addMinutes(15)->lte(now())) {
+                $record->update(['status' => 'suppressed', 'error_summary' => '登录链接已过期，请重新申请。', 'message_encrypted' => []]);
+
+                return;
+            }
             if (config('mail.default') === 'log') {
                 throw new \RuntimeException('Configure a non-logging mail transport');
             }

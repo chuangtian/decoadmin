@@ -94,6 +94,7 @@ export const menu: MenuItem[] = [
             { name: '结算中心', route: '/affiliate/finance/payouts', icon: 'analytics', permission: 'affiliate.payouts.view' },
             { name: '风险审查', route: '/affiliate/finance/risks', icon: 'analytics', permission: 'affiliate.fraud.view' },
             { name: '推广报表', route: '/affiliate/finance/reports', icon: 'analytics', permission: 'affiliate.dashboard.view' },
+            { name: '顾客奖励', route: '/affiliate/finance/rewards', icon: 'analytics', permission: 'affiliate.promoters.view' },
             { name: '推广素材', route: '/affiliate/materials', icon: 'analytics', permission: 'affiliate.promoters.view' },
         ],
     },

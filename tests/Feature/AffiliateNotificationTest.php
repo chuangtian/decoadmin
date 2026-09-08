@@ -52,6 +52,20 @@ class AffiliateNotificationTest extends TestCase
         $this->assertSame(1, $intent->fresh()->attempts);
     }
 
+    public function test_expired_login_intent_is_suppressed_without_delivery(): void
+    {
+        Queue::fake();
+        Mail::shouldReceive('raw')->never();
+        $member = $this->member();
+        $service = app(AffiliateNotificationService::class);
+        $intent = $service->intent($member, 'conversion.created', 'login:expired');
+        $intent->update(['event_key' => 'portal.login', 'status' => 'queued']);
+        $this->travel(16)->minutes();
+        $service->send($intent->id);
+        $this->assertSame('suppressed', $intent->fresh()->status);
+        $this->assertSame([], $intent->fresh()->message_encrypted);
+    }
+
     private function member(): AffiliateProgramMembership
     {
         $org = Organization::query()->create(['name' => 'Mail test', 'code' => 'mail-test']);

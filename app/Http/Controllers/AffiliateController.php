@@ -74,6 +74,7 @@ class AffiliateController extends Controller
     private function validateProgram(Request $request): array
     {
         return $request->validate([
+            'reward' => ['nullable', 'array'], 'milestones' => ['nullable', 'array', 'max:20'],
             'name' => ['required', 'string', 'max:120', 'regex:/\S/u'],
             'type' => ['required', Rule::in(['affiliate', 'influencer', 'ambassador', 'advocate', 'partner'])],
             'attribution_model' => ['required', Rule::in(['coupon_wins', 'last_click', 'first_click'])],
@@ -83,7 +84,7 @@ class AffiliateController extends Controller
             'rate_basis_points' => ['nullable', 'integer', 'between:1,10000', 'required_if:commission_type,percentage'],
             'amount_minor' => ['nullable', 'integer', 'between:1,1000000000', 'required_if:commission_type,fixed'],
             'coupon_enabled' => ['required', 'boolean'],
-            'customer_discount_type' => ['nullable', Rule::in(['percentage', 'fixed']), 'required_if:coupon_enabled,true'],
+            'customer_discount_type' => ['nullable', Rule::in(['percentage', 'fixed', 'free_shipping']), 'required_if:coupon_enabled,true'],
             'customer_discount_rate_basis_points' => ['nullable', 'integer', 'between:1,10000', 'required_if:customer_discount_type,percentage'],
             'customer_discount_amount_minor' => ['nullable', 'integer', 'between:1,1000000000', 'required_if:customer_discount_type,fixed'],
         ]);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domain\ReferralAffiliate\Models\AffiliateReward;
 use App\Domain\ReferralAffiliate\Services\AffiliateFinanceWorkspace;
 use App\Domain\ReferralAffiliate\Services\AffiliateLedgerService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManualAttributionService;
@@ -11,6 +12,7 @@ use App\Domain\ReferralAffiliate\Services\AffiliateReportService;
 use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Domain\ReferralAffiliate\Support\Money;
 use App\Jobs\SyncAffiliateOrder;
+use App\Jobs\SyncAffiliateReward;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Store;
@@ -26,6 +28,18 @@ class AffiliateFinanceController extends Controller
         $v = $r->validate(['status' => ['nullable', 'string', 'max:32', 'regex:/^[a-z_]+$/']]);
 
         return Inertia::render('Affiliate/Finance', $workspace->page($organization, $store, $r->user(), $section, $v['status'] ?? null));
+    }
+
+    public function retryReward(Request $r, Organization $organization, Store $store, string $reward)
+    {
+        app(AffiliateShopGuard::class)->actor($organization, $store, $r->user(), 'affiliate.programs.manage');
+        $record = AffiliateReward::query()->forOrganization($organization)->forStore($store)->where('public_id', $reward)->firstOrFail();
+        abort_unless(in_array($record->status, ['pending', 'failed', 'revoke_pending'], true), 409);
+        $record->update(['attempts' => 0, 'last_error' => null, 'last_synced_at' => null]);
+        SyncAffiliateReward::dispatch($organization->id, $store->id, $record->id);
+        AuditLog::query()->create(['organization_id' => $organization->id, 'store_id' => $store->id, 'user_id' => $r->user()->id, 'action' => 'affiliate_reward_retry', 'subject_type' => $record::class, 'subject_id' => $record->id]);
+
+        return back()->with('success', '奖励同步已提交，仍会核验资格与等待期。');
     }
 
     public function attribute(Request $r, Organization $organization, Store $store, string $conversion)

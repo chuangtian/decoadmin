@@ -26,7 +26,7 @@ class AffiliateTrackingService
         abort_unless($membership->status->value === 'approved'
             && $membership->program?->status->value === 'active'
             && $membership->store?->status === 'active'
-            && AffiliateStoreSetting::query()->forStore($link->store_id)->where('affiliate_enabled', true)->exists(), 404);
+            && AffiliateStoreSetting::query()->forStore($link->store_id)->where($membership->program->type->value === 'advocate' ? 'customer_referral_enabled' : 'affiliate_enabled', true)->exists(), 404);
 
         $visitorToken = hash('sha256', Str::random(64));
         $referrerHost = $this->host($request->headers->get('referer'));

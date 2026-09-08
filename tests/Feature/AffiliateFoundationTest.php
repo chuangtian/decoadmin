@@ -11,6 +11,7 @@ use App\Domain\ReferralAffiliate\Services\AffiliateAccountingService;
 use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCatalogService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCouponSyncService;
+use App\Domain\ReferralAffiliate\Services\AffiliateCustomerEligibilityService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManualAttributionService;
 use App\Domain\ReferralAffiliate\Services\AffiliateOrderReader;
@@ -474,6 +475,22 @@ class AffiliateFoundationTest extends TestCase
         $this->assertSame(500, $conversion->fresh()->reversed_minor);
         $this->assertSame(500, (int) AffiliateLedgerEntry::query()->sum('amount_minor'));
         $this->assertDatabaseCount('affiliate_ledger_entries', 2);
+    }
+
+    public function test_advocate_program_requires_reward_rules_and_approval_links_verified_customer(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $svc = app(AffiliateManagementService::class);
+        $values = ['name' => 'Customer referral', 'type' => 'advocate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 1, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false,
+            'reward' => ['type' => 'fixed', 'amount_minor' => 1000, 'valid_days' => 30, 'scope' => 'all', 'resource_ids' => []], 'milestones' => []];
+        $program = $svc->createProgram($org, $store, $actor, $values);
+        $this->assertSame(1000, data_get($program->settings, 'reward.amount_minor'));
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Customer', 'email' => 'customer@example.invalid', 'type' => 'advocate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $this->mock(AffiliateCustomerEligibilityService::class)->shouldReceive('purchasedCustomer')->once()->andReturn(['eligible' => true, 'customer_id' => 'gid://shopify/Customer/123']);
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+        $this->assertSame('gid://shopify/Customer/123', $member->fresh()->shopify_customer_id);
+        $this->actingAs($actor)->withSession($this->contextSession($org, $store))->get(route('affiliate.finance.index', [$org, $store, 'rewards']))->assertOk();
     }
 
     /** @return array{User, Organization, Store} */

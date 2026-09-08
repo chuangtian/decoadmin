@@ -86,6 +86,7 @@ class AffiliateLedgerService
                 $conversion->status = 'pending';
             }
             $conversion->save();
+            app(AffiliateRewardService::class)->record($conversion);
             $this->audit($org, $store, $actor, 'affiliate_risk_reviewed', $flag, ['action' => $action, 'reason' => $reason]);
         });
     }

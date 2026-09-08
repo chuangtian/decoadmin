@@ -60,6 +60,7 @@ class AffiliateWorkspaceService
                 'attribution_window_days' => $program->attribution_window_days,
                 'hold_days' => $program->hold_days,
                 'currency' => $program->currency,
+                'reward' => data_get($program->settings, 'reward'), 'milestones' => data_get($program->settings, 'milestones', []),
                 'coupon_enabled' => $program->coupon_enabled,
                 'customer_discount_type' => $program->customer_discount_type,
                 'customer_discount_rate_basis_points' => $program->customer_discount_rate_basis_points,

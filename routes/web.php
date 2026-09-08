@@ -708,6 +708,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
             ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
         Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
             ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
+        Route::post('/rewards/{reward}/retry', [\App\Http\Controllers\AffiliateFinanceController::class,'retryReward'])->whereUlid('reward')->middleware('permission:affiliate.programs.manage')->name('affiliate.rewards.retry');
         Route::post('/conversions/{conversion}/attribute', [\App\Http\Controllers\AffiliateFinanceController::class, 'attribute'])->whereUlid('conversion')->middleware('permission:affiliate.conversions.override')->name('affiliate.conversions.attribute');
         Route::get('/reports/export', [\App\Http\Controllers\AffiliateFinanceController::class, 'reportCsv'])->middleware('permission:affiliate.reports.export')->name('affiliate.reports.export');
         Route::post('/promoters/import', [AffiliateController::class, 'importPromoters'])->middleware(['permission:affiliate.promoters.manage','throttle:5,1'])->name('affiliate.promoters.import');
@@ -723,7 +724,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
         Route::put('/settings', [AffiliateController::class, 'settings'])
             ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
         Route::get('/finance/{section}', [AffiliateFinanceController::class, 'index'])
-            ->whereIn('section', ['conversions', 'commissions', 'payouts', 'risks', 'reports'])->name('affiliate.finance.index');
+            ->whereIn('section', ['conversions', 'commissions', 'payouts', 'risks', 'reports', 'rewards'])->name('affiliate.finance.index');
         Route::post('/finance/reconcile', [AffiliateFinanceController::class, 'reconcile'])->middleware('throttle:10,1')->name('affiliate.finance.reconcile');
         Route::post('/finance/release', [AffiliateFinanceController::class, 'release'])->middleware('throttle:10,1')->name('affiliate.finance.release');
         Route::post('/finance/adjust', [AffiliateFinanceController::class, 'adjust'])->middleware('throttle:10,1')->name('affiliate.finance.adjust');

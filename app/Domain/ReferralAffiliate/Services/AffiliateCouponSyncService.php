@@ -18,7 +18,7 @@ class AffiliateCouponSyncService
         query ReferralCoupon($code: String!) {
           codeDiscountNodeByCode(code: $code) {
             id
-            codeDiscount { ... on DiscountCodeBasic { title status } }
+            codeDiscount { __typename ... on DiscountCodeBasic { title status } ... on DiscountCodeFreeShipping { title status } }
           }
         }
         GRAPHQL;
@@ -40,6 +40,18 @@ class AffiliateCouponSyncService
           }
         }
         GRAPHQL;
+
+    private const CREATE_SHIPPING = <<<'GRAPHQL'
+mutation CreateReferralShipping($input: DiscountCodeFreeShippingInput!) {
+ discountCodeFreeShippingCreate(freeShippingCodeDiscount: $input) { codeDiscountNode { id } userErrors { code } }
+}
+GRAPHQL;
+
+    private const UPDATE_SHIPPING = <<<'GRAPHQL'
+mutation UpdateReferralShipping($id: ID!, $input: DiscountCodeFreeShippingInput!) {
+ discountCodeFreeShippingUpdate(id: $id, freeShippingCodeDiscount: $input) { codeDiscountNode { id } userErrors { code } }
+}
+GRAPHQL;
 
     private const DEACTIVATE = <<<'GRAPHQL'
         mutation DisableReferralCoupon($id: ID!) {
@@ -69,7 +81,7 @@ class AffiliateCouponSyncService
             $enabled = $membership->status->value === 'approved' && $membership->promoter->status === 'active'
                 && $program->status->value === 'active' && $program->coupon_enabled
                 && (! $program->ends_at || $program->ends_at->isFuture())
-                && AffiliateStoreSetting::query()->where('organization_id', $organizationId)->where('store_id', $storeId)->where('affiliate_enabled', true)->exists();
+                && AffiliateStoreSetting::query()->where('organization_id', $organizationId)->where('store_id', $storeId)->where($program->type->value === 'advocate' ? 'customer_referral_enabled' : 'affiliate_enabled', true)->exists();
             $coupon->forceFill(['status' => $enabled ? 'enable_pending' : 'disable_pending', 'last_error' => null])->save();
             try {
                 $token = $this->tokens->accessTokenFor($store);
@@ -87,22 +99,36 @@ class AffiliateCouponSyncService
                 if ($enabled) {
                     $coupon->starts_at ??= $program->starts_at ?? now();
                     $coupon->save();
+                    $shipping = $program->customer_discount_type === 'free_shipping';
+                    $kind = data_get($node, 'codeDiscount.__typename');
+                    if ($kind && $kind !== ($shipping ? 'DiscountCodeFreeShipping' : 'DiscountCodeBasic')) {
+                        $this->resultId($call(self::DEACTIVATE, ['id' => $id]), 'discountCodeDeactivate');
+                        throw new AffiliateException('COUPON_TYPE_CHANGED', '优惠类型不匹配，旧码已停用，请新建计划。', 422);
+                    }
                     if ($program->customer_discount_type === 'percentage') {
                         $rate = (int) $program->customer_discount_rate_basis_points;
                         abort_unless($rate > 0 && $rate <= 10000, 422);
                         $value = ['percentage' => $rate / 10000];
-                    } else {
+                    } elseif (! $shipping) {
                         abort_unless($program->currency === strtoupper((string) $store->currency)
                             && $program->customer_discount_amount_minor > 0, 422);
                         $value = ['discountAmount' => ['amount' => Money::decimal($program->customer_discount_amount_minor, $program->currency), 'appliesOnEachItem' => false]];
                     }
                     $input = ['title' => $title, 'code' => $coupon->code,
                         'startsAt' => $coupon->starts_at->toIso8601String(), 'endsAt' => $program->ends_at?->toIso8601String(),
-                        'context' => ['all' => 'ALL'], 'customerGets' => ['items' => ['all' => true], 'value' => $value],
-                        'appliesOncePerCustomer' => false,
+                        'context' => $program->type->value === 'advocate' ? ['customerSegments' => ['add' => [app(AffiliateCustomerEligibilityService::class)->newCustomerSegment($store)]]] : ['all' => 'ALL'],
+                        'appliesOncePerCustomer' => $program->type->value === 'advocate',
                         'combinesWith' => ['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false]];
-                    $operation = $id ? 'discountCodeBasicUpdate' : 'discountCodeBasicCreate';
-                    $result = $call($id ? self::UPDATE : self::CREATE, $id ? ['id' => $id, 'input' => $input] : ['input' => $input]);
+                    if ($shipping) {
+                        $input += ['destination' => ['all' => true], 'appliesOnOneTimePurchase' => true, 'appliesOnSubscription' => false];
+                        $operation = $id ? 'discountCodeFreeShippingUpdate' : 'discountCodeFreeShippingCreate';
+                        $query = $id ? self::UPDATE_SHIPPING : self::CREATE_SHIPPING;
+                    } else {
+                        $input['customerGets'] = ['items' => ['all' => true], 'value' => $value];
+                        $operation = $id ? 'discountCodeBasicUpdate' : 'discountCodeBasicCreate';
+                        $query = $id ? self::UPDATE : self::CREATE;
+                    }
+                    $result = $call($query, $id ? ['id' => $id, 'input' => $input] : ['input' => $input]);
                     $id = $this->resultId($result, $operation);
                 } elseif ($id && data_get($node, 'codeDiscount.status') !== 'EXPIRED') {
                     $this->resultId($call(self::DEACTIVATE, ['id' => $id]), 'discountCodeDeactivate');

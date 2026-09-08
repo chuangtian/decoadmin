@@ -78,6 +78,7 @@ class AffiliateAccountingService
             $conversion->order_snapshot = $order;
             $conversion->shopify_updated_at = $order['updated_at'];
             $conversion->save();
+            app(AffiliateRewardService::class)->record($conversion);
 
             return $conversion->fresh();
         }, 3);
@@ -100,6 +101,9 @@ class AffiliateAccountingService
             $totals = $this->commissions->refundTotals($conversion->lines->toArray(), $conversion->rule_snapshot, $conversion->base_minor, $cumulative);
             $target = $totals['commission_minor'];
             $conversion->refunded_base_minor = $totals['base_minor'];
+            if ($conversion->refunded_base_minor > 0 && ! in_array($conversion->status, ['cancelled', 'rejected', 'review'], true)) {
+                $conversion->status = $conversion->refunded_base_minor >= $conversion->base_minor ? 'refunded' : 'partially_refunded';
+            }
             $delta = max(0, min($conversion->commission_minor, $target) - $conversion->reversed_minor);
             AffiliateRefundRecord::query()->create(['organization_id' => $conversion->organization_id, 'store_id' => $conversion->store_id,
                 'conversion_id' => $conversion->id, 'shopify_refund_id' => $refund['id'], 'line_snapshot' => $refund['lines'],

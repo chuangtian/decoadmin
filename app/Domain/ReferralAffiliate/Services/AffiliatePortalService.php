@@ -11,6 +11,7 @@ use App\Domain\ReferralAffiliate\Models\AffiliatePortalToken;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
+use App\Domain\ReferralAffiliate\Models\AffiliateReward;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Support\Money;
 use App\Jobs\SendAffiliateNotification;
@@ -42,6 +43,7 @@ class AffiliatePortalService
             'entries' => (clone $entries)->latest('id')->limit(50)->get(['public_id', 'type', 'status', 'currency', 'amount_minor', 'created_at']),
             'payouts' => AffiliatePayoutItem::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('membership_id', $member->id)->latest('id')->limit(50)->get(['amount_minor', 'status', 'created_at']),
             'clicks' => AffiliateClick::query()->forOrganization($store->organization_id)->forStore($store)->where('membership_id', $member->id)->count(),
+            'rewards' => AffiliateReward::query()->forOrganization($store->organization_id)->forStore($store)->where('membership_id', $member->id)->latest('id')->limit(100)->get()->map(fn ($r) => ['code' => in_array($r->status, ['issued', 'redeemed', 'expired'], true) ? $r->code : null, 'status' => $r->status, 'expires_at' => $r->expires_at?->format('Y-m-d'), 'threshold' => $r->threshold]),
             'assets' => DB::table('affiliate_assets')->where('organization_id', $store->organization_id)->where('store_id', $store->id)->latest('id')->limit(100)->get(['public_id', 'title'])];
     }
 
@@ -56,9 +58,9 @@ class AffiliatePortalService
     public function apply(Store $store, array $values): void
     {
         app(AffiliateShopGuard::class)->store($store);
-        abort_unless(AffiliateStoreSetting::query()->where('store_id', $store->id)->where('affiliate_enabled', true)->exists(), 409, '此店铺暂未开放申请。');
         DB::transaction(function () use ($store, $values) {
             $program = AffiliateProgram::query()->forOrganization($store->organization_id)->forStore($store)->where('public_id', $values['program'])->where('status', 'active')->firstOrFail();
+            abort_unless(AffiliateStoreSetting::query()->forStore($store)->where($program->type->value === 'advocate' ? 'customer_referral_enabled' : 'affiliate_enabled', true)->exists(), 409, '此店铺暂未开放申请。');
             $email = mb_strtolower(trim($values['email']));
             $hash = hash_hmac('sha256', $store->organization_id.'|'.$email, (string) config('app.key'));
             $promoter = AffiliatePromoter::query()->firstOrCreate(['organization_id' => $store->organization_id, 'email_hash' => $hash], [

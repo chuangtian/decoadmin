@@ -56,3 +56,13 @@ Use completion-checklist.md. Notification intents/templates, invitation/import, 
 - During final #1002 refund verification, another deployment replaced staging with origin/test commit 315c7fef5d6fd813bc18c4049a186ac1f610fc41 (Instagram connection changes), removed Referral source and dedicated worker containers. The shared database retained Referral data. App/nginx recovered healthy on that different image.
 - Full #1002 Bogus refund is confirmed in Shopify (net payment zero). Its post-fix webhook result is NOT yet verified because the backend was replaced during the test.
 - Fetch origin/test and merge its existing upstream changes before reapplying Referral, so the Instagram work is preserved. Do not blindly restore the older source tree or overwrite environment secrets.
+
+## Merged recovery and customer rewards checkpoint
+
+- Recovered staging with merged commit da37a26, preserving upstream Instagram changes from 315c7fe. The test branch was updated; production was not. All staging web and queue processes use the merged image; image tags were persisted in the staging environment file with a private backup.
+- Verified #1002 refunds/create webhook processed automatically at 2026-09-08T07:38:28Z, one attempt, no error. Two refunds total; commission 17269 cents and reversed commission 17269 cents, conversion refunded. No manual reconciliation was used to establish this callback evidence.
+- Synthetic settlement fixture verified reservation, cancellation, recreation, paid confirmation and repeated confirmation with no duplicate entries or real transfer. Portal HTTP login returned 200, repeated one-time token returned 401, cookie path /referral-portal, no merchant session cookie issued.
+- Added customer purchase verification, new-customer review holds, customer-only one-use reward coupons, fixed/percentage/free-shipping rewards, milestones, refund revocation and already-used reward risk holds. Merchant and portal reward views included.
+- New-customer friend coupons require an existing Shopify segment with the exact rule number_of_orders = 0. No write_customers scope was added. Incomplete order history is held for review rather than assumed eligible.
+- Local full backend regression after rewards: 650 tests, 9827 assertions passed. Three tracking tests and application structure validation passed; frontend build passed. Reward API operations were schema validated against 2026-07. Live reward checkout and remaining completion-checklist items are still pending.
+- Expired portal login notifications are suppressed and their encrypted message removed; used milestone rewards after a refunded source create a review flag and hold subsequent rewards.

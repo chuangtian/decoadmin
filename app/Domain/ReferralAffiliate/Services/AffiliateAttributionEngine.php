@@ -18,7 +18,7 @@ class AffiliateAttributionEngine
         $at = CarbonImmutable::parse($order['ordered_at']);
         $candidates = [];
         $settings = AffiliateStoreSetting::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->first();
-        if (! $settings || ! $this->valueAt($settings, 'affiliate_enabled', $at)) {
+        if (! $settings || (! $this->valueAt($settings, 'affiliate_enabled', $at) && ! $this->valueAt($settings, 'customer_referral_enabled', $at))) {
             return ['membership' => null, 'reason' => 'feature_disabled', 'source' => 'none', 'candidates' => [], 'risks' => []];
         }
         $coupons = AffiliateCoupon::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
@@ -29,7 +29,7 @@ class AffiliateAttributionEngine
                 ->where('action', 'affiliate_coupon_synced')->where('created_at', '<=', $at)->orderByDesc('id')->first();
             $status = $historical ? data_get($historical->metadata, 'status')
                 : ($coupon->last_synced_at?->lte($at) ? $coupon->status : null);
-            if (in_array($status, ['active', 'scheduled'], true) && $this->eligible($coupon->membership, $store, $at, $order['currency'])) {
+            if (in_array($status, ['active', 'scheduled'], true) && $this->eligible($coupon->membership, $store, $at, $order['currency'], $settings)) {
                 $candidates[] = ['membership' => $coupon->membership, 'source' => 'coupon', 'coupon_id' => $coupon->id, 'confidence' => 100];
             }
         }
@@ -42,7 +42,7 @@ class AffiliateAttributionEngine
         $clicks = collect();
         foreach ($signals as $token) {
             $click = is_string($token) ? app(AffiliateTrackingTokenService::class)->verify($store, $token, $at) : null;
-            if ($click && $this->eligible($click->membership, $store, $at, $order['currency'])) {
+            if ($click && $this->eligible($click->membership, $store, $at, $order['currency'], $settings)) {
                 $clicks->push($click);
             }
         }
@@ -58,6 +58,12 @@ class AffiliateAttributionEngine
         $membership = $winner['membership'] ?? null;
         $risks = [];
         if ($membership) {
+            if ($membership->program->type->value === 'advocate') {
+                $eligible = data_get($order, 'customer_eligibility.eligible');
+                if ($eligible !== true) {
+                    $risks[] = $eligible === false ? 'not_new_customer' : 'customer_history_requires_review';
+                }
+            }
             if ($membership->shopify_customer_id && ($order['customer_id'] ?? null) === $membership->shopify_customer_id) {
                 $risks[] = 'self_customer_id';
             }
@@ -76,7 +82,7 @@ class AffiliateAttributionEngine
         return array_map(fn ($candidate) => array_replace($candidate, ['membership' => $candidate['membership']->public_id]), $candidates);
     }
 
-    private function eligible(?AffiliateProgramMembership $membership, Store $store, CarbonImmutable $at, string $currency): bool
+    private function eligible(?AffiliateProgramMembership $membership, Store $store, CarbonImmutable $at, string $currency, AffiliateStoreSetting $settings): bool
     {
         if (! $membership || (int) $membership->store_id !== (int) $store->id || (int) $membership->organization_id !== (int) $store->organization_id) {
             return false;
@@ -86,6 +92,7 @@ class AffiliateAttributionEngine
 
         return $program && $membership->promoter && (int) $program->store_id === (int) $store->id
             && (int) $membership->promoter->organization_id === (int) $store->organization_id
+            && $this->valueAt($settings, $program->type->value === 'advocate' ? 'customer_referral_enabled' : 'affiliate_enabled', $at)
             && $program->currency === $currency
             && $this->valueAt($membership, 'status', $at) === 'approved'
             && $this->valueAt($program, 'status', $at) === 'active'

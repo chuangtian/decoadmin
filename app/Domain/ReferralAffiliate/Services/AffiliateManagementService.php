@@ -14,6 +14,7 @@ use App\Models\ProductVariant;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 class AffiliateManagementService
 {
@@ -24,6 +25,9 @@ class AffiliateManagementService
         return DB::transaction(function () use ($organization, $store, $actor, $publicId, $values) {
             $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
             abort_if($program->status->value === 'archived', 409);
+            abort_unless($program->type->value === $values['type'], 422, '创建后不能更改计划身份。');
+            abort_if(($program->customer_discount_type === 'free_shipping') !== (($values['customer_discount_type'] ?? null) === 'free_shipping') && $program->memberships()->whereHas('coupon', fn ($q) => $q->whereNotNull('shopify_discount_id'))->exists(), 422, '已有优惠码时不能在免邮与商品优惠之间切换，请新建计划。');
+            $values['settings'] = $this->rewardSettings($organization, $store, $actor, $values, $program->settings ?? []);
             app(AffiliateRuleHistory::class)->baseline($program);
             $old = $program->only(['name', 'attribution_model', 'attribution_window_days', 'hold_days', 'coupon_enabled', 'customer_discount_type', 'customer_discount_rate_basis_points', 'customer_discount_amount_minor', 'settings']);
             $program->forceFill(array_intersect_key($values, array_flip(array_keys($old))) + ['updated_by' => $actor->id])->save();
@@ -107,7 +111,17 @@ class AffiliateManagementService
     {
         $this->guard->actor($organization, $store, $actor, 'affiliate.promoters.manage');
 
-        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action, $reason): AffiliateProgramMembership {
+        $verifiedCustomer = null;
+        if ($action === 'approve') {
+            $candidate = AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)->where('public_id', $publicId)->with('program', 'promoter')->firstOrFail();
+            if ($candidate->program->type->value === 'advocate') {
+                $eligibility = app(AffiliateCustomerEligibilityService::class)->purchasedCustomer($store, $candidate->promoter->email_encrypted);
+                abort_unless($eligibility['eligible'], 422, '仅已核验购买记录的顾客可以成为推荐人。');
+                $verifiedCustomer = $eligibility['customer_id'];
+            }
+        }
+
+        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action, $reason, $verifiedCustomer): AffiliateProgramMembership {
             $membership = AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)
                 ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
             $from = $membership->status->value;
@@ -122,6 +136,7 @@ class AffiliateManagementService
             abort_if($to === 'rejected' && mb_strlen(trim($reason ?? '')) < 3, 422, '请填写拒绝原因。');
             $membership->forceFill([
                 'rejection_reason' => $to === 'rejected' ? trim($reason) : null,
+                'shopify_customer_id' => $verifiedCustomer ?? $membership->shopify_customer_id,
                 'status' => $to,
                 'approved_at' => $to === 'approved' ? now() : $membership->approved_at,
                 'approved_by' => $to === 'approved' ? $actor->id : $membership->approved_by,
@@ -186,7 +201,7 @@ class AffiliateManagementService
                 'customer_discount_type' => $values['coupon_enabled'] ? $values['customer_discount_type'] : null,
                 'customer_discount_rate_basis_points' => $values['coupon_enabled'] && $values['customer_discount_type'] === 'percentage' ? (int) $values['customer_discount_rate_basis_points'] : null,
                 'customer_discount_amount_minor' => $values['coupon_enabled'] && $values['customer_discount_type'] === 'fixed' ? (int) $values['customer_discount_amount_minor'] : null,
-                'settings' => ['customer_scope' => 'store'],
+                'settings' => $this->rewardSettings($organization, $store, $actor, $values, ['customer_scope' => 'store']),
                 'created_by' => $actor->id,
                 'updated_by' => $actor->id,
             ]);
@@ -239,6 +254,20 @@ class AffiliateManagementService
 
             return $promoter;
         });
+    }
+
+    private function rewardSettings(Organization $org, Store $store, User $actor, array $values, array $existing): array
+    {
+        if ($values['type'] !== 'advocate') {
+            return $existing;
+        }
+        $rules = app(AffiliateRewardRules::class);
+        $existing['reward'] = $rules->validate($org, $store, $actor, $values['reward'] ?? $existing['reward'] ?? []);
+        $milestones = $values['milestones'] ?? $existing['milestones'] ?? [];
+        Validator::make(['milestones' => $milestones], ['milestones' => ['array', 'max:20'], 'milestones.*.threshold' => ['required', 'integer', 'between:1,10000', 'distinct'], 'milestones.*.reward' => ['required', 'array']])->validate();
+        $existing['milestones'] = array_map(fn ($m) => ['threshold' => (int) $m['threshold'], 'reward' => $rules->validate($org, $store, $actor, $m['reward'])], $milestones);
+
+        return $existing;
     }
 
     /** @param array<string, mixed>|null $old @param array<string, mixed> $new */

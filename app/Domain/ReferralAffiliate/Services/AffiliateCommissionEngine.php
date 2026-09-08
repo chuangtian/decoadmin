@@ -85,10 +85,20 @@ class AffiliateCommissionEngine
                     'presentment' => $line['presentment'] ?? null]];
         }
 
+        if ($membership->program->type->value === 'advocate') {
+            foreach ($result as &$line) {
+                $line['commission_minor'] = 0;
+            }
+            unset($line);
+            $fixed = [];
+        }
+
         return ['lines' => $result, 'base_minor' => array_sum(array_column($result, 'base_minor')),
             'commission_minor' => array_sum(array_column($result, 'commission_minor')) + array_sum(array_column($fixed, 'amount_minor')),
             'snapshot' => ['engine_version' => '1', 'currency' => $membership->program->currency,
-                'hold_days' => $history['hold_days'] ?? $membership->program->hold_days, 'fixed_order' => array_values($fixed),
+                'hold_days' => $history['hold_days'] ?? $membership->program->hold_days,
+                'reward' => data_get($history['settings'] ?? $membership->program->settings, 'reward'),
+                'milestones' => data_get($history['settings'] ?? $membership->program->settings, 'milestones', []), 'fixed_order' => array_values($fixed),
                 'fixed_refund_policy' => data_get($history['settings'] ?? $membership->program->settings, 'fixed_refund_policy', 'full_refund_only')]];
     }
 }

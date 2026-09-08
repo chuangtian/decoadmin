@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Domain\ReferralAffiliate\Models\AffiliateCoupon;
 use App\Domain\ReferralAffiliate\Services\AffiliateLedgerService;
 use App\Domain\ReferralAffiliate\Services\AffiliateReconciliationService;
+use App\Domain\ReferralAffiliate\Services\AffiliateRewardService;
 use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Jobs\ProcessWebhookEventJob;
 use App\Jobs\SyncAffiliateCoupon;
@@ -27,6 +28,7 @@ class AffiliateMaintenance extends Command
                 app(AffiliateShopGuard::class)->store($store);
                 Cache::lock('affiliate-maintenance:'.config('referral.environment').':'.$store->id, 55)->get(function () use ($store) {
                     app(AffiliateLedgerService::class)->release($store);
+                    app(AffiliateRewardService::class)->tick($store);
                     AffiliateCoupon::query()->forOrganization($store->organization_id)->forStore($store)
                         ->whereIn('status', ['provisioning', 'sync_pending', 'enable_pending', 'disable_pending'])->where('updated_at', '<', now()->subMinutes(5))
                         ->orderBy('id')->limit(100)->get()->each(function ($coupon) {

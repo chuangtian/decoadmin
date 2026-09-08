@@ -2,6 +2,7 @@
 
 namespace App\Domain\ReferralAffiliate\Services;
 
+use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Domain\ReferralAffiliate\Support\Money;
 use App\Exceptions\AffiliateException;
 use App\Models\Store;
@@ -139,7 +140,7 @@ GRAPHQL;
         }
         $attributes = array_column($first['customAttributes'], 'value', 'key');
 
-        return ['id' => $orderId, 'name' => $first['name'], 'ordered_at' => $first['createdAt'], 'updated_at' => $first['updatedAt'],
+        $snapshot = ['id' => $orderId, 'name' => $first['name'], 'ordered_at' => $first['createdAt'], 'updated_at' => $first['updatedAt'],
             'cancelled' => $first['cancelledAt'] !== null, 'is_test' => $first['test'], 'currency' => $currency,
             'paid' => in_array($first['displayFinancialStatus'], ['PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'], true),
             'customer_id' => data_get($first, 'customer.id'),
@@ -148,6 +149,11 @@ GRAPHQL;
             'first_tracking_token' => $attributes['deco_aff_first__'] ?? null,
             'last_tracking_token' => $attributes['deco_aff_last__'] ?? null, 'tracking_token' => $attributes['deco_aff'] ?? $attributes['deco_aff__'] ?? null,
             'lines' => $lines, 'refunds' => $refunds];
+        if ($snapshot['paid'] && $snapshot['customer_id'] && AffiliateStoreSetting::query()->forStore($store)->where('customer_referral_enabled', true)->exists()) {
+            $snapshot['customer_eligibility'] = app(AffiliateCustomerEligibilityService::class)->newCustomer($store, $snapshot['customer_id'], $orderId, $snapshot['ordered_at'], $snapshot['is_test']);
+        }
+
+        return $snapshot;
     }
 
     private function amount(array $money, string $currency): int
