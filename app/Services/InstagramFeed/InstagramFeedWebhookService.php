@@ -176,7 +176,16 @@ class InstagramFeedWebhookService
         $purged = $this->mirror->purgeStoreMedia($store);
         $store->instagramGalleries()->delete();
         $store->instagramAccount()->delete();
-        InstagramFeedInstallation::query()->where('store_id', $store->id)->delete();
+        // 记录保留、只清凭证并标记卸载：后台的「安装店铺」列表要能看到卸载历史，
+        // 硬删会让这条记录连同授权时间一起消失。
+        InstagramFeedInstallation::query()->where('store_id', $store->id)->update([
+            'status' => InstagramFeedInstallation::STATUS_DISCONNECTED,
+            'app_installation_id' => null,
+            'access_token_encrypted' => null,
+            'uninstalled_at' => now(),
+            'last_error' => null,
+            'last_error_at' => null,
+        ]);
 
         return $purged;
     }
