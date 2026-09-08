@@ -3,6 +3,13 @@ services:
     extends:
       file: compose.production.yaml
       service: app
-    command: ["php", "artisan", "queue:work", "redis", "--queue=affiliate", "--sleep=2", "--tries=4", "--timeout=100", "--max-time=3600"]
+    command: ["php", "artisan", "queue:work", "redis", "--queue=affiliate,affiliate-notifications", "--sleep=2", "--tries=4", "--timeout=100", "--max-time=3600"]
+    healthcheck:
+      disable: true
+  affiliate-maintenance:
+    extends:
+      file: compose.production.yaml
+      service: app
+    command: ["php", "artisan", "affiliate:maintenance", "--loop"]
     healthcheck:
       disable: true

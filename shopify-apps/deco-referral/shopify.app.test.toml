@@ -4,7 +4,7 @@ application_url = "https://testadmin.decomkt.com/shopify-app/referral"
 embedded = true
 
 [access_scopes]
-scopes = "read_orders,read_products,write_discounts"
+scopes = "read_orders,read_customers,read_products,write_discounts"
 use_legacy_install_flow = false
 
 [auth]

@@ -5,6 +5,7 @@ namespace App\Domain\ReferralAffiliate\Services;
 use App\Domain\ReferralAffiliate\Models\AffiliateClick;
 use App\Domain\ReferralAffiliate\Models\AffiliateLink;
 use App\Models\Store;
+use Carbon\CarbonInterface;
 use JsonException;
 
 class AffiliateTrackingTokenService
@@ -24,8 +25,9 @@ class AffiliateTrackingTokenService
         return $payload.'.'.$this->encode(hash_hmac('sha256', 'affiliate-tracking-v1|'.$payload, (string) config('app.key'), true));
     }
 
-    public function verify(Store $store, string $token): ?AffiliateClick
+    public function verify(Store $store, string $token, ?CarbonInterface $at = null): ?AffiliateClick
     {
+        $at ??= now();
         app(AffiliateShopGuard::class)->store($store);
         if (strlen($token) > 2048 || count($parts = explode('.', $token)) !== 2) {
             return null;
@@ -45,14 +47,14 @@ class AffiliateTrackingTokenService
             return null;
         }
         if (! is_array($claims) || ($claims['v'] ?? null) !== 1
-            || ! is_int($claims['exp'] ?? null) || $claims['exp'] <= now()->timestamp
+            || ! is_int($claims['exp'] ?? null) || $claims['exp'] <= $at->timestamp
             || ! is_string($claims['click'] ?? null) || ! is_string($claims['membership'] ?? null)) {
             return null;
         }
 
         return AffiliateClick::query()->forOrganization($store->organization_id)->forStore($store)
             ->where('public_id', $claims['click'])
-            ->where('occurred_at', '<=', now())
+            ->where('occurred_at', '<=', $at)
             ->whereHas('membership', fn ($query) => $query
                 ->where('public_id', $claims['membership'])
                 ->where('organization_id', $store->organization_id)->where('store_id', $store->id))

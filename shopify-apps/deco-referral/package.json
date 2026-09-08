@@ -7,9 +7,15 @@
     "extensions/*"
   ],
   "scripts": {
-    "check": "node scripts/validate-project.mjs"
+    "check": "node scripts/validate-project.mjs",
+    "build:portal": "esbuild resources/portal/index.js --bundle --minify --platform=browser --outfile=resources/portal/portal.js",
+    "test:tracking": "node --test scripts/tracking.test.mjs"
   },
-  "dependencies": {},
-  "devDependencies": {},
-  "author": "tianchuang"
+  "dependencies": {
+    "qrcode": "1.5.4"
+  },
+  "author": "tianchuang",
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
 }

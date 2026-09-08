@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\AffiliateController;
+use App\Http\Controllers\AffiliateFinanceController;
+use App\Http\Controllers\AffiliatePortalController;
 use App\Http\Controllers\AffiliateTrackingController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
@@ -53,6 +55,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShopifyAffiliateAppController;
+use App\Http\Controllers\ShopifyAffiliateWebhookController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
@@ -83,10 +86,23 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/api/shopify-app/referral/bootstrap', [ShopifyAffiliateAppController::class, 'bootstrap'])
     ->middleware(['shopify.id-token:referral', 'throttle:20,1'])->name('affiliate.shopify.bootstrap');
+Route::post('/api/shopify-app/referral/webhooks', ShopifyAffiliateWebhookController::class)
+    ->name('affiliate.shopify.webhooks');
 Route::get('/shopify-app/referral', [ShopifyAffiliateAppController::class, 'home'])
     ->name('affiliate.shopify.home');
 Route::get('/shopify-app/referral/manage', [ShopifyAffiliateAppController::class, 'management'])
     ->middleware(['auth', 'verified'])->name('affiliate.shopify.management');
+Route::prefix('/referral-portal')->group(function (): void {
+    Route::get('/portal.js', fn () => response()->file(base_path('shopify-apps/deco-referral/resources/portal/portal.js'), ['Content-Type'=>'application/javascript','Cache-Control'=>'public, max-age=300','X-Content-Type-Options'=>'nosniff']));
+    Route::get('/', [AffiliatePortalController::class, 'index'])->name('affiliate.portal');
+    Route::post('/apply', [AffiliatePortalController::class, 'apply'])->middleware('throttle:5,10');
+    Route::post('/request-login', [AffiliatePortalController::class, 'requestLogin'])->middleware('throttle:5,10');
+    Route::get('/login', [AffiliatePortalController::class, 'login']);
+    Route::post('/session', [AffiliatePortalController::class, 'session'])->middleware('throttle:10,1');
+    Route::post('/logout', [AffiliatePortalController::class, 'logout']);
+    Route::post('/profile', [AffiliatePortalController::class, 'profile'])->middleware('throttle:5,10');
+    Route::get('/assets/{asset}', [AffiliatePortalController::class, 'asset'])->whereUlid('asset');
+});
 
 Route::get('/health', HealthCheckController::class)->name('health');
 Route::get('/r/{link}', AffiliateTrackingController::class)
@@ -676,18 +692,39 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
             ->middleware('permission:affiliate.programs.view')->name('affiliate.programs.index');
         Route::post('/programs', [AffiliateController::class, 'storeProgram'])
             ->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.store');
+        Route::put('/programs/{program}', [AffiliateController::class, 'updateProgram'])->whereUlid('program')->middleware('permission:affiliate.programs.manage')->name('affiliate.programs.update');
+        Route::put('/programs/{program}/rules', [AffiliateController::class, 'rules'])->whereUlid('program')->middleware('permission:affiliate.programs.manage')->name('affiliate.programs.rules');
+        Route::get('/catalog', [AffiliateController::class, 'catalog'])->middleware('permission:affiliate.programs.manage')->name('affiliate.catalog');
         Route::post('/programs/{program}/transition', [AffiliateController::class, 'transitionProgram'])
             ->whereUlid('program')->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.transition');
         Route::get('/promoters', [AffiliateController::class, 'promoters'])
             ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
         Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
             ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
+        Route::post('/conversions/{conversion}/attribute', [\App\Http\Controllers\AffiliateFinanceController::class, 'attribute'])->whereUlid('conversion')->middleware('permission:affiliate.conversions.override')->name('affiliate.conversions.attribute');
+        Route::get('/reports/export', [\App\Http\Controllers\AffiliateFinanceController::class, 'reportCsv'])->middleware('permission:affiliate.reports.export')->name('affiliate.reports.export');
+        Route::post('/promoters/import', [AffiliateController::class, 'importPromoters'])->middleware(['permission:affiliate.promoters.manage','throttle:5,1'])->name('affiliate.promoters.import');
+        Route::put('/notification-templates/{key}', [\App\Http\Controllers\AffiliateMaterialController::class, 'template'])->middleware('permission:affiliate.settings.manage')->name('affiliate.notifications.template');
+        Route::get('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'index'])->middleware('permission:affiliate.promoters.view')->name('affiliate.materials.index');
+        Route::post('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'upload'])->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.upload');
+        Route::delete('/materials/{asset}', [\App\Http\Controllers\AffiliateMaterialController::class, 'remove'])->whereUlid('asset')->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.remove');
+        Route::put('/memberships/{membership}', [AffiliateController::class, 'updateMembership'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage')->name('affiliate.memberships.update');
         Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])
             ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.memberships.transition');
         Route::post('/memberships/{membership}/sync-coupon', [AffiliateController::class, 'syncCoupon'])
             ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:10,1'])->name('affiliate.coupons.sync');
         Route::put('/settings', [AffiliateController::class, 'settings'])
             ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
+        Route::get('/finance/{section}', [AffiliateFinanceController::class, 'index'])
+            ->whereIn('section', ['conversions', 'commissions', 'payouts', 'risks', 'reports'])->name('affiliate.finance.index');
+        Route::post('/finance/reconcile', [AffiliateFinanceController::class, 'reconcile'])->middleware('throttle:10,1')->name('affiliate.finance.reconcile');
+        Route::post('/finance/release', [AffiliateFinanceController::class, 'release'])->middleware('throttle:10,1')->name('affiliate.finance.release');
+        Route::post('/finance/adjust', [AffiliateFinanceController::class, 'adjust'])->middleware('throttle:10,1')->name('affiliate.finance.adjust');
+        Route::post('/finance/risks/{flag}', [AffiliateFinanceController::class, 'review'])->whereUlid('flag')->middleware('throttle:20,1')->name('affiliate.finance.risk');
+        Route::post('/finance/payouts', [AffiliateFinanceController::class, 'createPayout'])->middleware('throttle:10,1')->name('affiliate.finance.payout.create');
+        Route::post('/finance/payouts/{batch}', [AffiliateFinanceController::class, 'payoutTransition'])->whereUlid('batch')->middleware('throttle:10,1')->name('affiliate.finance.payout.transition');
+        Route::get('/finance/payouts/{batch}/csv', [AffiliateFinanceController::class, 'payoutCsv'])->whereUlid('batch')->name('affiliate.finance.payout.csv');
+        Route::get('/finance/payouts/{batch}/proof', [AffiliateFinanceController::class, 'proof'])->whereUlid('batch')->name('affiliate.finance.payout.proof');
     });
 
 Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')

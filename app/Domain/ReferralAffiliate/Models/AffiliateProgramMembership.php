@@ -54,6 +54,6 @@ class AffiliateProgramMembership extends Model
 
     protected function casts(): array
     {
-        return ['status' => MembershipStatus::class, 'shopify_customer_id' => 'string', 'commission_override' => 'array', 'approved_at' => 'datetime', 'suspended_at' => 'datetime'];
+        return ['labels' => 'array', 'application_encrypted' => 'encrypted:array', 'status' => MembershipStatus::class, 'shopify_customer_id' => 'string', 'commission_override' => 'array', 'approved_at' => 'datetime', 'suspended_at' => 'datetime'];
     }
 }

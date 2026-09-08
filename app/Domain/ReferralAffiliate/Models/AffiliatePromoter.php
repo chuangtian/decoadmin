@@ -34,6 +34,6 @@ class AffiliatePromoter extends Model
 
     protected function casts(): array
     {
-        return ['email_encrypted' => 'encrypted', 'tags' => 'array'];
+        return ['email_encrypted' => 'encrypted', 'profile_encrypted' => 'encrypted:array', 'tags' => 'array'];
     }
 }

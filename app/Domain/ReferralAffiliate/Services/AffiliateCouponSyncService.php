@@ -4,6 +4,7 @@ namespace App\Domain\ReferralAffiliate\Services;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateCoupon;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
+use App\Domain\ReferralAffiliate\Support\Money;
 use App\Exceptions\AffiliateException;
 use App\Models\AuditLog;
 use App\Models\Store;
@@ -91,11 +92,9 @@ class AffiliateCouponSyncService
                         abort_unless($rate > 0 && $rate <= 10000, 422);
                         $value = ['percentage' => $rate / 10000];
                     } else {
-                        // The initial pilot supports the store's two-decimal currencies only.
-                        abort_unless(in_array($program->currency, ['USD', 'CAD', 'EUR', 'GBP', 'AUD', 'HKD'], true)
-                            && $program->currency === strtoupper((string) $store->currency)
+                        abort_unless($program->currency === strtoupper((string) $store->currency)
                             && $program->customer_discount_amount_minor > 0, 422);
-                        $value = ['discountAmount' => ['amount' => number_format($program->customer_discount_amount_minor / 100, 2, '.', ''), 'appliesOnEachItem' => false]];
+                        $value = ['discountAmount' => ['amount' => Money::decimal($program->customer_discount_amount_minor, $program->currency), 'appliesOnEachItem' => false]];
                     }
                     $input = ['title' => $title, 'code' => $coupon->code,
                         'startsAt' => $coupon->starts_at->toIso8601String(), 'endsAt' => $program->ends_at?->toIso8601String(),

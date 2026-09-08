@@ -3,12 +3,17 @@
 namespace Tests\Feature;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateClick;
+use App\Domain\ReferralAffiliate\Models\AffiliateLedgerEntry;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
+use App\Domain\ReferralAffiliate\Services\AffiliateAccountingService;
 use App\Domain\ReferralAffiliate\Services\AffiliateAppTokenService;
+use App\Domain\ReferralAffiliate\Services\AffiliateCatalogService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCouponSyncService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
+use App\Domain\ReferralAffiliate\Services\AffiliateManualAttributionService;
+use App\Domain\ReferralAffiliate\Services\AffiliateOrderReader;
 use App\Domain\ReferralAffiliate\Services\AffiliateTrackingTokenService;
 use App\Domain\ReferralAffiliate\Services\ShopifyAffiliateAppService;
 use App\Exceptions\AffiliateException;
@@ -17,6 +22,7 @@ use App\Models\App;
 use App\Models\AppInstallation;
 use App\Models\Organization;
 use App\Models\Permission;
+use App\Models\Product;
 use App\Models\Role;
 use App\Models\ShopifyConnection;
 use App\Models\Store;
@@ -24,8 +30,12 @@ use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
@@ -340,6 +350,130 @@ class AffiliateFoundationTest extends TestCase
         }
         $this->assertCount($count + 1, Http::recorded());
         $this->assertNotNull($coupon->fresh()->last_error);
+    }
+
+    public function test_variant_rules_use_parent_store_and_edits_audit_the_default_commission(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $service = app(AffiliateManagementService::class);
+        $values = ['name' => 'Rules', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 30,
+            'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false];
+        $program = $service->createProgram($organization, $store, $actor, $values);
+        $product = Product::query()->create(['organization_id' => $organization->id, 'store_id' => $store->id, 'shopify_product_id' => '111', 'title' => 'Local product', 'handle' => 'local-product', 'status' => 'active', 'synced_at' => now()]);
+        $variant = $product->variants()->create(['shopify_variant_id' => '222', 'title' => 'Local variant', 'price' => '10.00']);
+        $catalog = app(AffiliateCatalogService::class);
+        $this->assertSame([['id' => 'gid://shopify/ProductVariant/222', 'name' => 'Local variant']], $catalog->search($organization, $store, $actor, 'variant', 'Local'));
+        $rules = [['scope' => 'variant', 'reference' => 'gid://shopify/ProductVariant/222', 'type' => 'percentage', 'basis_points' => 2000, 'exclude' => false]];
+        $service->replaceRules($organization, $store, $actor, $program->public_id, $rules);
+        $this->assertSame(2000, $program->rules()->where('scope', 'variant')->sole()->rate_basis_points);
+        $other = $this->store($organization, $actor, 'Other', 'other-rules.myshopify.com');
+        $product->update(['store_id' => $other->id]);
+        $this->assertSame([], $catalog->search($organization, $store, $actor, 'variant', 'Local'));
+        try {
+            $service->replaceRules($organization, $store, $actor, $program->public_id, $rules);
+            $this->fail('Cross-store variant accepted');
+        } catch (HttpException $e) {
+            $this->assertSame(422, $e->getStatusCode());
+        }
+        $this->assertSame(2000, $program->rules()->where('scope', 'variant')->sole()->rate_basis_points);
+        $values['rate_basis_points'] = 1500;
+        $service->updateProgram($organization, $store, $actor, $program->public_id, $values);
+        $this->assertSame(1500, $program->rules()->where('scope', 'program')->sole()->rate_basis_points);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'affiliate_program_updated', 'subject_id' => $program->id]);
+    }
+
+    public function test_application_can_be_waitlisted_rejected_with_reason_then_approved(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $program = AffiliateProgram::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'name' => 'Review', 'type' => 'affiliate', 'currency' => 'USD']);
+        $svc = app(AffiliateManagementService::class);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Applicant', 'email' => 'applicant@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'waitlist');
+        $this->assertSame('waitlisted', $member->fresh()->status->value);
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'reject', 'Audience does not match');
+        $this->assertSame('rejected', $member->fresh()->status->value);
+        $this->assertSame('Audience does not match', $member->fresh()->rejection_reason);
+        $this->assertDatabaseCount('affiliate_links', 0);
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+        $this->assertSame('approved', $member->fresh()->status->value);
+        $this->assertNull($member->fresh()->rejection_reason);
+        $this->assertDatabaseCount('affiliate_links', 1);
+    }
+
+    public function test_member_override_and_notes_are_store_scoped_and_validated(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $program = AffiliateProgram::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'name' => 'Overrides', 'type' => 'affiliate', 'currency' => 'USD']);
+        $svc = app(AffiliateManagementService::class);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Test', 'email' => 'override@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $url = route('affiliate.memberships.update', [$org, $store, $member->public_id]);
+        $values = ['tier_key' => 'gold', 'labels' => ['partner', 'partner'], 'admin_notes' => 'Reviewed application',
+            'commission_override' => ['commission_type' => 'percentage', 'rate_basis_points' => 2500]];
+        $this->actingAs($actor)->withSession($this->contextSession($org, $store))->put($url, $values)->assertRedirect();
+        $this->assertSame(['partner'], $member->fresh()->labels);
+        $this->assertSame(2500, $member->fresh()->commission_override['rate_basis_points']);
+        $values['commission_override']['rate_basis_points'] = 10001;
+        $this->put($url, $values)->assertSessionHasErrors('commission_override.rate_basis_points');
+        $this->assertSame(2500, $member->fresh()->commission_override['rate_basis_points']);
+    }
+
+    public function test_material_upload_stays_private_and_rejects_executable_content(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        Storage::fake('local');
+        $this->actingAs($actor)->withSession($this->contextSession($org, $store));
+        $url = route('affiliate.materials.upload', [$org, $store]);
+        $this->post($url, ['title' => 'Campaign copy', 'file' => UploadedFile::fake()->createWithContent('copy.txt', 'Share our new campaign')])->assertRedirect();
+        $row = DB::table('affiliate_assets')->sole();
+        $this->assertSame($store->id, $row->store_id);
+        Storage::disk('local')->assertExists($row->path);
+        $this->post($url, ['title' => 'Bad file', 'file' => UploadedFile::fake()->createWithContent('bad.php', '<?php echo 1;')])->assertSessionHasErrors('file');
+        $this->assertDatabaseCount('affiliate_assets', 1);
+        $this->delete(route('affiliate.materials.remove', [$org, $store, $row->public_id]))->assertRedirect();
+        Storage::disk('local')->assertMissing($row->path);
+    }
+
+    public function test_csv_import_is_atomic_and_duplicate_emails_do_not_overwrite_identity(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $program = AffiliateProgram::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'name' => 'CSV', 'type' => 'affiliate', 'currency' => 'USD']);
+        $url = route('affiliate.promoters.import', [$org, $store]);
+        $this->actingAs($actor)->withSession($this->contextSession($org, $store));
+        $this->post($url, ['program' => $program->public_id, 'file' => UploadedFile::fake()->createWithContent('invalid.csv', "name,email\nGood,good@example.invalid\nBad,invalid\n")])->assertSessionHasErrors('file');
+        $this->assertDatabaseCount('affiliate_promoters', 0);
+        $this->post($url, ['program' => $program->public_id, 'file' => UploadedFile::fake()->createWithContent('valid.csv', "name,email\nGood,good@example.invalid\n")])->assertRedirect();
+        $this->post($url, ['program' => $program->public_id, 'file' => UploadedFile::fake()->createWithContent('again.csv', "name,email\nChanged,good@example.invalid\n")])->assertRedirect();
+        $this->assertDatabaseCount('affiliate_promoters', 1);
+        $this->assertSame('Good', AffiliatePromoter::query()->sole()->display_name);
+        $this->assertDatabaseCount('affiliate_program_memberships', 1);
+    }
+
+    public function test_manual_attribution_accounts_for_existing_refunds_and_is_idempotent(): void
+    {
+        [$actor,$org,$store] = $this->context('store-admin');
+        $this->travelTo(now()->startOfSecond());
+        $svc = app(AffiliateManagementService::class);
+        $program = $svc->createProgram($org, $store, $actor, ['name' => 'Manual', 'type' => 'affiliate', 'attribution_model' => 'coupon_wins', 'attribution_window_days' => 30, 'hold_days' => 30, 'commission_type' => 'percentage', 'rate_basis_points' => 1000, 'coupon_enabled' => false]);
+        $svc->createPromoter($org, $store, $actor, ['display_name' => 'Manual test', 'email' => 'manual@example.invalid', 'type' => 'affiliate', 'program_public_id' => $program->public_id]);
+        $member = AffiliateProgramMembership::query()->sole();
+        $svc->transitionMembership($org, $store, $actor, $member->public_id, 'approve');
+        $this->travel(5)->seconds();
+        $order = ['id' => 'gid://shopify/Order/99', 'name' => '#MANUAL', 'ordered_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(), 'paid' => true, 'is_test' => true, 'cancelled' => false, 'currency' => 'USD', 'discount_codes' => [],
+            'lines' => [['id' => 'gid://shopify/LineItem/99', 'quantity' => 2, 'base_minor' => 10000]],
+            'refunds' => [['id' => 'gid://shopify/Refund/99', 'created_at' => now()->toIso8601String(), 'lines' => [['line_id' => 'gid://shopify/LineItem/99', 'quantity' => 1, 'base_minor' => 5000]]]]];
+        $conversion = app(AffiliateAccountingService::class)->reconcile($store, $order);
+        $this->mock(AffiliateOrderReader::class)->shouldReceive('read')->twice()->andReturn($order);
+        $manual = app(AffiliateManualAttributionService::class);
+        $requestId = (string) Str::uuid();
+        $manual->assign($org, $store, $actor, $conversion->public_id, $member->public_id, 'Verified referral proof', $requestId);
+        $manual->assign($org, $store, $actor, $conversion->public_id, $member->public_id, 'Verified referral proof', $requestId);
+        $this->assertSame('manual', $conversion->fresh()->source);
+        $this->assertSame(1000, $conversion->fresh()->commission_minor);
+        $this->assertSame(500, $conversion->fresh()->reversed_minor);
+        $this->assertSame(500, (int) AffiliateLedgerEntry::query()->sum('amount_minor'));
+        $this->assertDatabaseCount('affiliate_ledger_entries', 2);
     }
 
     /** @return array{User, Organization, Store} */

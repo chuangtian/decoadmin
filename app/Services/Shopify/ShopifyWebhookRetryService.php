@@ -49,7 +49,9 @@ class ShopifyWebhookRetryService
             return $locked;
         });
 
-        ProcessWebhookEventJob::dispatch($event->getKey());
+        ProcessWebhookEventJob::dispatch($event->getKey())->onQueue(
+            $event->app?->handle === config('referral.active.handle') ? 'affiliate' : 'shopify-webhook'
+        );
 
         return $event;
     }

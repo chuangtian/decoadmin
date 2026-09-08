@@ -8,12 +8,77 @@ use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
 use App\Models\AuditLog;
 use App\Models\Organization;
+use App\Models\Product;
+use App\Models\ProductCollection;
+use App\Models\ProductVariant;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 class AffiliateManagementService
 {
+    public function updateProgram(Organization $organization, Store $store, User $actor, string $publicId, array $values): AffiliateProgram
+    {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.programs.manage');
+
+        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $values) {
+            $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
+            abort_if($program->status->value === 'archived', 409);
+            app(AffiliateRuleHistory::class)->baseline($program);
+            $old = $program->only(['name', 'attribution_model', 'attribution_window_days', 'hold_days', 'coupon_enabled', 'customer_discount_type', 'customer_discount_rate_basis_points', 'customer_discount_amount_minor', 'settings']);
+            $program->forceFill(array_intersect_key($values, array_flip(array_keys($old))) + ['updated_by' => $actor->id])->save();
+            $rule = $program->rules()->where('scope', 'program')->where('scope_reference', '*')->firstOrFail();
+            $oldRule = $rule->only(['commission_type', 'rate_basis_points', 'amount_minor']);
+            $rule->update(['commission_type' => $values['commission_type'],
+                'rate_basis_points' => $values['commission_type'] === 'percentage' ? $values['rate_basis_points'] : null,
+                'amount_minor' => $values['commission_type'] === 'fixed' ? $values['amount_minor'] : null]);
+            app(AffiliateRuleHistory::class)->record($program);
+            $this->audit($organization, $store, $actor, 'affiliate_program_updated', $program, $old + ['default_rule' => $oldRule], $program->only(array_keys($old)) + ['default_rule' => $rule->only(array_keys($oldRule))]);
+            app(AffiliateCouponDispatchService::class)->dispatch($store, programId: $program->id);
+
+            return $program;
+        });
+    }
+
+    public function replaceRules(Organization $organization, Store $store, User $actor, string $publicId, array $rules): void
+    {
+        $this->guard->actor($organization, $store, $actor, 'affiliate.programs.manage');
+        DB::transaction(function () use ($organization, $store, $actor, $publicId, $rules) {
+            $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
+            abort_if($program->status->value === 'archived', 409);
+            app(AffiliateRuleHistory::class)->baseline($program);
+            $old = $program->rules()->where('scope', '!=', 'program')->get()->toArray();
+            $catalog = [];
+            foreach (['product' => [Product::class, 'shopify_product_id', 'Product'], 'variant' => [ProductVariant::class, 'shopify_variant_id', 'ProductVariant'], 'collection' => [ProductCollection::class, 'shopify_collection_id', 'Collection']] as $scope => [$model,$field,$type]) {
+                $ids = collect($rules)->where('scope', $scope)->pluck('reference')->map(fn ($ref) => basename($ref))->all();
+                $catalog[$scope] = app(AffiliateCatalogService::class)->scopedQuery($scope, $organization, $store)->whereIn($field, $ids)->get()->mapWithKeys(fn ($row) => ['gid://shopify/'.$type.'/'.$row->getAttribute($field) => $row->title])->all();
+            }
+            $program->rules()->where('scope', '!=', 'program')->delete();
+            foreach ($rules as $index => $rule) {
+                abort_unless($rule['scope'] === 'tier' || isset($catalog[$rule['scope']][$rule['reference']]), 422, '请选择本店已同步的商品或系列。');
+                $program->rules()->create(['organization_id' => $organization->id, 'store_id' => $store->id,
+                    'scope' => $rule['scope'], 'scope_reference' => $rule['reference'], 'priority' => $index,
+                    'commission_type' => $rule['type'], 'rate_basis_points' => $rule['type'] === 'percentage' ? $rule['basis_points'] : null,
+                    'amount_minor' => $rule['type'] === 'fixed' ? $rule['amount_minor'] : null, 'enabled' => true,
+                    'settings' => ['label' => $catalog[$rule['scope']][$rule['reference']] ?? $rule['reference'], 'exclude' => (bool) ($rule['exclude'] ?? false), 'fixed_mode' => $rule['fixed_mode'] ?? 'order']]);
+            }
+            app(AffiliateRuleHistory::class)->record($program);
+            $this->audit($organization, $store, $actor, 'affiliate_rules_updated', $program, ['rules' => $old], ['rules' => $rules]);
+        });
+    }
+
+    public function updateMembership(Organization $org, Store $store, User $actor, string $publicId, array $values): void
+    {
+        $this->guard->actor($org, $store, $actor, 'affiliate.promoters.manage');
+        DB::transaction(function () use ($org, $store, $actor, $publicId, $values) {
+            $member = AffiliateProgramMembership::query()->forOrganization($org)->forStore($store)->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
+            $old = $member->only(['tier_key', 'commission_override', 'labels']);
+            $member->forceFill(['tier_key' => $values['tier_key'] ?? null, 'commission_override' => $values['commission_override'] ?? null,
+                'labels' => array_values(array_unique($values['labels'] ?? [])), 'admin_notes' => $values['admin_notes'] ?? null])->save();
+            $this->audit($org, $store, $actor, 'affiliate_membership_updated', $member, $old, $member->only(array_keys($old)));
+        });
+    }
+
     public function __construct(private AffiliateAssetService $assets, private AffiliateShopGuard $guard) {}
 
     public function transitionProgram(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgram
@@ -38,21 +103,25 @@ class AffiliateManagementService
         });
     }
 
-    public function transitionMembership(Organization $organization, Store $store, User $actor, string $publicId, string $action): AffiliateProgramMembership
+    public function transitionMembership(Organization $organization, Store $store, User $actor, string $publicId, string $action, ?string $reason = null): AffiliateProgramMembership
     {
         $this->guard->actor($organization, $store, $actor, 'affiliate.promoters.manage');
 
-        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action): AffiliateProgramMembership {
+        return DB::transaction(function () use ($organization, $store, $actor, $publicId, $action, $reason): AffiliateProgramMembership {
             $membership = AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)
                 ->where('public_id', $publicId)->lockForUpdate()->firstOrFail();
             $from = $membership->status->value;
             $to = match ($action) {
-                'approve' => in_array($from, ['pending', 'waitlisted', 'suspended'], true) ? 'approved' : null,
+                'approve' => in_array($from, ['pending', 'waitlisted', 'suspended', 'rejected'], true) ? 'approved' : null,
                 'suspend' => $from === 'approved' ? 'suspended' : null,
+                'reject' => in_array($from, ['pending', 'waitlisted'], true) ? 'rejected' : null,
+                'waitlist' => $from === 'pending' ? 'waitlisted' : null,
                 default => null,
             };
             abort_unless($to !== null, 409, '当前推广者状态不允许执行此操作。');
+            abort_if($to === 'rejected' && mb_strlen(trim($reason ?? '')) < 3, 422, '请填写拒绝原因。');
             $membership->forceFill([
+                'rejection_reason' => $to === 'rejected' ? trim($reason) : null,
                 'status' => $to,
                 'approved_at' => $to === 'approved' ? now() : $membership->approved_at,
                 'approved_by' => $to === 'approved' ? $actor->id : $membership->approved_by,
@@ -63,6 +132,9 @@ class AffiliateManagementService
             } else {
                 $membership->link()->update(['status' => 'disabled']);
                 $membership->coupon()->whereIn('status', ['provisioning', 'active'])->update(['status' => 'disable_pending']);
+            }
+            if (in_array($to, ['approved', 'rejected'], true)) {
+                app(AffiliateNotificationService::class)->intent($membership, 'promoter.'.($to === 'approved' ? 'approved' : 'rejected'), 'membership:'.$membership->public_id.':'.$to.':'.$membership->updated_at->timestamp);
             }
             $this->audit($organization, $store, $actor, 'affiliate_membership_status_changed', $membership, ['status' => $from], ['status' => $to]);
             app(AffiliateCouponDispatchService::class)->dispatch($store, membershipId: $membership->id);
@@ -129,6 +201,7 @@ class AffiliateManagementService
                 'enabled' => true,
                 'settings' => ['base' => 'net_product_subtotal'],
             ]);
+            app(AffiliateRuleHistory::class)->record($program);
             $this->audit($organization, $store, $actor, 'affiliate_program_created', $program, null, ['public_id' => $program->public_id, 'name' => $program->name]);
 
             return $program;
@@ -147,16 +220,11 @@ class AffiliateManagementService
                 'organization_id' => $organization->id,
                 'email_hash' => $emailHash,
             ]);
-            $promoter->fill([
-                'email_encrypted' => $email,
-                'display_name' => trim((string) $values['display_name']),
-                'type' => $values['type'],
-                'status' => 'active',
-                'created_by' => $promoter->created_by ?: $actor->id,
-                'updated_by' => $actor->id,
-            ]);
-            $promoter->deleted_at = null;
-            $promoter->save();
+            abort_if($promoter->exists && $promoter->trashed(), 409, '该组织推广者已归档，请由组织管理员处理。');
+            if (! $promoter->exists) {
+                $promoter->fill(['email_encrypted' => $email, 'display_name' => trim((string) $values['display_name']),
+                    'type' => $values['type'], 'status' => 'active', 'created_by' => $actor->id, 'updated_by' => $actor->id])->save();
+            }
 
             $program = AffiliateProgram::query()->forOrganization($organization)->forStore($store)
                 ->where('public_id', $values['program_public_id'])->firstOrFail();

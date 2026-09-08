@@ -2,11 +2,10 @@
 
 namespace App\Domain\ReferralAffiliate\Services;
 
-use App\Domain\ReferralAffiliate\Enums\MembershipStatus;
-use App\Domain\ReferralAffiliate\Enums\ProgramStatus;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliateStoreSetting;
+use App\Domain\ReferralAffiliate\Support\Money;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Models\User;
@@ -26,7 +25,7 @@ class AffiliateWorkspaceService
             ->forOrganization($organization)->forStore($store)->first();
         $programs = AffiliateProgram::query()
             ->forOrganization($organization)->forStore($store)
-            ->withCount('memberships')->latest()->limit(100)->get();
+            ->with('rules')->withCount('memberships')->latest()->limit(100)->get();
         $memberships = AffiliateProgramMembership::query()
             ->forOrganization($organization)->forStore($store)
             ->with([
@@ -39,6 +38,7 @@ class AffiliateWorkspaceService
 
         return [
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
+            'currency_decimals' => Money::decimals(strtoupper($store->currency ?: 'USD')),
             'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => strtoupper((string) ($store->currency ?: 'USD'))],
             'section' => $section,
             'settings' => $settings?->only(['affiliate_enabled', 'customer_referral_enabled']) ?? [
@@ -46,12 +46,12 @@ class AffiliateWorkspaceService
                 'customer_referral_enabled' => false,
             ],
             'stats' => [
-                'programs' => $programs->count(),
-                'active_programs' => $programs->filter(fn (AffiliateProgram $program): bool => $program->status === ProgramStatus::Active)->count(),
-                'promoters' => $memberships->pluck('promoter_id')->unique()->count(),
-                'pending_memberships' => $memberships->filter(fn (AffiliateProgramMembership $membership): bool => $membership->status === MembershipStatus::Pending)->count(),
+                'programs' => AffiliateProgram::query()->forOrganization($organization)->forStore($store)->count(),
+                'active_programs' => AffiliateProgram::query()->forOrganization($organization)->forStore($store)->where('status', 'active')->count(),
+                'promoters' => AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)->distinct()->count('promoter_id'),
+                'pending_memberships' => AffiliateProgramMembership::query()->forOrganization($organization)->forStore($store)->where('status', 'pending')->count(),
             ],
-            'programs' => $programs->map(fn (AffiliateProgram $program): array => [
+            'programs' => ($actor->hasPermission('affiliate.programs.view', $organization, $store) ? $programs : collect())->map(fn (AffiliateProgram $program): array => [
                 'public_id' => $program->public_id,
                 'name' => $program->name,
                 'type' => $program->type->value,
@@ -64,11 +64,15 @@ class AffiliateWorkspaceService
                 'customer_discount_type' => $program->customer_discount_type,
                 'customer_discount_rate_basis_points' => $program->customer_discount_rate_basis_points,
                 'customer_discount_amount_minor' => $program->customer_discount_amount_minor,
+                'default_rule' => $program->rules->firstWhere('scope', 'program')?->only(['commission_type', 'rate_basis_points', 'amount_minor']),
+                'rules' => $program->rules->where('scope', '!=', 'program')->map(fn ($r) => ['label' => data_get($r->settings, 'label', $r->scope_reference), 'scope' => $r->scope, 'reference' => $r->scope_reference, 'type' => $r->commission_type, 'basis_points' => $r->rate_basis_points, 'amount_minor' => $r->amount_minor, 'exclude' => (bool) data_get($r->settings, 'exclude', false), 'fixed_mode' => data_get($r->settings, 'fixed_mode', 'order')])->values(),
                 'memberships_count' => $program->memberships_count,
                 'created_at' => $program->created_at?->toIso8601String(),
             ])->values(),
-            'memberships' => $memberships->map(fn (AffiliateProgramMembership $membership): array => [
+            'memberships' => ($actor->hasPermission('affiliate.promoters.view', $organization, $store) ? $memberships : collect())->map(fn (AffiliateProgramMembership $membership): array => [
                 'public_id' => $membership->public_id,
+                'tier_key' => $membership->tier_key, 'commission_override' => $membership->commission_override, 'labels' => $membership->labels ?? [],
+                'admin_notes' => $membership->admin_notes, 'application' => $membership->application_encrypted, 'rejection_reason' => $membership->rejection_reason,
                 'status' => $membership->status->value,
                 'program' => $membership->program?->only(['public_id', 'name']),
                 'promoter' => [

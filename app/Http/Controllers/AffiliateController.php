@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
+use App\Domain\ReferralAffiliate\Services\AffiliateCatalogService;
 use App\Domain\ReferralAffiliate\Services\AffiliateCouponDispatchService;
+use App\Domain\ReferralAffiliate\Services\AffiliateImportService;
 use App\Domain\ReferralAffiliate\Services\AffiliateManagementService;
 use App\Domain\ReferralAffiliate\Services\AffiliateShopGuard;
 use App\Domain\ReferralAffiliate\Services\AffiliateWorkspaceService;
@@ -63,7 +65,15 @@ class AffiliateController extends Controller
     public function storeProgram(Request $request, Organization $organization, Store $store): RedirectResponse
     {
         $this->assertScope($request, $organization, $store, 'affiliate.programs.manage');
-        $values = $request->validate([
+        $values = $this->validateProgram($request);
+        $this->management->createProgram($organization, $store, $request->user(), $values);
+
+        return back()->with('success', '推广计划已创建。');
+    }
+
+    private function validateProgram(Request $request): array
+    {
+        return $request->validate([
             'name' => ['required', 'string', 'max:120', 'regex:/\S/u'],
             'type' => ['required', Rule::in(['affiliate', 'influencer', 'ambassador', 'advocate', 'partner'])],
             'attribution_model' => ['required', Rule::in(['coupon_wins', 'last_click', 'first_click'])],
@@ -77,9 +87,62 @@ class AffiliateController extends Controller
             'customer_discount_rate_basis_points' => ['nullable', 'integer', 'between:1,10000', 'required_if:customer_discount_type,percentage'],
             'customer_discount_amount_minor' => ['nullable', 'integer', 'between:1,1000000000', 'required_if:customer_discount_type,fixed'],
         ]);
-        $this->management->createProgram($organization, $store, $request->user(), $values);
+    }
 
-        return back()->with('success', '推广计划已创建。');
+    public function updateProgram(Request $request, Organization $organization, Store $store, string $program): RedirectResponse
+    {
+        $this->assertScope($request, $organization, $store, 'affiliate.programs.manage');
+        $this->management->updateProgram($organization, $store, $request->user(), $program, $this->validateProgram($request));
+
+        return back()->with('success', '计划已更新；已产生订单的佣金快照保持不变。');
+    }
+
+    public function rules(Request $request, Organization $organization, Store $store, string $program): RedirectResponse
+    {
+        $this->assertScope($request, $organization, $store, 'affiliate.programs.manage');
+        $v = $request->validate(['rules' => ['present', 'array', 'max:100'], 'rules.*.scope' => ['required', 'in:variant,product,collection,tier'],
+            'rules.*.reference' => ['required', 'string', 'max:255'], 'rules.*.type' => ['required', 'in:percentage,fixed'],
+            'rules.*.basis_points' => ['nullable', 'integer', 'between:0,10000'], 'rules.*.amount_minor' => ['nullable', 'integer', 'between:0,1000000000'],
+            'rules.*.exclude' => ['boolean'], 'rules.*.fixed_mode' => ['in:order,item']]);
+        foreach ($v['rules'] as $rule) {
+            abort_unless(isset($rule[$rule['type'] === 'percentage' ? 'basis_points' : 'amount_minor']), 422);
+            if ($rule['scope'] !== 'tier') {
+                abort_unless(preg_match('~^gid://shopify/(ProductVariant|Product|Collection)/[0-9]+$~D', $rule['reference']) === 1, 422);
+            }
+        }
+        $this->management->replaceRules($organization, $store, $request->user(), $program, $v['rules']);
+
+        return back()->with('success', '商品规则已保存。');
+    }
+
+    public function catalog(Request $request, Organization $organization, Store $store)
+    {
+        $v = $request->validate(['scope' => ['required', 'in:product,variant,collection'], 'q' => ['nullable', 'string', 'max:100']]);
+
+        return response()->json(['data' => app(AffiliateCatalogService::class)->search($organization, $store, $request->user(), $v['scope'], $v['q'] ?? '')]);
+    }
+
+    public function updateMembership(Request $request, Organization $organization, Store $store, string $membership): RedirectResponse
+    {
+        $this->assertScope($request, $organization, $store, 'affiliate.promoters.manage');
+        $values = $request->validate(['tier_key' => ['nullable', 'string', 'max:64'], 'admin_notes' => ['nullable', 'string', 'max:4000'],
+            'labels' => ['present', 'array', 'max:20'], 'labels.*' => ['string', 'max:50'],
+            'commission_override' => ['nullable', 'array:commission_type,rate_basis_points,amount_minor,settings'],
+            'commission_override.commission_type' => ['required_with:commission_override', 'in:percentage,fixed'],
+            'commission_override.rate_basis_points' => ['nullable', 'required_if:commission_override.commission_type,percentage', 'integer', 'between:0,10000'],
+            'commission_override.amount_minor' => ['nullable', 'required_if:commission_override.commission_type,fixed', 'integer', 'between:0,1000000000'],
+            'commission_override.settings' => ['nullable', 'array:fixed_mode'], 'commission_override.settings.fixed_mode' => ['in:order,item']]);
+        $this->management->updateMembership($organization, $store, $request->user(), $membership, $values);
+
+        return back()->with('success', '推广者资料已更新。');
+    }
+
+    public function importPromoters(Request $r, Organization $organization, Store $store): RedirectResponse
+    {
+        $v = $r->validate(['program' => ['required', 'string', 'size:26'], 'file' => ['required', 'file', 'max:1024']]);
+        $count = app(AffiliateImportService::class)->import($organization, $store, $r->user(), $v['program'], $r->file('file')->getRealPath());
+
+        return back()->with('success', '已新增 '.$count.' 位待审核推广者，重复记录已跳过。');
     }
 
     public function storePromoter(Request $request, Organization $organization, Store $store): RedirectResponse
@@ -108,10 +171,10 @@ class AffiliateController extends Controller
     public function transitionMembership(Request $request, Organization $organization, Store $store, string $membership): RedirectResponse
     {
         $this->assertScope($request, $organization, $store, 'affiliate.promoters.manage');
-        $values = $request->validate(['action' => ['required', Rule::in(['approve', 'suspend'])]]);
-        $this->management->transitionMembership($organization, $store, $request->user(), $membership, $values['action']);
+        $values = $request->validate(['action' => ['required', Rule::in(['approve', 'suspend', 'reject', 'waitlist'])], 'reason' => ['nullable', 'required_if:action,reject', 'string', 'min:3', 'max:1000']]);
+        $this->management->transitionMembership($organization, $store, $request->user(), $membership, $values['action'], $values['reason'] ?? null);
 
-        return back()->with('success', $values['action'] === 'approve' ? '推广者已通过审核。' : '推广者已暂停。');
+        return back()->with('success', '推广者审核状态已更新。');
     }
 
     private function assertScope(Request $request, Organization $organization, Store $store, string $permission): void
