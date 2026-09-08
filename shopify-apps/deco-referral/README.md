@@ -26,4 +26,8 @@ Only `macfox-test-app.myshopify.com` may be used for backend and Shopify testing
 
 App credentials use environment-specific `REFERRAL_LOCAL_CLIENT_ID`, `REFERRAL_LOCAL_CLIENT_SECRET`, `REFERRAL_TEST_CLIENT_ID`, and `REFERRAL_TEST_CLIENT_SECRET` secret configuration. No cross-environment fallback is allowed. Each installation and registered App must match `referral.environment`; the registered App must have `settings.managed_by = referral_config`. Token refresh updates only the matching Referral installation and never falls back to the Commerce Hub token.
 
-Shopify installation/bootstrap and discount synchronization are not yet connected. The coupon records remain pending and cannot currently be redeemed in Shopify.
+The backend installation bootstrap endpoint is implemented at `POST /api/shopify-app/referral/bootstrap`. It requires a verified Referral App identity token, exchanges it for an independent offline token, verifies Shopify's returned shop identity and scopes, and records only the matching Referral installation. The test App's own credentials must be configured before real installation can be verified.
+
+Discount synchronization is not yet implemented. Coupon records remain pending and cannot currently be redeemed in Shopify. Checkout attribution, paid-order processing, commission/refund ledgers, payouts, and the customer portal are also unfinished.
+
+The current backend foundation was deployed to staging on 2026-09-08. See [the staging verification record](docs/staging-2026-09-08.md).
