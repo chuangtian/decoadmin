@@ -217,6 +217,30 @@ try {
     $assert($auto->memberships()->count() === 1, 'post_purchase_invitation_deduplicated');
     $autoMember = $auto->memberships()->sole();
     $autoIntent = AffiliateNotificationIntent::query()->where('membership_id', $autoMember->id)->where('event_key', 'customer.invited')->sole();
+    foreach (['accepted', 'expired', 'replaced', 'missing', 'other_member'] as $case) {
+        DB::beginTransaction();
+        try {
+            $queued = $autoIntent->replicate();
+            $queued->forceFill(['dedupe_key' => 'TEST-invitation-lifecycle:'.$case.':'.$autoMember->id])->save();
+            $invitation = DB::table('affiliate_invitations')->where('store_id', $store->id)->where('membership_id', $autoMember->id);
+            if ($case === 'accepted') {
+                $invitation->update(['accepted_at' => now()]);
+            } elseif ($case === 'expired') {
+                $invitation->update(['expires_at' => now()->subSecond()]);
+            } elseif ($case === 'replaced') {
+                app(\App\Domain\ReferralAffiliate\Services\AffiliateInvitationService::class)->issue($org, $store, $actor, $autoMember->public_id);
+            } elseif ($case === 'missing') {
+                $invitation->delete();
+            } else {
+                $invitation->update(['membership_id' => $member->id]);
+            }
+            $notifications->send($queued->id);
+            $notifications->send($queued->id);
+            $assert($queued->fresh()->status === 'suppressed' && $queued->fresh()->message_encrypted === [], 'invitation_link_stopped_'.$case);
+        } finally {
+            DB::rollBack();
+        }
+    }
     $notifications->send($autoIntent->id);
     $assert($autoIntent->fresh()->status === 'sent', 'invitation_rendered_into_memory_transport');
     foreach (['template', 'store_setting', 'program_paused', 'auto_invite', 'member_rejected', 'promoter_disabled'] as $case) {

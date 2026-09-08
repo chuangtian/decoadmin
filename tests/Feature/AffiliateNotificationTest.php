@@ -10,10 +10,12 @@ use App\Domain\ReferralAffiliate\Services\AffiliateInvitationOrderReader;
 use App\Domain\ReferralAffiliate\Services\AffiliateNotificationService;
 use App\Jobs\SendAffiliateNotification;
 use App\Models\Organization;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -147,6 +149,52 @@ class AffiliateNotificationTest extends TestCase
         $this->assertSame('suppressed', $intent->fresh()->status);
         $this->assertSame([], $intent->fresh()->message_encrypted);
         $this->assertCount(0, Mail::mailer('array')->getSymfonyTransport()->messages());
+    }
+
+    public static function invitationLifecycleCases(): array
+    {
+        return array_map(fn ($case) => [$case], ['valid', 'accepted', 'expired', 'replaced', 'missing', 'other_member']);
+    }
+
+    #[DataProvider('invitationLifecycleCases')]
+    public function test_queued_invitation_only_sends_its_own_unexpired_unused_link(string $case): void
+    {
+        Queue::fake();
+        config(['mail.default' => 'array']);
+        $member = $this->member();
+        $member->forceFill(['status' => 'pending', 'application_encrypted' => ['source_order_id' => 'gid://shopify/Order/80']])->save();
+        $member->program->update(['type' => 'advocate', 'status' => 'active', 'settings' => ['auto_invite' => true]]);
+        AffiliateStoreSetting::query()->create(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'customer_referral_enabled' => true]);
+        DB::table('affiliate_message_templates')->insert(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'key' => 'customer.invited', 'subject' => 'Invite', 'body' => '{invitation_url}', 'enabled' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        $token = str_repeat('b', 64);
+        $row = ['created_by' => User::factory()->create()->id, 'organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'membership_id' => $member->id, 'token_hash' => hash('sha256', $token), 'expires_at' => now()->addDays(7), 'created_at' => now(), 'updated_at' => now()];
+        $inviteId = DB::table('affiliate_invitations')->insertGetId($row);
+        $service = app(AffiliateNotificationService::class);
+        $intent = $service->intent($member, 'customer.invited', 'lifecycle:'.$case, ['invitation_url' => url('/referral-portal/invitation').'#token='.$token]);
+        if ($case === 'accepted') {
+            DB::table('affiliate_invitations')->where('id', $inviteId)->update(['accepted_at' => now()]);
+        } elseif (in_array($case, ['expired', 'replaced'], true)) {
+            DB::table('affiliate_invitations')->where('id', $inviteId)->update(['expires_at' => now()->subSecond()]);
+            if ($case === 'replaced') {
+                DB::table('affiliate_invitations')->insert(array_replace($row, ['token_hash' => hash('sha256', str_repeat('c', 64))]));
+            }
+        } elseif ($case === 'missing') {
+            DB::table('affiliate_invitations')->where('id', $inviteId)->delete();
+        } elseif ($case === 'other_member') {
+            $other = $member->replicate();
+            $other->public_id = (string) Str::ulid();
+            $other->program_id = AffiliateProgram::query()->create(['organization_id' => $member->organization_id, 'store_id' => $member->store_id, 'name' => 'Other program', 'type' => 'advocate', 'currency' => 'USD'])->id;
+            $other->save();
+            DB::table('affiliate_invitations')->where('id', $inviteId)->update(['membership_id' => $other->id]);
+        }
+        $this->mock(AffiliateInvitationOrderReader::class)->shouldReceive('eligibleContact')->zeroOrMoreTimes()->andReturn(['email' => 'mail@example.invalid']);
+        $service->send($intent->id);
+        $service->send($intent->id);
+        $this->assertSame($case === 'valid' ? 'sent' : 'suppressed', $intent->fresh()->status);
+        $this->assertCount($case === 'valid' ? 1 : 0, Mail::mailer('array')->getSymfonyTransport()->messages());
+        if ($case !== 'valid') {
+            $this->assertSame([], $intent->fresh()->message_encrypted);
+        }
     }
 
     private function member(): AffiliateProgramMembership

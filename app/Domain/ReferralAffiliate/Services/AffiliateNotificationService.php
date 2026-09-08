@@ -67,13 +67,13 @@ class AffiliateNotificationService
         $variables = ['{name}' => $member->promoter->display_name, '{program}' => $member->program->name];
         if ($event === 'customer.invited') {
             $url = (string) ($context['invitation_url'] ?? '');
-            abort_unless(str_starts_with($url, url('/referral-portal/invitation').'#token=') && preg_match('/[a-f0-9]{64}$/D', $url), 422);
+            abort_unless(preg_match('/^'.preg_quote(url('/referral-portal/invitation').'#token=', '/').'[a-f0-9]{64}$/D', $url), 422);
             $variables['{invitation_url}'] = $url;
         }
         $intent = AffiliateNotificationIntent::query()->firstOrCreate(['store_id' => $member->store_id, 'dedupe_key' => $dedupe], [
             'organization_id' => $member->organization_id, 'membership_id' => $member->id, 'event_key' => $event, 'template_version' => $template->version ?? 1,
             'recipient_hash' => $member->promoter->email_hash, 'status' => ($template->enabled ?? false) ? 'queued' : 'suppressed',
-            'message_encrypted' => ['to' => $member->promoter->email_encrypted, 'subject' => strtr($template->subject ?? $subject, $variables), 'body' => strtr($template->body ?? $body, $variables)]]);
+            'message_encrypted' => ['to' => $member->promoter->email_encrypted, 'subject' => strtr($template->subject ?? $subject, $variables), 'body' => strtr($template->body ?? $body, $variables)] + ($event === 'customer.invited' ? ['invitation_token_hash' => hash('sha256', substr($url, -64))] : [])]);
         if ($intent->wasRecentlyCreated && $intent->status === 'queued') {
             SendAffiliateNotification::dispatch($intent->id)->afterCommit();
         }
@@ -111,6 +111,16 @@ class AffiliateNotificationService
                     || $member->promoter?->status !== 'active' || $member->program?->status->value !== 'active'
                     || ! data_get($member->program->settings, 'auto_invite', false)) {
                     $record->update(['status' => 'suppressed', 'message_encrypted' => [], 'error_summary' => '自动邀请已停用或推广者状态已变更。']);
+
+                    return;
+                }
+                $invitationHash = data_get($record->message_encrypted, 'invitation_token_hash');
+                $usableInvitation = is_string($invitationHash) && DB::table('affiliate_invitations')
+                    ->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->where('membership_id', $member->id)->where('token_hash', $invitationHash)
+                    ->whereNull('accepted_at')->where('expires_at', '>', now())->exists();
+                if (! $usableInvitation) {
+                    $record->update(['status' => 'suppressed', 'message_encrypted' => [], 'error_summary' => '邀请链接已使用、失效或无法核验，请重新邀请。']);
 
                     return;
                 }
