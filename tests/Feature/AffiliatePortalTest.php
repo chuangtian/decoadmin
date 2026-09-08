@@ -81,7 +81,7 @@ class AffiliatePortalTest extends TestCase
         $this->withoutMiddleware(ConfigureAffiliatePortalSession::class);
         [$store, $member] = $this->context();
         $this->withSession(['affiliate_member' => $member->id, 'affiliate_verified_at' => now()->timestamp])
-            ->from('/referral-portal')->post('/referral-portal/profile', ['country' => 'Test', 'payment_method' => 'bank', 'payment_reference' => 'TEST-NO-TRANSFER'])->assertRedirect('/referral-portal');
+            ->from('/referral-portal')->post('/referral-portal/profile', ['country' => 'Test', 'payment_method' => 'bank', 'payment_reference' => 'TEST-NO-TRANSFER'])->assertRedirect('/referral-portal#profile');
         $this->assertSame('bank', data_get($member->promoter->fresh()->profile_encrypted, 'payment_method'));
         $html = $this->get('/referral-portal')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('/<option value="bank"[^>]*selected/', $html);
@@ -103,6 +103,27 @@ class AffiliatePortalTest extends TestCase
         $this->assertNull(DB::table('affiliate_invitations')->value('accepted_at'));
         $this->post('/referral-portal/invitation', ['token' => $token, 'terms' => '1', 'website' => 'https://example.com'])->assertRedirect('/referral-portal');
         $this->assertNotNull(DB::table('affiliate_invitations')->value('accepted_at'));
+    }
+
+    public function test_profile_without_referrer_returns_to_profile_even_after_script_request(): void
+    {
+        $this->withoutMiddleware(ConfigureAffiliatePortalSession::class);
+        [$store, $member] = $this->context();
+        $this->withSession(['affiliate_member' => $member->id, 'affiliate_verified_at' => now()->timestamp, '_previous' => ['url' => url('/referral-portal/portal.js')]])
+            ->post('/referral-portal/profile', ['country' => 'TEST', 'payment_method' => 'bank', 'payment_reference' => 'TEST ONLY'])
+            ->assertRedirect('/referral-portal#profile');
+        $this->withSession(['_previous' => ['url' => url('/referral-portal/portal.js')]])
+            ->post('/referral-portal/profile', ['payment_method' => 'bad', 'payment_reference' => 'TEST'])
+            ->assertRedirect('/referral-portal#profile')->assertSessionHasErrors('payment_method');
+    }
+
+    public function test_used_invitation_has_actionable_html_error_without_changing_json_status(): void
+    {
+        $this->context();
+        $values = ['token' => str_repeat('a', 64), 'terms' => '1'];
+        $this->post('/referral-portal/invitation', $values)->assertStatus(410)
+            ->assertSee('邀请已使用或失效')->assertSee('返回推广者门户')->assertDontSee('Something is broken');
+        $this->postJson('/referral-portal/invitation', $values)->assertStatus(410);
     }
 
     private function context(): array

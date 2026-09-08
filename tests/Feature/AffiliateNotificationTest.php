@@ -197,6 +197,21 @@ class AffiliateNotificationTest extends TestCase
         }
     }
 
+    public function test_referral_mail_does_not_inherit_another_apps_sender_name(): void
+    {
+        Queue::fake();
+        config(['mail.default' => 'array', 'mail.from.address' => 'test@example.invalid', 'mail.from.name' => 'Student Discount']);
+        $member = $this->member();
+        $service = app(AffiliateNotificationService::class);
+        $intent = $service->intent($member, 'conversion.created', 'login:branding');
+        $intent->update(['event_key' => 'portal.login', 'status' => 'queued']);
+        $service->send($intent->id);
+        $message = Mail::mailer('array')->getSymfonyTransport()->messages()->sole()->getOriginalMessage();
+        $this->assertSame('Deco Referral', $message->getFrom()[0]->getName());
+        $this->assertSame('test@example.invalid', $message->getFrom()[0]->getAddress());
+        $this->assertSame('Student Discount', config('mail.from.name'));
+    }
+
     private function member(): AffiliateProgramMembership
     {
         $org = Organization::query()->create(['name' => 'Mail test', 'code' => 'mail-test']);

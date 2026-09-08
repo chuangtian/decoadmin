@@ -138,7 +138,7 @@ class AffiliateNotificationService
             $record->increment('attempts');
             $message = $record->message_encrypted;
             try {
-                $sent = Mail::raw($message['body'], fn ($mail) => $mail->to($message['to'])->subject($message['subject']));
+                $sent = Mail::raw($message['body'], fn ($mail) => $mail->from((string) config('mail.from.address'), 'Deco Referral')->to($message['to'])->subject($message['subject']));
                 $record->update(['status' => 'sent', 'sent_at' => now(), 'provider_id' => $sent?->getMessageId(), 'error_summary' => null]);
             } catch (\Throwable $e) {
                 $record->update(['status' => 'failed', 'error_summary' => '邮件发送失败，请检查发送服务。']);
