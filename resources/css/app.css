@@ -40,6 +40,13 @@
     }
 }
 
+@layer components {
+    /* Let wide tables scroll inside cards instead of widening implicit grid tracks. */
+    .app-content-density .grid > * {
+        min-width: 0;
+    }
+}
+
 /*
  * Balanced compact density for authenticated page content.
  * Large layout gaps are halved while card padding, controls, table rows,

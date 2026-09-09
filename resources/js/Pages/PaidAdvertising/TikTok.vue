@@ -109,7 +109,7 @@ const busy = computed(() => syncing.value || ['pending', 'syncing', 'backfilling
 const selectedAccount = computed(() => overview.value?.accounts.find((item) => item.id === filters.value.account));
 
 const trendChart = computed(() => {
-    const width = 760, height = 330, left = 58, right = 56, top = 42, bottom = 48;
+    const width = 760, height = 330, left = 88, right = 96, top = 64, bottom = 48;
     const plotWidth = width - left - right, plotHeight = height - top - bottom;
     const current = overview.value?.trend ?? [], previous = overview.value?.previous_trend ?? [];
     const amountMax = Math.max(1, ...current.map(p => p.spend), ...previous.map(p => p.spend)) * 1.12;

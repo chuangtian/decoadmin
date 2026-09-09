@@ -218,9 +218,9 @@ const campaignColumns: Array<{ key: GoogleCampaignSortKey; label: string; format
 const trendChart = computed(() => {
     const width = 760;
     const height = 330;
-    const left = 62;
-    const right = 54;
-    const top = 42;
+    const left = 128;
+    const right = 112;
+    const top = 72;
     const bottom = 52;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
@@ -257,9 +257,9 @@ const activeTrendPoint = computed(() => hoveredTrendIndex.value === null ? null 
 const ctrChart = computed(() => {
     const width = 680;
     const height = 300;
-    const left = 52;
-    const right = 24;
-    const top = 28;
+    const left = 104;
+    const right = 40;
+    const top = 36;
     const bottom = 44;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;

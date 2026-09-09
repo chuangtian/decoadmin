@@ -17,7 +17,7 @@ const props = defineProps<{
 
 const width = 920;
 const height = 300;
-const inset = { left: 58, right: 22, top: 24, bottom: 42 };
+const inset = { left: 140, right: 32, top: 32, bottom: 42 };
 const values = computed(() => [...props.current, ...props.previous].map((point) => Number(point[props.metric] || 0)));
 const max = computed(() => Math.max(...values.value, 1));
 const x = (index: number, count: number) => inset.left + (count <= 1 ? 0 : index / (count - 1)) * (width - inset.left - inset.right);

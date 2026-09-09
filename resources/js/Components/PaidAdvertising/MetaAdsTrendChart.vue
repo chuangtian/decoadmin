@@ -22,7 +22,7 @@ const props = defineProps<{
 
 const width = 760;
 const height = 300;
-const plot = { left: 58, right: 58, top: 32, bottom: 44 };
+const plot = { left: 104, right: 104, top: 32, bottom: 44 };
 const plotWidth = width - plot.left - plot.right;
 const plotHeight = height - plot.top - plot.bottom;
 const hoverIndex = ref<number | null>(null);

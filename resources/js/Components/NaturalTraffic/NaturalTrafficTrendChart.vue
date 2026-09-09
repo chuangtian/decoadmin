@@ -20,7 +20,7 @@ const tickIndices = computed(() => {
     return Array.from({ length: 7 }, (_, i) => Math.round(i * (count - 1) / 6));
 });
 const width = 1000;
-const padding = computed(() => ({ left: 58, right: 20, top: 24, bottom: props.weeklyLabels ? 60 : 42 }));
+const padding = computed(() => ({ left: 88, right: 28, top: 32, bottom: props.weeklyLabels ? 60 : 42 }));
 const values = computed(() => props.points.flatMap((point) => props.series.map((series) => Number(point[series.key] ?? 0))).filter(Number.isFinite));
 const maxValue = computed(() => Math.max(1, ...values.value));
 const plotWidth = computed(() => width - padding.value.left - padding.value.right);
@@ -64,7 +64,7 @@ function axisValue(value: number): string {
 <template>
     <div v-if="points.length" class="w-full overflow-hidden">
         <div class="mb-3 flex flex-wrap justify-end gap-4 text-xs font-bold text-slate-500"><span v-for="item in series" :key="item.key" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full" :style="{ background: item.color }"></i>{{ item.label }}</span></div>
-        <div class="overflow-x-auto"><div class="relative" :style="weeklyLabels ? { minWidth: `${Math.max(900, points.length * 60)}px` } : undefined" @mouseleave="activeIndex = null">
+        <div class="overflow-x-auto"><div class="relative" :style="{ minWidth: `${weeklyLabels ? Math.max(900, points.length * 60) : 640}px` }" @mouseleave="activeIndex = null">
         <svg v-readable-chart :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="趋势图">
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="tick">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="padding.top + plotHeight * (1 - tick)" :y2="padding.top + plotHeight * (1 - tick)" stroke="#e2e8f0" stroke-dasharray="5 7" />
