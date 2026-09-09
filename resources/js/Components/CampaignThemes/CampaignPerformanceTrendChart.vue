@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface PerformanceItem {
@@ -97,14 +98,14 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，销售额 ${money
 
         <div v-if="orderedPoints.length" class="chart-scrollbar overflow-x-auto px-3 pb-3 pt-2 sm:px-4">
             <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="销售额广告花费与 ROI 趋势图">
-                    <text :x="plot.left" y="24" class="fill-slate-400 text-[11px] font-medium">金额</text>
-                    <text :x="chartWidth - plot.right" y="24" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">ROI</text>
+                <svg v-readable-chart :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="销售额广告花费与 ROI 趋势图">
+                    <text :x="plot.left" y="24" class="fill-slate-400 text-xs font-medium">金额</text>
+                    <text :x="chartWidth - plot.right" y="24" text-anchor="end" class="fill-slate-400 text-xs font-medium">ROI</text>
 
                     <g v-for="ratio in ticks" :key="ratio">
                         <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" />
-                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">{{ compactMoney(amountMaximum * ratio) }}</text>
-                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[11px] tabular-nums">{{ (roiMaximum * ratio).toFixed(1) }}</text>
+                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(amountMaximum * ratio) }}</text>
+                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ (roiMaximum * ratio).toFixed(1) }}</text>
                     </g>
 
                     <g v-for="(point, index) in orderedPoints" :key="`bars-${point.id}`">
@@ -117,10 +118,10 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，销售额 ${money
                     <g v-for="(point, index) in orderedPoints" :key="`point-${point.id}`">
                         <template v-if="point.roi !== null">
                             <circle :cx="xAt(index)" :cy="roiYAt(point.roi)" r="5" fill="#a855f7" stroke="white" stroke-width="2" />
-                            <text :x="xAt(index)" :y="roiYAt(point.roi) - 12" text-anchor="middle" class="fill-violet-600 text-[11px] font-semibold tabular-nums">{{ point.roi.toFixed(2) }}</text>
+                            <text :x="xAt(index)" :y="roiYAt(point.roi) - 12" text-anchor="middle" class="fill-violet-600 text-xs font-semibold tabular-nums">{{ point.roi.toFixed(2) }}</text>
                         </template>
-                        <text :x="xAt(index)" :y="plot.bottom + 27" text-anchor="middle" class="fill-slate-600 text-[11px] font-medium"><title>{{ point.name }}</title>{{ shortName(point.name) }}</text>
-                        <text :x="xAt(index)" :y="plot.bottom + 45" text-anchor="middle" class="fill-slate-400 text-[10px] tabular-nums">{{ shortDate(point.starts_on) }}</text>
+                        <text :x="xAt(index)" :y="plot.bottom + 27" text-anchor="middle" class="fill-slate-600 text-xs font-medium"><title>{{ point.name }}</title>{{ shortName(point.name) }}</text>
+                        <text :x="xAt(index)" :y="plot.bottom + 45" text-anchor="middle" class="fill-slate-400 text-xs tabular-nums">{{ shortDate(point.starts_on) }}</text>
                         <rect :x="xAt(index) - pointWidth / 2" :y="plot.top" :width="pointWidth" :height="plot.bottom - plot.top + 52" fill="transparent" tabindex="0" role="button" :aria-label="ariaLabel(point)" @mouseenter="hoveredId = point.id" @mouseleave="hoveredId = null" @focus="hoveredId = point.id" @blur="hoveredId = null" />
                     </g>
 

@@ -7,148 +7,37 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
-    --text-xs: 0.6rem;
-    --text-xs--line-height: 0.8rem;
-    --text-sm: 0.7rem;
-    --text-sm--line-height: 1rem;
-    --text-base: 0.8rem;
-    --text-base--line-height: 1.2rem;
-    --text-lg: 0.9rem;
-    --text-lg--line-height: 1.4rem;
-    --text-xl: 1rem;
-    --text-xl--line-height: 1.4rem;
-    --text-2xl: 1.2rem;
-    --text-2xl--line-height: 1.6rem;
-    --text-3xl: 1.5rem;
-    --text-3xl--line-height: 1.8rem;
-    --text-4xl: 1.8rem;
-    --text-4xl--line-height: 2rem;
-    --text-5xl: 2.4rem;
+    --text-xs: max(12px, 0.75rem);
+    --text-xs--line-height: 1rem;
+    --text-sm: max(14px, 0.875rem);
+    --text-sm--line-height: 1.25rem;
+    --text-base: max(16px, 1rem);
+    --text-base--line-height: 1.5rem;
+    --text-lg: 1.125rem;
+    --text-lg--line-height: 1.75rem;
+    --text-xl: 1.25rem;
+    --text-xl--line-height: 1.75rem;
+    --text-2xl: 1.5rem;
+    --text-2xl--line-height: 2rem;
+    --text-3xl: 1.875rem;
+    --text-3xl--line-height: 2.25rem;
+    --text-4xl: 2.25rem;
+    --text-4xl--line-height: 2.5rem;
+    --text-5xl: 3rem;
     --text-5xl--line-height: 1;
-    --text-6xl: 3rem;
+    --text-6xl: 3.75rem;
     --text-6xl--line-height: 1;
 }
 
-body {
-    font-size: 80%;
-}
+@layer base {
+    body {
+        font-size: var(--text-sm);
+        line-height: 1.5;
+    }
 
-.text-\[8px\] {
-    font-size: 6.4px;
-}
-
-.text-\[9px\] {
-    font-size: 7.2px;
-}
-
-.text-\[10px\] {
-    font-size: 8px;
-}
-
-.text-\[11px\] {
-    font-size: 8.8px;
-}
-
-.text-\[13px\] {
-    font-size: 10.4px;
-}
-
-.font-scale-110 {
-    font-size: 110%;
-}
-
-.font-scale-110 .text-xs {
-    font-size: 0.66rem;
-    line-height: 0.88rem;
-}
-
-.font-scale-110 .text-sm {
-    font-size: 0.77rem;
-    line-height: 1.1rem;
-}
-
-.font-scale-110 .text-base {
-    font-size: 0.88rem;
-    line-height: 1.32rem;
-}
-
-.font-scale-110 .text-lg {
-    font-size: 0.99rem;
-    line-height: 1.54rem;
-}
-
-.font-scale-110 .text-xl {
-    font-size: 1.1rem;
-    line-height: 1.54rem;
-}
-
-.font-scale-110 .text-2xl {
-    font-size: 1.32rem;
-    line-height: 1.76rem;
-}
-
-.font-scale-110 .text-3xl {
-    font-size: 1.65rem;
-    line-height: 1.98rem;
-}
-
-.font-scale-110 .text-4xl {
-    font-size: 1.98rem;
-    line-height: 2.2rem;
-}
-
-.font-scale-110 .text-5xl {
-    font-size: 2.64rem;
-}
-
-.font-scale-110 .text-6xl {
-    font-size: 3.3rem;
-}
-
-.font-scale-110 .text-\[8px\] {
-    font-size: 7.04px;
-}
-
-.font-scale-110 .text-\[10px\] {
-    font-size: 8.8px;
-}
-
-.font-scale-110 .text-\[11px\] {
-    font-size: 9.68px;
-}
-
-.font-scale-110 .text-\[13px\] {
-    font-size: 11.44px;
-}
-
-.sidebar-font-scale {
-    font-size: 120%;
-}
-
-.sidebar-font-scale .text-xs {
-    font-size: 0.72rem;
-    line-height: 0.96rem;
-}
-
-.sidebar-font-scale .text-sm {
-    font-size: 0.84rem;
-    line-height: 1.2rem;
-}
-
-.sidebar-font-scale .text-\[8px\] {
-    font-size: 7.68px;
-}
-
-.sidebar-font-scale .text-\[10px\] {
-    font-size: 9.6px;
-}
-
-.sidebar-font-scale .text-\[11px\] {
-    font-size: 10.56px;
-}
-
-.sidebar-font-scale .text-\[13px\] {
-    font-size: 12.48px;
+    small, sub, sup {
+        font-size: max(12px, 0.8em);
+    }
 }
 
 /*

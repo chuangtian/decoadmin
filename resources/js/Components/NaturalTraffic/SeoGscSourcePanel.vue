@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { router } from '@inertiajs/vue3';
 import { computed, onMounted, ref, watch } from 'vue';
 
@@ -175,7 +176,7 @@ function isQuickRangeActive(days: number): boolean {
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white">GSC 本地快照</span>
+                            <span class="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-black uppercase tracking-[0.16em] text-white">GSC 本地快照</span>
                             <span class="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>本地数据库已就绪</span>
                         </div>
                         <h2 class="mt-2.5 text-xl font-black tracking-tight text-slate-950">搜索表现数据仓</h2>
@@ -190,14 +191,14 @@ function isQuickRangeActive(days: number): boolean {
             <div class="px-5 py-5 lg:px-6">
                 <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.1fr)_minmax(135px,.72fr)_minmax(135px,.72fr)_minmax(120px,.58fr)_minmax(96px,auto)] xl:items-end">
                     <fieldset class="min-w-0">
-                        <legend class="mb-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">快捷范围</legend>
+                        <legend class="mb-1.5 text-xs font-black uppercase tracking-[0.12em] text-slate-400">快捷范围</legend>
                         <div class="grid h-11 grid-cols-4 rounded-xl bg-blue-50 p-1">
                             <button v-for="preset in [{ days: 1, label: '24小时' }, { days: 7, label: '7天' }, { days: 28, label: '28天' }, { days: 90, label: '3个月' }]" :key="preset.days" type="button" class="rounded-lg px-2 text-xs font-black transition" :class="isQuickRangeActive(preset.days) ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-blue-700'" @click="quickRange(preset.days)">{{ preset.label }}</button>
                         </div>
                     </fieldset>
-                    <label for="gsc-date-from" class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">开始日期<input id="gsc-date-from" v-model="filters.date_from" name="gsc_date_from" type="date" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></label>
-                    <label for="gsc-date-to" class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">结束日期<input id="gsc-date-to" v-model="filters.date_to" name="gsc_date_to" type="date" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></label>
-                    <label for="gsc-comparison" class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">对比<select id="gsc-comparison" v-model="filters.comparison" name="gsc_comparison" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="previous">上一周期</option><option value="year">去年同期</option><option value="none">不对比</option></select></label>
+                    <label for="gsc-date-from" class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">开始日期<input id="gsc-date-from" v-model="filters.date_from" name="gsc_date_from" type="date" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></label>
+                    <label for="gsc-date-to" class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">结束日期<input id="gsc-date-to" v-model="filters.date_to" name="gsc_date_to" type="date" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></label>
+                    <label for="gsc-comparison" class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">对比<select id="gsc-comparison" v-model="filters.comparison" name="gsc_comparison" class="mt-1.5 block h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold tracking-normal text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="previous">上一周期</option><option value="year">去年同期</option><option value="none">不对比</option></select></label>
                     <button type="button" class="h-11 min-w-24 whitespace-nowrap rounded-xl bg-slate-950 px-4 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200" @click="applyFilters">应用范围</button>
                 </div>
 
@@ -235,7 +236,7 @@ function isQuickRangeActive(days: number): boolean {
             <article class="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
                 <div class="flex flex-wrap items-start justify-between gap-4"><div><h3 class="text-lg font-black text-slate-950">{{ segmentOptions.find((item) => item.key === activeSegment)?.label }}{{ metricOptions.find((item) => item.key === metric)?.label }}趋势</h3><p class="mt-1 text-xs text-slate-400">本地 {{ grain === 'day' ? '按日' : grain === 'week' ? '按周' : '按月' }}聚合</p></div><div class="flex gap-2"><select v-model="metric" name="gsc_trend_metric" class="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"><option v-for="item in metricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select><select v-model="grain" name="gsc_trend_grain" class="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold"><option value="day">按日</option><option value="week">按周</option><option value="month">按月</option></select></div></div>
                 <div class="mt-6 overflow-x-auto">
-                    <svg class="min-w-[620px]" viewBox="0 0 820 260" role="img" :aria-label="`${segmentOptions.find((item) => item.key === activeSegment)?.label}${metricOptions.find((item) => item.key === metric)?.label}趋势`">
+                    <svg v-readable-chart class="min-w-[620px]" viewBox="0 0 820 260" role="img" :aria-label="`${segmentOptions.find((item) => item.key === activeSegment)?.label}${metricOptions.find((item) => item.key === metric)?.label}趋势`">
                         <defs><linearGradient id="gscArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2563eb" stop-opacity=".26"/><stop offset="1" stop-color="#2563eb" stop-opacity="0"/></linearGradient></defs>
                         <line v-for="row in 5" :key="row" x1="24" x2="796" :y1="24 + (row - 1) * 43" :y2="24 + (row - 1) * 43" stroke="#e2e8f0" stroke-dasharray="5 7"/>
                         <polygon v-if="chart.points.length" :points="chart.area" fill="url(#gscArea)"/>
@@ -276,7 +277,7 @@ function isQuickRangeActive(days: number): boolean {
                 <table class="min-w-full text-left text-sm">
                     <thead class="bg-slate-50 text-xs font-black uppercase tracking-wider text-slate-400"><tr><th class="min-w-[300px] px-4 py-3">{{ detailLabel }}</th><th v-for="column in [{ key: 'clicks', label: '点击' }, { key: 'impressions', label: '曝光' }, { key: 'ctr', label: 'CTR' }, { key: 'position', label: '排名' }]" :key="column.key" class="cursor-pointer whitespace-nowrap px-4 py-3" @click="toggleSort(column.key as typeof sortKey)">{{ column.label }} <span v-if="sortKey === column.key">{{ sortDirection === 'desc' ? '↓' : '↑' }}</span></th></tr></thead>
                     <tbody class="divide-y divide-slate-100">
-                        <tr v-for="row in detailRows" :key="row.hash" class="hover:bg-blue-50/40"><td class="max-w-[480px] truncate px-4 py-3.5 font-semibold text-slate-800" :title="row.label"><span v-if="row.status === 'new'" class="mr-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-black text-emerald-700">NEW</span>{{ row.label }}</td><td class="px-4 py-3.5 font-black tabular-nums text-slate-900">{{ number(row.clicks) }} <small v-if="row.difference" :class="deltaClass(row.difference.clicks)" class="ml-1">{{ signed(row.difference.clicks) }}</small></td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ number(row.impressions) }}</td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ percent(row.ctr) }}</td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ row.position.toFixed(2) }}</td></tr>
+                        <tr v-for="row in detailRows" :key="row.hash" class="hover:bg-blue-50/40"><td class="max-w-[480px] truncate px-4 py-3.5 font-semibold text-slate-800" :title="row.label"><span v-if="row.status === 'new'" class="mr-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-black text-emerald-700">NEW</span>{{ row.label }}</td><td class="px-4 py-3.5 font-black tabular-nums text-slate-900">{{ number(row.clicks) }} <small v-if="row.difference" :class="deltaClass(row.difference.clicks)" class="ml-1">{{ signed(row.difference.clicks) }}</small></td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ number(row.impressions) }}</td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ percent(row.ctr) }}</td><td class="px-4 py-3.5 tabular-nums text-slate-600">{{ row.position.toFixed(2) }}</td></tr>
                         <tr v-if="loading"><td colspan="5" class="px-4 py-12 text-center text-blue-600">正在读取本地明细…</td></tr><tr v-else-if="detailError"><td colspan="5" class="px-4 py-12 text-center text-rose-600">{{ detailError }}</td></tr><tr v-else-if="!detailRows.length"><td colspan="5" class="px-4 py-12 text-center text-slate-400">当前筛选没有匹配数据</td></tr>
                     </tbody>
                 </table>

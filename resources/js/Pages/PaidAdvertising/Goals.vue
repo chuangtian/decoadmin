@@ -951,7 +951,7 @@ const confirmDelete = () => {
                             <svg class="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg>
                         </span>
                         <span>
-                            <span class="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">统计时间</span>
+                            <span class="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">统计时间</span>
                             <span class="mt-0.5 block whitespace-nowrap text-sm font-semibold text-slate-800">{{ goalPage.period.label }}</span>
                         </span>
                         <svg class="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 8 4 4 4-4"/></svg>

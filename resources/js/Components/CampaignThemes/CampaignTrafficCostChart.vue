@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface TrafficCostPoint {
@@ -110,7 +111,7 @@ const coverage = computed(() => props.adSpendCoveragePercent === null ? '--' : p
             <div>
                 <div class="flex flex-wrap items-center gap-2">
                     <h2 class="text-lg font-semibold text-slate-950">活动期间流量、加购成本与结账成本走势</h2>
-                    <span v-if="pending || stale" class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-100">
+                    <span v-if="pending || stale" class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">
                         {{ pending ? '数据更新中' : '最近快照' }}
                     </span>
                 </div>
@@ -125,13 +126,13 @@ const coverage = computed(() => props.adSpendCoveragePercent === null ? '--' : p
 
         <div ref="scroller" v-if="points.length" class="traffic-cost-scrollbar min-w-0 overflow-x-auto px-3 pb-3 pt-2 sm:px-4" @scroll="hoveredIndex = null">
             <div class="relative" :style="{ width: chartWidth + 'px', height: chartHeight + 'px' }">
-                <svg :viewBox="'0 0 ' + chartWidth + ' ' + chartHeight" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动每日访问 Session、加购成本与结账成本">
-                    <text :x="plot.left" y="27" class="fill-slate-400 text-[11px] font-medium">访问 Session</text>
-                    <text :x="chartWidth - plot.right" y="27" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">成本</text>
+                <svg v-readable-chart :viewBox="'0 0 ' + chartWidth + ' ' + chartHeight" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动每日访问 Session、加购成本与结账成本">
+                    <text :x="plot.left" y="27" class="fill-slate-400 text-xs font-medium">访问 Session</text>
+                    <text :x="chartWidth - plot.right" y="27" text-anchor="end" class="fill-slate-400 text-xs font-medium">成本</text>
                     <g v-for="ratio in ticks" :key="ratio">
                         <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" />
-                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">{{ compactInteger(trafficMaximum * ratio) }}</text>
-                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[11px] tabular-nums">{{ compactMoney(costMaximum * ratio) }}</text>
+                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ compactInteger(trafficMaximum * ratio) }}</text>
+                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(costMaximum * ratio) }}</text>
                     </g>
 
                     <g v-for="(point, index) in points" :key="point.date">
@@ -151,7 +152,7 @@ const coverage = computed(() => props.adSpendCoveragePercent === null ? '--' : p
                     <g v-for="(point, index) in points" :key="'cost-' + point.date">
                         <circle v-if="point.cart_addition_cost !== null" :cx="xAt(index)" :cy="costY(point.cart_addition_cost)" r="4.5" fill="#10b981" stroke="white" stroke-width="2" />
                         <circle v-if="point.checkout_cost !== null" :cx="xAt(index)" :cy="costY(point.checkout_cost)" r="4.5" fill="#f97316" stroke="white" stroke-width="2" />
-                        <text :x="xAt(index)" :y="plot.bottom + 29" text-anchor="middle" class="fill-slate-500 text-[11px] tabular-nums">{{ shortDate(point.date) }}</text>
+                        <text :x="xAt(index)" :y="plot.bottom + 29" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ shortDate(point.date) }}</text>
                         <rect
                             :x="xAt(index) - pointWidth / 2"
                             :y="plot.top"

@@ -91,7 +91,7 @@ function formatDateTime(value: string | null): string {
             <div class="flex flex-wrap items-center" :class="compact ? 'gap-2' : 'gap-3'">
                 <div class="rounded-2xl border border-emerald-100 bg-emerald-50" :class="compact ? 'px-3 py-2' : 'px-4 py-2.5'">
                     <div class="flex items-center gap-2 text-xs font-bold text-emerald-800"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>当前项目 MySQL</div>
-                    <p class="mt-1 text-[11px] tabular-nums text-emerald-700/70">{{ dashboard.source.table_count }} 张表 · {{ dashboard.source.record_count }} 条 · {{ formatDateTime(dashboard.source.last_synced_at) }}</p>
+                    <p class="mt-1 text-xs tabular-nums text-emerald-700/70">{{ dashboard.source.table_count }} 张表 · {{ dashboard.source.record_count }} 条 · {{ formatDateTime(dashboard.source.last_synced_at) }}</p>
                 </div>
                 <button
                     type="button"

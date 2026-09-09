@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed } from 'vue';
 
 const props = defineProps<{ impressions: number; clicks: number; conversions: number }>();
@@ -60,7 +61,7 @@ const funnelLabel = computed(() => '曝光 ' + number(props.impressions) + '，�
         </header>
 
         <div class="overflow-x-auto px-3 pt-2 sm:px-5">
-            <svg viewBox="0 0 620 310" class="mx-auto block h-[310px] min-w-[540px] w-full max-w-[680px]" role="img" :aria-label="funnelLabel">
+            <svg v-readable-chart viewBox="0 0 620 310" class="mx-auto block h-[310px] min-w-[540px] w-full max-w-[680px]" role="img" :aria-label="funnelLabel">
                 <title>Criteo 曝光、点击与转化漏斗</title>
                 <g v-for="(stage, index) in funnelStages" :key="stage.key">
                     <polygon :points="stage.points" :fill="stage.color" :fill-opacity="index === 0 ? 0.92 : 0.96" />

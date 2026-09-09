@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import NaturalTrafficTrendChart from '../../Components/NaturalTraffic/NaturalTrafficTrendChart.vue';
@@ -363,7 +364,7 @@ onBeforeUnmount(stopPolling);
                             </thead>
                             <tbody class="divide-y divide-slate-100">
                                 <tr v-for="record in dashboard.records.data" :key="record.uuid" class="align-top hover:bg-slate-50/70">
-                                    <td class="whitespace-nowrap px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{{ sourceLabels[record.source] ?? record.source }}</span><div v-if="record.model_name" class="mt-2 text-xs text-slate-500">{{ record.model_name }}</div><div v-if="record.matched_products.length" class="mt-2 flex max-w-44 flex-wrap gap-1"><span v-for="product in record.matched_products" :key="`${record.uuid}-${product.handle}`" class="rounded-full px-2 py-1 text-[11px] font-semibold" :class="product.role === 'primary' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ product.title }}<small v-if="product.role === 'mentioned'" class="ml-1 font-normal">提及</small></span></div></td>
+                                    <td class="whitespace-nowrap px-4 py-4"><span class="inline-flex whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{{ sourceLabels[record.source] ?? record.source }}</span><div v-if="record.model_name" class="mt-2 text-xs text-slate-500">{{ record.model_name }}</div><div v-if="record.matched_products.length" class="mt-2 flex max-w-44 flex-wrap gap-1"><span v-for="product in record.matched_products" :key="`${record.uuid}-${product.handle}`" class="rounded-full px-2 py-1 text-xs font-semibold" :class="product.role === 'primary' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ product.title }}<small v-if="product.role === 'mentioned'" class="ml-1 font-normal">提及</small></span></div></td>
                                     <td class="whitespace-nowrap px-4 py-4 text-xs font-mono text-slate-600">{{ formatDate(record.published_at) }}</td>
                                     <td class="px-4 py-4"><p v-if="record.reviewer_name" class="mb-1 font-bold text-slate-900">{{ record.reviewer_name }}</p><p class="line-clamp-3 leading-6 text-slate-700">{{ contentPreview(record) }}</p><a v-if="record.url" :href="record.url" target="_blank" rel="noopener noreferrer" class="mt-2 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看来源</a></td>
                                     <td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-slate-600">{{ record.order_reference ?? record.order_reference_masked ?? '—' }}</td>
@@ -397,13 +398,13 @@ onBeforeUnmount(stopPolling);
                             <h3 class="font-bold text-slate-900">主题分布趋势（周度）</h3>
                             <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500"><span v-for="topic in redditTopicNames" :key="topic" class="inline-flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-sm" :style="{ backgroundColor: redditTopicColors[topic] }" />{{ topic }}</span></div>
                             <div class="relative" @mouseleave="activeTopicWeek = null">
-                            <svg v-if="redditTopicWeeks.some((week) => week.posts > 0)" class="mt-3 h-64 w-full" viewBox="0 0 688 210" role="img" aria-label="Reddit 主题分布趋势">
+                            <svg v-readable-chart v-if="redditTopicWeeks.some((week) => week.posts > 0)" class="mt-3 h-64 w-full" viewBox="0 0 688 210" role="img" aria-label="Reddit 主题分布趋势">
                                 <line v-for="percent in [0,25,50,75,100]" :key="percent" x1="38" x2="650" :y1="174 - percent * 1.32" :y2="174 - percent * 1.32" stroke="#e2e8f0" stroke-width="1" />
-                                <text v-for="percent in [0,25,50,75,100]" :key="`label-${percent}`" x="32" :y="178 - percent * 1.32" text-anchor="end" fill="#94a3b8" font-size="10">{{ percent }}%</text>
+                                <text v-for="percent in [0,25,50,75,100]" :key="`label-${percent}`" x="32" :y="178 - percent * 1.32" text-anchor="end" fill="#94a3b8" font-size="12">{{ percent }}%</text>
                                 <template v-for="(week, weekIndex) in redditTopicWeeks" :key="week.week">
                                     <rect v-for="(topic, topicIndex) in redditTopicNames" :key="`${week.week}-${topic}`" :x="topicWeekX(weekIndex) - 14" :y="174 - (topicStackBefore(week, topicIndex) + topicPercent(week, topic)) * 1.32" width="28" :height="topicPercent(week, topic) * 1.32" :fill="redditTopicColors[topic]" rx="2"><title>{{ week.label }} · {{ topic }}：{{ topicPercent(week, topic).toFixed(1) }}%</title></rect>
                                     <rect :x="topicWeekX(weekIndex) - 20" y="42" width="40" height="132" fill="transparent" tabindex="0" role="button" :aria-label="`${week.label}，${week.posts} 篇帖子`" @mouseenter="activeTopicWeek = week" @focus="activeTopicWeek = week" @blur="activeTopicWeek = null" @click="activeTopicWeek = week" @keydown.esc="activeTopicWeek = null" />
-                                    <text :x="topicWeekX(weekIndex)" y="202" text-anchor="middle" fill="#64748b" font-size="10">{{ week.label.split(' - ')[0] }}</text>
+                                    <text :x="topicWeekX(weekIndex)" y="202" text-anchor="middle" fill="#64748b" font-size="12">{{ week.label.split(' - ')[0] }}</text>
                                 </template>
                             </svg>
                             <div v-else class="mt-4 rounded-xl bg-slate-50 py-20 text-center text-sm text-slate-500">当前期间暂无可分类的 Reddit 帖子。</div>

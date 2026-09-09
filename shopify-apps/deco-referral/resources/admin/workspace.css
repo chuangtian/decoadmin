@@ -27,7 +27,7 @@
 .affiliate-workspace .fixed.inset-0 { background: rgb(15 23 42 / .4); overflow-y: auto; }
 .affiliate-workspace .fixed.inset-0 > :is(form,div) { max-height: 85dvh; overflow-y: auto; border: 1px solid #e2e8f0; box-shadow: 0 24px 64px rgb(15 23 42 / .18); }
 .affiliate-workspace summary { cursor: pointer; }
-.affiliate-status { display: inline-flex; align-items: center; gap: .35rem; border-radius: 999px; padding: .25rem .65rem; font-size: .65rem; line-height: 1rem; font-weight: 600; white-space: nowrap; background: #f1f5f9; color: #475569; }
+.affiliate-status { display: inline-flex; align-items: center; gap: .35rem; border-radius: 999px; padding: .25rem .65rem; font-size: 0.75rem; line-height: 1rem; font-weight: 600; white-space: nowrap; background: #f1f5f9; color: #475569; }
 .affiliate-status[data-tone=success] { background: #ecfdf5; color: #047857; }
 .affiliate-status[data-tone=warning] { background: #fffbeb; color: #92400e; }
 .affiliate-status[data-tone=danger] { background: #fff1f2; color: #be123c; }

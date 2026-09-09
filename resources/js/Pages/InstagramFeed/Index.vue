@@ -231,7 +231,7 @@ const statusLabel = computed(() => usable.value ? '已连接' : (needsPageSelect
                     <div class="min-w-0">
                         <div class="flex items-center gap-2">
                             <h2 class="text-lg font-semibold text-slate-950">Shopify 应用授权</h2>
-                            <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1" :class="appSessionMeta.tone">{{ appSessionMeta.label }}</span>
+                            <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="appSessionMeta.tone">{{ appSessionMeta.label }}</span>
                         </div>
                         <p class="mt-1 text-sm text-slate-500">{{ appSessionMeta.hint }}</p>
                         <dl class="mt-3 grid gap-x-6 gap-y-1 text-xs text-slate-500 sm:grid-cols-2">

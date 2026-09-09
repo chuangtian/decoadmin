@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed } from 'vue';
 
 type Point = Record<string, unknown> & { name?: string; platform?: string };
@@ -38,18 +39,18 @@ function compact(value: number): string { return new Intl.NumberFormat('en-US', 
         <div class="mb-3 flex flex-wrap justify-end gap-4 text-xs font-bold text-slate-500">
             <span v-for="platform in [...new Set(points.map((point) => String(point.platform || '未分类')))]" :key="platform" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full" :style="{ background: color(platform) }"></i>{{ platform }}</span>
         </div>
-        <svg :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" :aria-label="`${xLabel}与${yLabel}散点图`">
+        <svg v-readable-chart :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" :aria-label="`${xLabel}与${yLabel}散点图`">
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="`y-${tick}`">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="padding.top + plotHeight * (1 - tick)" :y2="padding.top + plotHeight * (1 - tick)" stroke="#e2e8f0" stroke-dasharray="5 7" />
-                <text :x="padding.left - 10" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(maxRate * tick) }}</text>
+                <text :x="padding.left - 10" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(maxRate * tick) }}</text>
             </g>
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="`x-${tick}`">
-                <text :x="padding.left + plotWidth * tick" :y="height - 14" text-anchor="middle" fill="#94a3b8" font-size="11">{{ compact(xTick(tick)) }}</text>
+                <text :x="padding.left + plotWidth * tick" :y="height - 14" text-anchor="middle" fill="#94a3b8" font-size="12">{{ compact(xTick(tick)) }}</text>
             </g>
             <g v-for="(point, index) in points" :key="`${point.name}-${index}`">
                 <circle :cx="x(point[xKey])" :cy="y(point[yKey])" r="6" :fill="color(point.platform)" fill-opacity=".75" stroke="white" stroke-width="2"><title>{{ point.name || '未命名内容' }} · {{ compact(Number(point[xKey] ?? 0)) }} {{ xLabel }} · {{ compact(Number(point[yKey] ?? 0)) }} {{ yLabel }}</title></circle>
             </g>
-            <text :x="width / 2" :y="height - 1" text-anchor="middle" fill="#64748b" font-size="11">{{ xLabel }}</text>
+            <text :x="width / 2" :y="height - 1" text-anchor="middle" fill="#64748b" font-size="12">{{ xLabel }}</text>
         </svg>
     </div>
     <div v-else class="flex items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400" :style="{ height: `${Math.max(160, height)}px` }">当前筛选暂无散点数据</div>

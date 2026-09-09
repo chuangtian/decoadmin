@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref, watch } from 'vue';
 
 type ValueFormat = 'number' | 'integer' | 'currency' | 'percent';
@@ -64,16 +65,16 @@ function axisValue(value: number): string {
     <div v-if="points.length" class="w-full overflow-hidden">
         <div class="mb-3 flex flex-wrap justify-end gap-4 text-xs font-bold text-slate-500"><span v-for="item in series" :key="item.key" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full" :style="{ background: item.color }"></i>{{ item.label }}</span></div>
         <div class="overflow-x-auto"><div class="relative" :style="weeklyLabels ? { minWidth: `${Math.max(900, points.length * 60)}px` } : undefined" @mouseleave="activeIndex = null">
-        <svg :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="趋势图">
+        <svg v-readable-chart :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="趋势图">
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="tick">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="padding.top + plotHeight * (1 - tick)" :y2="padding.top + plotHeight * (1 - tick)" stroke="#e2e8f0" stroke-dasharray="5 7" />
-                <text :x="padding.left - 10" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ axisValue(maxValue * tick) }}</text>
+                <text :x="padding.left - 10" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ axisValue(maxValue * tick) }}</text>
             </g>
             <path v-for="item in fillArea ? series : []" :key="`area-${item.key}`" :d="areaPath(item.key)" :fill="item.color" fill-opacity=".1" stroke="none" />
             <path v-for="item in series" :key="item.key" :d="path(item.key)" fill="none" :stroke="item.color" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
             <g v-for="(point, index) in points" :key="index">
                 <circle v-for="item in series" :key="item.key" :cx="x(index)" :cy="y(point[item.key])" :r="activeIndex === index ? 6 : 3.5" :fill="activeIndex === index ? item.color : 'white'" :stroke="item.color" stroke-width="2" />
-                <text v-if="tickIndices.includes(index)" :x="x(index)" :y="height - (weeklyLabels ? 30 : 12)" :text-anchor="weeklyLabels ? 'middle' : index === 0 && points.length > 1 ? 'start' : index === points.length - 1 && points.length > 1 ? 'end' : 'middle'" fill="#64748b" font-size="11">{{ weeklyLabels ? weekLabel(point[xKey]) : label(point[xKey]) }}<tspan v-if="weeklyLabels" :x="x(index)" dy="16">{{ label(point[xKey]) }}</tspan></text>
+                <text v-if="tickIndices.includes(index)" :x="x(index)" :y="height - (weeklyLabels ? 30 : 12)" :text-anchor="weeklyLabels ? 'middle' : index === 0 && points.length > 1 ? 'start' : index === points.length - 1 && points.length > 1 ? 'end' : 'middle'" fill="#64748b" font-size="12">{{ weeklyLabels ? weekLabel(point[xKey]) : label(point[xKey]) }}<tspan v-if="weeklyLabels" :x="x(index)" dy="16">{{ label(point[xKey]) }}</tspan></text>
             </g>
             <line v-if="interactive && activeIndex !== null" :x1="x(activeIndex)" :x2="x(activeIndex)" :y1="padding.top" :y2="height - padding.bottom" stroke="#94a3b8" stroke-dasharray="4 4" pointer-events="none" />
             <g v-if="interactive">

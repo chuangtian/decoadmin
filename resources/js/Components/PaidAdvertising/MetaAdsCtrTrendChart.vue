@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface DailyMetric {
@@ -94,7 +95,7 @@ function shortDate(date: string): string {
         </div>
 
         <div v-if="validPoints.length" class="relative mt-4" @mouseleave="hoverIndex = null">
-            <svg class="h-[280px] w-full" :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="每日广告点击率折线趋势">
+            <svg v-readable-chart class="h-[280px] w-full" :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="每日广告点击率折线趋势">
                 <defs>
                     <linearGradient id="meta-ctr-area" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28" />
@@ -104,14 +105,14 @@ function shortDate(date: string): string {
 
                 <g v-for="line in gridLines" :key="line">
                     <line :x1="plot.left" :x2="width - plot.right" :y1="plot.top + plotHeight - (line * plotHeight)" :y2="plot.top + plotHeight - (line * plotHeight)" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                    <text :x="plot.left - 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" text-anchor="end" fill="#94a3b8" font-size="10">{{ (yMax * line).toFixed(1) }}%</text>
+                    <text :x="plot.left - 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ (yMax * line).toFixed(1) }}%</text>
                 </g>
 
                 <path v-if="areaPath" :d="areaPath" fill="url(#meta-ctr-area)" />
                 <polyline v-if="linePoints" :points="linePoints" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
 
                 <g v-for="(row, index) in rows" :key="row.date">
-                    <text v-if="showDate(index)" :x="x(index)" :y="height - 15" text-anchor="middle" fill="#94a3b8" font-size="10">{{ shortDate(row.date) }}</text>
+                    <text v-if="showDate(index)" :x="x(index)" :y="height - 15" text-anchor="middle" fill="#94a3b8" font-size="12">{{ shortDate(row.date) }}</text>
                     <rect
                         :x="plot.left + (bandWidth * index)"
                         :y="plot.top"

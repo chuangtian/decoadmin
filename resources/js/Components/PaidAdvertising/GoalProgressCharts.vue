@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface GoalProgressPoint {
@@ -128,20 +129,20 @@ const shortDate = (date: string) => date.slice(5);
 
             <div v-if="progress.points.length" class="goal-chart-scrollbar min-w-0 overflow-x-auto px-2 pb-3 pt-2 sm:px-4">
                 <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                    <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="每日销售、退款、累计销售和月目标趋势图">
+                    <svg v-readable-chart :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="每日销售、退款、累计销售和月目标趋势图">
                         <defs>
                             <linearGradient id="goal-progress-area" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="0%" stop-color="#10b981" stop-opacity="0.18" />
                                 <stop offset="100%" stop-color="#10b981" stop-opacity="0.02" />
                             </linearGradient>
                         </defs>
-                        <text :x="plot.left" y="24" class="fill-slate-400 text-[11px] font-medium">每日金额</text>
-                        <text :x="chartWidth - plot.right" y="24" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">累计金额</text>
+                        <text :x="plot.left" y="24" class="fill-slate-400 text-xs font-medium">每日金额</text>
+                        <text :x="chartWidth - plot.right" y="24" text-anchor="end" class="fill-slate-400 text-xs font-medium">累计金额</text>
 
                         <g v-for="ratio in ticks" :key="ratio">
                             <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" stroke-dasharray="4 5" />
-                            <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[10px] tabular-nums">{{ compactMoney(dailyMax * ratio) }}</text>
-                            <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[10px] tabular-nums">{{ compactMoney(cumulativeMax * ratio) }}</text>
+                            <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(dailyMax * ratio) }}</text>
+                            <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(cumulativeMax * ratio) }}</text>
                         </g>
 
                         <path v-if="cumulativeAreaPath" :d="cumulativeAreaPath" fill="url(#goal-progress-area)" />
@@ -155,7 +156,7 @@ const shortDate = (date: string) => date.slice(5);
 
                         <g v-for="(point, index) in progress.points" :key="`point-${point.date}`">
                             <circle :cx="xAt(index)" :cy="cumulativeY(point.cumulative_sales)" r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-                            <text :x="xAt(index)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-500 text-[10px] tabular-nums">{{ shortDate(point.date) }}</text>
+                            <text :x="xAt(index)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ shortDate(point.date) }}</text>
                             <rect :x="xAt(index) - pointWidth / 2" :y="plot.top" :width="pointWidth" :height="plot.bottom - plot.top + 40" fill="transparent" tabindex="0" @mouseenter="hoveredIndex = index" @mouseleave="hoveredIndex = null" @focus="hoveredIndex = index" @blur="hoveredIndex = null" />
                         </g>
                         <line v-if="hoveredPoint" :x1="hoveredX" :x2="hoveredX" :y1="plot.top" :y2="plot.bottom" class="stroke-slate-400" stroke-dasharray="5 5" />

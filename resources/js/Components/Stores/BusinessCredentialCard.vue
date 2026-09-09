@@ -178,7 +178,7 @@ const clear = () => {
                     <span>{{ field.label }}</span>
                     <span class="flex items-center gap-2">
                         <code class="text-xs font-medium text-slate-400">{{ field.env_key }}</code>
-                        <span class="rounded-md px-2 py-0.5 text-[11px] font-semibold" :class="field.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">
+                        <span class="rounded-md px-2 py-0.5 text-xs font-semibold" :class="field.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">
                             {{ field.configured ? '已配置' : '未配置' }}
                         </span>
                     </span>

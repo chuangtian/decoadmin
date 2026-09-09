@@ -3,9 +3,11 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
+        "build": "npm run check:typography && vite build",
         "dev": "vite",
-        "type-check": "vue-tsc --noEmit"
+        "type-check": "vue-tsc --noEmit",
+        "check:typography": "node scripts/check-typography.mjs",
+        "test:typography": "node --experimental-strip-types --test tests/Frontend/Typography.test.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

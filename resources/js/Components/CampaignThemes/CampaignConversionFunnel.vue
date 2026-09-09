@@ -35,7 +35,7 @@ const change = (stage: FunnelStage) => stage.comparison_rate_percent === null
                     <strong class="mt-2 block text-3xl font-semibold tabular-nums text-slate-950">{{ stage.rate_percent.toFixed(2) }}%</strong>
                     <div class="mt-2 flex flex-wrap items-center gap-2">
                         <span class="text-sm tabular-nums text-slate-500">{{ integer(stage.sessions) }}</span>
-                        <span v-if="change(stage) !== null" class="rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="(change(stage) ?? 0) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'">
+                        <span v-if="change(stage) !== null" class="rounded-full px-2 py-0.5 text-xs font-semibold" :class="(change(stage) ?? 0) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'">
                             {{ (change(stage) ?? 0) >= 0 ? '+' : '' }}{{ change(stage)?.toFixed(2) }}pp
                         </span>
                     </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed } from 'vue';
 
 type ContentEfficiency = {
@@ -42,10 +43,10 @@ function typeLabel(item: ContentEfficiency): string {
             <span class="flex items-center gap-2"><i class="h-3 w-7 rounded bg-pink-500"></i>平均浏览</span>
             <span class="flex items-center gap-2"><i class="h-3 w-7 rounded bg-emerald-500"></i>平均互动</span>
         </div>
-        <svg :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="内容形式平均浏览与平均互动柱状对比图">
+        <svg v-readable-chart :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="内容形式平均浏览与平均互动柱状对比图">
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="tick">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="padding.top + plotHeight * (1 - tick)" :y2="padding.top + plotHeight * (1 - tick)" stroke="#e2e8f0" stroke-dasharray="5 7" />
-                <text :x="padding.left - 12" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(maxValue * tick) }}</text>
+                <text :x="padding.left - 12" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(maxValue * tick) }}</text>
             </g>
             <g v-for="(item, index) in items" :key="item.type">
                 <rect :x="groupCenter(index) - 38" :y="barY(item.average_views)" width="32" :height="barHeight(item.average_views)" rx="5" fill="#ec4899">

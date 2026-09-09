@@ -76,7 +76,7 @@ const channelDot = (key: string) => ({
                         </div>
                     </div>
 
-                    <div class="ml-[126px] mt-4 grid grid-cols-6 border-t border-slate-200 pt-2 text-[11px] tabular-nums text-slate-400">
+                    <div class="ml-[126px] mt-4 grid grid-cols-6 border-t border-slate-200 pt-2 text-xs tabular-nums text-slate-400">
                         <span v-for="tick in [0, 20, 40, 60, 80, 100]" :key="tick" :class="tick === 100 ? 'text-right' : ''">{{ tick }}%</span>
                     </div>
                 </div>

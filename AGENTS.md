@@ -16,6 +16,12 @@
 - Keep local, test, and production environments distinct; never treat their URLs, credentials, data, or deployment actions as interchangeable.
 - The Cloudflare URL is a temporary local-development tunnel and may change. Treat the URL above as the currently known local URL, not a permanent production endpoint.
 
+## Interface typography
+
+- User requirement: DecoAdmin interface text must be at least 12 CSS pixels when rendered. Use 14px for normal table text, headings/captions in the brand-media weekly tables at 16px/14px, and 12px only for secondary labels.
+- Do not reintroduce global font shrinking or explicit sub-12px utility classes. Keep SVG chart labels readable after viewBox scaling using the shared `readableChart` directive; map label sizing must preserve the same minimum.
+- Run `npm run check:typography` for interface changes. The production frontend build includes this check; run `npm run test:typography` when changing responsive typography behavior.
+
 ## Git and test deployment source
 
 - Git `origin/test` is the source of truth for test deployments and local synchronization.

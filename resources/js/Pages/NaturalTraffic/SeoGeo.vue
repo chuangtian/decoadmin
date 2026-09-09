@@ -301,15 +301,15 @@ function paceLeft(metric: Metric): string {
                         </div>
                         <div class="mt-5 grid grid-cols-3 gap-2">
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">完成度</p>
+                                <p class="text-xs font-bold text-slate-400">完成度</p>
                                 <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ formatPercent(metric.completion) }}</p>
                             </div>
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">应完成</p>
+                                <p class="text-xs font-bold text-slate-400">应完成</p>
                                 <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ formatValue(metric.expected, metric) }}</p>
                             </div>
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">月底预估</p>
+                                <p class="text-xs font-bold text-slate-400">月底预估</p>
                                 <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ metric.status === 'no_data' ? '—' : formatValue(metric.forecast, metric) }}</p>
                             </div>
                         </div>

@@ -27,7 +27,7 @@ const save = (enabled:boolean) => {
     </div>
     </div>
     <p v-for="error in form.errors" :key="error" class="text-xs text-red-600" role="alert">{{ error }}</p>
-    <p v-if="monitor?.is_enabled" class="max-w-72 truncate text-[11px]" :title="monitor.last_error || (monitor.last_success_at ? formatDateTime(monitor.last_success_at) : '等待首次检查建立基线')" :class="monitor.last_error ? 'text-red-600' : 'text-slate-400'">
+    <p v-if="monitor?.is_enabled" class="max-w-72 truncate text-xs" :title="monitor.last_error || (monitor.last_success_at ? formatDateTime(monitor.last_success_at) : '等待首次检查建立基线')" :class="monitor.last_error ? 'text-red-600' : 'text-slate-400'">
       {{ monitor.last_error || (monitor.last_success_at ? `最近成功检查：${formatDateTime(monitor.last_success_at)}` : '等待首次检查建立基线') }}
     </p>
   </div>

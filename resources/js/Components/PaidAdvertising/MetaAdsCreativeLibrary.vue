@@ -116,7 +116,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                             @error="brokenThumbnails[item.id] = true"
                         />
                         <div v-else class="flex h-full items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-sm font-medium text-slate-400">素材预览暂不可用</div>
-                        <span class="absolute left-3 top-3 rounded-full bg-slate-950/75 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">{{ item.format }}</span>
+                        <span class="absolute left-3 top-3 rounded-full bg-slate-950/75 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">{{ item.format }}</span>
                     </div>
                     <div class="p-4">
                         <h3 class="line-clamp-1 font-semibold text-slate-900" :title="item.title">{{ item.title }}</h3>

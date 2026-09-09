@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 type Series = { key: string; label: string; color: string };
@@ -42,7 +43,7 @@ function hover(event: PointerEvent): void {
 <template>
     <div ref="container" class="social-bars">
         <div class="social-bars-legend"><span v-for="item in series" :key="item.key"><i :style="{ background: item.color }"></i>{{ item.label }}</span></div>
-        <svg v-if="points.length" :viewBox="`0 0 ${width} ${height}`" role="group" aria-label="平台数据柱状趋势图" @pointermove="hover" @pointerleave="active = null" @keydown.esc="active = null">
+        <svg v-readable-chart v-if="points.length" :viewBox="`0 0 ${width} ${height}`" role="group" aria-label="平台数据柱状趋势图" @pointermove="hover" @pointerleave="active = null" @keydown.esc="active = null">
             <g v-for="tick in ticks" :key="tick">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="y(tick)" :y2="y(tick)" stroke="#e2e8f0" :stroke-dasharray="tick ? '3 4' : undefined" />
                 <text :x="padding.left - 8" :y="y(tick) + 4" text-anchor="end">{{ format(tick) }}</text>

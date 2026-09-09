@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface DailyMetric {
@@ -133,7 +134,7 @@ function compactMoney(value: number): string {
                 <h2 class="font-semibold text-slate-950">{{ title || '花费与 ROAS 趋势' }}</h2>
                 <p class="mt-1 text-xs text-slate-500">{{ description || '按日查看花费规模与广告回报变化' }}</p>
             </div>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium text-slate-500">
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-slate-500">
                 <span class="inline-flex items-center gap-1.5"><i class="h-2.5 w-3 rounded-sm bg-blue-500" />花费</span>
                 <span v-if="comparisonEnabled" class="inline-flex items-center gap-1.5"><i class="h-2.5 w-3 rounded-sm bg-blue-200" />上期花费</span>
                 <span class="inline-flex items-center gap-1.5"><i class="h-0.5 w-4 bg-emerald-500" />ROAS</span>
@@ -142,17 +143,17 @@ function compactMoney(value: number): string {
         </div>
 
         <div class="relative mt-4" @mouseleave="hoverIndex = null">
-            <svg class="h-[300px] w-full" :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="每日花费和 ROAS 趋势">
+            <svg v-readable-chart class="h-[300px] w-full" :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="每日花费和 ROAS 趋势">
                 <g v-for="line in gridLines" :key="line">
                     <line :x1="plot.left" :x2="width - plot.right" :y1="plot.top + plotHeight - (line * plotHeight)" :y2="plot.top + plotHeight - (line * plotHeight)" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                    <text :x="plot.left - 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" text-anchor="end" fill="#94a3b8" font-size="10">{{ compactMoney(spendMax * line) }}</text>
-                    <text :x="width - plot.right + 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" fill="#94a3b8" font-size="10">{{ (roasMax * line).toFixed(1) }}×</text>
+                    <text :x="plot.left - 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compactMoney(spendMax * line) }}</text>
+                    <text :x="width - plot.right + 8" :y="plot.top + plotHeight - (line * plotHeight) + 4" fill="#94a3b8" font-size="12">{{ (roasMax * line).toFixed(1) }}×</text>
                 </g>
 
                 <g v-for="(row, index) in rows" :key="row.date">
                     <rect v-if="comparisonEnabled" :x="x(index) + 1" :y="spendY(row.previousSpend)" :width="barWidth" :height="plot.top + plotHeight - spendY(row.previousSpend)" rx="2" fill="#bfdbfe" />
                     <rect :x="x(index) - (comparisonEnabled ? barWidth + 1 : barWidth / 2)" :y="spendY(row.spend)" :width="barWidth" :height="plot.top + plotHeight - spendY(row.spend)" rx="2" fill="#3b82f6" />
-                    <text v-if="showDate(index)" :x="x(index)" :y="height - 16" text-anchor="middle" fill="#94a3b8" font-size="10">{{ shortDate(row.date) }}</text>
+                    <text v-if="showDate(index)" :x="x(index)" :y="height - 16" text-anchor="middle" fill="#94a3b8" font-size="12">{{ shortDate(row.date) }}</text>
                     <rect
                         :x="plot.left + (bandWidth * index)"
                         :y="plot.top"
