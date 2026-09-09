@@ -18,11 +18,12 @@ class PermissionSeeder extends Seeder
         'personalization' => '个性化推荐',
         'discounts' => '折扣管理',
         'affiliate' => '推荐与联盟',
+        'design_requests' => '设计需求',
     ];
 
     /** @var array<string, string> */
     private array $actions = [
-        'view' => '查看', 'update' => '更新', 'create' => '创建', 'delete' => '删除',
+        'view' => '查看', 'view_all' => '查看全部', 'update' => '更新', 'create' => '创建', 'delete' => '删除',
         'connect' => '连接', 'disconnect' => '断开连接', 'authorize' => '授权', 'sync' => '同步',
         'export' => '导出', 'refresh' => '刷新', 'cancel' => '取消', 'refund' => '退款', 'install' => '安装',
         'configure' => '配置', 'uninstall' => '卸载', 'retry' => '重试', 'run' => '执行',
@@ -147,6 +148,10 @@ class PermissionSeeder extends Seeder
         'affiliate.fraud.review',
         'affiliate.settings.manage',
         'affiliate.reports.export',
+        'design_requests.view',
+        'design_requests.create',
+        'design_requests.view_all',
+        'design_requests.manage',
     ];
 
     public function run(): void

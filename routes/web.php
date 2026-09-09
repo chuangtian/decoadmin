@@ -27,6 +27,7 @@ use App\Http\Controllers\CodexRemoteMcpController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiscountController;
 use App\Http\Controllers\DiscountManagerOAuthController;
+use App\Http\Controllers\DesignRequestController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
 use App\Http\Controllers\GoogleSearchConsoleOAuthController;
@@ -333,6 +334,12 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/design-requests', [DesignRequestController::class, 'index'])
+        ->middleware('permission:design_requests.view')->name('design-requests.index');
+    Route::post('/design-requests', [DesignRequestController::class, 'store'])
+        ->middleware(['permission:design_requests.create', 'throttle:30,1'])->name('design-requests.store');
+    Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
+        ->middleware(['permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
     Route::get('/brand-profile/{section?}', BrandProfileController::class)
         ->where('section', 'overview|login-emails|seo-accounts|plugins|business-licenses')
         ->middleware('permission:store.view')
