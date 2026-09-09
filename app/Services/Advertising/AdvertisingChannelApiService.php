@@ -2,6 +2,7 @@
 
 namespace App\Services\Advertising;
 
+use App\Exceptions\AdvertisingApiException;
 use App\Models\Store;
 use App\Services\StoreBusinessCredentialService;
 use Carbon\CarbonImmutable;
@@ -1085,7 +1086,11 @@ class AdvertisingChannelApiService
         $context = collect([$status, $apiCode])->filter()->unique()->implode('/');
         $suffix = $context !== '' ? ", {$context}" : '';
 
-        throw new RuntimeException("{$provider} request failed (HTTP {$response->status()}{$suffix}).");
+        throw new AdvertisingApiException(
+            "{$provider} request failed (HTTP {$response->status()}{$suffix}).",
+            $response->status(),
+            AdvertisingSyncFailurePolicy::retryAfter($response->header('Retry-After')),
+        );
     }
 
     private function metaPurchaseValue(mixed $values): float

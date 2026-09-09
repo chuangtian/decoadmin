@@ -31,16 +31,21 @@ class SyncAdvertisingChannels extends Command
             ->when(filled($storeId), fn ($query) => $query->whereKey((int) $storeId))
             ->get()
             ->filter(fn (Store $store): bool => $sync->configured($store, $channel));
+        $submitted = 0;
         foreach ($stores as $store) {
+            if ($sync->cooldownSeconds($store, $channel, $sync->credentialVersion($store, $channel)) > 0) {
+                continue;
+            }
             SyncAdvertisingChannelForStore::dispatch(
                 (int) $store->organization_id,
                 (int) $store->getKey(),
                 $channel,
-                $mode,
+                $sync->resumeMode($store, $channel, $mode, $sync->credentialVersion($store, $channel)),
                 $sync->credentialVersion($store, $channel),
             );
+            $submitted++;
         }
-        $this->components->info("已提交 {$stores->count()} 个店铺的 {$channel} 同步任务。");
+        $this->components->info("已提交 {$submitted} 个店铺的 {$channel} 同步任务（冷却中的店铺已跳过）。");
 
         return self::SUCCESS;
     }
