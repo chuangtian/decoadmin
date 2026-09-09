@@ -1,3 +1,5 @@
+import { brandProfileSections } from './brandProfile';
+
 export interface MenuItem {
     name: string;
     route?: string;
@@ -124,10 +126,16 @@ export const menu: MenuItem[] = [
         permission: 'alerts.view',
     },
     {
-        name: 'Shopify',
-        icon: 'shopify',
+        name: '品牌资料',
+        icon: 'brand-profile',
         section: '系统',
         sectionDivider: true,
+        children: brandProfileSections.map(({ name, route, icon }) => ({ name, route, icon, permission: 'store.view' })),
+    },
+
+    {
+        name: 'Shopify',
+        icon: 'shopify',
         children: [
             { name: '店铺管理', route: '/stores', icon: 'stores', permission: 'store.view' },
             { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },

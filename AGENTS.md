@@ -16,6 +16,15 @@
 - Keep local, test, and production environments distinct; never treat their URLs, credentials, data, or deployment actions as interchangeable.
 - The Cloudflare URL is a temporary local-development tunnel and may change. Treat the URL above as the currently known local URL, not a permanent production endpoint.
 
+## Git and test deployment source
+
+- Git `origin/test` is the source of truth for test deployments and local synchronization.
+- Commit, validate, and push test changes before building a release. Build from a clean export of the exact fetched commit, not a mutable staging directory or an existing image with additional source files copied over it.
+- Record the full source commit with each release. Do not treat an old `RELEASE` file or an image tag alone as proof that the running source matches Git; verify source hashes when reconciling drift.
+- If test-only changes are discovered, preserve them in an isolated checkout, review and merge them into `test` before the next deployment. Never overwrite newer Git code, tests, or documents with older files from a container.
+- Keep environment secrets, databases, storage, generated assets, local tools, and backups separate from source synchronization. Back up local uncommitted work before restoring branch tracking.
+- A request to synchronize code does not by itself authorize a new test or production deployment.
+
 ## Shopify App architecture
 
 - Store all Shopify plugin and Shopify App files under `shopify-apps/<app-name>/`, including source code, dependencies, extensions, configuration, scripts, and documentation. Do not place these files in the DecoAdmin repository root or elsewhere in the repository.

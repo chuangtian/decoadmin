@@ -14,6 +14,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\BrandProfileController;
 use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
@@ -332,6 +333,18 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/brand-profile/{section?}', BrandProfileController::class)
+        ->where('section', 'overview|login-emails|seo-accounts|plugins|business-licenses')
+        ->middleware('permission:store.view')
+        ->name('brand-profile.show');
+    Route::post('/brand-profile/{storeId}/refresh', [BrandProfileController::class, 'refresh'])
+        ->whereNumber('storeId')->middleware(['permission:store.update', 'throttle:6,1'])->name('brand-profile.refresh');
+    Route::get('/brand-profile/{storeId}/{section}/rows/{rowId}/password', [BrandProfileController::class, 'password'])
+        ->whereNumber('storeId')->where('section', 'login-emails|seo-accounts|plugins')->where('rowId', '[a-f0-9]{64}')
+        ->middleware(['permission:store.update', 'throttle:30,1'])->name('brand-profile.password');
+    Route::get('/brand-profile/{storeId}/files/{assetId}', [BrandProfileController::class, 'file'])
+        ->whereNumber('storeId')->where('assetId', '[a-f0-9]{64}')
+        ->middleware(['permission:store.view', 'throttle:60,1'])->name('brand-profile.file');
     Route::get('/campaign-themes', CampaignThemeController::class)->middleware('permission:reports.view')->name('campaign-themes.index');
     Route::post('/campaign-themes/refresh', [CampaignThemeController::class, 'refresh'])
         ->middleware(['permission:sync.run', 'throttle:6,1'])

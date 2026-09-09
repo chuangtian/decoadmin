@@ -66,8 +66,9 @@ class NaturalTrafficDashboardService
 
             return [
                 ...$social,
-                'is_hidden' => (bool) ($state?->is_hidden ?? false),
-                'visibility_status' => ($state?->is_hidden ?? false) ? '已隐藏' : '可见',
+                'is_hidden' => (bool) ($state?->is_hidden || $state?->is_deleted),
+                'record_status' => $state?->is_deleted ? 'deleted' : ($state?->is_hidden ? 'hidden' : 'visible'),
+                'visibility_status' => $state?->is_deleted ? '回收站' : ($state?->is_hidden ? '已隐藏' : '可见'),
             ];
         });
         $visible = $all->reject(fn (array $row): bool => $row['is_hidden'])->values();
@@ -177,6 +178,7 @@ class NaturalTrafficDashboardService
         $postTypes = $allPosts->pluck('post_type')->filter()->unique()->sort()->values()->all();
         $postFilters['post_type'] = collect($postTypes)
             ->first(fn (string $postType): bool => mb_strtolower($postType) === mb_strtolower($postFilters['post_type'])) ?? '';
+        $postVisibilityCounts = $this->filterBrandPosts($allPosts, [...$postFilters, 'visibility' => 'all'])->countBy('record_status')->all();
         $filteredPosts = $this->filterBrandPosts($allPosts, $postFilters)
             ->sort(fn (array $left, array $right): int => $this->compareBrandPosts(
                 $left,
@@ -303,7 +305,7 @@ class NaturalTrafficDashboardService
                 'visibility_statuses' => [
                     ['value' => 'visible', 'label' => '可见帖子'],
                     ['value' => 'hidden', 'label' => '已隐藏帖子'],
-                    ['value' => 'all', 'label' => '全部帖子'],
+                    ['value' => 'deleted', 'label' => '回收站'],
                 ],
                 'aggregation_statuses' => [
                     ['value' => 'included', 'label' => '已纳入'],
@@ -319,7 +321,8 @@ class NaturalTrafficDashboardService
                 'to' => $postsTotal === 0 ? null : min($postsCurrentPage * $postFilters['per_page'], $postsTotal),
             ],
             'posts' => $posts,
-            'hidden_posts_count' => $periodAll->where('is_hidden', true)->count(),
+            'hidden_posts_count' => $periodAll->where('record_status', 'hidden')->count(),
+            'post_visibility_counts' => array_replace(['visible' => 0, 'hidden' => 0, 'deleted' => 0], $postVisibilityCounts),
             'columns' => $this->columns($source['records']),
             'raw_rows' => $this->sanitizedRows($source['records'], 1000),
         ];
@@ -344,7 +347,7 @@ class NaturalTrafficDashboardService
             'platform' => $platform,
             'post_type' => mb_substr(trim((string) ($filters['content_type'] ?? '')), 0, 100),
             'aggregation_status' => in_array($status, ['included', 'excluded'], true) ? $status : '',
-            'visibility' => in_array($visibility, ['visible', 'hidden', 'all'], true) ? $visibility : 'visible',
+            'visibility' => in_array($visibility, ['visible', 'hidden', 'deleted', 'all'], true) ? $visibility : 'visible',
             'origin' => in_array($origin, ['official', 'collaboration'], true) ? $origin : '',
             'sort' => in_array($sort, ['date', 'platform', 'views', 'likes', 'comments', 'shares', 'engagement_rate'], true) ? $sort : 'date',
             'direction' => in_array($direction, ['asc', 'desc'], true) ? $direction : 'desc',
@@ -370,9 +373,7 @@ class NaturalTrafficDashboardService
                     ? (bool) $row['excluded_from_aggregates']
                     : ! (bool) $row['excluded_from_aggregates']))
             ->when($filters['visibility'] !== 'all', fn (Collection $rows): Collection => $rows
-                ->filter(fn (array $row): bool => $filters['visibility'] === 'hidden'
-                    ? (bool) $row['is_hidden']
-                    : ! (bool) $row['is_hidden']))
+                ->filter(fn (array $row): bool => $row['record_status'] === $filters['visibility']))
             ->when($filters['origin'] !== '', fn (Collection $rows): Collection => $rows
                 ->filter(fn (array $row): bool => $row['content_origin'] === $filters['origin']))
             ->when($filters['keyword'] !== '', function (Collection $rows) use ($filters): Collection {

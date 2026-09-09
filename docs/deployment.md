@@ -189,6 +189,16 @@ SHOPIFY_SYNC_STALLED_AFTER_MINUTES=45
 
 ## Release procedure
 
+### Source of truth and reproducibility
+
+Use `origin/test` for test releases. The server repository is `/opt/decoadmin/repository`; `/opt/decoadmin/staging` may be an exported deployment directory without `.git`.
+
+Fetch `origin/test`, record its full commit SHA, and export that exact commit to a new release directory (for example with `git archive`). Run validation and build images from that export. Keep the environment file outside the Git export and supply it separately to Compose. Never overlay source from an old container or a developer's uncommitted working tree onto the build context.
+
+Label or record the same full source SHA for the app, nginx, and any workers being released. Deploy only within the explicitly authorized environment and service scope. After deployment, verify health and the source revision; a stale `RELEASE` file is not sufficient evidence. Reconcile unexpected source differences into Git before another release rather than carrying them forward as uncommitted patches.
+
+The commands below assume a clean Git checkout. Do not run the Git commands in an exported staging directory. The reconciliation recorded in `test-source-reconciliation-20260909.md` did not deploy services.
+
 ```bash
 git fetch --all --prune
 git checkout test
