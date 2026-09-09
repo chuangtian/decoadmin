@@ -259,7 +259,7 @@ function closeGscTrend(): void {
 }
 
 function lineChart(current: Trend[], previous: Trend[], key: 'revenue' | GscMetric) {
-    const width = 920, height = 300, left = 58, right = 22, top = 24, bottom = 42;
+    const width = 920, height = 300, left = 80, right = 40, top = 32, bottom = 42;
     const plotWidth = width - left - right, plotHeight = height - top - bottom;
     const max = Math.max(1, ...current.map((row) => Number(row[key] ?? 0)), ...previous.map((row) => Number(row[key] ?? 0))) * 1.12;
     const length = Math.max(current.length, previous.length, 1);

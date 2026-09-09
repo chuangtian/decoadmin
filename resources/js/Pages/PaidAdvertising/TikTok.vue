@@ -331,7 +331,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                             </div>
                             <div v-if="trendChart.points.length" class="relative mt-4 w-full" @mouseleave="hoveredTrend = null">
                                 <svg v-readable-chart class="h-auto w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="TikTok Ads 每日花费与 ROAS 趋势">
-                                    <g v-for="tick in trendChart.ticks" :key="tick.y"><line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line"/><text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text><text :x="trendChart.width-48" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text></g>
+                                    <g v-for="tick in trendChart.ticks" :key="tick.y"><line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line"/><text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text><text :x="trendChart.width-trendChart.right+12" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text></g>
                                     <g v-for="point in trendChart.points" :key="point.date"><rect :x="point.x-16" :y="point.previousBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.previousBarY" class="bar prior"/><rect :x="point.x+2" :y="point.currentBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.currentBarY" class="bar current"/><text :x="point.x" :y="trendChart.height-17" text-anchor="middle">{{ point.date.slice(5) }}</text><rect :x="point.x-trendChart.step/2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" @mouseenter="hoveredTrend=point.index"/></g>
                                     <polyline :points="trendChart.currentLine" class="roi current-roi"/><polyline :points="trendChart.previousLine" class="roi prior-roi"/>
                                     <line v-if="activeTrend" :x1="activeTrend.x" :x2="activeTrend.x" :y1="trendChart.top" :y2="trendChart.top+trendChart.plotHeight" class="hover-line"/>
@@ -378,7 +378,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 <g v-for="tick in trendChart.ticks" :key="tick.y">
                                     <line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line" />
                                     <text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text>
-                                    <text :x="trendChart.width-48" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text>
+                                    <text :x="trendChart.width-trendChart.right+12" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text>
                                 </g>
                                 <g v-for="point in trendChart.points" :key="point.date">
                                     <rect :x="point.x-16" :y="point.previousBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.previousBarY" class="bar prior" />

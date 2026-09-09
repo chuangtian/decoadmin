@@ -798,8 +798,8 @@ onBeforeUnmount(() => {
                                         <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
                                         <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.roi.toFixed(1) }}×</text>
                                     </g>
-                                    <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="12">金额</text>
-                                    <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
+                                    <text :x="trendChart.left" y="40" fill="#94a3b8" font-size="12">金额</text>
+                                    <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                     <g v-for="point in trendChart.points" :key="point.date" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                         <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.9" />
                                         <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.9" />
@@ -883,8 +883,8 @@ onBeforeUnmount(() => {
                                     <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
                                     <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.roi.toFixed(1) }}×</text>
                                 </g>
-                                <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="12">金额</text>
-                                <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
+                                <text :x="trendChart.left" y="40" fill="#94a3b8" font-size="12">金额</text>
+                                <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                 <g v-for="point in trendChart.points" :key="`trend-${point.date}`" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                     <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.92" />
                                     <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.92" />
