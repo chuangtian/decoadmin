@@ -7,6 +7,8 @@ use App\Models\InstagramFeedInstallation;
 use App\Models\Store;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * instagram-feed App 自己的 Shopify Admin API 会话。
@@ -76,7 +78,20 @@ class InstagramFeedShopifyClient
 
         $payload = $response->json();
         if ($response->failed() || ! is_array($payload) || ! empty($payload['errors'])) {
-            throw new InstagramFeedException('SHOPIFY_ADMIN_API_FAILED', 'Shopify Admin API 请求失败。', 502);
+            // 这里以前只抛一句通用文案，Shopify 的真实原因（HTTP 状态或 GraphQL errors）
+            // 全部丢失，线上排查只能靠猜。响应体不含我们的令牌，仍做一次兜底脱敏。
+            Log::warning('Instagram Feed Shopify Admin API 调用失败。', [
+                'shop' => $shopDomain,
+                'status' => $response->status(),
+                'api_version' => (string) config('shopify.api_version'),
+                'response' => $this->safeSnippet((string) $response->body()),
+            ]);
+
+            throw new InstagramFeedException(
+                'SHOPIFY_ADMIN_API_FAILED',
+                'Shopify Admin API 请求失败（HTTP '.$response->status().'）：'.$this->firstErrorMessage($payload, $response->body()),
+                502,
+            );
         }
 
         return $payload;
@@ -85,5 +100,35 @@ class InstagramFeedShopifyClient
     public function endpoint(string $shopDomain): string
     {
         return 'https://'.$shopDomain.'/admin/api/'.(string) config('shopify.api_version').'/graphql.json';
+    }
+
+    /** 取第一条可展示的错误说明：GraphQL errors 优先，退回响应体片段。 */
+    private function firstErrorMessage(mixed $payload, string $body): string
+    {
+        $errors = is_array($payload) ? ($payload['errors'] ?? null) : null;
+
+        if (is_string($errors) && trim($errors) !== '') {
+            return $this->safeSnippet($errors, 200);
+        }
+
+        if (is_array($errors)) {
+            $message = collect($errors)
+                ->map(fn (mixed $error): string => is_array($error) ? (string) ($error['message'] ?? '') : (string) $error)
+                ->filter()
+                ->implode('；');
+
+            if ($message !== '') {
+                return $this->safeSnippet($message, 200);
+            }
+        }
+
+        return $this->safeSnippet($body, 200);
+    }
+
+    private function safeSnippet(string $value, int $limit = 500): string
+    {
+        $redacted = preg_replace('/\b(shp(at|ca|pa|ss)_[A-Za-z0-9]+)\b/', '[redacted]', $value) ?? $value;
+
+        return Str::limit(trim($redacted), $limit, '…');
     }
 }
