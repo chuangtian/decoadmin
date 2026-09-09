@@ -25,7 +25,10 @@ class BrandSocialWorkflowService
         string $sourceTableKey,
         string $sourceRecordId,
         bool $hidden,
+        bool $deleted = false,
     ): BrandSocialPostState {
+        abort_unless(in_array($sourceSection, ['natural-traffic:social', BrandSocialCsvImportService::SOURCE_SECTION, \App\Services\YouTubeAnalytics\YouTubeAnalyticsSyncService::SOURCE_SECTION], true), 404);
+        $hidden = $hidden || $deleted;
         $sourceExists = FeishuBitableRecord::query()
             ->where('organization_id', (int) $store->organization_id)
             ->where('store_id', (int) $store->id)
@@ -36,17 +39,19 @@ class BrandSocialWorkflowService
             ->exists();
         abort_unless($sourceExists, 404);
 
-        return DB::transaction(function () use ($store, $actor, $sourceSection, $sourceTableKey, $sourceRecordId, $hidden): BrandSocialPostState {
+        return DB::transaction(function () use ($store, $actor, $sourceSection, $sourceTableKey, $sourceRecordId, $hidden, $deleted): BrandSocialPostState {
             $state = BrandSocialPostState::query()->firstOrNew([
                 'store_id' => (int) $store->id,
                 'source_section' => $sourceSection,
                 'source_table_key' => $sourceTableKey,
                 'source_record_id' => $sourceRecordId,
             ]);
+            $oldDeleted = (bool) ($state->is_deleted ?? false);
             $oldHidden = $state->exists ? (bool) $state->is_hidden : false;
             $state->fill([
                 'organization_id' => (int) $store->organization_id,
                 'is_hidden' => $hidden,
+                'is_deleted' => $deleted,
                 'hidden_by' => $hidden ? (int) $actor->id : null,
                 'hidden_at' => $hidden ? now() : null,
             ])->save();
@@ -57,7 +62,9 @@ class BrandSocialWorkflowService
                 'source_record_id' => $sourceRecordId,
                 'old_hidden' => $oldHidden,
                 'new_hidden' => $hidden,
-                'idempotent' => $oldHidden === $hidden,
+                'old_status' => $oldDeleted ? 'deleted' : ($oldHidden ? 'hidden' : 'visible'),
+                'new_status' => $deleted ? 'deleted' : ($hidden ? 'hidden' : 'visible'),
+                'idempotent' => $oldHidden === $hidden && $oldDeleted === $deleted,
             ]);
 
             return $state;

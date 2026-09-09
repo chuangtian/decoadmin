@@ -16,6 +16,15 @@
 - Keep local, test, and production environments distinct; never treat their URLs, credentials, data, or deployment actions as interchangeable.
 - The Cloudflare URL is a temporary local-development tunnel and may change. Treat the URL above as the currently known local URL, not a permanent production endpoint.
 
+## Git and test deployment source
+
+- Git `origin/test` is the source of truth for test deployments and local synchronization.
+- Commit, validate, and push test changes before building a release. Build from a clean export of the exact fetched commit, not a mutable staging directory or an existing image with additional source files copied over it.
+- Record the full source commit with each release. Do not treat an old `RELEASE` file or an image tag alone as proof that the running source matches Git; verify source hashes when reconciling drift.
+- If test-only changes are discovered, preserve them in an isolated checkout, review and merge them into `test` before the next deployment. Never overwrite newer Git code, tests, or documents with older files from a container.
+- Keep environment secrets, databases, storage, generated assets, local tools, and backups separate from source synchronization. Back up local uncommitted work before restoring branch tracking.
+- A request to synchronize code does not by itself authorize a new test or production deployment.
+
 ## Shopify App architecture
 
 - Store all Shopify plugin and Shopify App files under `shopify-apps/<app-name>/`, including source code, dependencies, extensions, configuration, scripts, and documentation. Do not place these files in the DecoAdmin repository root or elsewhere in the repository.
@@ -25,3 +34,13 @@
 - Shopify Apps may reuse DecoAdmin backend services, but backend authorization must enforce User, Organization, Store, and RBAC boundaries.
 - A request to develop or release one Shopify App never authorizes changes or releases for another app or environment.
 - Treat `shopify-apps/AGENTS.md` as the detailed operating rules for all current and future Shopify Apps in this repository.
+
+## Production update workflow
+
+- User-confirmed on 2026-09-09: production updates follow **`test` → merge into `main` → deploy the resulting `main` commit to the production server**.
+- Git `origin/main` is the production release source. Do not deploy `test` directly to production or copy the test deployment directory, test environment configuration, or uncommitted patches into production.
+- Before an authorized production update, fetch the latest `test` and `main`, inspect their differences and the current production release, and preserve any production-only changes before merging. Resolve conflicts and validate the resulting code; push the completed merge to `main` without rewriting others' history.
+- After the merge is on GitHub, fetch `origin/main` on the server and build from a clean export of its exact full commit SHA. Production target: `/opt/decoadmin/production`, `https://admin.decomkt.com`; confirm the actual Compose project and services before changing them.
+- Keep production credentials and Shopify App identities separate. Back up the production database and configuration, record previous image versions, review required migrations, and update the authorized application and worker services consistently.
+- Verify health, login, key pages, queues, and scheduled tasks after release. Record the deployed `main` SHA, validation results, and rollback information. Assess schema compatibility before reverting images; do not blindly reverse database migrations.
+- Detailed procedure: `docs/deployment.md`, “Production updates: test → main → server”. Recording or discussing this workflow does not authorize a merge, push, or deployment.

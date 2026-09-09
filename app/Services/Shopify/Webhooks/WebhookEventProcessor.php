@@ -2,6 +2,7 @@
 
 namespace App\Services\Shopify\Webhooks;
 
+use App\Domain\ReferralAffiliate\Services\AffiliateWebhookService;
 use App\Models\WebhookEvent;
 
 class WebhookEventProcessor
@@ -10,6 +11,11 @@ class WebhookEventProcessor
 
     public function process(WebhookEvent $event): WebhookProcessingResult
     {
+        if ($event->app?->handle === config('referral.active.handle') && $event->app?->client_id === config('referral.active.client_id')) {
+            app(AffiliateWebhookService::class)->process($event);
+
+            return WebhookProcessingResult::handled(AffiliateWebhookService::class);
+        }
         $handler = $this->handlers->forTopic($event->topic);
 
         if (! $handler) {

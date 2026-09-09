@@ -26,6 +26,7 @@ class ShopifyDataController extends Controller
 
         return Inertia::render('Products/Index', [
             'products' => $this->queries->products($this->store(), $filters['search'] ?? null, $filters['status'] ?? null),
+            'canManageMonitor' => $request->user()->hasPermission('products.update', $this->currentOrganization->require(), $this->store()),
             'filters' => $filters,
         ]);
     }

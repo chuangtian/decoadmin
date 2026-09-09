@@ -1,3 +1,5 @@
+import { brandProfileSections } from './brandProfile';
+
 export interface MenuItem {
     name: string;
     route?: string;
@@ -83,6 +85,22 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '推荐与联盟',
+        icon: 'campaign',
+        children: [
+            { name: '概览', route: '/affiliate', icon: 'dashboard', permission: 'affiliate.dashboard.view' },
+            { name: '推广计划', route: '/affiliate/programs', icon: 'campaign', permission: 'affiliate.programs.view' },
+            { name: '推广者', route: '/affiliate/promoters', icon: 'users', permission: 'affiliate.promoters.view' },
+            { name: '推荐订单', route: '/affiliate/finance/conversions', icon: 'analytics', permission: 'affiliate.conversions.view' },
+            { name: '佣金账本', route: '/affiliate/finance/commissions', icon: 'analytics', permission: 'affiliate.commissions.view' },
+            { name: '结算中心', route: '/affiliate/finance/payouts', icon: 'analytics', permission: 'affiliate.payouts.view' },
+            { name: '风险审查', route: '/affiliate/finance/risks', icon: 'analytics', permission: 'affiliate.fraud.view' },
+            { name: '推广报表', route: '/affiliate/finance/reports', icon: 'analytics', permission: 'affiliate.dashboard.view' },
+            { name: '顾客奖励', route: '/affiliate/finance/rewards', icon: 'analytics', permission: 'affiliate.promoters.view' },
+            { name: '推广素材', route: '/affiliate/materials', icon: 'analytics', permission: 'affiliate.promoters.view' },
+        ],
+    },
+    {
         name: '舆情监控',
         icon: 'reports',
         children: [
@@ -108,10 +126,16 @@ export const menu: MenuItem[] = [
         permission: 'alerts.view',
     },
     {
-        name: 'Shopify',
-        icon: 'shopify',
+        name: '品牌资料',
+        icon: 'brand-profile',
         section: '系统',
         sectionDivider: true,
+        children: brandProfileSections.map(({ name, route, icon }) => ({ name, route, icon, permission: 'store.view' })),
+    },
+
+    {
+        name: 'Shopify',
+        icon: 'shopify',
         children: [
             { name: '店铺管理', route: '/stores', icon: 'stores', permission: 'store.view' },
             { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },

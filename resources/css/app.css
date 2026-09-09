@@ -204,3 +204,61 @@ body {
 .app-page-content > .mt-6 { margin-top: 0.75rem; }
 .app-page-content > .mt-7 { margin-top: 0.875rem; }
 .app-page-content > .mt-8 { margin-top: 1rem; }
+
+/* Consistent control insets across admin filters. Keep icon space separate
+   from the 12px content inset, including for native select arrows. */
+.app-page-content :is(
+    select:not([multiple]):not([size]),
+    input[type='search'],
+    input[type='date'],
+    input[type='datetime-local'],
+    input[type='month'],
+    input[type='week'],
+    input[placeholder*='搜索'],
+    input[placeholder*='筛选'],
+    input[placeholder*='关键'],
+    input[placeholder*='search' i],
+    [data-filter-control]
+) {
+    min-height: 38px;
+    padding-block: 8px;
+    padding-right: 12px;
+}
+
+.app-page-content :is(
+    select:not([multiple]):not([size]),
+    input[type='search'],
+    input[type='date'],
+    input[type='datetime-local'],
+    input[type='month'],
+    input[type='week'],
+    input[placeholder*='搜索'],
+    input[placeholder*='筛选'],
+    input[placeholder*='关键'],
+    input[placeholder*='search' i],
+    [data-filter-control]
+):not([class*='pl-']):not([class*='ps-']) {
+    padding-left: 12px;
+}
+
+.app-page-content select:not([multiple]):not([size]) {
+    appearance: none;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2364758b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 12px center;
+    background-size: 16px 16px;
+    background-repeat: no-repeat;
+}
+
+.app-page-content input:is([type='date'], [type='datetime-local'], [type='month'], [type='week'])::-webkit-calendar-picker-indicator {
+    margin: 0;
+    padding: 0;
+}
+
+@media (forced-colors: active) {
+    .app-page-content select:not([multiple]):not([size]) {
+        appearance: auto;
+        background-image: none;
+        padding-right: 12px;
+    }
+}

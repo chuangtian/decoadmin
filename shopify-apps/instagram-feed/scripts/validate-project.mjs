@@ -83,14 +83,22 @@ function assertConfiguration(fileName, origin) {
     contents.includes(`application_url = "${origin}/shopify-app/instagram-feed"`),
     `${fileName} has the wrong Shopify-facing application URL`,
   );
+  // 授权码安装流程下 Shopify 拒绝 app 级 webhook 订阅：
+  // app/uninstalled 与 app/scopes_update 由 DecoAdmin 按店铺注册。
   check(
-    contents.includes(`uri = "${origin}/api/shopify-app/instagram-feed/webhooks"`),
-    `${fileName} has the wrong webhook endpoint`,
+    ! contents.includes('[[webhooks.subscriptions]]'),
+    `${fileName} must not declare app-specific webhook subscriptions while use_legacy_install_flow is enabled`,
   );
-  check(contents.includes(`"${origin}/api/shopify-app/auth/callback"`), `${fileName} has the wrong auth callback URL`);
+  check(contents.includes('api_version = "'), `${fileName} must pin the webhook api_version`);
+  check(
+    contents.includes(`"${origin}/shopify-app/instagram-feed/oauth/callback"`),
+    `${fileName} has the wrong Shopify OAuth callback URL`,
+  );
   check(contents.includes('embedded = true'), `${fileName} must stay embedded`);
   check(contents.includes(`scopes = "${expectedScopes}"`), `${fileName} scopes differ from config/instagram_feed.php`);
-  check(contents.includes('use_legacy_install_flow = false'), `${fileName} must use Shopify managed installation`);
+  // DecoAdmin 通过授权码回调建立本 App 的 offline token（与 Commerce Hub 一致）。
+  // 改成 Shopify 托管安装前必须先把后端换回 token exchange。
+  check(contents.includes('use_legacy_install_flow = true'), `${fileName} must keep the authorization-code install flow`);
   check(
     contents.includes('automatically_update_urls_on_dev = false'),
     `${fileName} must not rewrite deployed URLs`,

@@ -10,6 +10,9 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
+if (config('product_monitoring.enabled', true)) {
+    Schedule::command('shopify:monitor-products')->everyFiveMinutes()->onOneServer()->withoutOverlapping(60);
+}
 Schedule::call([SystemStatusService::class, 'recordSchedulerHeartbeat'])
     ->name('system:scheduler-heartbeat')
     ->everyMinute()
@@ -196,4 +199,13 @@ if (config('shopify.scheduled_sync.enabled')) {
         ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
         ->onOneServer()
         ->withoutOverlapping(60);
+}
+
+// The pilot's queue and maintenance must survive the standard staging deployment.
+if (app()->environment('staging')) {
+    Schedule::command('affiliate:maintenance')
+        ->name('affiliate:pilot-maintenance')
+        ->everyMinute()
+        ->onOneServer()
+        ->withoutOverlapping(5);
 }

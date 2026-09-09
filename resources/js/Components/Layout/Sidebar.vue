@@ -14,9 +14,10 @@ const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
 // 这些菜单项的真实路径带组织与店铺作用域，菜单里只登记后缀，进入时按当前上下文补全。
-const storeScopedRoutes = ['/student-discounts', '/instagram-feed', '/community-reviews'];
+const storeScopedRoutes = ['/student-discounts', '/instagram-feed', '/community-reviews', '/affiliate'];
+const isStoreScopedRoute = (route: string) => storeScopedRoutes.some(prefix => route === prefix || route.startsWith(`${prefix}/`));
 const contextualRoute = (route?: string) => {
-    if (!route || !storeScopedRoutes.includes(route)) return route;
+    if (!route || !isStoreScopedRoute(route)) return route;
     const organization = page.props.currentOrganization;
     const store = page.props.currentStore;
     return organization && store
@@ -54,7 +55,7 @@ const visibleMenu = computed<MenuItem[]>(() => menu
             ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
             .map((child) => ({ ...child, route: contextualRoute(child.route) }))
             // 还没选店铺时店铺级路由补不出完整路径，先隐藏，避免点进去 404。
-            .filter((child) => !(child.route && storeScopedRoutes.includes(child.route)));
+            .filter((child) => !(child.route && isStoreScopedRoute(child.route)));
 
         return {
             ...item,

@@ -17,6 +17,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class Product extends Model
 {
+    public function monitor(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(ShopifyProductMonitor::class);
+    }
+
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);

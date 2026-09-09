@@ -17,6 +17,7 @@ class PermissionSeeder extends Seeder
         'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram Feed',
         'personalization' => '个性化推荐',
         'discounts' => '折扣管理',
+        'affiliate' => '推荐与联盟',
     ];
 
     /** @var array<string, string> */
@@ -34,6 +35,12 @@ class PermissionSeeder extends Seeder
         'gallery.manage' => '管理展示组', 'publish' => '发布前台',
         'smart_cart.manage' => '管理 Smart Cart',
         'tokens.view' => '查看授权', 'tokens.manage' => '管理授权',
+        'dashboard.view' => '查看概览', 'programs.view' => '查看推广计划', 'programs.manage' => '管理推广计划',
+        'promoters.view' => '查看推广者', 'promoters.manage' => '管理推广者',
+        'conversions.view' => '查看推荐订单', 'conversions.override' => '纠正订单归因',
+        'commissions.view' => '查看佣金', 'commissions.adjust' => '调整佣金', 'commissions.approve' => '审批佣金',
+        'payouts.view' => '查看结算', 'payouts.create' => '创建结算', 'payouts.confirm' => '确认付款',
+        'fraud.view' => '查看风险', 'fraud.review' => '审核风险', 'settings.manage' => '管理设置',
     ];
 
     /** @var list<string> */
@@ -123,6 +130,23 @@ class PermissionSeeder extends Seeder
         'personalization.smart_cart.manage',
         'discounts.view',
         'discounts.manage',
+        'affiliate.dashboard.view',
+        'affiliate.programs.view',
+        'affiliate.programs.manage',
+        'affiliate.promoters.view',
+        'affiliate.promoters.manage',
+        'affiliate.conversions.view',
+        'affiliate.conversions.override',
+        'affiliate.commissions.view',
+        'affiliate.commissions.adjust',
+        'affiliate.commissions.approve',
+        'affiliate.payouts.view',
+        'affiliate.payouts.create',
+        'affiliate.payouts.confirm',
+        'affiliate.fraud.view',
+        'affiliate.fraud.review',
+        'affiliate.settings.manage',
+        'affiliate.reports.export',
     ];
 
     public function run(): void

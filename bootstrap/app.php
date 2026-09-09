@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthenticateCodexApiToken;
+use App\Http\Middleware\ConfigureAffiliatePortalSession;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
@@ -36,6 +37,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'shopify/pixels/*',
             'api/student-discounts/*',
             'api/shopify-app/webhooks',
+            'api/shopify-app/referral/bootstrap',
+            'api/shopify-app/referral/webhooks',
             'api/shopify-app/student-discounts/*',
             'api/shopify-app/instagram-feed/*',
             'api/shopify-app/personalization/*',
@@ -66,7 +69,7 @@ return Application::configure(basePath: dirname(__DIR__))
             VerifyShopifyAppProxy::class,
         );
 
-        $middleware->web(append: [
+        $middleware->web(prepend: [ConfigureAffiliatePortalSession::class], append: [
             UseBuiltAssetsForExternalRequests::class,
             HandleInertiaRequests::class,
         ]);

@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\AffiliateController;
+use App\Http\Controllers\AffiliateFinanceController;
+use App\Http\Controllers\AffiliatePortalController;
+use App\Http\Controllers\AffiliateTrackingController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\ApplicationCenterController;
@@ -10,6 +14,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
+use App\Http\Controllers\BrandProfileController;
 use App\Http\Controllers\BusinessInsightsController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
@@ -28,6 +33,7 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
+use App\Http\Controllers\InstagramFeedShopifyOAuthController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
@@ -43,12 +49,15 @@ use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\PersonalizationStrategyWorkflowController;
+use App\Http\Controllers\ProductMonitorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
 use App\Http\Controllers\PublicStudentDiscountController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\ShopifyAffiliateAppController;
+use App\Http\Controllers\ShopifyAffiliateWebhookController;
 use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
@@ -77,7 +86,31 @@ use App\Http\Controllers\YouTubeAnalyticsOAuthController;
 use App\Models\Store;
 use Illuminate\Support\Facades\Route;
 
+Route::post('/api/shopify-app/referral/bootstrap', [ShopifyAffiliateAppController::class, 'bootstrap'])
+    ->middleware(['shopify.id-token:referral', 'throttle:20,1'])->name('affiliate.shopify.bootstrap');
+Route::post('/api/shopify-app/referral/webhooks', ShopifyAffiliateWebhookController::class)
+    ->name('affiliate.shopify.webhooks');
+Route::get('/shopify-app/referral', [ShopifyAffiliateAppController::class, 'home'])
+    ->name('affiliate.shopify.home');
+Route::get('/shopify-app/referral/manage', [ShopifyAffiliateAppController::class, 'management'])
+    ->middleware(['auth', 'verified'])->name('affiliate.shopify.management');
+Route::prefix('/referral-portal')->group(function (): void {
+    Route::get('/portal.js', fn () => response()->file(base_path('shopify-apps/deco-referral/resources/portal/portal.js'), ['Content-Type'=>'application/javascript','Cache-Control'=>'public, max-age=300','X-Content-Type-Options'=>'nosniff']));
+    Route::get('/', [AffiliatePortalController::class, 'index'])->name('affiliate.portal');
+    Route::post('/apply', [AffiliatePortalController::class, 'apply'])->middleware('throttle:5,10');
+    Route::post('/request-login', [AffiliatePortalController::class, 'requestLogin'])->middleware('throttle:5,10');
+    Route::get('/invitation', [AffiliatePortalController::class, 'invitation']);
+    Route::post('/invitation', [AffiliatePortalController::class, 'acceptInvitation'])->middleware('throttle:10,1');
+    Route::get('/login', [AffiliatePortalController::class, 'login']);
+    Route::post('/session', [AffiliatePortalController::class, 'session'])->middleware('throttle:10,1');
+    Route::post('/logout', [AffiliatePortalController::class, 'logout']);
+    Route::post('/profile', [AffiliatePortalController::class, 'profile'])->middleware('throttle:5,10');
+    Route::get('/assets/{asset}', [AffiliatePortalController::class, 'asset'])->whereUlid('asset');
+});
+
 Route::get('/health', HealthCheckController::class)->name('health');
+Route::get('/r/{link}', AffiliateTrackingController::class)
+    ->whereUlid('link')->middleware('throttle:120,1')->name('affiliate.tracking.redirect');
 
 Route::get('/.well-known/oauth-protected-resource', [CodexOAuthMetadataController::class, 'protectedResource'])
     ->middleware('throttle:120,1')
@@ -161,6 +194,12 @@ Route::prefix('/api/shopify-app/student-discounts/proxy')
 Route::get('/shopify-app/instagram-feed', [ShopifyInstagramFeedAppController::class, 'management'])
     ->middleware(['auth', 'verified', 'throttle:60,1'])
     ->name('instagram-feed.shopify-app.management');
+
+// Shopify 授权码回调：Shopify 直接把浏览器打回来，所以不能挂 auth。
+// 身份靠 state cookie + oauth_states 一次性记录 + HMAC 验签确认。
+Route::get('/shopify-app/instagram-feed/oauth/callback', [InstagramFeedShopifyOAuthController::class, 'callback'])
+    ->middleware('throttle:30,1')
+    ->name('instagram-feed.shopify-oauth.callback');
 
 Route::post('/api/shopify-app/instagram-feed/webhooks', ShopifyInstagramFeedWebhookController::class)
     ->middleware('throttle:600,1')
@@ -294,6 +333,18 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/brand-profile/{section?}', BrandProfileController::class)
+        ->where('section', 'overview|login-emails|seo-accounts|plugins|business-licenses')
+        ->middleware('permission:store.view')
+        ->name('brand-profile.show');
+    Route::post('/brand-profile/{storeId}/refresh', [BrandProfileController::class, 'refresh'])
+        ->whereNumber('storeId')->middleware(['permission:store.update', 'throttle:6,1'])->name('brand-profile.refresh');
+    Route::get('/brand-profile/{storeId}/{section}/rows/{rowId}/password', [BrandProfileController::class, 'password'])
+        ->whereNumber('storeId')->where('section', 'login-emails|seo-accounts|plugins')->where('rowId', '[a-f0-9]{64}')
+        ->middleware(['permission:store.update', 'throttle:30,1'])->name('brand-profile.password');
+    Route::get('/brand-profile/{storeId}/files/{assetId}', [BrandProfileController::class, 'file'])
+        ->whereNumber('storeId')->where('assetId', '[a-f0-9]{64}')
+        ->middleware(['permission:store.view', 'throttle:60,1'])->name('brand-profile.file');
     Route::get('/campaign-themes', CampaignThemeController::class)->middleware('permission:reports.view')->name('campaign-themes.index');
     Route::post('/campaign-themes/refresh', [CampaignThemeController::class, 'refresh'])
         ->middleware(['permission:sync.run', 'throttle:6,1'])
@@ -613,6 +664,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/sync/{syncJob}/retry', [SyncJobController::class, 'retry'])->middleware('permission:sync.retry')->name('sync.retry');
 
     Route::get('/products', [ShopifyDataController::class, 'products'])->middleware('permission:products.view')->name('products.index');
+    Route::patch('/products/{product}/monitor', [ProductMonitorController::class, 'update'])
+        ->whereNumber('product')->middleware(['permission:products.update', 'throttle:60,1'])->name('products.monitor.update');
     Route::get('/products/{product}', [ShopifyDataController::class, 'product'])->whereNumber('product')->middleware('permission:products.view')->name('products.show');
     Route::get('/orders', [ShopifyDataController::class, 'orders'])->middleware('permission:orders.view')->name('orders.index');
     Route::get('/orders/{order}', [ShopifyDataController::class, 'order'])->whereNumber('order')->middleware('permission:orders.view')->name('orders.show');
@@ -651,6 +704,52 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
         ->middleware(['store.access', 'permission:store.view'])
         ->name('stores.access-check');
 });
+
+Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->group(function (): void {
+        Route::get('/', [AffiliateController::class, 'overview'])
+            ->middleware('permission:affiliate.dashboard.view')->name('affiliate.index');
+        Route::get('/programs', [AffiliateController::class, 'programs'])
+            ->middleware('permission:affiliate.programs.view')->name('affiliate.programs.index');
+        Route::post('/programs', [AffiliateController::class, 'storeProgram'])
+            ->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.store');
+        Route::put('/programs/{program}', [AffiliateController::class, 'updateProgram'])->whereUlid('program')->middleware('permission:affiliate.programs.manage')->name('affiliate.programs.update');
+        Route::put('/programs/{program}/rules', [AffiliateController::class, 'rules'])->whereUlid('program')->middleware('permission:affiliate.programs.manage')->name('affiliate.programs.rules');
+        Route::get('/catalog', [AffiliateController::class, 'catalog'])->middleware('permission:affiliate.programs.manage')->name('affiliate.catalog');
+        Route::post('/programs/{program}/transition', [AffiliateController::class, 'transitionProgram'])
+            ->whereUlid('program')->middleware(['permission:affiliate.programs.manage', 'throttle:30,1'])->name('affiliate.programs.transition');
+        Route::get('/promoters', [AffiliateController::class, 'promoters'])
+            ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
+        Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
+            ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
+        Route::post('/rewards/{reward}/retry', [\App\Http\Controllers\AffiliateFinanceController::class,'retryReward'])->whereUlid('reward')->middleware('permission:affiliate.programs.manage')->name('affiliate.rewards.retry');
+        Route::post('/conversions/{conversion}/attribute', [\App\Http\Controllers\AffiliateFinanceController::class, 'attribute'])->whereUlid('conversion')->middleware('permission:affiliate.conversions.override')->name('affiliate.conversions.attribute');
+        Route::get('/reports/export', [\App\Http\Controllers\AffiliateFinanceController::class, 'reportCsv'])->middleware('permission:affiliate.reports.export')->name('affiliate.reports.export');
+        Route::post('/promoters/import', [AffiliateController::class, 'importPromoters'])->middleware(['permission:affiliate.promoters.manage','throttle:5,1'])->name('affiliate.promoters.import');
+        Route::put('/notification-templates/{key}', [\App\Http\Controllers\AffiliateMaterialController::class, 'template'])->middleware('permission:affiliate.settings.manage')->name('affiliate.notifications.template');
+        Route::get('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'index'])->middleware('permission:affiliate.promoters.view')->name('affiliate.materials.index');
+        Route::post('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'upload'])->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.upload');
+        Route::delete('/materials/{asset}', [\App\Http\Controllers\AffiliateMaterialController::class, 'remove'])->whereUlid('asset')->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.remove');
+        Route::post('/memberships/{membership}/invite', [AffiliateController::class, 'invite'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage');
+        Route::put('/memberships/{membership}', [AffiliateController::class, 'updateMembership'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage')->name('affiliate.memberships.update');
+        Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])
+            ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.memberships.transition');
+        Route::post('/memberships/{membership}/sync-coupon', [AffiliateController::class, 'syncCoupon'])
+            ->whereUlid('membership')->middleware(['permission:affiliate.promoters.manage', 'throttle:10,1'])->name('affiliate.coupons.sync');
+        Route::put('/settings', [AffiliateController::class, 'settings'])
+            ->middleware(['permission:affiliate.settings.manage', 'throttle:30,1'])->name('affiliate.settings.update');
+        Route::get('/finance/{section}', [AffiliateFinanceController::class, 'index'])
+            ->whereIn('section', ['conversions', 'commissions', 'payouts', 'risks', 'reports', 'rewards'])->name('affiliate.finance.index');
+        Route::post('/finance/reconcile', [AffiliateFinanceController::class, 'reconcile'])->middleware('throttle:10,1')->name('affiliate.finance.reconcile');
+        Route::post('/finance/release', [AffiliateFinanceController::class, 'release'])->middleware('throttle:10,1')->name('affiliate.finance.release');
+        Route::post('/finance/adjust', [AffiliateFinanceController::class, 'adjust'])->middleware('throttle:10,1')->name('affiliate.finance.adjust');
+        Route::post('/finance/risks/{flag}', [AffiliateFinanceController::class, 'review'])->whereUlid('flag')->middleware('throttle:20,1')->name('affiliate.finance.risk');
+        Route::post('/finance/payouts', [AffiliateFinanceController::class, 'createPayout'])->middleware('throttle:10,1')->name('affiliate.finance.payout.create');
+        Route::post('/finance/payouts/{batch}', [AffiliateFinanceController::class, 'payoutTransition'])->whereUlid('batch')->middleware('throttle:10,1')->name('affiliate.finance.payout.transition');
+        Route::get('/finance/payouts/{batch}/csv', [AffiliateFinanceController::class, 'payoutCsv'])->whereUlid('batch')->name('affiliate.finance.payout.csv');
+        Route::get('/finance/payouts/{batch}/proof', [AffiliateFinanceController::class, 'proof'])->whereUlid('batch')->name('affiliate.finance.payout.proof');
+    });
 
 Route::prefix('/organizations/{organization}/stores/{store}/student-discounts')
     ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
@@ -785,6 +884,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
         Route::get('/', [InstagramFeedController::class, 'index'])
             ->middleware('permission:instagram_feed.view')
             ->name('instagram-feed.index');
+
+        // Shopify App 自身的授权（授权码模式），与下面的 Meta 账号授权是两件事。
+        Route::post('/shopify-authorize', [InstagramFeedShopifyOAuthController::class, 'redirect'])
+            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
+            ->name('instagram-feed.shopify-oauth.redirect');
+        Route::post('/shopify-verify', [InstagramFeedShopifyOAuthController::class, 'verify'])
+            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
+            ->name('instagram-feed.shopify-oauth.verify');
 
         Route::post('/connect', [InstagramFeedController::class, 'connect'])
             ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
