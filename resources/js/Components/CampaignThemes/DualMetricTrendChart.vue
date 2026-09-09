@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface TrendPoint {
@@ -133,7 +134,7 @@ const pointLabel = (point: TrendPoint) => [
 
         <div v-if="points.length" class="trend-scrollbar overflow-x-auto px-3 pb-3 pt-2 sm:px-4">
             <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                <svg
+                <svg v-readable-chart
                     class="block"
                     :viewBox="`0 0 ${chartWidth} ${chartHeight}`"
                     :width="chartWidth"
@@ -141,8 +142,8 @@ const pointLabel = (point: TrendPoint) => [
                     role="img"
                     :aria-label="title"
                 >
-                    <text :x="plot.left" y="25" class="fill-slate-400 text-[11px] font-medium">{{ lineLabel }}</text>
-                    <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">{{ barLabel }}</text>
+                    <text :x="plot.left" y="25" class="fill-slate-400 text-xs font-medium">{{ lineLabel }}</text>
+                    <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-xs font-medium">{{ barLabel }}</text>
 
                     <g v-for="ratio in ticks" :key="ratio">
                         <line
@@ -157,12 +158,12 @@ const pointLabel = (point: TrendPoint) => [
                             :x="plot.left - 10"
                             :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4"
                             text-anchor="end"
-                            class="fill-slate-400 text-[11px] tabular-nums"
+                            class="fill-slate-400 text-xs tabular-nums"
                         >{{ lineAxisText(lineMaximum * ratio) }}</text>
                         <text
                             :x="chartWidth - plot.right + 10"
                             :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4"
-                            class="fill-slate-400 text-[11px] tabular-nums"
+                            class="fill-slate-400 text-xs tabular-nums"
                         >{{ barAxisText(barMaximum * ratio) }}</text>
                     </g>
 
@@ -204,7 +205,7 @@ const pointLabel = (point: TrendPoint) => [
                                 :x="xAt(index)"
                                 :y="lineYAt(point.lineValue) - 12"
                                 text-anchor="middle"
-                                class="text-[11px] font-semibold tabular-nums"
+                                class="text-xs font-semibold tabular-nums"
                                 :fill="lineColor"
                             >{{ lineText(point.lineValue) }}</text>
                         </template>
@@ -213,7 +214,7 @@ const pointLabel = (point: TrendPoint) => [
                             :x="xAt(index)"
                             :y="plot.bottom + 28"
                             text-anchor="middle"
-                            class="fill-slate-600 text-[11px] font-medium"
+                            class="fill-slate-600 text-xs font-medium"
                         >
                             <title>{{ point.name }}</title>
                             {{ shortName(point.name) }}
@@ -222,7 +223,7 @@ const pointLabel = (point: TrendPoint) => [
                             :x="xAt(index)"
                             :y="plot.bottom + 46"
                             text-anchor="middle"
-                            class="fill-slate-400 text-[10px] tabular-nums"
+                            class="fill-slate-400 text-xs tabular-nums"
                         >{{ shortDate(point.startsOn) }}</text>
 
                         <rect

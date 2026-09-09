@@ -429,7 +429,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                     <div class="mt-8 h-64 border-b border-l border-slate-200 bg-[linear-gradient(to_bottom,transparent_24%,#e2e8f0_25%,transparent_26%,transparent_49%,#e2e8f0_50%,transparent_51%,transparent_74%,#e2e8f0_75%,transparent_76%)] p-2">
                         <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="h-full w-full overflow-visible"><polyline :points="linePoints" fill="none" stroke="#0ea5e9" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" /></svg>
                     </div>
-                    <div class="mt-3 flex justify-between text-[11px] text-slate-400"><span>{{ overview.trend[0]?.label }}</span><span>{{ overview.trend[Math.floor(overview.trend.length / 2)]?.label }}</span><span>{{ overview.trend.at(-1)?.label }}</span></div>
+                    <div class="mt-3 flex justify-between text-xs text-slate-400"><span>{{ overview.trend[0]?.label }}</span><span>{{ overview.trend[Math.floor(overview.trend.length / 2)]?.label }}</span><span>{{ overview.trend.at(-1)?.label }}</span></div>
                 </article>
 
                 <article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -480,7 +480,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                 </div>
                 <div class="grid md:grid-cols-2">
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问来源</h3><p class="mt-1 text-sm text-slate-400">推荐人与访问转化</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.acquisition)">{{ reportStatusLabel(insights.acquisition) }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问来源</h3><p class="mt-1 text-sm text-slate-400">推荐人与访问转化</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="reportStatusClass(insights.acquisition)">{{ reportStatusLabel(insights.acquisition) }}</span></div>
                         <div v-if="insights.acquisition.available && insights.acquisition.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.acquisition.items.slice(0, 5)" :key="item.key">
                                 <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.detail }} · 转化 {{ item.conversion_rate }}%</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
@@ -491,7 +491,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">设备类型</h3><p class="mt-1 text-sm text-slate-400">桌面、移动设备和平板占比</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.devices)">{{ reportStatusLabel(insights.devices) }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">设备类型</h3><p class="mt-1 text-sm text-slate-400">桌面、移动设备和平板占比</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="reportStatusClass(insights.devices)">{{ reportStatusLabel(insights.devices) }}</span></div>
                         <div v-if="insights.devices.available && insights.devices.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.devices.items.slice(0, 5)" :key="item.key" class="rounded-2xl bg-slate-50 p-4">
                                 <div class="flex items-center justify-between"><strong class="text-sm text-slate-800">{{ item.label }}</strong><span class="text-lg font-semibold text-slate-950">{{ item.share }}%</span></div>
@@ -503,7 +503,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问地点</h3><p class="mt-1 text-sm text-slate-400">国家和地区分布</p></div><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="reportStatusClass(insights.locations)">{{ reportStatusLabel(insights.locations) }}</span></div>
+                        <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">访问地点</h3><p class="mt-1 text-sm text-slate-400">国家和地区分布</p></div><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="reportStatusClass(insights.locations)">{{ reportStatusLabel(insights.locations) }}</span></div>
                         <div v-if="insights.locations.available && insights.locations.items.length" class="mt-7 space-y-4">
                             <div v-for="item in insights.locations.items.slice(0, 5)" :key="item.key">
                                 <div class="mb-1.5 flex items-center justify-between gap-3 text-sm"><div class="min-w-0"><p class="truncate font-semibold text-slate-700">{{ item.label }}</p><p class="truncate text-xs text-slate-400">{{ item.country }} · {{ item.visitors }} 位访客</p></div><strong class="shrink-0 text-slate-950">{{ number(item.sessions) }}</strong></div>
@@ -514,7 +514,7 @@ const riskLabel: Record<string, string> = { out_of_stock: '已缺货', low_stock
                     </article>
 
                     <article class="min-h-80 border-b border-slate-100 p-6 md:border-r">
-                    <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">客户群组</h3><p class="mt-1 text-sm text-slate-400">新客户与回头客户</p></div><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">ShopifyQL</span></div>
+                    <div class="flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-800">客户群组</h3><p class="mt-1 text-sm text-slate-400">新客户与回头客户</p></div><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">ShopifyQL</span></div>
                         <div class="mt-8 grid grid-cols-3 gap-3">
                             <div v-for="item in insights.customers.items" :key="item.key" class="rounded-2xl bg-slate-50 p-4 text-center"><p class="text-xs text-slate-500">{{ item.label }}</p><p class="mt-2 text-2xl font-semibold text-slate-950">{{ number(item.value) }}</p></div>
                         </div>

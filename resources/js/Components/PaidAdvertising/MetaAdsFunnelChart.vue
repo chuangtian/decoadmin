@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{
@@ -62,7 +63,7 @@ function integer(value: number): string {
         </div>
 
         <div class="relative mt-4" @mouseleave="hoveredIndex = null">
-            <svg class="h-[300px] w-full" viewBox="0 0 620 300" role="img" aria-label="曝光、点击和购买转化漏斗">
+            <svg v-readable-chart class="h-[300px] w-full" viewBox="0 0 620 300" role="img" aria-label="曝光、点击和购买转化漏斗">
                 <g
                     v-for="(stage, index) in stages"
                     :key="stage.label"

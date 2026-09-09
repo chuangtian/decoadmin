@@ -12,7 +12,7 @@ defineProps<{ title: string; description: string }>();
                 <div class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-teal-400 to-emerald-600 shadow-xl shadow-emerald-950/40">
                     <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h6a4 4 0 0 1 0 8H7V7Z"/><path d="M7 3v18M13 7h4"/></svg>
                 </div>
-                <div><p class="text-[11px] font-semibold tracking-[0.24em] text-emerald-400">电商运营系统</p><p class="font-semibold">Shopify 运营中台</p></div>
+                <div><p class="text-xs font-semibold tracking-[0.24em] text-emerald-400">电商运营系统</p><p class="font-semibold">Shopify 运营中台</p></div>
             </div>
             <div class="relative max-w-2xl">
                 <p class="mb-6 text-sm font-semibold tracking-[0.24em] text-emerald-400">安全统一的工作空间</p>

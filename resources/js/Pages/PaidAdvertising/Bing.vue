@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -476,18 +477,18 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 </div>
                             </div>
                             <div v-if="trendChart.points.length" class="relative mt-4 w-full" @mouseleave="hoveredTrend = null">
-                                <svg class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Bing Ads 每日花费与 ROAS 趋势">
+                                <svg v-readable-chart class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Bing Ads 每日花费与 ROAS 趋势">
                                     <g v-for="tick in trendChart.ticks" :key="tick.y">
                                         <line :x1="trendChart.left" :x2="trendChart.width - trendChart.right" :y1="tick.y" :y2="tick.y" stroke="#dbe5ef" stroke-dasharray="4 5" />
-                                        <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="11">{{ compactNumber(tick.amount) }}</text>
-                                        <text :x="trendChart.width - 4" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ tick.roas.toFixed(1) }}×</text>
+                                        <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
+                                        <text :x="trendChart.width - 4" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ tick.roas.toFixed(1) }}×</text>
                                     </g>
-                                    <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="11">花费</text>
-                                    <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="11">ROAS</text>
+                                    <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="12">花费</text>
+                                    <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="12">ROAS</text>
                                     <g v-for="point in trendChart.points" :key="point.date">
                                         <rect v-if="comparisonEnabled" :x="point.x - trendChart.barWidth - 2" :y="point.previousBarY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.previousBarY" rx="2" fill="#164e63" opacity="0.78" />
                                         <rect :x="comparisonEnabled ? point.x + 2 : point.x - trendChart.barWidth / 2" :y="point.currentBarY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.currentBarY" rx="2" fill="#06b6d4" />
-                                        <text v-if="point.showLabel" :x="point.x" :y="trendChart.height - 17" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text>
+                                        <text v-if="point.showLabel" :x="point.x" :y="trendChart.height - 17" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
                                         <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" class="cursor-pointer" @mouseenter="hoveredTrend = point.index" />
                                     </g>
                                     <polyline :points="trendChart.currentLine" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
@@ -516,7 +517,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                             </div>
                             <div class="mt-4 grid items-center gap-4 md:grid-cols-[minmax(0,1fr)_118px]">
                                 <div class="relative" @mouseleave="hoveredFunnel = null">
-                                    <svg class="h-auto min-h-[300px] w-full" viewBox="0 0 600 310" role="img" aria-label="Bing Ads 曝光、点击、加购、结账、购买转化漏斗">
+                                    <svg v-readable-chart class="h-auto min-h-[300px] w-full" viewBox="0 0 600 310" role="img" aria-label="Bing Ads 曝光、点击、加购、结账、购买转化漏斗">
                                         <g v-for="stage in funnelChart" :key="stage.key" class="cursor-pointer" @mouseenter="hoveredFunnel = stage.index">
                                             <path :d="stage.path" :fill="stage.color" :opacity="activeFunnel && activeFunnel.index !== stage.index ? 0.72 : 1" stroke="white" stroke-width="1.5" />
                                             <text x="300" :y="stage.y + 22" text-anchor="middle" fill="white" font-size="13" font-weight="700">{{ stage.label }}</text>
@@ -564,18 +565,18 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                             </div>
                         </div>
                         <div v-if="trendChart.points.length" class="relative mt-6 w-full" @mouseleave="hoveredTrend = null">
-                            <svg class="h-auto min-h-[380px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Bing Ads 趋势分析每日花费与 ROAS">
+                            <svg v-readable-chart class="h-auto min-h-[380px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Bing Ads 趋势分析每日花费与 ROAS">
                                 <g v-for="tick in trendChart.ticks" :key="`detail-${tick.y}`">
                                     <line :x1="trendChart.left" :x2="trendChart.width - trendChart.right" :y1="tick.y" :y2="tick.y" stroke="#dbe5ef" stroke-dasharray="4 5" />
-                                    <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="11">{{ compactNumber(tick.amount) }}</text>
-                                    <text :x="trendChart.width - 4" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ tick.roas.toFixed(1) }}×</text>
+                                    <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
+                                    <text :x="trendChart.width - 4" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ tick.roas.toFixed(1) }}×</text>
                                 </g>
-                                <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="11">花费</text>
-                                <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="11">ROAS</text>
+                                <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="12">花费</text>
+                                <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="12">ROAS</text>
                                 <g v-for="point in trendChart.points" :key="`detail-${point.date}`">
                                     <rect v-if="comparisonEnabled" :x="point.x - trendChart.barWidth - 2" :y="point.previousBarY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.previousBarY" rx="2" fill="#164e63" opacity="0.78" />
                                     <rect :x="comparisonEnabled ? point.x + 2 : point.x - trendChart.barWidth / 2" :y="point.currentBarY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.currentBarY" rx="2" fill="#06b6d4" />
-                                    <text v-if="point.showLabel" :x="point.x" :y="trendChart.height - 17" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text>
+                                    <text v-if="point.showLabel" :x="point.x" :y="trendChart.height - 17" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
                                     <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" class="cursor-pointer" @mouseenter="hoveredTrend = point.index" />
                                 </g>
                                 <polyline :points="trendChart.currentLine" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
@@ -603,7 +604,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 <p class="mt-1 text-sm text-slate-500">每日点击数 ÷ 每日曝光量</p>
                             </div>
                             <div v-if="ctrChart.points.length" class="relative mt-5" @mouseleave="hoveredCtr = null">
-                                <svg class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${ctrChart.width} ${ctrChart.height}`" role="img" aria-label="Bing Ads 每日 CTR 趋势">
+                                <svg v-readable-chart class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${ctrChart.width} ${ctrChart.height}`" role="img" aria-label="Bing Ads 每日 CTR 趋势">
                                     <defs>
                                         <linearGradient id="bingCtrArea" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.3" />
@@ -612,13 +613,13 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                     </defs>
                                     <g v-for="tick in ctrChart.ticks" :key="`ctr-${tick.y}`">
                                         <line :x1="ctrChart.left" :x2="ctrChart.width - ctrChart.right" :y1="tick.y" :y2="tick.y" stroke="#dbe5ef" stroke-dasharray="4 5" />
-                                        <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="11">{{ tick.value.toFixed(1) }}%</text>
+                                        <text x="4" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.value.toFixed(1) }}%</text>
                                     </g>
                                     <polygon :points="ctrChart.area" fill="url(#bingCtrArea)" />
                                     <polyline :points="ctrChart.line" fill="none" stroke="#0ea5e9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                                     <g v-for="point in ctrChart.points" :key="`ctr-point-${point.date}`">
                                         <circle :cx="point.x" :cy="point.y" r="3.5" fill="#0ea5e9" stroke="white" stroke-width="1.5" />
-                                        <text v-if="point.showLabel" :x="point.x" :y="ctrChart.height - 16" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text>
+                                        <text v-if="point.showLabel" :x="point.x" :y="ctrChart.height - 16" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
                                         <rect :x="point.x - Math.max(10, ctrChart.step / 2)" :y="ctrChart.top" :width="Math.max(20, ctrChart.step)" :height="ctrChart.plotHeight" fill="transparent" class="cursor-pointer" @mouseenter="hoveredCtr = point.index" />
                                     </g>
                                     <line v-if="activeCtr" :x1="activeCtr.x" :x2="activeCtr.x" :y1="ctrChart.top" :y2="ctrChart.baseline" stroke="#64748b" stroke-dasharray="5 5" />
@@ -755,10 +756,10 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 <p class="mt-1 text-sm text-slate-500">花费前 6 名系列的 Revenue ÷ Spend</p>
                             </div>
                             <div v-if="campaignRoasChart.rows.length" class="relative mt-6 overflow-x-auto" @mouseleave="hoveredCampaignRoas = null">
-                                <svg class="h-auto w-full" :viewBox="`0 0 ${campaignRoasChart.width} ${campaignRoasChart.height}`" role="img" aria-label="Bing Ads 广告系列 ROAS 对比">
+                                <svg v-readable-chart class="h-auto w-full" :viewBox="`0 0 ${campaignRoasChart.width} ${campaignRoasChart.height}`" role="img" aria-label="Bing Ads 广告系列 ROAS 对比">
                                     <g v-for="tick in campaignRoasChart.ticks" :key="`roas-tick-${tick.x}`">
                                         <line :x1="tick.x" :x2="tick.x" :y1="campaignRoasChart.top" :y2="campaignRoasChart.height - campaignRoasChart.bottom" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                                        <text :x="tick.x" :y="campaignRoasChart.height - 7" text-anchor="middle" fill="#94a3b8" font-size="11">{{ tick.value.toFixed(1) }}×</text>
+                                        <text :x="tick.x" :y="campaignRoasChart.height - 7" text-anchor="middle" fill="#94a3b8" font-size="12">{{ tick.value.toFixed(1) }}×</text>
                                     </g>
                                     <g v-for="row in campaignRoasChart.rows" :key="`roas-row-${row.id}`" @mouseenter="hoveredCampaignRoas = row.index">
                                         <text :x="campaignRoasChart.left - 14" :y="row.y + 18" text-anchor="end" fill="#64748b" font-size="12"><title>{{ row.name }}</title>{{ row.shortName }}</text>
@@ -806,7 +807,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                     <tr v-for="row in paginatedCampaignRows" :key="row.id" class="transition hover:bg-cyan-50/40">
                                         <td class="min-w-64 px-5 py-4">
                                             <div class="max-w-80 truncate font-semibold text-slate-900" :title="row.name">{{ row.name }}</div>
-                                            <div class="mt-1 flex items-center gap-2 text-[11px] text-slate-400"><span>{{ row.id }}</span><span class="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">{{ row.status }}</span></div>
+                                            <div class="mt-1 flex items-center gap-2 text-xs text-slate-400"><span>{{ row.id }}</span><span class="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">{{ row.status }}</span></div>
                                         </td>
                                         <td class="whitespace-nowrap px-5 py-4 font-semibold text-cyan-600">{{ format(row.spend, 'money') }}</td>
                                         <td class="whitespace-nowrap px-5 py-4 font-semibold text-emerald-600">{{ format(row.roas, 'ratio') }}</td>

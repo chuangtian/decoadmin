@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed } from 'vue';
 
 type ContentEfficiency = {
@@ -11,7 +12,7 @@ type ContentEfficiency = {
 const props = defineProps<{ items: ContentEfficiency[] }>();
 const width = 1000;
 const height = 300;
-const padding = { left: 70, right: 24, top: 28, bottom: 58 };
+const padding = { left: 88, right: 28, top: 32, bottom: 58 };
 const plotWidth = width - padding.left - padding.right;
 const plotHeight = height - padding.top - padding.bottom;
 const maxValue = computed(() => Math.max(1, ...props.items.flatMap((item) => [Number(item.average_views ?? 0), Number(item.average_interactions ?? 0)])));
@@ -42,10 +43,11 @@ function typeLabel(item: ContentEfficiency): string {
             <span class="flex items-center gap-2"><i class="h-3 w-7 rounded bg-pink-500"></i>平均浏览</span>
             <span class="flex items-center gap-2"><i class="h-3 w-7 rounded bg-emerald-500"></i>平均互动</span>
         </div>
-        <svg :viewBox="`0 0 ${width} ${height}`" class="block w-full" role="img" aria-label="内容形式平均浏览与平均互动柱状对比图">
+        <div class="max-w-full overflow-x-auto">
+        <svg v-readable-chart :viewBox="`0 0 ${width} ${height}`" class="block min-w-[640px] w-full" role="img" aria-label="内容形式平均浏览与平均互动柱状对比图">
             <g v-for="tick in [0, .25, .5, .75, 1]" :key="tick">
                 <line :x1="padding.left" :x2="width - padding.right" :y1="padding.top + plotHeight * (1 - tick)" :y2="padding.top + plotHeight * (1 - tick)" stroke="#e2e8f0" stroke-dasharray="5 7" />
-                <text :x="padding.left - 12" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(maxValue * tick) }}</text>
+                <text :x="padding.left - 12" :y="padding.top + plotHeight * (1 - tick) + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(maxValue * tick) }}</text>
             </g>
             <g v-for="(item, index) in items" :key="item.type">
                 <rect :x="groupCenter(index) - 38" :y="barY(item.average_views)" width="32" :height="barHeight(item.average_views)" rx="5" fill="#ec4899">
@@ -57,6 +59,7 @@ function typeLabel(item: ContentEfficiency): string {
                 <text :x="groupCenter(index)" :y="height - 18" text-anchor="middle" fill="#64748b" font-size="12" font-weight="700">{{ typeLabel(item) }}</text>
             </g>
         </svg>
+        </div>
     </div>
     <div v-else class="flex h-64 items-center justify-center rounded-2xl bg-slate-50 text-sm font-semibold text-slate-400">暂无内容形式数据</div>
 </template>

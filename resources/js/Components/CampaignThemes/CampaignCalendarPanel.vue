@@ -241,7 +241,7 @@ const openDetail = (activityId: number) => router.get('/campaign-themes', {
                             v-for="event in week.events"
                             :key="`${week.key}-${event.activity.id}`"
                             type="button"
-                            class="pointer-events-auto z-10 h-6 min-w-0 truncate rounded-md px-2 text-left text-[11px] font-semibold shadow-sm transition hover:z-20 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-offset-1"
+                            class="pointer-events-auto z-10 h-6 min-w-0 truncate rounded-md px-2 text-left text-xs font-semibold shadow-sm transition hover:z-20 hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-offset-1"
                             :class="colorClass(event.activity)"
                             :style="{ gridColumn: `${event.startColumn} / span ${event.span}`, gridRow: `${event.lane + 1}` }"
                             :title="`${event.activity.name} · ${event.activity.starts_on}–${event.activity.ends_on}`"

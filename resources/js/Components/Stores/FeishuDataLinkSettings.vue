@@ -148,7 +148,7 @@ const save = () => {
                     <div>
                         <div class="flex items-center gap-2">
                             <h3 class="text-lg font-semibold text-slate-950">{{ activeSection.title }}</h3>
-                            <span class="rounded-md px-2 py-0.5 text-[11px] font-semibold" :class="activeSection.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ activeSection.configured ? '已配置' : '未配置' }}</span>
+                            <span class="rounded-md px-2 py-0.5 text-xs font-semibold" :class="activeSection.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ activeSection.configured ? '已配置' : '未配置' }}</span>
                         </div>
                         <p class="mt-2 text-sm leading-6 text-slate-500">{{ activeSection.description }}</p>
                     </div>
@@ -160,8 +160,8 @@ const save = () => {
                         <span class="flex flex-wrap items-center justify-between gap-2">
                             <span class="text-sm font-semibold text-slate-800">{{ field.label }}</span>
                             <span class="flex items-center gap-2">
-                                <code class="text-[11px] text-slate-400">{{ field.env_key }}</code>
-                                <span class="rounded-md px-2 py-0.5 text-[11px] font-semibold" :class="field.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ field.configured ? '已配置' : '未配置' }}</span>
+                                <code class="text-xs text-slate-400">{{ field.env_key }}</code>
+                                <span class="rounded-md px-2 py-0.5 text-xs font-semibold" :class="field.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ field.configured ? '已配置' : '未配置' }}</span>
                             </span>
                         </span>
                         <span class="mt-2 flex overflow-hidden rounded-xl border border-slate-200 bg-white transition focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100" :class="{ 'bg-slate-50 opacity-70': !canUpdate }">

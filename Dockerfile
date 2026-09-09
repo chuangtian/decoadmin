@@ -17,6 +17,7 @@ COPY resources ./resources
 COPY shopify-apps/community-reviews ./shopify-apps/community-reviews
 COPY shopify-apps/deco-referral/resources/admin ./shopify-apps/deco-referral/resources/admin
 COPY vite.config.ts tsconfig.json ./
+COPY scripts/check-typography.mjs ./scripts/check-typography.mjs
 RUN npm run build
 
 FROM php:8.4-fpm-bookworm AS app

@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{
     emptyText?: string;
     compact?: boolean;
     readable?: boolean;
-}>(), { labels: () => ({}), pageSize: 20, emptyText: '当前筛选暂无数据', compact: false, readable: false });
+}>(), { labels: () => ({}), pageSize: 20, emptyText: '当前筛选暂无数据', compact: false, readable: true });
 const page = ref(1);
 const totalPages = computed(() => Math.max(1, Math.ceil(props.rows.length / props.pageSize)));
 const pageRows = computed(() => props.rows.slice((page.value - 1) * props.pageSize, page.value * props.pageSize));
@@ -32,10 +32,10 @@ function isLink(value: unknown): boolean { return /^https?:\/\//i.test(valueText
 </script>
 
 <template>
-    <div>
-        <div class="overflow-x-auto border border-slate-200" :class="compact ? 'rounded-xl' : 'rounded-2xl'">
+    <div class="min-w-0 max-w-full">
+        <div class="max-w-full overflow-x-auto border border-slate-200" :class="compact ? 'rounded-xl' : 'rounded-2xl'">
             <table class="w-full min-w-max text-left" :class="readable ? 'text-[14px] leading-5' : compact ? 'text-xs' : 'text-sm'">
-                <thead class="bg-slate-50 font-bold text-slate-500" :class="readable ? 'text-[14px] leading-5' : 'text-[11px] uppercase tracking-wider'"><tr><th v-for="column in columns" :key="column" class="whitespace-nowrap" :class="compact ? 'px-3 py-2.5' : 'px-4 py-3.5'">{{ labels[column] || column }}</th><th v-if="$slots.actions" class="px-3 py-2.5">操作</th></tr></thead>
+                <thead class="bg-slate-50 font-bold text-slate-500" :class="readable ? 'text-[14px] leading-5' : 'text-xs uppercase tracking-wider'"><tr><th v-for="column in columns" :key="column" class="whitespace-nowrap" :class="compact ? 'px-3 py-2.5' : 'px-4 py-3.5'">{{ labels[column] || column }}</th><th v-if="$slots.actions" class="px-3 py-2.5">操作</th></tr></thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                     <tr v-for="(row, index) in pageRows" :key="String(row.record_id ?? index)" class="hover:bg-slate-50/80">
                         <td v-for="column in columns" :key="column" class="max-w-[360px] whitespace-nowrap text-slate-700" :class="compact ? 'px-3 py-2' : 'px-4 py-3'">

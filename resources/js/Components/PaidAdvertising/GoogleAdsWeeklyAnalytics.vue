@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 type MetricKey = 'spend' | 'revenue' | 'roi' | 'conversions' | 'add_to_cart' | 'checkout' | 'add_to_cart_cost' | 'checkout_cost' | 'cpa';
@@ -196,18 +197,18 @@ function tableClass(key: MetricKey | 'label', row: WeekRow): string {
                 </header>
                 <div class="relative overflow-x-auto p-3 sm:p-4" @mouseleave="hoveredSpendIndex = null">
                     <div class="relative min-w-[760px]" :style="{ width: `${spendChart.width}px` }">
-                        <svg class="block" :width="spendChart.width" :height="spendChart.height" :viewBox="`0 0 ${spendChart.width} ${spendChart.height}`" role="img" aria-label="Google Ads 周花费与 ROI 趋势">
-                            <text :x="spendChart.left" y="24" fill="#94a3b8" font-size="11">花费</text>
-                            <text :x="spendChart.width - spendChart.right" y="24" text-anchor="end" fill="#94a3b8" font-size="11">ROI</text>
+                        <svg v-readable-chart class="block" :width="spendChart.width" :height="spendChart.height" :viewBox="`0 0 ${spendChart.width} ${spendChart.height}`" role="img" aria-label="Google Ads 周花费与 ROI 趋势">
+                            <text :x="spendChart.left" y="24" fill="#94a3b8" font-size="12">花费</text>
+                            <text :x="spendChart.width - spendChart.right" y="24" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                             <g v-for="tick in spendChart.ticks" :key="`spend-tick-${tick.y}`">
                                 <line :x1="spendChart.left" :x2="spendChart.width - spendChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                                <text :x="spendChart.left - 8" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="10">{{ compact(tick.spend) }}</text>
-                                <text :x="spendChart.width - spendChart.right + 8" :y="tick.y + 4" fill="#94a3b8" font-size="10">{{ tick.roi.toFixed(1) }}×</text>
+                                <text :x="spendChart.left - 8" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(tick.spend) }}</text>
+                                <text :x="spendChart.width - spendChart.right + 8" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.roi.toFixed(1) }}×</text>
                             </g>
                             <g v-for="point in spendChart.points" :key="point.key" @mouseenter="hoveredSpendIndex = point.index">
                                 <rect :x="point.x - spendChart.barWidth / 2" :y="point.spendY" :width="spendChart.barWidth" :height="spendChart.bottom - point.spendY" rx="3" :fill="point.index === spendChart.points.length - 1 ? '#2563eb' : '#3b82f6'" :opacity="hoveredSpendIndex === null || hoveredSpendIndex === point.index ? 0.92 : 0.38" />
                                 <rect :x="point.x - spendChart.step / 2" :y="spendChart.top" :width="spendChart.step" :height="spendChart.bottom - spendChart.top + 34" fill="transparent" />
-                                <text v-if="point.showLabel" :x="point.x" :y="spendChart.bottom + 22" text-anchor="middle" fill="#64748b" font-size="10">{{ point.shortLabel }}</text>
+                                <text v-if="point.showLabel" :x="point.x" :y="spendChart.bottom + 22" text-anchor="middle" fill="#64748b" font-size="12">{{ point.shortLabel }}</text>
                             </g>
                             <polyline :points="spendChart.linePoints" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                             <circle v-for="point in spendChart.points" :key="`roi-${point.key}`" :cx="point.x" :cy="point.roiY" :r="point.index === spendChart.points.length - 1 ? 4.5 : 3" fill="#10b981" stroke="white" stroke-width="1.5" />
@@ -229,7 +230,7 @@ function tableClass(key: MetricKey | 'label', row: WeekRow): string {
                     <p class="mt-1 text-xs text-slate-400">加购 → 结账 → 成交，均来自当前所选周记录</p>
                 </header>
                 <div class="grid min-h-[372px] items-center gap-3 p-4 sm:grid-cols-[minmax(360px,1fr)_auto] sm:p-5">
-                    <svg class="h-auto w-full" viewBox="0 0 600 340" role="img" :aria-label="`${report.selected_week?.label} 加购、结账与成交漏斗`">
+                    <svg v-readable-chart class="h-auto w-full" viewBox="0 0 600 340" role="img" :aria-label="`${report.selected_week?.label} 加购、结账与成交漏斗`">
                         <g v-for="stage in funnel" :key="stage.key">
                             <polygon :points="stage.points" :fill="stage.color" opacity="0.94" stroke="white" stroke-width="2" />
                             <text x="300" :y="stage.textY" text-anchor="middle" fill="white" font-size="16" font-weight="700">{{ stage.label }}</text>
@@ -266,19 +267,19 @@ function tableClass(key: MetricKey | 'label', row: WeekRow): string {
             </header>
             <div class="overflow-x-auto p-3 sm:p-4" @mouseleave="hoveredCheckoutIndex = null">
                 <div class="relative" :style="{ width: `${checkoutChart.width}px`, height: `${checkoutChart.height}px` }">
-                    <svg :width="checkoutChart.width" :height="checkoutChart.height" :viewBox="`0 0 ${checkoutChart.width} ${checkoutChart.height}`" role="img" aria-label="Google Ads 周加购、结账与成本趋势">
-                        <text :x="checkoutChart.left" y="28" fill="#94a3b8" font-size="11">数量</text>
-                        <text :x="checkoutChart.width - checkoutChart.right" y="28" text-anchor="end" fill="#94a3b8" font-size="11">成本</text>
+                    <svg v-readable-chart :width="checkoutChart.width" :height="checkoutChart.height" :viewBox="`0 0 ${checkoutChart.width} ${checkoutChart.height}`" role="img" aria-label="Google Ads 周加购、结账与成本趋势">
+                        <text :x="checkoutChart.left" y="28" fill="#94a3b8" font-size="12">数量</text>
+                        <text :x="checkoutChart.width - checkoutChart.right" y="28" text-anchor="end" fill="#94a3b8" font-size="12">成本</text>
                         <g v-for="tick in checkoutChart.ticks" :key="`checkout-tick-${tick.y}`">
                             <line :x1="checkoutChart.left" :x2="checkoutChart.width - checkoutChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                            <text :x="checkoutChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="10">{{ compact(tick.count) }}</text>
-                            <text :x="checkoutChart.width - checkoutChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="10">${{ tick.cost.toFixed(0) }}</text>
+                            <text :x="checkoutChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(tick.count) }}</text>
+                            <text :x="checkoutChart.width - checkoutChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="12">${{ tick.cost.toFixed(0) }}</text>
                         </g>
                         <g v-for="point in checkoutChart.points" :key="`bars-${point.key}`" @mouseenter="hoveredCheckoutIndex = point.index">
                             <rect :x="point.x - checkoutChart.barWidth - 1.5" :y="point.addY" :width="checkoutChart.barWidth" :height="checkoutChart.bottom - point.addY" rx="2.5" fill="#3b82f6" :opacity="hoveredCheckoutIndex === null || hoveredCheckoutIndex === point.index ? 0.84 : 0.34" />
                             <rect :x="point.x + 1.5" :y="point.checkoutY" :width="checkoutChart.barWidth" :height="checkoutChart.bottom - point.checkoutY" rx="2.5" fill="#84cc16" :opacity="hoveredCheckoutIndex === null || hoveredCheckoutIndex === point.index ? 0.84 : 0.34" />
                             <rect :x="point.x - checkoutChart.step / 2" :y="checkoutChart.top" :width="checkoutChart.step" :height="checkoutChart.bottom - checkoutChart.top + 58" fill="transparent" />
-                            <text :x="point.x" :y="checkoutChart.bottom + 22" text-anchor="end" fill="#64748b" font-size="9.5" :transform="`rotate(-34 ${point.x} ${checkoutChart.bottom + 22})`">{{ point.shortLabel }}</text>
+                            <text :x="point.x" :y="checkoutChart.bottom + 22" text-anchor="end" fill="#64748b" font-size="12" :transform="`rotate(-34 ${point.x} ${checkoutChart.bottom + 22})`">{{ point.shortLabel }}</text>
                         </g>
                         <polyline :points="checkoutChart.addCostLine" fill="none" stroke="#8b5cf6" stroke-width="2.8" stroke-dasharray="8 5" stroke-linecap="round" stroke-linejoin="round" />
                         <polyline :points="checkoutChart.checkoutCostLine" fill="none" stroke="#f59e0b" stroke-width="2.8" stroke-dasharray="8 5" stroke-linecap="round" stroke-linejoin="round" />

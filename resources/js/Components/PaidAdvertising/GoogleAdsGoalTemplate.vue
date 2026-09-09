@@ -165,15 +165,15 @@ function detailValue(value: string | number | null, kind: string): string {
 
                     <div class="mt-4 grid grid-cols-3 gap-2">
                         <div class="rounded-xl bg-slate-950 px-3 py-3 text-white">
-                            <p class="text-[11px] text-slate-400">目标完成率</p>
+                            <p class="text-xs text-slate-400">目标完成率</p>
                             <p class="mt-1.5 text-sm font-semibold tabular-nums" :class="complete ? 'text-emerald-400' : 'text-blue-400'">{{ percent(summary.values.completion_rate) }}</p>
                         </div>
                         <div class="rounded-xl bg-slate-950 px-3 py-3 text-white">
-                            <p class="text-[11px] text-slate-400">时间对比</p>
+                            <p class="text-xs text-slate-400">时间对比</p>
                             <p class="mt-1.5 text-sm font-semibold tabular-nums" :class="ahead ? 'text-emerald-400' : 'text-rose-400'">{{ signedPercent(summary.values.time_variance) }}</p>
                         </div>
                         <div class="rounded-xl bg-slate-950 px-3 py-3 text-white">
-                            <p class="text-[11px] text-slate-400">时间进度</p>
+                            <p class="text-xs text-slate-400">时间进度</p>
                             <p class="mt-1.5 text-sm font-semibold tabular-nums text-slate-100">{{ percent(summary.values.time_progress) }}</p>
                         </div>
                     </div>
@@ -254,7 +254,7 @@ function detailValue(value: string | number | null, kind: string): string {
                         <p class="mt-3 text-xl font-semibold tabular-nums" :class="summary.efficiency.values.current_roas === null ? 'text-slate-300' : 'text-rose-600'">
                             {{ roas(summary.efficiency.values.current_roas) }}
                         </p>
-                        <p class="mt-1 text-[11px] text-slate-400">销售目标表最新记录</p>
+                        <p class="mt-1 text-xs text-slate-400">销售目标表最新记录</p>
                     </article>
 
                     <article class="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -263,7 +263,7 @@ function detailValue(value: string | number | null, kind: string): string {
                             <span class="h-2.5 w-2.5 rounded-full bg-blue-500" />
                         </div>
                         <p class="mt-3 text-xl font-semibold tabular-nums text-blue-700">{{ roas(summary.efficiency.values.target_roas) }}</p>
-                        <p class="mt-1 text-[11px] text-slate-400">字段缺失时默认 3.70×</p>
+                        <p class="mt-1 text-xs text-slate-400">字段缺失时默认 3.70×</p>
                     </article>
 
                     <article class="rounded-xl border border-orange-100 bg-white p-4 shadow-sm">
@@ -274,7 +274,7 @@ function detailValue(value: string | number | null, kind: string): string {
                         <p class="mt-3 text-xl font-semibold tabular-nums" :class="summary.efficiency.values.achievement_rate === null ? 'text-slate-300' : 'text-orange-600'">
                             {{ percent(summary.efficiency.values.achievement_rate) }}
                         </p>
-                        <p class="mt-1 text-[11px] text-slate-400">当前 ROAS ÷ 目标 ROAS</p>
+                        <p class="mt-1 text-xs text-slate-400">当前 ROAS ÷ 目标 ROAS</p>
                     </article>
 
                     <article class="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
@@ -285,7 +285,7 @@ function detailValue(value: string | number | null, kind: string): string {
                         <p class="mt-3 whitespace-nowrap text-xl font-semibold tabular-nums" :class="summary.efficiency.values.monthly_spend === null ? 'text-slate-300' : 'text-emerald-700'">
                             {{ money(summary.efficiency.values.monthly_spend) }}
                         </p>
-                        <p class="mt-1 text-[11px] text-slate-400">花费或消耗字段</p>
+                        <p class="mt-1 text-xs text-slate-400">花费或消耗字段</p>
                     </article>
                 </div>
 

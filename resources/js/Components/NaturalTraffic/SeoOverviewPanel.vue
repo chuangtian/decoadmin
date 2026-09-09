@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { router } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -258,7 +259,7 @@ function closeGscTrend(): void {
 }
 
 function lineChart(current: Trend[], previous: Trend[], key: 'revenue' | GscMetric) {
-    const width = 920, height = 300, left = 58, right = 22, top = 24, bottom = 42;
+    const width = 920, height = 300, left = 80, right = 40, top = 32, bottom = 42;
     const plotWidth = width - left - right, plotHeight = height - top - bottom;
     const max = Math.max(1, ...current.map((row) => Number(row[key] ?? 0)), ...previous.map((row) => Number(row[key] ?? 0))) * 1.12;
     const length = Math.max(current.length, previous.length, 1);
@@ -362,11 +363,11 @@ function difference(value: number, suffix = ''): string { return `${value > 0 ? 
             </div>
             <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
                 <div class="overflow-x-auto">
-                    <svg :viewBox="`0 0 ${gaChart.width} ${gaChart.height}`" class="min-w-[720px] w-full" role="img" aria-label="SEO GMV趋势">
-                        <g v-for="tick in gaChart.ticks" :key="tick.y"><line :x1="gaChart.left" :x2="gaChart.width-gaChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/><text :x="gaChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(tick.value) }}</text></g>
+                    <svg v-readable-chart :viewBox="`0 0 ${gaChart.width} ${gaChart.height}`" class="min-w-[720px] w-full" role="img" aria-label="SEO GMV趋势">
+                        <g v-for="tick in gaChart.ticks" :key="tick.y"><line :x1="gaChart.left" :x2="gaChart.width-gaChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/><text :x="gaChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(tick.value) }}</text></g>
                         <polyline v-if="filters.comparison !== 'none'" :points="gaChart.previousLine" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="7 6"/>
                         <polyline :points="gaChart.currentLine" fill="none" stroke="#10b981" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        <g v-for="point in gaChart.current" :key="point.date"><circle :cx="point.x" :cy="point.y" r="4" fill="#10b981"><title>{{ point.date }} · {{ money(point.value) }}</title></circle><text v-if="point.index===0 || point.index===gaChart.current.length-1" :x="point.x" :y="gaChart.height-12" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text></g>
+                        <g v-for="point in gaChart.current" :key="point.date"><circle :cx="point.x" :cy="point.y" r="4" fill="#10b981"><title>{{ point.date }} · {{ money(point.value) }}</title></circle><text v-if="point.index===0 || point.index===gaChart.current.length-1" :x="point.x" :y="gaChart.height-12" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text></g>
                     </svg>
                 </div>
                 <div class="space-y-3">
@@ -448,10 +449,10 @@ function difference(value: number, suffix = ''): string { return `${value > 0 ? 
                                 <span v-if="filters.comparison !== 'none'" class="inline-flex items-center gap-2"><span class="w-5 border-t-2 border-dashed border-slate-400"></span>{{ comparisonPeriodLabel }} · {{ overview.comparison_period.date_from }} — {{ overview.comparison_period.date_to }}</span>
                             </div>
                             <div v-if="gscHasTrend" class="mt-2 overflow-x-auto">
-                                <svg :viewBox="`0 0 ${gscChart.width} ${gscChart.height}`" class="min-w-[540px] w-full" role="img" :aria-label="`${gscMetricLabel}趋势`">
+                                <svg v-readable-chart :viewBox="`0 0 ${gscChart.width} ${gscChart.height}`" class="min-w-[540px] w-full" role="img" :aria-label="`${gscMetricLabel}趋势`">
                                     <g v-for="tick in gscChart.ticks" :key="tick.y">
                                         <line :x1="gscChart.left" :x2="gscChart.width-gscChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/>
-                                        <text :x="gscChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="11">{{ formatGscMetric(tick.value, activeGscMetric, true) }}</text>
+                                        <text :x="gscChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="12">{{ formatGscMetric(tick.value, activeGscMetric, true) }}</text>
                                     </g>
                                     <polyline v-if="filters.comparison !== 'none'" :points="gscChart.previousLine" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="7 6"/>
                                     <polyline :points="gscChart.currentLine" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -460,7 +461,7 @@ function difference(value: number, suffix = ''): string { return `${value > 0 ? 
                                     </g>
                                     <g v-for="point in gscChart.current" :key="point.date">
                                         <circle :cx="point.x" :cy="point.y" r="4" fill="#2563eb"><title>本期 · {{ point.date }} · {{ formatGscMetric(point.value, activeGscMetric) }}</title></circle>
-                                        <text v-if="point.index===0 || point.index===gscChart.current.length-1" :x="point.x" :y="gscChart.height-12" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text>
+                                        <text v-if="point.index===0 || point.index===gscChart.current.length-1" :x="point.x" :y="gscChart.height-12" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
                                     </g>
                                 </svg>
                             </div>
