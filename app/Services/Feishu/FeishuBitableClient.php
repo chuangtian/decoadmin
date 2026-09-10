@@ -10,6 +10,29 @@ class FeishuBitableClient
 {
     private ?string $tenantAccessToken = null;
 
+    public function uploadMessageImage(string $contents, string $filename = 'mf-daily-report.png'): string
+    {
+        if ($contents === '') {
+            throw new RuntimeException('飞书消息图片内容为空。');
+        }
+
+        $response = Http::baseUrl($this->baseUrl())
+            ->acceptJson()
+            ->withToken($this->accessToken())
+            ->timeout(max($this->timeout(), 60))
+            ->retry(3, 300, throw: false)
+            ->attach('image', $contents, $filename)
+            ->post('/im/v1/images', ['image_type' => 'message']);
+        $payload = $this->validatedPayload($response, '上传飞书消息图片');
+        $imageKey = data_get($payload, 'data.image_key');
+
+        if (! is_string($imageKey) || trim($imageKey) === '') {
+            throw new RuntimeException('飞书消息图片响应缺少 image_key。');
+        }
+
+        return trim($imageKey);
+    }
+
     /** @return list<array<string, mixed>> */
     public function tables(string $appToken): array
     {

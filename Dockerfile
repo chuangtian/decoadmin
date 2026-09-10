@@ -26,15 +26,17 @@ FROM php:8.4-fpm-bookworm AS app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         default-mysql-client \
+        fonts-noto-cjk \
         git \
         libicu-dev \
+        libfreetype6-dev \
         libjpeg62-turbo-dev \
         libpng-dev \
         libwebp-dev \
         libzip-dev \
         procps \
         unzip \
-    && docker-php-ext-configure gd --with-jpeg --with-webp \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" bcmath gd intl opcache pcntl pdo_mysql zip \
     && pecl install redis \
     && docker-php-ext-enable redis \
