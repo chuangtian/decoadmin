@@ -54,6 +54,7 @@ use App\Http\Controllers\ShopifyAppUninstallController;
 use App\Http\Controllers\ShopifyConnectionHealthController;
 use App\Http\Controllers\ShopifyDataController;
 use App\Http\Controllers\ShopifyInstagramFeedAppController;
+use App\Http\Controllers\ShopifyInstagramFeedContentController;
 use App\Http\Controllers\ShopifyInstagramFeedWebhookController;
 use App\Http\Controllers\ShopifyOAuthController;
 use App\Http\Controllers\ShopifyPersonalizationAppController;
@@ -159,8 +160,12 @@ Route::prefix('/api/shopify-app/student-discounts/proxy')
     });
 
 // instagram-feed Shopify App。前台数据走 app-data metafield，不需要 App Proxy。
+//
+// App Home 走 Shopify 官方推荐的自托管 iframe 模型：这是商家在 Shopify 后台看到的页面，
+// 所以不能挂 auth（商家没有 DecoAdmin 账号）。壳页面不输出任何店铺数据，
+// 身份校验在下面的 /api/shopify-app/instagram-feed/* 上按请求进行。
 Route::get('/shopify-app/instagram-feed', [ShopifyInstagramFeedAppController::class, 'management'])
-    ->middleware(['auth', 'verified', 'throttle:60,1'])
+    ->middleware(['shopify.embedded-frame', 'throttle:60,1'])
     ->name('instagram-feed.shopify-app.management');
 
 // Shopify 授权码回调：Shopify 直接把浏览器打回来，所以不能挂 auth。
@@ -181,6 +186,70 @@ Route::prefix('/api/shopify-app/instagram-feed')->group(function (): void {
         ->middleware(['shopify.id-token:instagram_feed', 'throttle:20,1'])
         ->name('instagram-feed.shopify-app.bootstrap');
 });
+
+// 内嵌页面的内容管理接口。
+//
+// 身份只认 App Bridge 的 session token：中间件验签后把 dest 写进 shopify_shop，
+// 店铺由它精确匹配得出，所以一次请求只能触及这一个店铺。这里没有 DecoAdmin 用户，
+// 也没有按人的 instagram_feed.* 授权 —— 能在 Shopify 后台打开应用的店铺员工即可操作。
+// 限流沿用后台同类动作的力度（同步与转存打外部 API，比一般写操作更严）。
+Route::prefix('/api/shopify-app/instagram-feed')
+    ->middleware('shopify.id-token:instagram_feed')
+    ->group(function (): void {
+        Route::get('/overview', [ShopifyInstagramFeedContentController::class, 'overview'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.overview');
+
+        Route::post('/account/authorize', [ShopifyInstagramFeedContentController::class, 'authorizeAccount'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.account.authorize');
+        Route::post('/account/select-page', [ShopifyInstagramFeedContentController::class, 'selectPage'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.account.select-page');
+        Route::delete('/account', [ShopifyInstagramFeedContentController::class, 'disconnectAccount'])
+            ->middleware('throttle:10,1')
+            ->name('instagram-feed.embedded.account.disconnect');
+
+        Route::post('/sync', [ShopifyInstagramFeedContentController::class, 'sync'])
+            ->middleware('throttle:6,1')
+            ->name('instagram-feed.embedded.sync');
+        Route::post('/mirror', [ShopifyInstagramFeedContentController::class, 'mirror'])
+            ->middleware('throttle:12,1')
+            ->name('instagram-feed.embedded.mirror');
+        Route::post('/media/{media}/retry-mirror', [ShopifyInstagramFeedContentController::class, 'retryMirror'])
+            ->middleware('throttle:30,1')
+            ->name('instagram-feed.embedded.media.retry-mirror');
+
+        Route::post('/publish', [ShopifyInstagramFeedContentController::class, 'publish'])
+            ->middleware('throttle:12,1')
+            ->name('instagram-feed.embedded.publish');
+
+        Route::get('/galleries/{gallery}', [ShopifyInstagramFeedContentController::class, 'showGallery'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.galleries.show');
+        Route::post('/galleries', [ShopifyInstagramFeedContentController::class, 'storeGallery'])
+            ->middleware('throttle:30,1')
+            ->name('instagram-feed.embedded.galleries.store');
+        Route::put('/galleries/{gallery}', [ShopifyInstagramFeedContentController::class, 'updateGallery'])
+            ->middleware('throttle:30,1')
+            ->name('instagram-feed.embedded.galleries.update');
+        Route::delete('/galleries/{gallery}', [ShopifyInstagramFeedContentController::class, 'destroyGallery'])
+            ->middleware('throttle:30,1')
+            ->name('instagram-feed.embedded.galleries.destroy');
+        Route::post('/galleries/{gallery}/items', [ShopifyInstagramFeedContentController::class, 'addGalleryItems'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.galleries.items.store');
+        Route::delete('/galleries/{gallery}/items', [ShopifyInstagramFeedContentController::class, 'removeGalleryItems'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.galleries.items.destroy');
+        Route::put('/galleries/{gallery}/order', [ShopifyInstagramFeedContentController::class, 'reorderGallery'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.galleries.order');
+
+        Route::put('/media/{media}/products', [ShopifyInstagramFeedContentController::class, 'updateMediaProducts'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.media.products');
+    });
 
 Route::get('/shopify-app/personalization', [ShopifyPersonalizationAppController::class, 'management'])
     ->middleware(['auth', 'verified', 'throttle:60,1'])

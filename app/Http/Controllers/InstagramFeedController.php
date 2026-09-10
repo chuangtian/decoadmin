@@ -3,18 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InstagramFeedException;
-use App\Models\InstagramFeedInstallation;
 use App\Models\InstagramGallery;
 use App\Models\InstagramMedia;
 use App\Models\Organization;
 use App\Models\Store;
 use App\Services\InstagramFeed\InstagramAccountService;
+use App\Services\InstagramFeed\InstagramFeedPresenter;
 use App\Services\InstagramFeed\InstagramFeedPublisher;
 use App\Services\InstagramFeed\InstagramGalleryService;
-use App\Services\InstagramFeed\InstagramProductResolver;
-use App\Services\InstagramFeed\InstagramProviderService;
 use App\Services\InstagramFeed\InstagramSyncService;
-use App\Services\InstagramFeed\R2Client;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -31,17 +28,12 @@ use Throwable;
  */
 class InstagramFeedController extends Controller
 {
-    /** @var list<string> */
-    private const MEDIA_FILTERS = ['all', 'VIDEO', 'IMAGE'];
-
     public function __construct(
         private InstagramAccountService $accounts,
-        private InstagramProviderService $providers,
         private InstagramSyncService $sync,
         private InstagramGalleryService $galleries,
         private InstagramFeedPublisher $publisher,
-        private InstagramProductResolver $productResolver,
-        private R2Client $r2,
+        private InstagramFeedPresenter $presenter,
         private SystemSettingsService $settings,
     ) {}
 
@@ -49,78 +41,10 @@ class InstagramFeedController extends Controller
     {
         $this->assertUserScope($request, $organization, $store, 'instagram_feed.view');
 
-        $account = $store->instagramAccount;
-        $counts = InstagramMedia::query()
-            ->where('store_id', $store->id)
-            ->selectRaw('mirror_status, count(*) as aggregate')
-            ->groupBy('mirror_status')
-            ->pluck('aggregate', 'mirror_status');
-
-        $pageOptions = [];
-        $pageOptionsError = null;
-        if ($account?->status === 'needs_page_selection') {
-            try {
-                $pageOptions = $this->providers->listSelectablePages($account);
-            } catch (Throwable $exception) {
-                $pageOptionsError = $exception instanceof InstagramFeedException
-                    ? $exception->getMessage()
-                    : '读取 Facebook 主页列表失败，请稍后重试。';
-            }
-        }
-
-        $galleries = InstagramGallery::query()
-            ->where('store_id', $store->id)
-            ->with(['items' => fn ($query) => $query->with('media')->limit(4)])
-            ->withCount('items')
-            ->orderBy('position')
-            ->orderBy('created_at')
-            ->get()
-            ->map(fn (InstagramGallery $gallery): array => [
-                'id' => $gallery->uuid,
-                'name' => $gallery->name,
-                'handle' => $gallery->handle,
-                'item_count' => (int) $gallery->items_count,
-                'previews' => $gallery->items
-                    ->map(fn ($item) => $item->media?->previewUrl())
-                    ->filter()
-                    ->values()
-                    ->all(),
-            ])
-            ->all();
-
-        $installation = InstagramFeedInstallation::query()->where('store_id', $store->id)->first();
-
         return Inertia::render('InstagramFeed/Index', [
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
             'store' => ['id' => $store->id, 'name' => $store->name, 'shopify_domain' => $store->shopify_domain],
-            'environment' => (string) config('instagram_feed.environment'),
-            'providers' => $this->providers->configuredProviders(),
-            'account' => $account ? [
-                'provider' => $account->provider,
-                'provider_label' => $account->providerLabel(),
-                'status' => $account->status,
-                'username' => $account->username,
-                'account_type' => $account->account_type,
-                'profile_picture_url' => $account->profile_picture_url,
-                'page_name' => $account->page_name,
-                'token_expires_at' => $account->token_expires_at?->toIso8601String(),
-                'last_synced_at' => $account->last_synced_at?->toIso8601String(),
-                'last_published_at' => $account->last_published_at?->toIso8601String(),
-            ] : null,
-            'pageOptions' => $pageOptions,
-            'pageOptionsError' => $pageOptionsError,
-            'stats' => [
-                'total' => (int) $counts->sum(),
-                'ready' => (int) $counts->get('ready', 0),
-                'processing' => (int) $counts->get('processing', 0),
-                'pending' => (int) $counts->get('pending', 0),
-                'failed' => (int) $counts->get('failed', 0),
-                'galleries' => count($galleries),
-            ],
-            'galleries' => $galleries,
-            'mirrorConfigured' => $this->r2->isConfigured(),
-            'appSessionReady' => $installation?->isUsable() ?? false,
-            'appSession' => $this->appSessionForFrontend($installation),
+            ...$this->presenter->overview($store),
             'permissions' => [
                 'connect' => $request->user()->hasPermission('instagram_feed.connect', $organization, $store),
                 'sync' => $request->user()->hasPermission('instagram_feed.sync', $organization, $store),
@@ -137,50 +61,10 @@ class InstagramFeedController extends Controller
         $this->assertUserScope($request, $organization, $store, 'instagram_feed.gallery.manage');
         abort_unless((int) $gallery->store_id === (int) $store->id, 404);
 
-        $filter = $request->string('filter')->toString();
-        $filter = in_array($filter, self::MEDIA_FILTERS, true) ? $filter : 'all';
-
-        $gallery->load(['items.media']);
-        $members = $gallery->items->map(fn ($item) => $item->media)->filter()->values();
-        $memberIds = $members->pluck('id')->all();
-
-        // 左侧候选：媒体库里还没进这个组的内容。筛选只作用在这一侧 —— 右侧是组内完整
-        // 清单，拖拽排序要按全量重写 position，被筛掉会串号。
-        $candidates = InstagramMedia::query()
-            ->where('store_id', $store->id)
-            ->when($memberIds !== [], fn ($query) => $query->whereNotIn('id', $memberIds))
-            ->when($filter === 'VIDEO', fn ($query) => $query->where('media_type', 'VIDEO'))
-            // 「图片」要连带算上 CAROUSEL_ALBUM，轮播相册本质就是多图的图文贴。
-            ->when($filter === 'IMAGE', fn ($query) => $query->whereIn('media_type', ['IMAGE', 'CAROUSEL_ALBUM']))
-            ->orderByDesc('posted_at')
-            ->limit(200)
-            ->get();
-
-        $productGids = $members->concat($candidates)
-            ->flatMap(fn (InstagramMedia $media): array => $media->productGids())
-            ->unique()
-            ->values()
-            ->all();
-        $productMap = [];
-        $productError = null;
-        if ($productGids !== []) {
-            try {
-                $productMap = $this->productResolver->resolve($store, $productGids);
-            } catch (Throwable) {
-                $productError = '暂时无法从 Shopify 读取关联商品信息。';
-            }
-        }
-
         return Inertia::render('InstagramFeed/Gallery', [
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
             'store' => ['id' => $store->id, 'name' => $store->name],
-            'gallery' => ['id' => $gallery->uuid, 'name' => $gallery->name, 'handle' => $gallery->handle],
-            'members' => $members->map(fn (InstagramMedia $media): array => $this->mediaPayload($media, $productMap))->all(),
-            'candidates' => $candidates->map(fn (InstagramMedia $media): array => $this->mediaPayload($media, $productMap))->all(),
-            'totalCount' => InstagramMedia::query()->where('store_id', $store->id)->count(),
-            'filter' => $filter,
-            'filters' => self::MEDIA_FILTERS,
-            'productError' => $productError,
+            ...$this->presenter->galleryDetail($store, $gallery, $request->string('filter')->toString()),
             'permissions' => [
                 'publish' => $request->user()->hasPermission('instagram_feed.publish', $organization, $store),
             ],
@@ -403,78 +287,6 @@ class InstagramFeedController extends Controller
         ]);
 
         return array_values($values['media_ids']);
-    }
-
-    /**
-     * @param  array<string, array{id: string, title: string, handle: string, image_url: string|null, image_alt: string|null}>  $productMap
-     * @return array<string, mixed>
-     */
-    private function mediaPayload(InstagramMedia $media, array $productMap): array
-    {
-        $products = [];
-        foreach ($media->productGids() as $gid) {
-            if (isset($productMap[$gid])) {
-                $products[] = $productMap[$gid];
-            }
-        }
-
-        return [
-            'id' => $media->uuid,
-            'media_type' => $media->media_type,
-            'media_product_type' => $media->media_product_type,
-            'caption' => $media->caption,
-            'permalink' => $media->permalink,
-            'preview_url' => $media->previewUrl(),
-            'video_url' => $media->video_url,
-            'mirror_status' => $media->mirror_status,
-            'mirror_error' => $media->mirror_error,
-            'posted_at' => $media->posted_at?->toIso8601String(),
-            'like_count' => $media->like_count,
-            'comments_count' => $media->comments_count,
-            'products' => $products,
-        ];
-    }
-
-    /**
-     * Shopify App 授权状态。给后台的连接状态卡片用，也是「安装了哪些店铺」的依据。
-     *
-     * @return array<string, mixed>
-     */
-    private function appSessionForFrontend(?InstagramFeedInstallation $installation): array
-    {
-        if (! $installation) {
-            return [
-                'status' => 'not_authorized',
-                'usable' => false,
-                'environment' => null,
-                'environment_matches' => false,
-                'app_installation_id' => null,
-                'granted_scopes' => [],
-                'installed_at' => null,
-                'uninstalled_at' => null,
-                'last_verified_at' => null,
-                'last_api_check' => null,
-                'last_published_at' => null,
-                'last_error' => null,
-                'last_error_at' => null,
-            ];
-        }
-
-        return [
-            'status' => (string) $installation->status,
-            'usable' => $installation->isUsable(),
-            'environment' => (string) $installation->environment,
-            'environment_matches' => $installation->environment === (string) config('instagram_feed.environment'),
-            'app_installation_id' => $installation->app_installation_id,
-            'granted_scopes' => is_array($installation->granted_scopes) ? $installation->granted_scopes : [],
-            'installed_at' => $installation->installed_at?->toIso8601String(),
-            'uninstalled_at' => $installation->uninstalled_at?->toIso8601String(),
-            'last_verified_at' => $installation->last_verified_at?->toIso8601String(),
-            'last_api_check' => $installation->last_api_check?->toIso8601String(),
-            'last_published_at' => $installation->last_published_at?->toIso8601String(),
-            'last_error' => $installation->last_error,
-            'last_error_at' => $installation->last_error_at?->toIso8601String(),
-        ];
     }
 
     /**
