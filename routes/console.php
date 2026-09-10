@@ -135,6 +135,15 @@ if (config('services.feishu_table.paid_advertising_goal_sync_enabled', true)) {
         ->withoutOverlapping(120);
 }
 
+if (config('services.feishu_table.mf_daily_report_sync_enabled', true)) {
+    Schedule::command('feishu:sync-mf-daily-reports')
+        ->name('feishu:mf-daily-report-sync-and-delivery')
+        ->dailyAt((string) config('services.feishu_table.mf_daily_report_sync_time', '15:30'))
+        ->timezone((string) config('services.feishu_table.mf_daily_report_sync_timezone', 'Asia/Shanghai'))
+        ->onOneServer()
+        ->withoutOverlapping(120);
+}
+
 if (config('services.feishu_table.campaign_sync_enabled', true)) {
     Schedule::command('feishu:sync-campaign-activities')
         ->name('feishu:campaign-activities-and-all-tables-sync')

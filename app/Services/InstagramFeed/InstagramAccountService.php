@@ -22,8 +22,12 @@ class InstagramAccountService
         private InstagramMirrorService $mirror,
     ) {}
 
-    /** 生成授权链接。授权在新窗口完成，state 绑定当前店铺。 */
-    public function authorizeUrl(Store $store, User $actor, string $provider): string
+    /**
+     * 生成授权链接。授权在新窗口完成，state 绑定当前店铺。
+     *
+     * actor 为空表示操作来自 Shopify 内嵌页面（店铺员工，没有 DecoAdmin 账号）。
+     */
+    public function authorizeUrl(Store $store, ?User $actor, string $provider): string
     {
         $this->states->assertProvider($provider);
         if (! data_get($this->providers->configuredProviders(), $provider)) {
@@ -149,8 +153,8 @@ class InstagramAccountService
         return ['account' => $account, 'needs_page_selection' => true, 'page_count' => count($pages)];
     }
 
-    /** 多主页场景下确认要连接的 Instagram 账号。 */
-    public function selectPage(Store $store, User $actor, string $pageId): InstagramAccount
+    /** 多主页场景下确认要连接的 Instagram 账号。actor 为空表示来自 Shopify 内嵌页面。 */
+    public function selectPage(Store $store, ?User $actor, string $pageId): InstagramAccount
     {
         $account = $store->instagramAccount;
         if (! $account || ! $account->usesFacebookLogin()) {
@@ -205,6 +209,8 @@ class InstagramAccountService
             'metadata' => [
                 'scope' => 'store',
                 'environment' => (string) config('instagram_feed.environment'),
+                'actor_type' => $actor ? 'user' : 'shopify_app_session',
+                'shop_domain' => $store->shopify_domain,
                 'username' => $username,
                 'purged_records' => $purged['records'],
                 'purged_objects' => $purged['objects'],
@@ -298,6 +304,10 @@ class InstagramAccountService
             'metadata' => [
                 'scope' => 'store',
                 'environment' => (string) config('instagram_feed.environment'),
+                // user_id 为空时要能看出是谁动的：Shopify 内嵌页面的操作者是店铺员工，
+                // 只能按店铺追溯，所以把店铺域名一并记下来。
+                'actor_type' => $actor ? 'user' : 'shopify_app_session',
+                'shop_domain' => $store->shopify_domain,
                 ...$metadata,
             ],
         ]);

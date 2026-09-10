@@ -21,6 +21,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: '概览', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
             { name: '活动主题', route: '/campaign-themes', icon: 'campaign', permission: 'reports.view' },
+            { name: '设计需求', route: '/design-requests', icon: 'design-request', permission: 'design_requests.view' },
         ],
     },
     {

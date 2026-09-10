@@ -108,6 +108,11 @@ return [
         'paid_advertising_goal_max_fields' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_FIELDS', 1000),
         'paid_advertising_goal_max_records' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_RECORDS', 5000),
         'paid_advertising_goal_max_tables' => (int) env('FEISHU_PAID_ADVERTISING_GOAL_MAX_TABLES', 100),
+        'mf_daily_report_sync_enabled' => (bool) env('FEISHU_MF_DAILY_REPORT_SYNC_ENABLED', true),
+        'mf_daily_report_sync_time' => env('FEISHU_MF_DAILY_REPORT_SYNC_TIME', '15:30'),
+        'mf_daily_report_sync_timezone' => env('FEISHU_MF_DAILY_REPORT_SYNC_TIMEZONE', 'Asia/Shanghai'),
+        'daily_report_font_regular' => env('FEISHU_DAILY_REPORT_FONT_REGULAR', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'),
+        'daily_report_font_bold' => env('FEISHU_DAILY_REPORT_FONT_BOLD', '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'),
     ],
 
     'google_ads' => [
