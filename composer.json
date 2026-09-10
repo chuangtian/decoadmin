@@ -26,6 +26,7 @@
         "psr-4": {
             "App\\": "app/",
             "CommunityReviews\\": "shopify-apps/community-reviews/backend/",
+            "DecoMarketing\\": "shopify-apps/deco-marketing/backend/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }
