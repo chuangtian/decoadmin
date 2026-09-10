@@ -194,6 +194,40 @@ class AffiliateFoundationTest extends TestCase
         ])->assertForbidden();
     }
 
+    public function test_affiliate_navigation_and_admin_routes_require_an_active_referral_installation(): void
+    {
+        [$viewer, $organization, $store] = $this->context('viewer', false);
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($viewer)->withSession($session)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('applicationAvailability.referral', false));
+        $this->actingAs($viewer)->withSession($session)
+            ->get(route('affiliate.index', [$organization, $store]))
+            ->assertForbidden();
+
+        $installation = $this->installReferralApp($store, $viewer);
+
+        $this->actingAs($viewer)->withSession($session)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('applicationAvailability.referral', true));
+        $this->actingAs($viewer)->withSession($session)
+            ->get(route('affiliate.index', [$organization, $store]))
+            ->assertOk();
+
+        $installation->update(['status' => 'uninstalled', 'uninstalled_at' => now()]);
+
+        $this->actingAs($viewer)->withSession($session)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('applicationAvailability.referral', false));
+        $this->actingAs($viewer)->withSession($session)
+            ->get(route('affiliate.index', [$organization, $store]))
+            ->assertForbidden();
+    }
+
     public function test_permission_and_role_seeders_are_idempotent(): void
     {
         [, $organization] = $this->context('store-admin');
@@ -243,7 +277,7 @@ class AffiliateFoundationTest extends TestCase
 
     public function test_referral_refresh_uses_only_matching_app_installation_credentials(): void
     {
-        [, $organization, $store] = $this->context('store-admin');
+        [, $organization, $store] = $this->context('store-admin', false);
         config(['referral.environment' => 'test', 'referral.active.client_id' => 'referral-test-client',
             'referral.active.client_secret' => 'referral-test-secret', 'referral.active.handle' => 'deco-referral-test']);
         $connection = ShopifyConnection::query()->create([
@@ -283,7 +317,7 @@ class AffiliateFoundationTest extends TestCase
 
     public function test_bootstrap_records_only_referral_installation_and_preserves_commerce_token(): void
     {
-        [, $organization, $store] = $this->context('store-admin');
+        [, $organization, $store] = $this->context('store-admin', false);
         config(['referral.environment' => 'test', 'referral.active.client_id' => 'referral-test-client',
             'referral.active.client_secret' => 'referral-test-secret', 'referral.active.handle' => 'deco-referral-test']);
         $connection = ShopifyConnection::query()->create([
@@ -733,7 +767,7 @@ class AffiliateFoundationTest extends TestCase
     }
 
     /** @return array{User, Organization, Store} */
-    private function context(string $role): array
+    private function context(string $role, bool $withInstallation = true): array
     {
         $this->seed(PermissionSeeder::class);
         $organization = Organization::query()->create(['name' => 'Affiliate Organization', 'code' => 'affiliate-org']);
@@ -743,8 +777,39 @@ class AffiliateFoundationTest extends TestCase
         $this->seed(RoleSeeder::class);
         $systemRole = Role::query()->whereBelongsTo($organization)->where('slug', $role)->firstOrFail();
         $user->roles()->attach($systemRole, ['organization_id' => $organization->id, 'store_id' => null]);
+        if ($withInstallation) {
+            $this->installReferralApp($store, $user);
+        }
 
         return [$user, $organization, $store];
+    }
+
+    private function installReferralApp(Store $store, User $user): AppInstallation
+    {
+        $connection = ShopifyConnection::query()->create([
+            'store_id' => $store->id,
+            'shop_domain' => $store->shopify_domain,
+            'status' => 'connected',
+            'access_token_encrypted' => 'commerce-fixture-token',
+            'scopes' => ['read_orders'],
+            'api_version' => '2026-07',
+        ]);
+        $app = App::query()->create([
+            'name' => 'Deco 推荐与联盟 test',
+            'handle' => (string) config('referral.active.handle'),
+            'distribution' => 'custom',
+            'status' => 'active',
+        ]);
+
+        return AppInstallation::query()->create([
+            'app_id' => $app->id,
+            'store_id' => $store->id,
+            'shopify_connection_id' => $connection->id,
+            'installed_by' => $user->id,
+            'status' => 'active',
+            'granted_scopes' => [],
+            'installed_at' => now(),
+        ]);
     }
 
     private function store(Organization $organization, User $user, string $name, string $domain): Store

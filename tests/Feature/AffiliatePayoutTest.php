@@ -7,8 +7,11 @@ use App\Domain\ReferralAffiliate\Models\AffiliateProgram;
 use App\Domain\ReferralAffiliate\Models\AffiliateProgramMembership;
 use App\Domain\ReferralAffiliate\Models\AffiliatePromoter;
 use App\Domain\ReferralAffiliate\Services\AffiliatePayoutService;
+use App\Models\App;
+use App\Models\AppInstallation;
 use App\Models\Organization;
 use App\Models\Role;
+use App\Models\ShopifyConnection;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
@@ -131,6 +134,20 @@ class AffiliatePayoutTest extends TestCase
         $this->seed(RoleSeeder::class);
         $r = Role::query()->where('organization_id', $org->id)->where('slug', $role)->firstOrFail();
         $actor->roles()->attach($r, ['organization_id' => $org->id, 'store_id' => null]);
+        $connection = ShopifyConnection::query()->create([
+            'store_id' => $store->id, 'shop_domain' => $store->shopify_domain,
+            'status' => 'connected', 'access_token_encrypted' => 'commerce-fixture-token',
+            'scopes' => ['read_orders'], 'api_version' => '2026-07',
+        ]);
+        $app = App::query()->create([
+            'name' => 'Deco 推荐与联盟 test', 'handle' => (string) config('referral.active.handle'),
+            'distribution' => 'custom', 'status' => 'active',
+        ]);
+        AppInstallation::query()->create([
+            'app_id' => $app->id, 'store_id' => $store->id,
+            'shopify_connection_id' => $connection->id, 'installed_by' => $actor->id,
+            'status' => 'active', 'granted_scopes' => [], 'installed_at' => now(),
+        ]);
         $program = AffiliateProgram::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'name' => 'Test', 'type' => 'affiliate', 'currency' => 'USD']);
         $promoter = AffiliatePromoter::query()->create(['organization_id' => $org->id, 'email_encrypted' => 'test@example.invalid', 'email_hash' => str_repeat('a', 64), 'display_name' => 'Test', 'type' => 'affiliate', 'status' => 'active']);
         $member = AffiliateProgramMembership::query()->create(['organization_id' => $org->id, 'store_id' => $store->id, 'program_id' => $program->id, 'promoter_id' => $promoter->id, 'status' => 'approved']);

@@ -46,6 +46,7 @@ const dedupeByRoute = (items: MenuItem[]) => {
 
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
+    .filter((item) => !item.requiresInstalledApp || page.props.applicationAvailability[item.requiresInstalledApp])
     .map((item) => {
         const isApplications = item.dynamicChildren === 'applications';
         const children = isApplications

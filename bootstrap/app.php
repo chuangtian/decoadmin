@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateCodexApiToken;
 use App\Http\Middleware\ConfigureAffiliatePortalSession;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\InstalledApplicationMiddleware;
 use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
@@ -56,6 +57,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'codex.token' => AuthenticateCodexApiToken::class,
+            'app.installed' => InstalledApplicationMiddleware::class,
             'organization.access' => OrganizationAccessMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'store.context' => ResolveCurrentStore::class,

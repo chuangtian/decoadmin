@@ -374,6 +374,7 @@ export interface SharedProps {
     currentStore: (StoreOption & { organization_id: number }) | null;
     availableOrganizations: OrganizationOption[];
     applicationNavigation: ApplicationNavigationItem[];
+    applicationAvailability: Record<'referral', boolean>;
     flash: FlashMessages;
     [key: string]: unknown;
 }
