@@ -1,0 +1,12 @@
+{% if shop.permanent_domain == 'macfox-test-app.myshopify.com' %}
+  <deco-marketing-popup data-base="/apps/deco-marketing"></deco-marketing-popup>
+{% endif %}
+{% schema %}
+{
+  "name": "Deco Marketing Popup",
+  "target": "body",
+  "javascript": "popup.js",
+  "stylesheet": "popup.css",
+  "settings": []
+}
+{% endschema %}

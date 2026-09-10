@@ -15,6 +15,7 @@ RUN npm ci
 COPY --from=vendor /app/vendor ./vendor
 COPY resources ./resources
 COPY shopify-apps/community-reviews ./shopify-apps/community-reviews
+COPY shopify-apps/deco-marketing ./shopify-apps/deco-marketing
 COPY shopify-apps/deco-referral/resources/admin ./shopify-apps/deco-referral/resources/admin
 COPY vite.config.ts tsconfig.json ./
 COPY scripts/check-typography.mjs ./scripts/check-typography.mjs

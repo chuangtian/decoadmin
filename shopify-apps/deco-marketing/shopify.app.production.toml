@@ -1,0 +1,11 @@
+# Deliberately unconfigured. Production release and stores are NOT authorized.
+client_id = ""
+name = "Deco Marketing"
+application_url = "https://admin.decomkt.com/shopify-app/marketing"
+embedded = true
+[access_scopes]
+scopes = ""
+[auth]
+redirect_urls = []
+[webhooks]
+api_version = "2026-07"

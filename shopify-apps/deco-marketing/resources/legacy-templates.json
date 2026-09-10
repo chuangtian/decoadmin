@@ -1,0 +1,62 @@
+{
+  "abandoned_1": {
+    "subject": "Your MACFOX is waiting — $100 off + 3 free accessories",
+    "body": "Your MACFOX is still waiting in your cart. We saved everything so you can pick up right where you left off.\n\nEvery MACFOX ships free, arrives 99% assembled, and is covered by our 2-year warranty with US-based support.",
+    "button": "Complete your order"
+  },
+  "abandoned_2": {
+    "subject": "Questions about your MACFOX? Answered.",
+    "body": "Still thinking it over? Here's what riders ask most: up to 40+ miles of range per charge, 99% pre-assembled (riding in about 15 minutes), hassle-free returns with a 2-year warranty, and you can pay over time with Klarna.\n\n★★★★★ \"Best purchase I've made in years — I ride it every single day.\" — Verified buyer",
+    "button": "Return to checkout"
+  },
+  "abandoned_3": {
+    "subject": "Last call — free 3-piece accessory bundle with your MACFOX",
+    "body": "Last call — complete your order in the next 48 hours and we'll include a free accessory gift (rider's choice of helmet or rear rack, added automatically after checkout).\n\nThis cart link expires soon. If you have any questions, just reply to this email — a real person answers.",
+    "button": "Claim it now"
+  },
+  "payment_1": {
+    "subject": "Your order {orderName} is reserved — payment pending",
+    "body": "Good news — your order {orderName} is reserved. We're just waiting for the payment to complete before we can ship it.\n\nIf the payment didn't go through, you can retry with a different card or use Klarna to pay over time.",
+    "button": "Complete payment"
+  },
+  "payment_2": {
+    "subject": "Final reminder: order {orderName} awaits payment",
+    "body": "We're still holding your order {orderName}, but we can only reserve stock for a limited time. Complete the payment to lock in your bike.\n\nNeed help? Reply to this email and our support team will sort it out.",
+    "button": "Complete payment now"
+  },
+  "back_in_stock": {
+    "subject": "{productTitle} is back in stock",
+    "body": "{productTitle} is back in stock — and you're on the priority list.\n\nStock is limited and this model sold out last time. Orders ship within 2 business days from our US warehouse.",
+    "button": "Shop now before it's gone"
+  },
+  "cancelled": {
+    "subject": "About your cancelled order — anything we can help with?",
+    "body": "We noticed your recent order {orderName} was cancelled, and we just wanted to check in — was it the configuration, the timing, or anything we could have done better?\n\nIf anything went wrong on our side, or you have a question about sizing, range, or shipping, just reply to this email — a real person on our support team reads every message.\n\nNo pressure at all — we're here when you're ready.",
+    "button": "Browse bikes"
+  },
+  "welcome_1": {
+    "subject": "Welcome — here's your {couponCode} discount 🎉(SCHOOL50 for M16)",
+    "body": "Welcome to the MACFOX crew! Here's the discount code you unlocked — it's ready to use on your first ride.\n\nEvery MACFOX ships free, arrives 99% pre-assembled, is UL-2849 certified (Class-2, street legal), and is backed by our 2-year warranty with US-based support.",
+    "button": "Shop e-bikes"
+  },
+  "welcome_2": {
+    "subject": "Why riders love their MACFOX",
+    "body": "Still deciding? Here's what MACFOX riders bring up most: up to 38–56 miles of range per charge, 99% pre-assembled (riding in about 15 minutes), street legal (UL-2849, Class-2, no registration), and you can pay over time with Klarna.\n\n★★★★★ \"Best purchase I've made in years — I ride it every single day.\" — Verified buyer",
+    "button": "Find your ride"
+  },
+  "welcome_3": {
+    "subject": "Your {couponCode} code is still here",
+    "body": "No pressure from us — your welcome code is still here whenever you're ready.\n\nIf something's holding you back — sizing, range, or how long shipping takes — just reply to this email. A real person on our team answers, and we'd rather you got the right bike than a fast one.",
+    "button": "Claim your ride"
+  },
+  "welcome_4": {
+    "subject": "Which MACFOX is right for you?",
+    "body": "Still deciding which one? Here's how riders usually narrow it down:\n\n• Mostly city + commuting? The X1S is the light one — easiest to park, easiest to carry.\n• Want the planted, go-anywhere feel? The X7 runs 20×5.0 fat tires — gravel, sand, rough road.\n• Buying for a teen? The M16 is sized and speed-tuned for younger riders.\n\nNot sure? Reply to this email — a real person reads it. Every MACFOX ships free, arrives 99% pre-assembled, and is covered for 2 years. You can also pay over time with Klarna.",
+    "button": "Compare the lineup"
+  },
+  "advocacy": {
+    "subject": "How's the {productTitle} riding?",
+    "body": "How are the first few rides going?\n\nIf someone's already asked you what you're riding — here's the useful answer. Your code gets them $150 off, and their bike ships with the free 3-piece accessory bundle.\n\n{referralCode}\n\nNothing to fill in. When a friend uses your code we see it automatically, and your free Rearview Mirror Kit ($99) ships 10 days after their order. Up to 5 friends.",
+    "button": "See the lineup"
+  }
+}

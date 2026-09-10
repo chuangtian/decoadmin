@@ -1,0 +1,11 @@
+# Unconfigured; do not reuse the test or live app identity.
+client_id = ""
+name = "Deco Marketing Local"
+application_url = "http://localhost:8000/shopify-app/marketing"
+embedded = true
+[access_scopes]
+scopes = "read_orders,read_customers,read_products,read_inventory,read_fulfillments,write_app_proxy"
+[auth]
+redirect_urls = ["http://localhost:8000/shopify-app/marketing"]
+[webhooks]
+api_version = "2026-07"
