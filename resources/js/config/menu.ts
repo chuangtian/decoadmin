@@ -149,9 +149,11 @@ export const menu: MenuItem[] = [
     },
     {
         name: '用户管理',
-        route: '/users',
         icon: 'users',
-        permission: 'users.view',
+        children: [
+            { name: '用户', route: '/users', icon: 'users', permission: 'users.view' },
+            { name: '角色', route: '/roles', icon: 'roles', permission: 'roles.view' },
+        ],
     },
     {
         name: '公司财务',
@@ -173,7 +175,6 @@ export const menu: MenuItem[] = [
         icon: 'system',
         children: [
             { name: 'Codex 插件授权', route: '/codex-tokens', icon: 'apps', permission: 'codex.tokens.view' },
-            { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },
             { name: '飞书设置', route: '/settings/feishu', icon: 'settings', permission: 'system.settings.view' },

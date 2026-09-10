@@ -16,6 +16,26 @@ class SidebarMenuAuthorizationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_users_and_roles_are_grouped_under_user_management(): void
+    {
+        $menu = file_get_contents(resource_path('js/config/menu.ts'));
+
+        $userManagement = substr(
+            $menu,
+            strpos($menu, "name: '用户管理'"),
+            strpos($menu, "name: '公司财务'") - strpos($menu, "name: '用户管理'"),
+        );
+        $this->assertStringContainsString("name: '用户', route: '/users'", $userManagement);
+        $this->assertStringContainsString("name: '角色', route: '/roles'", $userManagement);
+        $this->assertLessThan(
+            strpos($userManagement, "name: '角色'"),
+            strpos($userManagement, "name: '用户'"),
+        );
+        $system = substr($menu, strpos($menu, "name: '系统管理'"));
+        $this->assertStringNotContainsString("name: '角色权限'", $menu);
+        $this->assertStringNotContainsString("route: '/roles'", $system);
+    }
+
     public function test_sidebar_only_receives_permissions_granted_to_the_current_user(): void
     {
         $this->seed(PermissionSeeder::class);
