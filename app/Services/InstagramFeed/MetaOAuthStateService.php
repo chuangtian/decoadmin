@@ -32,8 +32,13 @@ class MetaOAuthStateService
         return $provider;
     }
 
-    /** 生成一次性 state，返回放进授权链接的明文。 */
-    public function issue(Store $store, User $actor, string $provider, string $redirectUri): string
+    /**
+     * 生成一次性 state，返回放进授权链接的明文。
+     *
+     * actor 允许为空：Shopify 内嵌页面里的操作者是店铺员工，不是 DecoAdmin 用户，
+     * 此时 oauth_states.user_id 留空（该列可空），店铺归属仍由 store_id 绑定。
+     */
+    public function issue(Store $store, ?User $actor, string $provider, string $redirectUri): string
     {
         $this->assertProvider($provider);
         $app = $this->registry->configuredApp();
@@ -44,7 +49,7 @@ class MetaOAuthStateService
             'organization_id' => $store->organization_id,
             'store_id' => $store->id,
             'app_id' => $app->id,
-            'user_id' => $actor->getKey(),
+            'user_id' => $actor?->getKey(),
             'shop_domain' => $store->shopify_domain,
             'redirect_uri' => $redirectUri,
             'intended_url' => null,

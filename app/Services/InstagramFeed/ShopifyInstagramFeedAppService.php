@@ -6,7 +6,6 @@ use App\Exceptions\InstagramFeedException;
 use App\Models\AuditLog;
 use App\Models\InstagramFeedInstallation;
 use App\Models\Store;
-use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\DB;
@@ -34,23 +33,6 @@ class ShopifyInstagramFeedAppService
         private InstagramFeedAppRegistry $registry,
         private InstagramFeedShopifyClient $client,
     ) {}
-
-    /** Shopify Admin 跳转到 DecoAdmin 后台前的鉴权：店铺存在、用户有权访问且有查看权限。 */
-    public function managementStore(User $user, string $shop): Store
-    {
-        $shop = strtolower(trim($shop));
-        if (preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $shop) !== 1) {
-            throw new InstagramFeedException('STORE_NOT_CONNECTED', '未找到对应的 DecoAdmin 店铺。', 404);
-        }
-
-        $store = $this->activeStore($shop);
-        if (! $user->canAccessStore($store)
-            || ! $user->hasPermission('instagram_feed.view', $store->organization, $store)) {
-            throw new InstagramFeedException('STORE_ACCESS_DENIED', '无权访问该店铺的 Instagram Feed 后台。', 403);
-        }
-
-        return $store;
-    }
 
     public function connectedStore(string $shop): ?Store
     {
@@ -189,15 +171,5 @@ class ShopifyInstagramFeedAppService
         $this->registry->assertRequiredScopes($grantedScopes);
 
         return ['access_token' => $accessToken, 'granted_scopes' => $grantedScopes];
-    }
-
-    private function activeStore(string $shop): Store
-    {
-        $store = $this->connectedStore($shop);
-        if (! $store || ! $store->organization) {
-            throw new InstagramFeedException('STORE_NOT_CONNECTED', '未找到对应的 DecoAdmin 店铺。', 404);
-        }
-
-        return $store;
     }
 }

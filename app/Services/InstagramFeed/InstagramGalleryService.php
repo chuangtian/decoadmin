@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\DB;
  */
 class InstagramGalleryService
 {
-    public function create(Store $store, string $rawName, User $actor): InstagramGallery
+    public function create(Store $store, string $rawName, ?User $actor): InstagramGallery
     {
         $name = $this->normalizeName($rawName);
 
@@ -36,7 +36,7 @@ class InstagramGalleryService
                 'name' => $name,
                 'handle' => $this->uniqueHandle($store),
                 'position' => $lastPosition + 1,
-                'created_by' => $actor->getKey(),
+                'created_by' => $actor?->getKey(),
             ]);
         });
 
@@ -45,7 +45,7 @@ class InstagramGalleryService
         return $gallery;
     }
 
-    public function rename(Store $store, InstagramGallery $gallery, string $rawName, User $actor): InstagramGallery
+    public function rename(Store $store, InstagramGallery $gallery, string $rawName, ?User $actor): InstagramGallery
     {
         $this->assertOwnership($store, $gallery);
         $name = $this->normalizeName($rawName);
@@ -61,7 +61,7 @@ class InstagramGalleryService
         return $gallery;
     }
 
-    public function delete(Store $store, InstagramGallery $gallery, User $actor): void
+    public function delete(Store $store, InstagramGallery $gallery, ?User $actor): void
     {
         $this->assertOwnership($store, $gallery);
         $snapshot = ['gallery_handle' => $gallery->handle, 'gallery_name' => $gallery->name];
@@ -71,11 +71,17 @@ class InstagramGalleryService
         AuditLog::query()->create([
             'organization_id' => $store->organization_id,
             'store_id' => $store->id,
-            'user_id' => $actor->getKey(),
+            'user_id' => $actor?->getKey(),
             'action' => 'instagram_feed_gallery_deleted',
             'subject_type' => InstagramGallery::class,
             'subject_id' => $gallery->id,
-            'metadata' => ['scope' => 'store', 'environment' => (string) config('instagram_feed.environment'), ...$snapshot],
+            'metadata' => [
+                'scope' => 'store',
+                'environment' => (string) config('instagram_feed.environment'),
+                'actor_type' => $actor ? 'user' : 'shopify_app_session',
+                'shop_domain' => $store->shopify_domain,
+                ...$snapshot,
+            ],
         ]);
     }
 
@@ -87,7 +93,7 @@ class InstagramGalleryService
      *
      * @param  list<string>  $mediaUuids
      */
-    public function addItems(Store $store, InstagramGallery $gallery, array $mediaUuids, User $actor): int
+    public function addItems(Store $store, InstagramGallery $gallery, array $mediaUuids, ?User $actor): int
     {
         $this->assertOwnership($store, $gallery);
         $ordered = $this->ownedMediaIds($store, $mediaUuids);
@@ -133,7 +139,7 @@ class InstagramGalleryService
     }
 
     /** @param list<string> $mediaUuids */
-    public function removeItems(Store $store, InstagramGallery $gallery, array $mediaUuids, User $actor): int
+    public function removeItems(Store $store, InstagramGallery $gallery, array $mediaUuids, ?User $actor): int
     {
         $this->assertOwnership($store, $gallery);
         $mediaIds = $this->ownedMediaIds($store, $mediaUuids);
@@ -161,7 +167,7 @@ class InstagramGalleryService
      *
      * @param  list<string>  $mediaUuids
      */
-    public function reorder(Store $store, InstagramGallery $gallery, array $mediaUuids, User $actor): int
+    public function reorder(Store $store, InstagramGallery $gallery, array $mediaUuids, ?User $actor): int
     {
         $this->assertOwnership($store, $gallery);
         $mediaIds = $this->ownedMediaIds($store, $mediaUuids);
@@ -193,7 +199,7 @@ class InstagramGalleryService
      *
      * @param  list<string>  $productGids
      */
-    public function setMediaProducts(Store $store, InstagramMedia $media, array $productGids, User $actor): void
+    public function setMediaProducts(Store $store, InstagramMedia $media, array $productGids, ?User $actor): void
     {
         if ((int) $media->store_id !== (int) $store->id) {
             throw new InstagramFeedException('INSTAGRAM_MEDIA_NOT_FOUND', '找不到这条 Instagram 媒体。', 404);
@@ -216,13 +222,15 @@ class InstagramGalleryService
         AuditLog::query()->create([
             'organization_id' => $store->organization_id,
             'store_id' => $store->id,
-            'user_id' => $actor->getKey(),
+            'user_id' => $actor?->getKey(),
             'action' => 'instagram_feed_media_products_updated',
             'subject_type' => InstagramMedia::class,
             'subject_id' => $media->id,
             'metadata' => [
                 'scope' => 'store',
                 'environment' => (string) config('instagram_feed.environment'),
+                'actor_type' => $actor ? 'user' : 'shopify_app_session',
+                'shop_domain' => $store->shopify_domain,
                 'ig_media_id' => $media->ig_media_id,
                 'products' => count($valid),
             ],
@@ -310,18 +318,22 @@ class InstagramGalleryService
     }
 
     /** @param array<string, mixed> $metadata */
-    private function audit(Store $store, InstagramGallery $gallery, User $actor, string $action, array $metadata = []): void
+    private function audit(Store $store, InstagramGallery $gallery, ?User $actor, string $action, array $metadata = []): void
     {
         AuditLog::query()->create([
             'organization_id' => $store->organization_id,
             'store_id' => $store->id,
-            'user_id' => $actor->getKey(),
+            'user_id' => $actor?->getKey(),
             'action' => $action,
             'subject_type' => InstagramGallery::class,
             'subject_id' => $gallery->id,
             'metadata' => [
                 'scope' => 'store',
                 'environment' => (string) config('instagram_feed.environment'),
+                // user_id 为空时要能看出是谁动的：Shopify 内嵌页面的操作者是店铺员工，
+                // 只能按店铺追溯，所以把店铺域名一并记下来。
+                'actor_type' => $actor ? 'user' : 'shopify_app_session',
+                'shop_domain' => $store->shopify_domain,
                 'gallery_handle' => $gallery->handle,
                 ...$metadata,
             ],

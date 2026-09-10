@@ -7,6 +7,7 @@ use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\ResolveCurrentStore;
+use App\Http\Middleware\ShopifyEmbeddedFrameHeaders;
 use App\Http\Middleware\StoreAccessMiddleware;
 use App\Http\Middleware\UseBuiltAssetsForExternalRequests;
 use App\Http\Middleware\VerifyShopifyAppProxy;
@@ -62,6 +63,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'shopify.app-proxy' => VerifyShopifyAppProxy::class,
             'shopify.app-proxy-response' => NormalizeShopifyAppProxyResponse::class,
             'shopify.checkout-token' => VerifyShopifyCheckoutToken::class,
+            'shopify.embedded-frame' => ShopifyEmbeddedFrameHeaders::class,
             'shopify.id-token' => VerifyShopifyIdToken::class,
         ]);
         $middleware->prependToPriorityList(

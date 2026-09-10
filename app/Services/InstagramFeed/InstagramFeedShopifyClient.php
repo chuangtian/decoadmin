@@ -63,7 +63,14 @@ class InstagramFeedShopifyClient
                 ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
                 ->connectTimeout(5)
                 ->timeout(30)
-                ->post($this->endpoint($shopDomain), ['query' => $query, 'variables' => $variables]);
+                ->post($this->endpoint($shopDomain), [
+                    'query' => $query,
+                    // GraphQL 的 variables 必须是 JSON 对象。PHP 的空数组会被编成 `[]`，
+                    // Shopify 直接以 HTTP 200 + errors: "Invalid variables parameter." 拒掉，
+                    // 于是所有不带变量的查询（currentAppInstallation、webhook 订阅列表）全部失败。
+                    // 与 student-discount、personalization 两个 App 的客户端保持同一写法。
+                    'variables' => (object) $variables,
+                ]);
         } catch (ConnectionException) {
             throw new InstagramFeedException('SHOPIFY_ADMIN_API_TIMEOUT', 'Shopify Admin API 请求超时。', 502);
         }
