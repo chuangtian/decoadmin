@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AffiliateController;
 use App\Http\Controllers\AffiliateFinanceController;
+use App\Http\Controllers\AffiliateMaterialController;
 use App\Http\Controllers\AffiliatePortalController;
 use App\Http\Controllers\AffiliateTrackingController;
 use App\Http\Controllers\AnalyticsController;
@@ -25,9 +26,9 @@ use App\Http\Controllers\CodexOAuthMetadataController;
 use App\Http\Controllers\CodexOAuthTokenController;
 use App\Http\Controllers\CodexRemoteMcpController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DesignRequestController;
 use App\Http\Controllers\DiscountController;
 use App\Http\Controllers\DiscountManagerOAuthController;
-use App\Http\Controllers\DesignRequestController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GoogleAdsOAuthController;
 use App\Http\Controllers\GoogleSearchConsoleOAuthController;
@@ -97,7 +98,7 @@ Route::get('/shopify-app/referral', [ShopifyAffiliateAppController::class, 'home
 Route::get('/shopify-app/referral/manage', [ShopifyAffiliateAppController::class, 'management'])
     ->middleware(['auth', 'verified'])->name('affiliate.shopify.management');
 Route::prefix('/referral-portal')->group(function (): void {
-    Route::get('/portal.js', fn () => response()->file(base_path('shopify-apps/deco-referral/resources/portal/portal.js'), ['Content-Type'=>'application/javascript','Cache-Control'=>'public, max-age=300','X-Content-Type-Options'=>'nosniff']));
+    Route::get('/portal.js', fn () => response()->file(base_path('shopify-apps/deco-referral/resources/portal/portal.js'), ['Content-Type' => 'application/javascript', 'Cache-Control' => 'public, max-age=300', 'X-Content-Type-Options' => 'nosniff']));
     Route::get('/', [AffiliatePortalController::class, 'index'])->name('affiliate.portal');
     Route::post('/apply', [AffiliatePortalController::class, 'apply'])->middleware('throttle:5,10');
     Route::post('/request-login', [AffiliatePortalController::class, 'requestLogin'])->middleware('throttle:5,10');
@@ -782,7 +783,7 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
 });
 
 Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
-    ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
+    ->middleware(['auth', 'verified', 'organization.access', 'store.access', 'app.installed:referral'])
     ->group(function (): void {
         Route::get('/', [AffiliateController::class, 'overview'])
             ->middleware('permission:affiliate.dashboard.view')->name('affiliate.index');
@@ -799,14 +800,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/affiliate')
             ->middleware('permission:affiliate.promoters.view')->name('affiliate.promoters.index');
         Route::post('/promoters', [AffiliateController::class, 'storePromoter'])
             ->middleware(['permission:affiliate.promoters.manage', 'throttle:30,1'])->name('affiliate.promoters.store');
-        Route::post('/rewards/{reward}/retry', [\App\Http\Controllers\AffiliateFinanceController::class,'retryReward'])->whereUlid('reward')->middleware('permission:affiliate.programs.manage')->name('affiliate.rewards.retry');
-        Route::post('/conversions/{conversion}/attribute', [\App\Http\Controllers\AffiliateFinanceController::class, 'attribute'])->whereUlid('conversion')->middleware('permission:affiliate.conversions.override')->name('affiliate.conversions.attribute');
-        Route::get('/reports/export', [\App\Http\Controllers\AffiliateFinanceController::class, 'reportCsv'])->middleware('permission:affiliate.reports.export')->name('affiliate.reports.export');
-        Route::post('/promoters/import', [AffiliateController::class, 'importPromoters'])->middleware(['permission:affiliate.promoters.manage','throttle:5,1'])->name('affiliate.promoters.import');
-        Route::put('/notification-templates/{key}', [\App\Http\Controllers\AffiliateMaterialController::class, 'template'])->middleware('permission:affiliate.settings.manage')->name('affiliate.notifications.template');
-        Route::get('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'index'])->middleware('permission:affiliate.promoters.view')->name('affiliate.materials.index');
-        Route::post('/materials', [\App\Http\Controllers\AffiliateMaterialController::class, 'upload'])->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.upload');
-        Route::delete('/materials/{asset}', [\App\Http\Controllers\AffiliateMaterialController::class, 'remove'])->whereUlid('asset')->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.remove');
+        Route::post('/rewards/{reward}/retry', [AffiliateFinanceController::class, 'retryReward'])->whereUlid('reward')->middleware('permission:affiliate.programs.manage')->name('affiliate.rewards.retry');
+        Route::post('/conversions/{conversion}/attribute', [AffiliateFinanceController::class, 'attribute'])->whereUlid('conversion')->middleware('permission:affiliate.conversions.override')->name('affiliate.conversions.attribute');
+        Route::get('/reports/export', [AffiliateFinanceController::class, 'reportCsv'])->middleware('permission:affiliate.reports.export')->name('affiliate.reports.export');
+        Route::post('/promoters/import', [AffiliateController::class, 'importPromoters'])->middleware(['permission:affiliate.promoters.manage', 'throttle:5,1'])->name('affiliate.promoters.import');
+        Route::put('/notification-templates/{key}', [AffiliateMaterialController::class, 'template'])->middleware('permission:affiliate.settings.manage')->name('affiliate.notifications.template');
+        Route::get('/materials', [AffiliateMaterialController::class, 'index'])->middleware('permission:affiliate.promoters.view')->name('affiliate.materials.index');
+        Route::post('/materials', [AffiliateMaterialController::class, 'upload'])->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.upload');
+        Route::delete('/materials/{asset}', [AffiliateMaterialController::class, 'remove'])->whereUlid('asset')->middleware('permission:affiliate.promoters.manage')->name('affiliate.materials.remove');
         Route::post('/memberships/{membership}/invite', [AffiliateController::class, 'invite'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage');
         Route::put('/memberships/{membership}', [AffiliateController::class, 'updateMembership'])->whereUlid('membership')->middleware('permission:affiliate.promoters.manage')->name('affiliate.memberships.update');
         Route::post('/memberships/{membership}/transition', [AffiliateController::class, 'transitionMembership'])

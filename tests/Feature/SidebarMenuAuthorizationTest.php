@@ -36,6 +36,19 @@ class SidebarMenuAuthorizationTest extends TestCase
         $this->assertStringNotContainsString("route: '/roles'", $system);
     }
 
+    public function test_referral_navigation_requires_an_installed_app_and_a_granted_permission(): void
+    {
+        $menu = file_get_contents(resource_path('js/config/menu.ts'));
+        $sidebar = file_get_contents(resource_path('js/Components/Layout/Sidebar.vue'));
+
+        $this->assertIsString($menu);
+        $this->assertIsString($sidebar);
+        $this->assertStringContainsString("name: '推荐与联盟'", $menu);
+        $this->assertStringContainsString("requiresInstalledApp: 'referral'", $menu);
+        $this->assertStringContainsString('page.props.applicationAvailability[item.requiresInstalledApp]', $sidebar);
+        $this->assertStringContainsString('page.props.auth.permissions.includes(child.permission)', $sidebar);
+    }
+
     public function test_sidebar_only_receives_permissions_granted_to_the_current_user(): void
     {
         $this->seed(PermissionSeeder::class);

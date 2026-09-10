@@ -11,6 +11,7 @@ export interface MenuItem {
     dynamicChildren?: 'applications';
     comingSoon?: boolean;
     hidden?: boolean;
+    requiresInstalledApp?: 'referral';
 }
 
 export const menu: MenuItem[] = [
@@ -88,6 +89,7 @@ export const menu: MenuItem[] = [
     {
         name: '推荐与联盟',
         icon: 'campaign',
+        requiresInstalledApp: 'referral',
         children: [
             { name: '概览', route: '/affiliate', icon: 'dashboard', permission: 'affiliate.dashboard.view' },
             { name: '推广计划', route: '/affiliate/programs', icon: 'campaign', permission: 'affiliate.programs.view' },
