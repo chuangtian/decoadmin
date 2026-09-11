@@ -31,14 +31,13 @@ There is a single Shopify App (`deco-instagram-feed`, client id
 - `production`: `https://admin.decomkt.com`, declared in
   `shopify.app.production.toml`. Currently parked.
 
-Because one Shopify App holds one `application_url`, one webhook endpoint set and
-one OAuth redirect list, the two targets are mutually exclusive: `deploy:test`
+Because one Shopify App holds one `application_url` and one webhook endpoint set,
+the two targets are mutually exclusive: `deploy:test`
 parks production and `deploy:production` parks test. The local Cloudflare tunnel
 target was removed and `shopify.app.local.toml` must not come back.
 
 `shopify.app.toml` is the CLI selected configuration and must mirror whichever
-target is live. `scripts/validate-project.mjs` enforces that, and also that
-`extensions/app-home/src/runtime.mjs` points at the same origin. Running the app
+target is live, and `scripts/validate-project.mjs` enforces that. Running the app
 against a target whose `INSTAGRAM_FEED_<ENV>_CLIENT_ID` and `_CLIENT_SECRET` are
 missing makes the backend return `INSTAGRAM_FEED_APP_NOT_CONFIGURED`.
 
@@ -68,10 +67,14 @@ deploys Laravel.
 
 ## Extensions
 
-- `extensions/app-home` is an Admin UI extension. It verifies the store is linked
-  to DecoAdmin, calls `bootstrap` to establish this app's Shopify session, and
-  then sends the merchant to DecoAdmin. Publishing depends on that session, so
-  the merchant must open the app in Shopify Admin at least once per store.
+App Home is not an extension. It uses the self-hosted iframe model, so the page is
+served by DecoAdmin at `/shopify-app/instagram-feed`. Do not add an
+`admin.app.home.render` extension: it would take over the App Home surface and the
+iframe page would become unreachable. `scripts/validate-project.mjs` blocks it.
+
+The merchant still has to open the app in Shopify Admin at least once per store,
+because that is when the session token is exchanged for the offline token that
+publishing needs.
 - `extensions/instagram-videos` is a Theme App Extension. It renders server-side
   from `app.metafields.instagram_videos.feed` and never calls DecoAdmin, so the
   storefront keeps working when the backend or tunnel is down. Merchants pick
@@ -98,20 +101,23 @@ deploys Laravel.
 - A request to develop or release this app never authorizes changes or releases
   for another app or environment.
 
-## Rotating the local tunnel URL
+## Changing an environment origin
 
-The Cloudflare quick tunnel has no stable hostname. When it changes, update all
-of these and redeploy, because CLI URL rewriting is disabled:
+CLI URL rewriting is disabled on purpose, so an origin change has to be made in
+every place that hard-codes it:
 
-1. `shopify.app.toml` and `shopify.app.local.toml`: `application_url`, both
-   `webhooks.subscriptions.uri` entries, and `auth.redirect_urls`.
+1. The target TOML plus `shopify.app.toml` when that target is the selected one:
+   `application_url` and both `[[webhooks.subscriptions]]` URIs.
 2. The `configurations` map in `scripts/validate-project.mjs`.
-3. The local `app_url` in the root `config/instagram_feed.php`.
+3. The matching `app_url` in the root `config/instagram_feed.php`.
 4. The Meta dashboard OAuth redirect URI, Deauthorize callback, and Data deletion
    callback.
 
-Steps 1 and 3 must agree, otherwise `bootstrap` succeeds against one origin while
-Meta redirects to another.
+Steps 1 and 3 must agree, otherwise the App Home page loads against one origin
+while Meta redirects to another. `npm run check:project` enforces 1 and 2.
+
+There are no OAuth redirect URLs to update: installation is Shopify-managed and
+DecoAdmin no longer exposes an authorization-code callback.
 
 For exact setup and release commands, read
 [`shopify-apps/instagram-feed/README.md`](../shopify-apps/instagram-feed/README.md).

@@ -16,18 +16,20 @@ embedded = true
 include_config_on_deploy = true
 automatically_update_urls_on_dev = false
 
-# 授权码安装流程不接受 app 级 webhook 订阅，所以这里只声明 api_version，
-# app/uninstalled 与 app/scopes_update 由 DecoAdmin 在授权成功后按店铺注册
-# （InstagramFeedWebhookSubscriptionService），与 Commerce Hub 一致。
+# 安装由 Shopify 托管（不再声明 use_legacy_install_flow），所以可以直接在配置里声明
+# app 级 webhook 订阅，由 Shopify 统一管理与重投。DecoAdmin 侧不再按店铺注册，
+# 也因此「装了但从未打开过应用」的店铺卸载时同样能收到通知。
 [webhooks]
 api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "https://testadmin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 
 # 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
 [access_scopes]
 scopes = "read_products"
-# DecoAdmin 用授权码回调建立本 App 的 offline token（对齐 Commerce Hub），
-# 所以保持 legacy install flow；切成 Shopify 托管安装需要后端改回 token exchange。
-use_legacy_install_flow = true
-
-[auth]
-redirect_urls = [ "https://testadmin.decomkt.com/shopify-app/instagram-feed/oauth/callback" ]
