@@ -38,11 +38,14 @@ class DeploymentPreparationTest extends TestCase
     {
         $entrypoint = file_get_contents(base_path('docker/php/entrypoint.sh'));
 
+        $configClear = strpos($entrypoint, 'php artisan config:clear --no-interaction');
         $packageDiscovery = strpos($entrypoint, 'php artisan package:discover --ansi --no-interaction');
         $optimization = strpos($entrypoint, 'php artisan optimize --no-interaction');
 
+        $this->assertNotFalse($configClear);
         $this->assertNotFalse($packageDiscovery);
         $this->assertNotFalse($optimization);
+        $this->assertLessThan($packageDiscovery, $configClear);
         $this->assertLessThan($optimization, $packageDiscovery);
     }
 
