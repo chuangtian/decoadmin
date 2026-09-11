@@ -2,6 +2,12 @@ import '../css/app.css';
 import { createInertiaApp } from '@inertiajs/vue3';
 import type { DefineComponent } from 'vue';
 
+declare global {
+    interface Window {
+        Pusher: typeof import('pusher-js').default;
+    }
+}
+
 createInertiaApp({
     resolve: async (name: string) => {
         const pages = import.meta.glob<{ default: DefineComponent }>('./Pages/**/*.vue');

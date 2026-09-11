@@ -58,6 +58,9 @@ services:
       app:
         condition: service_healthy
         restart: true
+      reverb:
+        condition: service_started
+        restart: true
 
   cloudflared:
     image: cloudflare/cloudflared:2026.8.2
@@ -112,6 +115,10 @@ services:
   scheduler:
     <<: *app
     command: ["php", "artisan", "schedule:work", "--verbose", "--no-interaction"]
+
+  reverb:
+    <<: *app
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
 
   vite:
     image: node:22-alpine

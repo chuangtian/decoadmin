@@ -17,6 +17,7 @@ use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BrandProfileController;
 use App\Http\Controllers\BusinessInsightsController;
+use App\Http\Controllers\BusinessNotificationController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
 use App\Http\Controllers\CodexApiTokenController;
@@ -420,6 +421,13 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 });
 
 Route::middleware(['auth', 'verified', 'organization.access'])->group(function (): void {
+    Route::get('/business-notifications', [BusinessNotificationController::class, 'index'])
+        ->middleware('throttle:120,1')->name('business-notifications.index');
+    Route::patch('/business-notifications/read-all', [BusinessNotificationController::class, 'readAll'])
+        ->middleware('throttle:60,1')->name('business-notifications.read-all');
+    Route::patch('/business-notifications/{businessNotification}/read', [BusinessNotificationController::class, 'read'])
+        ->middleware('throttle:120,1')->name('business-notifications.read');
+
     Route::get('/design-requests', [DesignRequestController::class, 'index'])
         ->middleware('personal.permission:design_requests.view')->name('design-requests.index');
     Route::post('/design-requests', [DesignRequestController::class, 'store'])

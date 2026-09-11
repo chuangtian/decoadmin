@@ -119,6 +119,11 @@ class HandleInertiaRequests extends Middleware
                 'name' => $organization->name,
                 'code' => $organization->code,
             ] : null,
+            'realtime' => [
+                'enabled' => config('broadcasting.default') === 'reverb'
+                    && filled(config('broadcasting.connections.reverb.key')),
+                'key' => (string) config('broadcasting.connections.reverb.key', ''),
+            ],
             'currentStore' => $store ? [
                 'id' => $store->id,
                 'name' => $store->name,
