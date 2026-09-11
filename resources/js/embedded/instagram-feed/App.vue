@@ -67,7 +67,8 @@ const run = async (action: () => Promise<{ message: string }>, refresh?: () => P
     busy.value = true;
     try {
         const result = await action();
-        flash('success', result.message);
+        // 空消息表示"这次没什么可说的"（例如商家把商品选择器直接关掉），不弹提示。
+        if (result.message) flash('success', result.message);
         await refresh?.();
     } catch (error) {
         flash('error', describe(error));

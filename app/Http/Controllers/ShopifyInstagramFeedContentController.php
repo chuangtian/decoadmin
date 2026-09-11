@@ -233,12 +233,35 @@ class ShopifyInstagramFeedContentController extends Controller
         });
     }
 
+    /**
+     * 展示组详情。
+     *
+     * 媒体库上千条，候选一次只回 200 条，所以搜索与日期筛选必须在服务端做。
+     * 这几个参数都是可选的，坏值不该让整页打不开，因此只做上限与格式校验，
+     * 解析不了的日期由 presenter 当作未填处理。
+     */
     public function showGallery(Request $request, InstagramGallery $gallery): JsonResponse
     {
-        return $this->read($request, function (Store $store) use ($request, $gallery): array {
+        $values = $request->validate([
+            'filter' => ['nullable', 'string', 'max:20'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+        ]);
+
+        return $this->read($request, function (Store $store) use ($values, $gallery): array {
             $this->assertGalleryOwnership($store, $gallery);
 
-            return $this->presenter->galleryDetail($store, $gallery, $request->string('filter')->toString());
+            return $this->presenter->galleryDetail(
+                $store,
+                $gallery,
+                (string) ($values['filter'] ?? ''),
+                [
+                    'search' => $values['search'] ?? null,
+                    'from' => $values['from'] ?? null,
+                    'to' => $values['to'] ?? null,
+                ],
+            );
         });
     }
 

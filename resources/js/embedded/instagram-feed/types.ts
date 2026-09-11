@@ -77,7 +77,8 @@ export interface Media {
     caption: string | null;
     permalink: string;
     preview_url: string | null;
-    video_url: string | null;
+    /** Instagram 官方 embed 地址，点击封面时嵌进弹窗。脏数据时为 null。 */
+    embed_url: string | null;
     mirror_status: 'pending' | 'processing' | 'ready' | 'failed';
     mirror_error: string | null;
     posted_at: string | null;
@@ -107,6 +108,13 @@ export interface GalleryDetail {
     totalCount: number;
     filter: string;
     filters: string[];
+    /** 服务端实际生效的筛选条件，用来回填输入框。 */
+    search: string;
+    from: string | null;
+    to: string | null;
+    /** 满足筛选条件的总条数；大于 candidateLimit 说明候选被截断了。 */
+    matchedCount: number;
+    candidateLimit: number;
     productError: string | null;
 }
 
