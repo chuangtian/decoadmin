@@ -5,11 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
 #[Fillable([
-    'uuid', 'organization_id', 'store_id', 'reference_no', 'request_type', 'priority', 'description',
+    'uuid', 'organization_id', 'store_id', 'reference_no', 'task_name', 'request_type', 'priority', 'description',
     'requester_department', 'requester_id', 'designer_id', 'quantity', 'requested_on',
     'planned_delivery_date', 'actual_delivery_date', 'status', 'revision_count', 'delivery_note', 'updated_by',
 ])]
@@ -48,6 +49,16 @@ class DesignRequest extends Model
     public function updater(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(DesignRequestAttachment::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function progressLogs(): HasMany
+    {
+        return $this->hasMany(DesignRequestProgressLog::class)->orderBy('created_at')->orderBy('id');
     }
 
     public function getRouteKeyName(): string

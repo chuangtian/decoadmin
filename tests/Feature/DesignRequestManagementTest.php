@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\DesignRequest;
+use App\Models\DesignRequestAttachment;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
@@ -11,6 +12,8 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -33,6 +36,7 @@ class DesignRequestManagementTest extends TestCase
                 ->component('DesignRequests/Index')
                 ->where('scope', 'mine')
                 ->where('canManage', false)
+                ->where('canViewOverview', false)
                 ->where('summary.total', 1)
                 ->where('summary.completed', 1)
                 ->has('requests.data', 1)
@@ -40,11 +44,61 @@ class DesignRequestManagementTest extends TestCase
                 ->where('requests.data.0.description', '王静彬的首页 Banner'));
 
         $this->assertStringNotContainsString('王娇阳的 EDM', $this->get(route('design-requests.index'))->getContent());
+
+        $viewerRole = $reporter->roles()->where('roles.slug', 'viewer')->firstOrFail();
+        $marketingRole = Role::query()->whereBelongsTo($organization)->where('slug', 'marketing')->firstOrFail();
+        $reporter->roles()->detach($viewerRole->id);
+        $reporter->roles()->attach($marketingRole, ['organization_id' => $organization->id, 'store_id' => null]);
+
+        $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('requests.data.0.requester_role', '营销人员'));
+
+        $this->get(route('design-requests.index', ['tab' => 'overview']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('filters.tab', 'list')
+                ->where('canViewOverview', false));
     }
 
-    public function test_designer_sees_all_store_requests_and_can_assign_and_complete_one(): void
+    public function test_only_designers_developers_and_super_admins_see_all_requests_and_overview(): void
     {
+        [$reporter, $organization, $store] = $this->context('viewer');
+        $this->designRequest($organization, $store, $reporter, ['description' => '员工自己的任务']);
+
+        foreach (['designer', 'developer', 'super-admin'] as $roleSlug) {
+            [$user] = $this->additionalUser($organization, $store, $roleSlug, $roleSlug);
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->get(route('design-requests.index', ['tab' => 'overview']))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('scope', 'all')
+                    ->where('canViewOverview', true)
+                    ->where('filters.tab', 'overview')
+                    ->where('summary.total', 1));
+        }
+
+        foreach (['organization-admin', 'store-admin', 'operator', 'marketing'] as $roleSlug) {
+            [$user] = $this->additionalUser($organization, $store, $roleSlug, $roleSlug);
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->get(route('design-requests.index', ['tab' => 'overview']))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('scope', 'mine')
+                    ->where('canViewOverview', false)
+                    ->where('canManage', false)
+                    ->where('filters.tab', 'list')
+                    ->where('summary.total', 0));
+        }
+    }
+
+    public function test_designer_sees_all_organization_requests_and_can_assign_and_complete_one(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-11 10:00:00');
         [$designer, $organization, $store] = $this->context('designer');
+        [$otherDesigner] = $this->additionalUser($organization, $store, 'designer', '另一位设计师');
         [$first] = $this->additionalUser($organization, $store, 'viewer', '王静彬');
         [$second] = $this->additionalUser($organization, $store, 'viewer', '王娇阳');
         $item = $this->designRequest($organization, $store, $first, ['description' => '第一条需求']);
@@ -56,62 +110,156 @@ class DesignRequestManagementTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('scope', 'all')
                 ->where('canManage', true)
+                ->where('canViewOverview', true)
                 ->where('summary.total', 2)
                 ->has('requests.data', 2)
-                ->where('options.designers.0.id', $designer->id));
+                ->where('requests.data.1.can_accept', true)
+                ->where('requests.data.1.can_process', false));
+
+        $this->post(route('design-requests.accept', $item))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $item->refresh();
+        $this->assertSame($designer->id, $item->designer_id);
+        $this->assertSame('assigned', $item->status);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_accepted', 'subject_id' => $item->id]);
+
+        $this->get(route('design-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('requests.data.1.can_accept', false)
+                ->where('requests.data.1.can_process', true));
+
+        $this->actingAs($otherDesigner)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('requests.data.1.can_accept', false)
+                ->where('requests.data.1.can_process', false));
+        $this->post(route('design-requests.accept', $item))
+            ->assertRedirect()
+            ->assertSessionHasErrors('accept');
+        $this->put(route('design-requests.update', $item), [
+            'action' => 'progress',
+            'progress_note' => '尝试越权提交进展',
+        ])->assertForbidden();
+
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store));
+        $this->put(route('design-requests.update', $item), [
+            'action' => 'progress',
+            'progress_note' => '初稿已经完成',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame('in_progress', $item->fresh()->status);
+        $this->assertDatabaseHas('design_request_progress_logs', [
+            'design_request_id' => $item->id,
+            'action' => 'progress',
+            'content' => '初稿已经完成',
+        ]);
 
         $this->put(route('design-requests.update', $item), [
-            'designer_id' => $designer->id,
-            'status' => 'completed',
-            'planned_delivery_date' => '2026-09-12',
-            'actual_delivery_date' => '2026-09-11',
-            'revision_count' => 2,
-            'delivery_note' => '文件已交付',
+            'action' => 'complete',
+            'progress_note' => '文件已交付',
         ])->assertRedirect()->assertSessionHasNoErrors();
 
         $item->refresh();
         $this->assertSame($designer->id, $item->designer_id);
         $this->assertSame('completed', $item->status);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_updated', 'subject_id' => $item->id]);
+        $this->assertSame('2026-09-11', $item->actual_delivery_date->toDateString());
+        $this->assertDatabaseHas('design_request_progress_logs', [
+            'design_request_id' => $item->id,
+            'action' => 'completed',
+            'content' => '文件已交付',
+        ]);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_completed', 'subject_id' => $item->id]);
+
+        $this->get(route('design-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('requests.data.1.status', 'completed')
+                ->where('requests.data.1.can_process', false)
+                ->has('requests.data.1.progress_logs', 3));
     }
 
     public function test_reporter_creation_forces_logged_in_requester_and_safe_initial_state(): void
     {
         CarbonImmutable::setTestNow('2026-09-09 10:00:00');
+        Storage::fake('local');
         [$reporter, $organization, $store] = $this->context('viewer');
         [$other] = $this->additionalUser($organization, $store, 'viewer', '另一个用户');
 
         $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
             ->post(route('design-requests.store'), [
                 'requester_id' => $other->id,
+                'task_name' => '新品首页视觉设计',
                 'request_type' => 'site_banner', 'priority' => 'urgent',
                 'description' => '新品首页首屏 Banner', 'requester_department' => '品牌部',
                 'quantity' => 2, 'planned_delivery_date' => '2026-09-12',
                 'status' => 'completed', 'designer_id' => $other->id,
+                'images' => [UploadedFile::fake()->image('brief.png', 320, 180)],
             ])->assertRedirect()->assertSessionHasNoErrors();
 
         $item = DesignRequest::query()->sole();
+        $attachment = DesignRequestAttachment::query()->sole();
         $this->assertSame($reporter->id, $item->requester_id);
+        $this->assertNull($item->store_id);
+        $this->assertSame('新品首页视觉设计', $item->task_name);
+        $this->assertNull($item->requester_department);
+        $this->assertSame(1, $item->quantity);
         $this->assertNull($item->designer_id);
         $this->assertSame('pending', $item->status);
         $this->assertSame('2026-09-09', $item->requested_on->toDateString());
+        Storage::disk('local')->assertExists($attachment->path);
         $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_created', 'subject_id' => $item->id]);
+
+        $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.attachments.show', [$item, $attachment]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+        $this->actingAs($other)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.attachments.show', [$item, $attachment]))
+            ->assertNotFound();
     }
 
-    public function test_permissions_block_reporter_updates_and_cross_store_manager_access(): void
+    public function test_permissions_block_reporter_updates_but_developer_can_handle_legacy_store_requests(): void
     {
         [$reporter, $organization, $store] = $this->context('viewer');
-        [$admin] = $this->additionalUser($organization, $store, 'store-admin', '管理员');
+        [$admin] = $this->additionalUser($organization, $store, 'developer', '开发人员');
         $otherStore = $organization->stores()->create(['name' => 'Other Store', 'shopify_domain' => 'other-design.test', 'status' => 'active']);
         $otherStore->members()->attach($admin, ['status' => 'active', 'joined_at' => now()]);
         $item = $this->designRequest($organization, $otherStore, $reporter, ['description' => '其他店铺需求']);
-        $payload = ['designer_id' => null, 'status' => 'in_progress', 'planned_delivery_date' => '2026-09-12', 'actual_delivery_date' => null, 'revision_count' => 0, 'delivery_note' => null];
+        $payload = ['action' => 'progress', 'progress_note' => '开始处理历史需求'];
 
         $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
             ->put(route('design-requests.update', $item), $payload)->assertForbidden();
         $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
-            ->put(route('design-requests.update', $item), $payload)->assertNotFound();
-        $this->assertSame('pending', $item->fresh()->status);
+            ->post(route('design-requests.accept', $item))->assertRedirect()->assertSessionHasNoErrors();
+        $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
+            ->put(route('design-requests.update', $item), $payload)->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertSame('in_progress', $item->fresh()->status);
+        $this->assertSame($admin->id, $item->fresh()->designer_id);
+    }
+
+    public function test_switching_stores_does_not_change_personal_design_requests(): void
+    {
+        [$reporter, $organization, $store] = $this->context('viewer');
+        $otherStore = $organization->stores()->create(['name' => 'Other Store', 'shopify_domain' => 'other-personal-design.test', 'status' => 'active']);
+        $otherStore->members()->attach($reporter, ['status' => 'active', 'joined_at' => now()]);
+        $role = $reporter->roles()->firstOrFail();
+        $reporter->roles()->updateExistingPivot($role->id, ['store_id' => $store->id]);
+        $first = $this->designRequest($organization, $store, $reporter, ['description' => '原店铺创建的历史需求']);
+        $second = $this->designRequest($organization, $otherStore, $reporter, ['description' => '另一店铺创建的历史需求']);
+
+        foreach ([$store, $otherStore] as $selectedStore) {
+            $this->actingAs($reporter)->withSession($this->contextSession($organization, $selectedStore))
+                ->get(route('design-requests.index'))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->where('summary.total', 2)
+                    ->where('requests.data.0.uuid', $second->uuid)
+                    ->where('requests.data.1.uuid', $first->uuid)
+                    ->missing('store'));
+        }
     }
 
     /** @return array{User, Organization, Store} */
@@ -142,7 +290,7 @@ class DesignRequestManagementTest extends TestCase
     {
         return DesignRequest::query()->create([
             'organization_id' => $organization->id, 'store_id' => $store->id,
-            'request_type' => 'site_banner', 'priority' => 'medium', 'description' => '设计需求',
+            'task_name' => '设计任务', 'request_type' => 'site_banner', 'priority' => 'medium', 'description' => '设计需求',
             'requester_id' => $requester->id, 'quantity' => 1, 'requested_on' => '2026-09-09',
             'planned_delivery_date' => '2026-09-12', 'status' => 'pending',
             ...$values,

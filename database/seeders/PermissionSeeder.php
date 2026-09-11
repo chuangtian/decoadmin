@@ -19,6 +19,11 @@ class PermissionSeeder extends Seeder
         'discounts' => '折扣管理',
         'affiliate' => '推荐与联盟',
         'design_requests' => '设计需求',
+        'technical_requests' => '技术需求',
+        'request_approvals' => '需求审批',
+        'expense_requests' => '费用申请',
+        'expense_claims' => '发票报销',
+        'marketing' => '营销自动化',
     ];
 
     /** @var array<string, string> */
@@ -120,11 +125,11 @@ class PermissionSeeder extends Seeder
         'student_discount.email_template.manage',
         'student_discount.analytics.read',
         'student_discount.audit.read',
+        // Instagram Feed 只剩后台只读页要判权；连接、同步、编排、配置都在
+        // Shopify App 内嵌页完成，那条链路按 shop domain 判定店铺、不做按人 RBAC，
+        // 所以 connect / sync / gallery.manage / publish 这四个权限已经退役
+        // （见 2026_09_10_000200 迁移，它把这四条软删除）。
         'instagram_feed.view',
-        'instagram_feed.connect',
-        'instagram_feed.sync',
-        'instagram_feed.gallery.manage',
-        'instagram_feed.publish',
         'personalization.view',
         'personalization.manage',
         'personalization.analytics.read',
@@ -152,6 +157,22 @@ class PermissionSeeder extends Seeder
         'design_requests.create',
         'design_requests.view_all',
         'design_requests.manage',
+        'technical_requests.view',
+        'technical_requests.create',
+        'technical_requests.view_all',
+        'technical_requests.manage',
+        'request_approvals.view',
+        'request_approvals.manage',
+        'expense_requests.view',
+        'expense_requests.create',
+        'expense_requests.view_all',
+        'expense_requests.manage',
+        'expense_claims.view',
+        'expense_claims.create',
+        'expense_claims.view_all',
+        'expense_claims.manage',
+        'marketing.view',
+        'marketing.manage',
     ];
 
     public function run(): void

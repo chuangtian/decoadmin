@@ -27,6 +27,17 @@
   opacity: 0.75;
 }
 
+/* 只在主题编辑器里出现的可选展示组提示，店面访客看不到。 */
+.igv__hint {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px dashed currentcolor;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+
 /* ---------- 头部 ---------- */
 
 .igv__header {
@@ -115,7 +126,6 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
-.igv__video,
 .igv__image {
   display: block;
   width: 100%;
@@ -123,7 +133,7 @@
   object-fit: cover;
 }
 
-/* ---------- 播放按钮 ---------- */
+/* ---------- 打开帖子按钮 ---------- */
 
 .igv__play {
   position: absolute;
@@ -168,7 +178,19 @@
   outline-offset: 2px;
 }
 
-/* ---------- 文案与商品 ---------- */
+/* ---------- 日期、文案与商品 ---------- */
+
+.igv__date {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.igv__date + .igv__caption {
+  margin-top: 4px;
+}
 
 .igv__caption {
   margin: 8px 0 0;
@@ -210,6 +232,10 @@
 
 /* ---------- 轮播箭头 ---------- */
 
+/*
+ * 桌面端箭头竖直居中压在轨道两侧边缘；移动端在下面的断点里改成 static，
+ * 跟圆点一起排到轨道下方（一屏只有一条时，箭头压在图上会挡住内容）。
+ */
 .igv__arrow {
   position: absolute;
   top: 50%;
@@ -217,6 +243,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   width: var(--igv-arrow-size);
   height: var(--igv-arrow-size);
   transform: translateY(-50%);
@@ -226,10 +253,17 @@
   color: #1a1a1a;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  transition: opacity 0.15s ease;
 }
 
-.igv__arrow[hidden] {
-  display: none;
+/*
+ * 到边界是禁用而不是隐藏：隐藏会让另一侧箭头的位置发生跳动，
+ * 而且商家从截图上看不出「这里本来有个按钮」。
+ */
+.igv__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+  box-shadow: none;
 }
 
 .igv__arrow svg {
@@ -252,6 +286,39 @@
   outline-offset: 2px;
 }
 
+/* ---------- 圆点指示器 ---------- */
+
+/* 桌面端一屏能看好几条，圆点没有信息量；只在移动端出现。 */
+.igv__dots {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.igv__dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: currentcolor;
+  opacity: 0.25;
+  cursor: pointer;
+  transition: width 0.2s ease, opacity 0.2s ease;
+}
+
+/* 当前页拉长成胶囊，比只靠深浅区分更容易看清。 */
+.igv__dot[aria-current="true"] {
+  width: 22px;
+  opacity: 0.85;
+  cursor: default;
+}
+
+.igv__dot:focus-visible {
+  outline: 2px solid var(--igv-accent, #1a1a1a);
+  outline-offset: 2px;
+}
+
 @media screen and (max-width: 749px) {
   .igv__list {
     grid-template-columns: repeat(var(--igv-columns-mobile, 2), minmax(0, 1fr));
@@ -264,12 +331,33 @@
     );
   }
 
-  .igv__arrow--prev {
-    transform: translate(8px, -50%);
+  /*
+   * 控件下移：轨道单独占一行，箭头与圆点排在它下面并靠左。
+   * 用 order 而不是改 DOM 顺序，桌面端的绝对定位才能继续复用同一组按钮。
+   */
+  .igv[data-layout="carousel"] .igv__viewport {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
 
-  .igv__arrow--next {
-    transform: translate(-8px, -50%);
+  .igv[data-layout="carousel"] .igv__list {
+    order: 0;
+    flex: 0 0 100%;
+    margin-bottom: 4px;
+  }
+
+  .igv[data-layout="carousel"] .igv__arrow {
+    position: static;
+    order: 1;
+    transform: none;
+  }
+
+  .igv[data-layout="carousel"] .igv__dots {
+    display: flex;
+    order: 2;
+    margin-left: 8px;
   }
 }
 
@@ -300,11 +388,44 @@
   width: 100%;
 }
 
-.igv-lightbox__video {
+/*
+ * Instagram embed 的 iframe 是跨域的，读不到内部高度，所以用固定宽高比的容器。
+ * 4/5 覆盖 Reels 与图文贴的常见比例；内容更长时由 iframe 自己滚动。
+ */
+.igv-lightbox__frame {
+  position: relative;
   width: 100%;
+  aspect-ratio: 4 / 5;
   max-height: 78vh;
+  overflow: hidden;
   border-radius: 12px;
-  background: #000;
+  background: #fff;
+}
+
+.igv-lightbox__embed {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.igv-lightbox__embed[hidden] {
+  display: none;
+}
+
+.igv-lightbox__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-size: 14px;
+  color: #616161;
+}
+
+.igv-lightbox__loading[hidden] {
+  display: none;
 }
 
 .igv-lightbox__meta {

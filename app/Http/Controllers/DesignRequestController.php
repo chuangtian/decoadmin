@@ -4,37 +4,46 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\DesignRequest;
-use App\Models\Store;
+use App\Models\DesignRequestAttachment;
+use App\Models\Organization;
 use App\Models\User;
+use App\Services\Authorization\PersonalPermissionService;
 use App\Support\CurrentOrganization;
-use App\Support\CurrentStore;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DesignRequestController extends Controller
 {
+    private const FULL_ACCESS_ROLES = ['designer', 'developer', 'super-admin'];
+
     private const TYPES = ['site_banner', 'edm', 'social_media', 'product_detail', 'video', 'other'];
 
     private const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 
     private const STATUSES = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'cancelled'];
 
-    public function index(Request $request, CurrentOrganization $currentOrganization, CurrentStore $currentStore): Response
+    public function __construct(private PersonalPermissionService $permissions) {}
+
+    public function index(Request $request, CurrentOrganization $currentOrganization): Response
     {
         $organization = $currentOrganization->require();
-        $store = $currentStore->require();
         $user = $request->user();
-        abort_unless($user && (int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($user, 401);
+        $timezone = $this->timezone($user);
 
-        $canViewAll = $user->hasPermission('design_requests.view_all', $organization, $store);
-        $canManage = $user->hasPermission('design_requests.manage', $organization, $store);
+        $hasFullAccessRole = $this->hasFullAccessRole($user, $organization);
+        $canViewAll = $hasFullAccessRole && $this->permissions->allows($user, $organization, 'design_requests.view_all');
+        $canManage = $hasFullAccessRole && $this->permissions->allows($user, $organization, 'design_requests.manage');
         $filters = $request->validate([
             'tab' => ['nullable', Rule::in(['overview', 'list'])],
             'status' => ['nullable', Rule::in(self::STATUSES)],
@@ -43,14 +52,14 @@ class DesignRequestController extends Controller
             'search' => ['nullable', 'string', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
+        $activeTab = $canViewAll ? ($filters['tab'] ?? 'list') : 'list';
 
         $scope = DesignRequest::query()
             ->where('organization_id', $organization->id)
-            ->where('store_id', $store->id)
             ->when(! $canViewAll, fn (Builder $query) => $query->where('requester_id', $user->id));
-        $allRows = (clone $scope)->with(['requester:id,name', 'designer:id,name'])->get();
+        $allRows = (clone $scope)->get();
         $rows = (clone $scope)
-            ->with(['requester:id,name', 'designer:id,name'])
+            ->with(['requester:id,name', 'requester.roles:id,name', 'designer:id,name', 'attachments', 'progressLogs.user:id,name'])
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
             ->when($filters['priority'] ?? null, fn (Builder $query, string $priority) => $query->where('priority', $priority))
             ->when($filters['type'] ?? null, fn (Builder $query, string $type) => $query->where('request_type', $type))
@@ -58,8 +67,10 @@ class DesignRequestController extends Controller
                 $keyword = '%'.addcslashes(trim((string) $filters['search']), '%_\\').'%';
                 $query->where(fn (Builder $query) => $query
                     ->where('reference_no', 'like', $keyword)
+                    ->orWhere('task_name', 'like', $keyword)
                     ->orWhere('description', 'like', $keyword));
             })
+            ->orderByRaw("case when status = 'completed' then 1 else 0 end")
             ->orderByRaw("case priority when 'urgent' then 1 when 'high' then 2 when 'medium' then 3 else 4 end")
             ->orderByDesc('requested_on')
             ->orderByDesc('id')
@@ -67,105 +78,216 @@ class DesignRequestController extends Controller
             ->withQueryString();
 
         return Inertia::render('DesignRequests/Index', [
-            'store' => ['id' => $store->id, 'name' => $store->name, 'timezone' => $store->timezone ?: 'UTC'],
             'scope' => $canViewAll ? 'all' : 'mine',
-            'today' => today($store->timezone ?: 'UTC')->toDateString(),
-            'canCreate' => $user->hasPermission('design_requests.create', $organization, $store),
+            'today' => today($timezone)->toDateString(),
+            'canCreate' => $this->permissions->allows($user, $organization, 'design_requests.create'),
             'canManage' => $canManage,
+            'canViewOverview' => $canViewAll,
             'filters' => [
-                'tab' => $filters['tab'] ?? 'list', 'status' => $filters['status'] ?? '',
+                'tab' => $activeTab, 'status' => $filters['status'] ?? '',
                 'priority' => $filters['priority'] ?? '', 'type' => $filters['type'] ?? '',
                 'search' => trim((string) ($filters['search'] ?? '')),
             ],
             'options' => [
                 'types' => self::TYPES, 'priorities' => self::PRIORITIES, 'statuses' => self::STATUSES,
-                'designers' => $canManage ? $this->designers($store) : [],
             ],
-            'summary' => $this->summary($allRows, $store->timezone ?: 'UTC'),
+            'summary' => $this->summary($allRows, $timezone),
             'requests' => [
                 ...$rows->toArray(),
-                'data' => collect($rows->items())->map(fn (DesignRequest $item) => $this->serialize($item, $store->timezone ?: 'UTC'))->all(),
+                'data' => collect($rows->items())->map(fn (DesignRequest $item) => $this->serialize($item, $timezone, $user, $canManage))->all(),
             ],
         ]);
     }
 
-    public function store(Request $request, CurrentOrganization $currentOrganization, CurrentStore $currentStore): RedirectResponse
+    public function store(Request $request, CurrentOrganization $currentOrganization): RedirectResponse
     {
         $organization = $currentOrganization->require();
-        $store = $currentStore->require();
         $user = $request->user();
-        abort_unless($user && (int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($user, 401);
+        $timezone = $this->timezone($user);
         $validated = $request->validate([
+            'task_name' => ['required', 'string', 'max:160', 'regex:/\S/u'],
             'request_type' => ['required', Rule::in(self::TYPES)],
             'priority' => ['required', Rule::in(self::PRIORITIES)],
             'description' => ['required', 'string', 'max:5000'],
-            'requester_department' => ['nullable', 'string', 'max:120'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:999'],
             'planned_delivery_date' => ['required', 'date', 'after_or_equal:today'],
+            'images' => ['nullable', 'array', 'max:10'],
+            'images.*' => ['file', 'image', 'mimes:jpg,jpeg,png,webp,gif', 'max:8192'],
         ]);
+        $images = $validated['images'] ?? [];
+        unset($validated['images']);
+        $storedPaths = [];
 
-        $designRequest = DB::transaction(function () use ($validated, $organization, $store, $user): DesignRequest {
-            $item = DesignRequest::query()->create([
-                ...$validated,
-                'organization_id' => $organization->id,
-                'store_id' => $store->id,
-                'requester_id' => $user->id,
-                'requested_on' => today($store->timezone ?: 'UTC')->toDateString(),
-                'status' => 'pending',
-                'revision_count' => 0,
-                'updated_by' => $user->id,
-            ]);
-            $this->audit($item, $user, 'design_request_created', [], ['status' => 'pending']);
+        try {
+            $designRequest = DB::transaction(function () use ($images, $validated, $organization, &$storedPaths, $timezone, $user): DesignRequest {
+                $item = DesignRequest::query()->create([
+                    ...$validated,
+                    'organization_id' => $organization->id,
+                    'store_id' => null,
+                    'requester_id' => $user->id,
+                    'requested_on' => today($timezone)->toDateString(),
+                    'status' => 'pending',
+                    'revision_count' => 0,
+                    'updated_by' => $user->id,
+                ]);
 
-            return $item;
-        });
+                foreach ($images as $index => $image) {
+                    $extension = $image->guessExtension() ?: 'img';
+                    $filename = Str::uuid().'.'.$extension;
+                    $path = $image->storeAs("design-requests/{$organization->id}/{$item->uuid}", $filename, 'local');
+                    abort_unless(is_string($path), 500, '任务图片保存失败。');
+                    $storedPaths[] = $path;
+                    $item->attachments()->create([
+                        'uploaded_by' => $user->id,
+                        'disk' => 'local',
+                        'path' => $path,
+                        'original_name' => $image->getClientOriginalName(),
+                        'mime_type' => (string) $image->getMimeType(),
+                        'size' => (int) $image->getSize(),
+                        'sort_order' => $index,
+                    ]);
+                }
 
-        return back()->with('success', "需求 {$designRequest->reference_no} 已提交。");
+                $this->audit($item, $user, 'design_request_created', [], [
+                    'status' => 'pending',
+                    'image_count' => count($images),
+                ]);
+
+                return $item;
+            });
+        } catch (\Throwable $exception) {
+            foreach ($storedPaths as $path) {
+                Storage::disk('local')->delete($path);
+            }
+
+            throw $exception;
+        }
+
+        return back()->with('success', "任务 {$designRequest->reference_no} 已提交。");
     }
 
-    public function update(Request $request, DesignRequest $designRequest, CurrentOrganization $currentOrganization, CurrentStore $currentStore): RedirectResponse
+    public function attachment(
+        Request $request,
+        DesignRequest $designRequest,
+        DesignRequestAttachment $attachment,
+        CurrentOrganization $currentOrganization,
+    ): StreamedResponse {
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        abort_unless($user && (int) $designRequest->organization_id === (int) $organization->id, 404);
+        abort_unless(
+            (int) $designRequest->requester_id === (int) $user->id
+                || ($this->hasFullAccessRole($user, $organization)
+                    && $this->permissions->allows($user, $organization, 'design_requests.view_all')),
+            404,
+        );
+        abort_unless((int) $attachment->design_request_id === (int) $designRequest->id, 404);
+        abort_unless(Storage::disk($attachment->disk)->exists($attachment->path), 404);
+        $extension = pathinfo($attachment->path, PATHINFO_EXTENSION) ?: 'img';
+
+        return Storage::disk($attachment->disk)->response(
+            $attachment->path,
+            $attachment->uuid.'.'.$extension,
+            [
+                'Content-Type' => $attachment->mime_type,
+                'Content-Disposition' => 'inline; filename="'.$attachment->uuid.'.'.$extension.'"',
+                'Cache-Control' => 'private, max-age=3600',
+                'X-Content-Type-Options' => 'nosniff',
+            ],
+        );
+    }
+
+    public function update(Request $request, DesignRequest $designRequest, CurrentOrganization $currentOrganization): RedirectResponse
     {
         $organization = $currentOrganization->require();
-        $store = $currentStore->require();
         $user = $request->user();
-        abort_unless($user && (int) $designRequest->organization_id === (int) $organization->id && (int) $designRequest->store_id === (int) $store->id, 404);
-        abort_unless($user->hasPermission('design_requests.manage', $organization, $store), 403);
+        abort_unless($user && (int) $designRequest->organization_id === (int) $organization->id, 404);
+        abort_unless(
+            $this->hasFullAccessRole($user, $organization)
+                && $this->permissions->allows($user, $organization, 'design_requests.manage'),
+            403,
+        );
+        abort_unless((int) $designRequest->designer_id === (int) $user->id, 403);
+        abort_if(in_array($designRequest->status, ['completed', 'cancelled'], true), 409, '已结束的任务不能继续处理。');
         $validated = $request->validate([
-            'designer_id' => ['nullable', 'integer'],
-            'status' => ['required', Rule::in(self::STATUSES)],
-            'planned_delivery_date' => ['required', 'date', 'after_or_equal:'.$designRequest->requested_on->toDateString()],
-            'actual_delivery_date' => ['nullable', 'date', 'after_or_equal:'.$designRequest->requested_on->toDateString()],
-            'revision_count' => ['required', 'integer', 'min:0', 'max:999'],
-            'delivery_note' => ['nullable', 'string', 'max:3000'],
+            'action' => ['required', Rule::in(['progress', 'complete'])],
+            'progress_note' => ['nullable', 'string', 'max:3000', 'required_if:action,progress'],
         ]);
-        if ($validated['designer_id'] !== null) {
-            abort_unless(collect($this->designers($store))->contains('id', (int) $validated['designer_id']), 422);
-        }
-        if ($validated['status'] === 'completed' && blank($validated['actual_delivery_date'])) {
-            return back()->withErrors(['actual_delivery_date' => '完成需求时请填写实际交付日期。']);
-        }
-        if (in_array($validated['status'], ['assigned', 'in_progress', 'review', 'completed'], true) && $validated['designer_id'] === null) {
-            return back()->withErrors(['designer_id' => '进入处理流程前请先分配设计师。']);
-        }
+        $note = trim((string) ($validated['progress_note'] ?? ''));
+        $completed = $validated['action'] === 'complete';
+        $timezone = $this->timezone($user);
 
-        DB::transaction(function () use ($validated, $designRequest, $user): void {
-            $old = $designRequest->only(['designer_id', 'status', 'planned_delivery_date', 'actual_delivery_date', 'revision_count', 'delivery_note']);
-            $designRequest->fill([...$validated, 'updated_by' => $user->id])->save();
-            $this->audit($designRequest, $user, 'design_request_updated', $old, $designRequest->only(array_keys($old)));
+        DB::transaction(function () use ($completed, $designRequest, $note, $timezone, $user): void {
+            $old = $designRequest->only(['status', 'actual_delivery_date', 'delivery_note']);
+            $designRequest->forceFill([
+                'status' => $completed ? 'completed' : 'in_progress',
+                'actual_delivery_date' => $completed ? today($timezone)->toDateString() : null,
+                'delivery_note' => $note !== '' ? $note : $designRequest->delivery_note,
+                'updated_by' => $user->id,
+            ])->save();
+            $designRequest->progressLogs()->create([
+                'user_id' => $user->id,
+                'action' => $completed ? 'completed' : 'progress',
+                'content' => $note !== '' ? $note : null,
+            ]);
+            $this->audit($designRequest, $user, $completed ? 'design_request_completed' : 'design_request_progressed', $old, $designRequest->only(array_keys($old)));
         });
 
-        return back()->with('success', "需求 {$designRequest->reference_no} 已更新。");
+        return back()->with('success', $completed
+            ? "任务 {$designRequest->reference_no} 已完成。"
+            : "任务 {$designRequest->reference_no} 的进展已提交。");
     }
 
-    /** @return list<array{id: int, name: string}> */
-    private function designers(Store $store): array
+    public function accept(Request $request, DesignRequest $designRequest, CurrentOrganization $currentOrganization): RedirectResponse
     {
-        $organization = $store->organization;
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        abort_unless($user && (int) $designRequest->organization_id === (int) $organization->id, 404);
+        abort_unless(
+            $this->hasFullAccessRole($user, $organization)
+                && $this->permissions->allows($user, $organization, 'design_requests.manage'),
+            403,
+        );
 
-        return $store->members()->select('users.id', 'users.name')->orderBy('users.name')->get()
-            ->filter(fn (User $member) => $member->hasPermission('design_requests.manage', $organization, $store))
-            ->map(fn (User $member) => ['id' => (int) $member->id, 'name' => $member->name])
-            ->values()->all();
+        $accepted = DB::transaction(function () use ($designRequest, $organization, $user): bool {
+            $item = DesignRequest::query()
+                ->whereKey($designRequest->getKey())
+                ->where('organization_id', $organization->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($item->designer_id !== null) {
+                return (int) $item->designer_id === (int) $user->id;
+            }
+
+            $old = $item->only(['designer_id', 'status']);
+            $item->forceFill([
+                'designer_id' => $user->id,
+                'status' => 'assigned',
+                'updated_by' => $user->id,
+            ])->save();
+            $item->progressLogs()->create([
+                'user_id' => $user->id,
+                'action' => 'accepted',
+                'content' => null,
+            ]);
+            $this->audit($item, $user, 'design_request_accepted', $old, $item->only(['designer_id', 'status']));
+
+            return true;
+        });
+
+        if (! $accepted) {
+            return back()->withErrors(['accept' => '该任务已被其他人接受。']);
+        }
+
+        return back()->with('success', "任务 {$designRequest->reference_no} 已由你接受。");
+    }
+
+    private function timezone(User $user): string
+    {
+        $timezone = filled($user->timezone) ? (string) $user->timezone : (string) config('app.timezone', 'UTC');
+
+        return in_array($timezone, timezone_identifiers_list(\DateTimeZone::ALL_WITH_BC), true) ? $timezone : 'UTC';
     }
 
     /** @param Collection<int, DesignRequest> $rows */
@@ -187,12 +309,11 @@ class DesignRequestController extends Controller
             'overdue' => $overdue,
             'on_time_rate' => $completed->count() ? round($onTime / $completed->count() * 100, 1) : null,
             'average_turnaround_days' => $turnaround->isNotEmpty() ? round($turnaround->average(), 1) : null,
-            'revision_count' => (int) $rows->sum('revision_count'),
             'status_counts' => collect(self::STATUSES)->mapWithKeys(fn (string $status) => [$status => $rows->where('status', $status)->count()])->all(),
         ];
     }
 
-    private function serialize(DesignRequest $item, string $timezone): array
+    private function serialize(DesignRequest $item, string $timezone, User $user, bool $canManage): array
     {
         $today = CarbonImmutable::today($timezone);
         $comparison = $item->actual_delivery_date ?? $today;
@@ -200,26 +321,73 @@ class DesignRequestController extends Controller
 
         return [
             'uuid' => $item->uuid, 'reference_no' => $item->reference_no,
+            'task_name' => $item->task_name ?: Str::limit($item->description, 80),
             'request_type' => $item->request_type, 'priority' => $item->priority,
-            'description' => $item->description, 'requester_department' => $item->requester_department,
+            'description' => $item->description,
             'requester' => $item->requester?->name, 'designer_id' => $item->designer_id,
-            'designer' => $item->designer?->name, 'quantity' => $item->quantity,
+            'requester_role' => $this->requesterRole($item),
+            'designer' => $item->designer?->name,
             'requested_on' => $item->requested_on->toDateString(),
             'planned_delivery_date' => $item->planned_delivery_date->toDateString(),
             'actual_delivery_date' => $item->actual_delivery_date?->toDateString(),
             'status' => $item->status, 'is_delayed' => $delayDays > 0, 'delay_days' => $delayDays,
-            'revision_count' => $item->revision_count, 'delivery_note' => $item->delivery_note,
+            'can_accept' => $canManage && $item->designer_id === null && $item->status === 'pending',
+            'can_process' => $canManage
+                && (int) $item->designer_id === (int) $user->id
+                && ! in_array($item->status, ['completed', 'cancelled'], true),
+            'progress_logs' => $item->progressLogs->map(fn ($log) => [
+                'uuid' => $log->uuid,
+                'action' => $log->action,
+                'content' => $log->content,
+                'user' => $log->user?->name ?? '已离职用户',
+                'created_at' => $log->created_at?->timezone($timezone)->format('Y-m-d H:i'),
+            ])->values()->all(),
+            'images' => $item->attachments->map(fn (DesignRequestAttachment $attachment) => [
+                'uuid' => $attachment->uuid,
+                'name' => $attachment->original_name,
+                'mime_type' => $attachment->mime_type,
+                'size' => $attachment->size,
+                'url' => route('design-requests.attachments.show', [$item, $attachment], false),
+            ])->values()->all(),
         ];
+    }
+
+    private function requesterRole(DesignRequest $item): string
+    {
+        if (! $item->requester) {
+            return '未分配角色';
+        }
+
+        $roles = $item->requester->roles
+            ->filter(fn ($role) => (int) $role->pivot->organization_id === (int) $item->organization_id)
+            ->pluck('name')
+            ->unique()
+            ->sort()
+            ->implode('、');
+
+        return $roles !== '' ? $roles : '未分配角色';
+    }
+
+    private function hasFullAccessRole(User $user, Organization $organization): bool
+    {
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        return $user->roles()
+            ->where('user_roles.organization_id', $organization->getKey())
+            ->whereIn('roles.slug', self::FULL_ACCESS_ROLES)
+            ->exists();
     }
 
     private function audit(DesignRequest $item, User $user, string $action, array $old, array $new): void
     {
         AuditLog::query()->create([
-            'organization_id' => $item->organization_id, 'store_id' => $item->store_id,
+            'organization_id' => $item->organization_id, 'store_id' => null,
             'user_id' => $user->id, 'action' => $action,
             'subject_type' => DesignRequest::class, 'subject_id' => $item->id,
             'old_values' => $old, 'new_values' => $new,
-            'metadata' => ['scope' => 'store', 'reference_no' => $item->reference_no],
+            'metadata' => ['scope' => 'personal', 'reference_no' => $item->reference_no],
         ]);
     }
 }

@@ -1,13 +1,10 @@
-# 生产环境使用 Dev Dashboard 里的 Shopify App「Instagram Feed (Deco)」。
-# local 与 test 配置已移除：Cloudflare 隧道不再维护，测试环境也不再单独占用一个 App，
-# 这个 App 现在只服务生产（https://admin.decomkt.com）。
+# 生产环境配置。注意：这里用的是与测试同一个 Shopify App
+# （client_id d3446448682d2950aa75cea4a399d50f，handle deco-instagram-feed）。
 #
-# 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以不要再为它
-# 添加指向其他域名的配置文件，那会在发布时把生产地址覆盖掉。
+# 一个 Shopify App 只有一份 application_url 与一组 webhook 地址，所以生产与测试
+# 不能同时生效：发布这份配置＝把该 App 指回生产，测试入口同时停用。
 #
-# 不要用 `shopify app config link` 覆盖本文件：它会从 Dashboard 拉取配置，
-# 把下面的 scopes 和 webhook 订阅冲成 Dashboard 的默认值。
-# 配置一律以本文件为准，改完用 `npm run deploy:production` 推送。
+# 当前该 App 指向测试服用于联调，这份配置是切回生产的还原点，地址保持不动。
 client_id = "d3446448682d2950aa75cea4a399d50f"
 name = "Instagram Feed (Deco)"
 handle = "deco-instagram-feed"
@@ -17,17 +14,25 @@ embedded = true
 [build]
 automatically_update_urls_on_dev = false
 
-# 授权码安装流程不接受 app 级 webhook 订阅，所以这里只声明 api_version，
-# app/uninstalled 与 app/scopes_update 由 DecoAdmin 在授权成功后按店铺注册
-# （InstagramFeedWebhookSubscriptionService），与 Commerce Hub 一致。
+# 安装由 Shopify 托管（不再声明 use_legacy_install_flow），所以可以直接在配置里声明
+# app 级 webhook 订阅，由 Shopify 统一管理与重投。DecoAdmin 侧不再按店铺注册，
+# 也因此「装了但从未打开过应用」的店铺卸载时同样能收到通知。
 [webhooks]
 api_version = "2026-07"
 
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
+
+# 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
 [access_scopes]
 scopes = "read_products"
-# DecoAdmin 用授权码回调建立本 App 的 offline token（对齐 Commerce Hub），
-# 所以保持 legacy install flow；切成 Shopify 托管安装需要后端改回 token exchange。
-use_legacy_install_flow = true
 
+# 托管安装下后端没有授权码回调，但 Shopify CLI 的 schema 仍要求声明 [auth]。
+# 与 deco-personalization 一致，指向 App Home 入口本身。
 [auth]
-redirect_urls = [ "https://admin.decomkt.com/shopify-app/instagram-feed/oauth/callback" ]
+redirect_urls = [ "https://admin.decomkt.com/shopify-app/instagram-feed" ]

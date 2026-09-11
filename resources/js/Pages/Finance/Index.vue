@@ -143,5 +143,6 @@ const date = (value: string) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'm
             </section>
             <Pagination :links="finance.entries.links" />
         </div>
+
     </AppLayout>
 </template>

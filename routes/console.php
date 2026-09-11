@@ -10,6 +10,11 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
+Schedule::command('finance:process-auto-renewals')
+    ->name('finance:process-auto-renewals')
+    ->hourly()
+    ->onOneServer()
+    ->withoutOverlapping(10);
 if (config('product_monitoring.enabled', true)) {
     Schedule::command('shopify:monitor-products')->everyFiveMinutes()->onOneServer()->withoutOverlapping(60);
 }

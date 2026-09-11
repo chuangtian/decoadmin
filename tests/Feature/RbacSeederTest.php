@@ -30,6 +30,7 @@ class RbacSeederTest extends TestCase
             'super-admin',
             'organization-admin',
             'store-admin',
+            'designer',
             'developer',
             'operator',
             'marketing',

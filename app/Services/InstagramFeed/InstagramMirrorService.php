@@ -9,7 +9,10 @@ use Throwable;
 
 /**
  * Instagram CDN 的媒体链接带签名，几小时到几天就会失效，直接放到店铺前台一定会挂。
- * 所以同步完立刻把文件搬到 Cloudflare R2，对外用绑定在桶上的自定义域名给永久地址。
+ * 所以同步完立刻把封面图搬到 Cloudflare R2，对外用绑定在桶上的自定义域名给永久地址。
+ *
+ * 只转存封面图，不转存视频文件 —— 原因见 mirrorOne() 的注释。视频的播放交给
+ * Instagram 官方 embed（前台与内嵌管理页点击封面即弹窗播放原帖）。
  *
  * 状态机：pending → processing → ready / failed。
  * processing 是占位状态，进程中断会留在这里，超过 stale 阈值后下一轮重新捞出来。
@@ -60,7 +63,7 @@ class InstagramMirrorService
                 $failed++;
                 $media->forceFill([
                     'mirror_status' => 'failed',
-                    'mirror_error' => mb_substr($exception->getMessage(), 0, 500),
+                    'mirror_error' => $this->safeFailureReason($exception),
                 ])->save();
             }
         }
@@ -71,6 +74,27 @@ class InstagramMirrorService
             'pending' => $this->queuedCount($store),
             'configured' => true,
         ];
+    }
+
+    /**
+     * 失败原因要落库并展示给商家，所以必须先脱敏。
+     *
+     * HTTP 客户端的异常消息通常带完整请求地址：Instagram 的媒体地址是带签名的，
+     * R2 端点含账号标识，预签名地址还会带 X-Amz-Credential。这些都不该出现在
+     * 商家看到的日志里，所以统一去掉查询串，并抹掉常见的令牌与凭证片段。
+     */
+    private function safeFailureReason(Throwable $exception): string
+    {
+        $reason = $exception->getMessage();
+
+        // 去掉所有 URL 的查询串（签名、凭证都在这里）。
+        $reason = preg_replace('#(https?://[^\s?"\']+)\?[^\s"\']*#i', '$1', $reason) ?? $reason;
+        // 兜底抹掉可能夹带的令牌与访问密钥。
+        $reason = preg_replace('/\b(shp(at|ca|pa|ss)_[A-Za-z0-9]+)\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/\b(AKIA|ASIA)[A-Z0-9]{8,}\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/(?i)\b(x-amz-credential|x-amz-signature|access[_-]?key|secret)\b\S*/', '[redacted]', $reason) ?? $reason;
+
+        return mb_substr(trim($reason), 0, 500);
     }
 
     /**
@@ -117,68 +141,66 @@ class InstagramMirrorService
         return ['records' => $records, 'objects' => count($keys), 'failed_keys' => $failedKeys];
     }
 
+    /**
+     * 只转存封面图，不再转存视频文件。
+     *
+     * 原因：Instagram 出于版权保护会对部分 Reels（用了平台授权音乐、或关闭了「允许下载」）
+     * 直接省略 media_url 字段 —— 没有报错、字段整个不存在，占本店铺 REELS 的一成左右，
+     * 靠重试永远拿不到。而 thumbnail_url 对所有视频都稳定返回。
+     *
+     * 所以前台改为「封面图 + 点击用 Instagram 官方 embed 播放原帖」：内容完整可看、
+     * 播放由 Instagram 提供，不存在版权问题，同时省掉大量视频存储与带宽。
+     */
     private function mirrorOne(Store $store, InstagramMedia $media): void
     {
-        $isVideo = $media->isVideo();
-        $videoSource = $isVideo ? $media->ig_media_url : null;
-        // 视频用 IG 的缩略图当封面；图片本身就是封面。
-        $posterSource = $isVideo
-            ? $media->ig_thumbnail_url
+        // 视频用 IG 的缩略图当封面；图片与轮播用原图，拿不到再回退缩略图。
+        $posterSource = $media->isVideo()
+            ? ($media->ig_thumbnail_url ?: $media->ig_media_url)
             : ($media->ig_media_url ?: $media->ig_thumbnail_url);
 
-        if ($isVideo && blank($videoSource)) {
-            throw new \RuntimeException('Instagram 没有返回视频地址。');
-        }
-        if (! $isVideo && blank($posterSource)) {
-            throw new \RuntimeException('Instagram 没有返回可用的媒体地址。');
+        if (blank($posterSource)) {
+            throw new \RuntimeException('Instagram 没有返回可用的图片地址。');
         }
 
-        $videoKey = null;
-        $posterKey = null;
+        $posterKey = $this->posterKey($store, $media);
+        $this->r2->copyFromUrl((string) $posterSource, $posterKey, 'image/jpeg');
 
-        if (filled($videoSource)) {
-            $videoKey = $this->videoKey($store, $media);
-            $this->r2->copyFromUrl((string) $videoSource, $videoKey, 'video/mp4');
-        }
-
-        if (filled($posterSource)) {
-            $candidate = $this->posterKey($store, $media);
-            try {
-                $this->r2->copyFromUrl((string) $posterSource, $candidate, 'image/jpeg');
-                $posterKey = $candidate;
-            } catch (Throwable $exception) {
-                // 视频已经搬好了，封面搬不动只是体验降级，不该让整条失败。
-                // 前台 <video> 没有 poster 也能播，后台列表会回退到 IG 缩略图。
-                if ($videoKey === null) {
-                    throw $exception;
-                }
-                Log::warning('Instagram feed poster mirror failed; keeping the media without a poster.', [
-                    'store_id' => $store->id,
-                    'ig_media_id' => $media->ig_media_id,
-                ]);
-            }
-        }
+        // 早期版本转存过视频，切换后这些对象已经用不上了；顺手清掉，避免一直计存储费。
+        $this->discardMirroredVideo($media);
 
         $media->forceFill([
             'mirror_status' => 'ready',
-            'video_key' => $videoKey,
             'poster_key' => $posterKey,
-            'video_url' => $videoKey ? $this->r2->publicUrl($videoKey) : null,
-            'poster_url' => $posterKey ? $this->r2->publicUrl($posterKey) : null,
+            'poster_url' => $this->r2->publicUrl($posterKey),
             'mirror_error' => null,
             'mirrored_at' => now(),
         ])->save();
+    }
+
+    /** 删掉这条媒体遗留的视频对象并清空字段。删不掉只记日志，不影响封面转存的结果。 */
+    private function discardMirroredVideo(InstagramMedia $media): void
+    {
+        if (blank($media->video_key)) {
+            $media->forceFill(['video_url' => null])->save();
+
+            return;
+        }
+
+        $failed = $this->r2->deleteObjects([(string) $media->video_key]);
+        if ($failed !== []) {
+            Log::warning('Instagram feed legacy video object could not be deleted and needs manual cleanup.', [
+                'store_id' => $media->store_id,
+                'ig_media_id' => $media->ig_media_id,
+            ]);
+        }
+
+        $media->forceFill(['video_key' => null, 'video_url' => null])->save();
     }
 
     /**
      * key 里带 store 做租户隔离，带 ig_media_id 保证同一条媒体重复转存是覆盖而不是堆积。
      * 一条媒体的内容不会变，所以对象可以按 immutable 长缓存。
      */
-    private function videoKey(Store $store, InstagramMedia $media): string
-    {
-        return $this->prefix($store).'/videos/'.$media->ig_media_id.'.mp4';
-    }
-
     private function posterKey(Store $store, InstagramMedia $media): string
     {
         return $this->prefix($store).'/posters/'.$media->ig_media_id.'.jpg';

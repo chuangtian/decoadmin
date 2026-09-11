@@ -53,10 +53,27 @@ class InstagramMedia extends Model
         return $this->mirror_status === 'ready';
     }
 
-    /** 后台列表用的封面：优先转存后的封面，回退到 IG 缩略图或原图。 */
+    /** 列表用的封面：优先转存后的封面，回退到 IG 缩略图或原图。 */
     public function previewUrl(): ?string
     {
         return $this->poster_url ?: ($this->ig_thumbnail_url ?: $this->ig_media_url);
+    }
+
+    /**
+     * Instagram 官方 embed 地址，点击封面后在弹窗里嵌它。
+     *
+     * 视频文件不再转存（Instagram 对部分 Reels 不给 media_url），播放交给 Instagram 自己；
+     * `captioned` 变体会连带文案渲染。permalink 结尾斜杠不一定有，统一补齐再拼。
+     * 只认 instagram.com 的地址，避免把库里的脏数据直接塞进 iframe。
+     */
+    public function embedUrl(): ?string
+    {
+        $url = trim((string) $this->permalink);
+        if ($url === '' || ! str_starts_with($url, 'https://www.instagram.com/')) {
+            return null;
+        }
+
+        return rtrim($url, '/').'/embed/captioned';
     }
 
     /** @return list<string> */

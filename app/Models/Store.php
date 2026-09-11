@@ -115,6 +115,12 @@ class Store extends Model
         return $this->hasOne(InstagramAccount::class);
     }
 
+    /** 店铺自己的 Meta / R2 凭证，留空的项回退到平台级配置。 */
+    public function instagramFeedSetting(): HasOne
+    {
+        return $this->hasOne(InstagramFeedStoreSetting::class);
+    }
+
     public function instagramMedia(): HasMany
     {
         return $this->hasMany(InstagramMedia::class);

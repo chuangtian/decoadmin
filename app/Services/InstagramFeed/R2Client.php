@@ -226,7 +226,17 @@ class R2Client
         $signature = hash_hmac('sha256', $stringToSign, $signingKey);
 
         $requestHeaders = $headers;
+        // host 由 HTTP 客户端按 URL 自己带上，重复设置会变成两个值。
         unset($requestHeaders['host']);
+        // Content-Type 必须参与签名（在 SignedHeaders 里），但不能在这里再设一遍：
+        // withBody() 内部会调 contentType()，而 withHeaders() 是 array_merge_recursive，
+        // 'content-type' 与 'Content-Type' 会各留一份，Guzzle 合并同名头后实际发出的是
+        // "video/mp4, video/mp4"，与签名用的单值对不上 —— R2 一律回 403
+        // SignatureDoesNotMatch。GET / DELETE 没有 body 也没有 Content-Type，所以只有
+        // 上传会踩到，排查时很容易误判成密钥不对。
+        if ($body !== null) {
+            unset($requestHeaders['content-type']);
+        }
         $requestHeaders['Authorization'] = self::ALGORITHM
             .' Credential='.$config['access_key_id'].'/'.$credentialScope
             .', SignedHeaders='.$signedHeaders

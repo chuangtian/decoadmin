@@ -35,7 +35,6 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
-use App\Http\Controllers\InstagramFeedShopifyOAuthController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
@@ -51,6 +50,7 @@ use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\PersonalizationStrategyWorkflowController;
+use App\Http\Controllers\PersonalRequestController;
 use App\Http\Controllers\ProductMonitorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
@@ -202,12 +202,8 @@ Route::get('/shopify-app/instagram-feed', [ShopifyInstagramFeedAppController::cl
     ->middleware(['shopify.embedded-frame', 'throttle:60,1'])
     ->name('instagram-feed.shopify-app.management');
 
-// Shopify 授权码回调：Shopify 直接把浏览器打回来，所以不能挂 auth。
-// 身份靠 state cookie + oauth_states 一次性记录 + HMAC 验签确认。
-Route::get('/shopify-app/instagram-feed/oauth/callback', [InstagramFeedShopifyOAuthController::class, 'callback'])
-    ->middleware('throttle:30,1')
-    ->name('instagram-feed.shopify-oauth.callback');
-
+// 安装由 Shopify 托管：不再有授权码回调，会话统一由 App Bridge 的 session token
+// 走 token exchange 建立（见 ShopifyInstagramFeedAppService::bootstrap）。
 Route::post('/api/shopify-app/instagram-feed/webhooks', ShopifyInstagramFeedWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('instagram-feed.shopify-app.webhooks');
@@ -234,6 +230,18 @@ Route::prefix('/api/shopify-app/instagram-feed')
             ->middleware('throttle:60,1')
             ->name('instagram-feed.embedded.overview');
 
+        // 「应用配置」页签：本店铺自己的 Meta 应用凭证与 R2 存储凭证。
+        // 密钥只写不回显，写入限流按平台级端点的力度（20/分钟）。
+        Route::get('/settings', [ShopifyInstagramFeedContentController::class, 'settings'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.settings');
+        Route::put('/settings/meta', [ShopifyInstagramFeedContentController::class, 'updateMetaSettings'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.settings.meta');
+        Route::put('/settings/r2', [ShopifyInstagramFeedContentController::class, 'updateR2Settings'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.settings.r2');
+
         Route::post('/account/authorize', [ShopifyInstagramFeedContentController::class, 'authorizeAccount'])
             ->middleware('throttle:20,1')
             ->name('instagram-feed.embedded.account.authorize');
@@ -254,9 +262,18 @@ Route::prefix('/api/shopify-app/instagram-feed')
             ->middleware('throttle:30,1')
             ->name('instagram-feed.embedded.media.retry-mirror');
 
-        Route::post('/publish', [ShopifyInstagramFeedContentController::class, 'publish'])
+        // 前台数据在内容变化时自动同步，这条只是"前台没更新"时的自助恢复入口。
+        Route::post('/storefront-sync', [ShopifyInstagramFeedContentController::class, 'syncStorefrontNow'])
             ->middleware('throttle:12,1')
-            ->name('instagram-feed.embedded.publish');
+            ->name('instagram-feed.embedded.storefront-sync');
+
+        // 转存失败日志与整批重试。
+        Route::get('/mirror-failures', [ShopifyInstagramFeedContentController::class, 'mirrorFailures'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.mirror-failures');
+        Route::post('/mirror-failures/retry', [ShopifyInstagramFeedContentController::class, 'retryAllMirrorFailures'])
+            ->middleware('throttle:12,1')
+            ->name('instagram-feed.embedded.mirror-failures.retry');
 
         Route::get('/galleries/{gallery}', [ShopifyInstagramFeedContentController::class, 'showGallery'])
             ->middleware('throttle:60,1')
@@ -402,14 +419,43 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('context.store.update');
 });
 
+Route::middleware(['auth', 'verified', 'organization.access'])->group(function (): void {
+    Route::get('/design-requests', [DesignRequestController::class, 'index'])
+        ->middleware('personal.permission:design_requests.view')->name('design-requests.index');
+    Route::post('/design-requests', [DesignRequestController::class, 'store'])
+        ->middleware(['personal.permission:design_requests.create', 'throttle:30,1'])->name('design-requests.store');
+    Route::get('/design-requests/{designRequest}/attachments/{attachment}', [DesignRequestController::class, 'attachment'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:120,1'])->name('design-requests.attachments.show');
+    Route::post('/design-requests/{designRequest}/accept', [DesignRequestController::class, 'accept'])
+        ->middleware(['personal.permission:design_requests.manage', 'throttle:30,1'])->name('design-requests.accept');
+    Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
+        ->middleware(['personal.permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
+    Route::get('/technical-requests', [PersonalRequestController::class, 'technicalIndex'])
+        ->middleware('personal.permission:technical_requests.view')->name('technical-requests.index');
+    Route::post('/technical-requests', [PersonalRequestController::class, 'storeTechnical'])
+        ->middleware(['personal.permission:technical_requests.create', 'throttle:30,1'])->name('technical-requests.store');
+    Route::post('/technical-requests/{personalRequest}/accept', [PersonalRequestController::class, 'acceptTechnical'])
+        ->middleware(['personal.permission:technical_requests.manage', 'throttle:30,1'])->name('technical-requests.accept');
+    Route::put('/technical-requests/{personalRequest}/progress', [PersonalRequestController::class, 'progressTechnical'])
+        ->middleware(['personal.permission:technical_requests.manage', 'throttle:60,1'])->name('technical-requests.progress');
+    Route::get('/request-approvals', [PersonalRequestController::class, 'approvalIndex'])
+        ->middleware('personal.permission:request_approvals.view')->name('request-approvals.index');
+    Route::put('/request-approvals/{personalRequest}', [PersonalRequestController::class, 'review'])
+        ->middleware(['personal.permission:request_approvals.manage', 'throttle:60,1'])->name('request-approvals.review');
+    Route::get('/expense-claims', [PersonalRequestController::class, 'expenseIndex'])
+        ->middleware('personal.permission:expense_claims.view')->name('expense-claims.index');
+    Route::post('/expense-claims', [PersonalRequestController::class, 'storeExpense'])
+        ->middleware(['personal.permission:expense_claims.create', 'throttle:30,1'])->name('expense-claims.store');
+    Route::get('/expense-requests', [PersonalRequestController::class, 'expenseRequestIndex'])
+        ->middleware('personal.permission:expense_requests.view')->name('expense-requests.index');
+    Route::post('/expense-requests', [PersonalRequestController::class, 'storeExpenseRequest'])
+        ->middleware(['personal.permission:expense_requests.create', 'throttle:30,1'])->name('expense-requests.store');
+    Route::get('/personal-requests/{personalRequest}/attachments/{attachment}', [PersonalRequestController::class, 'attachment'])
+        ->middleware('throttle:120,1')->name('personal-requests.attachments.show');
+});
+
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
-    Route::get('/design-requests', [DesignRequestController::class, 'index'])
-        ->middleware('permission:design_requests.view')->name('design-requests.index');
-    Route::post('/design-requests', [DesignRequestController::class, 'store'])
-        ->middleware(['permission:design_requests.create', 'throttle:30,1'])->name('design-requests.store');
-    Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
-        ->middleware(['permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
     Route::get('/brand-profile/{section?}', BrandProfileController::class)
         ->where('section', 'overview|login-emails|seo-accounts|plugins|business-licenses')
         ->middleware('permission:store.view')
@@ -640,14 +686,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.feishu.update');
-    // Instagram / Facebook 应用凭证与 R2 存储是平台级配置，界面放在
-    // 应用中心 → Instagram Feed 的「应用配置」页签里，这里只保留写入端点。
-    Route::put('/settings/instagram-feed/meta', [SystemSettingsController::class, 'updateInstagramMeta'])
-        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
-        ->name('system.settings.instagram-meta.update');
-    Route::put('/settings/instagram-feed/r2', [SystemSettingsController::class, 'updateInstagramR2'])
-        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
-        ->name('system.settings.instagram-r2.update');
+    // Instagram / Facebook 应用凭证与 R2 存储已改为店铺级，由商家在 Shopify App 的
+    // 「应用配置」页签维护（instagram-feed.embedded.settings.*），后台不再提供写入口。
     Route::get('/audit-logs', [AuditLogController::class, 'index'])
         ->middleware('permission:audit.view')
         ->name('audit-logs.index');
@@ -709,9 +749,15 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/notifications/{storeAlert}/resend', [NotificationCenterController::class, 'resend'])->middleware('permission:alerts.manage')->name('notifications.resend');
 
     Route::get('/finance', [FinanceController::class, 'index'])->middleware('permission:finance.view')->name('finance.index');
+    Route::get('/finance/renewals', [FinanceController::class, 'renewals'])->middleware('permission:finance.view')->name('finance.renewals');
+    Route::get('/finance/renewal-history', [FinanceController::class, 'renewalHistory'])->middleware('permission:finance.view')->name('finance.renewal-history');
+    Route::get('/finance/expense-requests/{personalRequest}/password', [FinanceController::class, 'revealExpenseRequestPassword'])
+        ->middleware(['permission:finance.manage', 'throttle:30,1'])->name('finance.expense-requests.password');
     Route::post('/finance/categories', [FinanceController::class, 'storeCategory'])->middleware('permission:finance.manage')->name('finance.categories.store');
     Route::post('/finance/entries', [FinanceController::class, 'storeEntry'])->middleware('permission:finance.manage')->name('finance.entries.store');
     Route::delete('/finance/entries/{financeEntry}', [FinanceController::class, 'destroyEntry'])->middleware('permission:finance.manage')->name('finance.entries.destroy');
+    Route::post('/finance/expense-requests/{personalRequest}/payment', [FinanceController::class, 'recordExpenseRequestPayment'])
+        ->middleware(['permission:finance.manage', 'throttle:60,1'])->name('finance.expense-requests.payment');
 
     Route::get('/store-settings/status', StoreStatusController::class)->middleware('permission:store.view')->name('store-settings.status');
     Route::get('/store-settings/mail', [StoreNotificationSettingsController::class, 'mail'])->middleware('permission:store.view')->name('store-settings.mail');
@@ -955,69 +1001,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
             ->name('personalization.smart-cart.update');
     });
 
+// Instagram Feed 的后台页面只读：连接状态、转存素材统计、展示区。
+// 所有编辑动作（连接账号、同步、转存、展示组编排、应用配置）都在 Shopify App 内嵌页，
+// 见上面的 /api/shopify-app/instagram-feed/* 路由组。这里刻意不提供任何写路由 ——
+// 内嵌页那套按 shop domain 判定店铺，后台再开一份写入口只会多一条要同步维护的边界。
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
     ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
     ->group(function (): void {
         Route::get('/', [InstagramFeedController::class, 'index'])
             ->middleware('permission:instagram_feed.view')
             ->name('instagram-feed.index');
-
-        // Shopify App 自身的授权（授权码模式），与下面的 Meta 账号授权是两件事。
-        Route::post('/shopify-authorize', [InstagramFeedShopifyOAuthController::class, 'redirect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
-            ->name('instagram-feed.shopify-oauth.redirect');
-        Route::post('/shopify-verify', [InstagramFeedShopifyOAuthController::class, 'verify'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.shopify-oauth.verify');
-
-        Route::post('/connect', [InstagramFeedController::class, 'connect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.connect');
-        Route::post('/select-page', [InstagramFeedController::class, 'selectPage'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.select-page');
-        Route::delete('/account', [InstagramFeedController::class, 'disconnect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
-            ->name('instagram-feed.disconnect');
-
-        // 同步与转存会打 Instagram 与 R2，限流比一般写操作更严。
-        Route::post('/sync', [InstagramFeedController::class, 'sync'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:6,1'])
-            ->name('instagram-feed.sync');
-        Route::post('/mirror', [InstagramFeedController::class, 'mirror'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:12,1'])
-            ->name('instagram-feed.mirror');
-        Route::post('/media/{media}/retry-mirror', [InstagramFeedController::class, 'retryMirror'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:30,1'])
-            ->name('instagram-feed.media.retry-mirror');
-
-        Route::post('/publish', [InstagramFeedController::class, 'publish'])
-            ->middleware(['permission:instagram_feed.publish', 'throttle:12,1'])
-            ->name('instagram-feed.publish');
-
-        Route::post('/galleries', [InstagramFeedController::class, 'storeGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.store');
-        Route::get('/galleries/{gallery}', [InstagramFeedController::class, 'showGallery'])
-            ->middleware('permission:instagram_feed.gallery.manage')
-            ->name('instagram-feed.galleries.show');
-        Route::put('/galleries/{gallery}', [InstagramFeedController::class, 'updateGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.update');
-        Route::delete('/galleries/{gallery}', [InstagramFeedController::class, 'destroyGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.destroy');
-        Route::post('/galleries/{gallery}/items', [InstagramFeedController::class, 'addGalleryItems'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.items.store');
-        Route::delete('/galleries/{gallery}/items', [InstagramFeedController::class, 'removeGalleryItems'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.items.destroy');
-        Route::put('/galleries/{gallery}/order', [InstagramFeedController::class, 'reorderGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.order');
-
-        Route::put('/media/{media}/products', [InstagramFeedController::class, 'updateMediaProducts'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.media.products');
     });
