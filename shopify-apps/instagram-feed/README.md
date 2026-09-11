@@ -21,8 +21,11 @@ DecoAdmin（Laravel）根项目里，本目录没有独立的 Node / Remix / Pri
 
 ## 扩展
 
-- `extensions/app-home`：Admin UI 扩展。检查店铺是否已接入 DecoAdmin，调用
-  `bootstrap` 建立本 App 的 Shopify 会话，然后把用户引导到 DecoAdmin。
+只有一个扩展。App Home 不是扩展：它走自托管 iframe 模型，页面由 DecoAdmin 提供
+（`/shopify-app/instagram-feed`）。**不要再加 `admin.app.home.render` 扩展**——它会占据
+App Home 这个坑位，商家从后台导航打开看到的就是扩展而不是 iframe 页面，两者互斥。
+`validate-project.mjs` 会拦住这种改动。
+
 - `extensions/instagram-videos`：Theme App Extension。从
   `app.metafields.instagram_videos.feed` 读取内容并服务端渲染，商家在区块设置里
   填写展示组标识来指定展示哪一组。
@@ -35,7 +38,7 @@ DecoAdmin（Laravel）根项目里，本目录没有独立的 Node / Remix / Pri
 | `production`（当前停用） | `shopify.app.production.toml` | `https://admin.decomkt.com` | `d3446448682d2950aa75cea4a399d50f` |
 
 **生产与测试是同一个 Shopify App**（handle `deco-instagram-feed`，同一个 `client_id`）。
-一个 Shopify App 只有一份 `application_url`、一组 webhook 地址和一组 OAuth redirect，
+一个 Shopify App 只有一份 `application_url` 和一组 webhook 地址，
 所以两套配置永远只能有一套生效：发布测试配置就等于把生产入口停用，反之亦然。
 
 当前状态：该 App 已指向测试服用于联调，生产入口暂时停用（生产侧没有任何店铺安装）。
@@ -43,13 +46,13 @@ DecoAdmin（Laravel）根项目里，本目录没有独立的 Node / Remix / Pri
 `shopify.app.production.toml` 保持生产地址不动，它就是切回生产的还原点。
 
 Cloudflare 隧道环境已废弃，`shopify.app.local.toml` 不允许重新出现。
-`validate-project.mjs` 的闸门：每份配置的三处地址必须同源、不得混入另一套环境的域名、
-不得出现隧道或本地地址，`shopify.app.toml` 必须完整镜像某一套环境，且
-`extensions/app-home/src/runtime.mjs` 的 `appOrigin` / `environment` 必须与选中环境一致。
+`validate-project.mjs` 的闸门：每份配置的 `application_url` 与两条 webhook 订阅地址必须同源、
+不得混入另一套环境的域名、不得出现隧道或本地地址，`shopify.app.toml` 必须完整镜像某一套环境，
+安装必须保持 Shopify 托管（不得出现 `use_legacy_install_flow` 或 `[auth]`），
+且不得存在 `admin.app.home.render` 扩展。
 
 要让测试与生产真正并行（互不停用），必须先在 Dev Dashboard 新建一个**独立的** App，
-用它自己的 `client_id`，再把本目录的配置、`runtime.mjs` 的 `APP_ENVIRONMENTS` 映射
-和根项目 `config/instagram_feed.php` 按环境拆开。
+用它自己的 `client_id`，再把本目录的配置和根项目 `config/instagram_feed.php` 按环境拆开。
 
 后端通过 `INSTAGRAM_FEED_ENVIRONMENT=local|test|production` 选择环境。Client Secret
 只放在未跟踪的环境变量里：`INSTAGRAM_FEED_PRODUCTION_CLIENT_SECRET`，或公共回退变量
@@ -103,9 +106,7 @@ npm run deploy:production
 
 切回生产（测试联调完成后）：
 
-1. `extensions/app-home/src/runtime.mjs`：`environment` 改 `production`、
-   `appOrigin` 改 `https://admin.decomkt.com`；
-2. `shopify.app.toml`：改成 `shopify.app.production.toml` 的逐字镜像；
+1. `shopify.app.toml`：改成 `shopify.app.production.toml` 的逐字镜像；
 3. 先把 DecoAdmin 生产后端部署到包含目标改动的提交；
 4. `npm run check` 确认闸门通过（会打印当前选中环境）；
 5. `npm run check:config:production`；
@@ -124,20 +125,37 @@ npm run deploy:production
 1. 在 Dev Dashboard 新建一个**独立**的 App，取得新的 `client_id`（绝不能复用现在这个）；
 2. 把 `shopify.app.test.toml` 的 `client_id` 换成新 App 的；
 3. `scripts/validate-project.mjs`：把 `sharedClientId` 拆成按文件区分的 client_id 校验；
-4. `extensions/app-home/src/runtime.mjs` 的 `APP_ENVIRONMENTS`：两个 `client_id` 各登记
-   一条，这样扩展就能按 `aud` 自动识别环境，不再需要切换时改这个文件；
-5. 根项目 `config/instagram_feed.php` 对应环境档的 `client_id` 与 `app_url`，
+4. 根项目 `config/instagram_feed.php` 对应环境档的 `client_id` 与 `app_url`，
    以及该环境 `.env` 里的 `INSTAGRAM_FEED_<ENV>_CLIENT_ID` / `_CLIENT_SECRET`；
-6. Meta 开发者后台补充该域名的 OAuth redirect URI、Deauthorize 与 Data deletion 回调。
+5. Meta 开发者后台补充该域名的 OAuth redirect URI、Deauthorize 与 Data deletion 回调。
+
+两套环境各自独立之后，App Home 页面由各自的 DecoAdmin 环境提供，不存在共用的构建期常量，
+所以不再需要"切换环境时改扩展"这一步。
 
 在完成第 1 步拿到独立 `client_id` 之前，`deploy:test` 与 `deploy:production` 始终是互斥的。
+
+## 安装与会话
+
+安装由 **Shopify 托管**：配置里不声明 `use_legacy_install_flow`，也没有 `[auth] redirect_urls`。
+商家点安装链接后由 Shopify 弹权限授予页，装好直接打开应用，**不需要任何授权动作**。
+
+DecoAdmin 侧的人工授权入口已经全部移除（`InstagramFeedShopifyOAuthController`、
+`InstagramFeedOAuthService`、`/shopify-authorize`、`/shopify-verify`、OAuth 回调路由）。
+会话的唯一建立途径是 App Bridge 的 session token 换 offline token，且在任何内容管理请求
+发现会话不可用时自动补建（`InstagramFeedEmbeddedSession`）。
+
+webhook 订阅写在 TOML 里由 Shopify 统一管理（`app/uninstalled`、`app/scopes_update`），
+不再按店铺注册——这样"装了但从未打开过应用"的店铺卸载时也能收到通知。
+
+App Home 走 Shopify 官方推荐的自托管 iframe 模型：页面由 DecoAdmin 提供
+（`/shopify-app/instagram-feed`，前端在根项目 `resources/js/embedded/instagram-feed*`），
+本目录只保留 App 配置与扩展。
 
 ## 安全约定
 
 - 不要把 Client Secret、Access Token、Meta 凭证或 R2 密钥写进 TOML、源码或文档。
-- 保持 `embedded = true` 与 `use_legacy_install_flow = true`：DecoAdmin 用授权码回调
-  `/shopify-app/instagram-feed/oauth/callback` 建立本 App 的 offline token（与 Commerce Hub
-  同一套模式）。要改成 Shopify 托管安装，必须先把后端换回 session token exchange。
+- 保持 `embedded = true`，并保持安装为 Shopify 托管：后端已经没有授权码回调可用，
+  重新声明 `use_legacy_install_flow` 会让安装流程直接断掉。`validate-project.mjs` 会拦住这种改动。
 - 保持自动改写 URL 关闭，避免 CLI 覆盖已部署地址。
 - 不要把学生优惠或其他 Shopify App 的代码与资源放进本目录。
 - 不要把 Laravel 应用、Node 后端、Prisma 或本地数据库放回本目录，

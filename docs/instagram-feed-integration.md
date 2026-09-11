@@ -10,11 +10,70 @@
 
 运行环境通过 `INSTAGRAM_FEED_ENVIRONMENT=local|test|production` 选择。对应 Client Secret 只放在未跟踪的环境变量中：`INSTAGRAM_FEED_<ENV>_CLIENT_SECRET`，也可使用当前环境公共回退变量 `INSTAGRAM_FEED_SHOPIFY_CLIENT_SECRET`。
 
-测试与生产目前是**同一个** Shopify App：一个 App 只有一份 `application_url`、一组 webhook 地址和一组 OAuth redirect，所以两个环境不能同时生效，发布哪一套配置就等于停用另一套。当前该 App 指向测试服，生产入口停用。切换步骤见 `shopify-apps/instagram-feed/README.md` 的「切换环境」。配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
+测试与生产目前是**同一个** Shopify App：一个 App 只有一份 `application_url` 和一组 webhook 地址，所以两个环境不能同时生效，发布哪一套配置就等于停用另一套。当前该 App 指向测试服，生产入口停用。切换步骤见 `shopify-apps/instagram-feed/README.md` 的「切换环境」。配置未补齐时后端一律返回 `INSTAGRAM_FEED_APP_NOT_CONFIGURED`（503），不会向 Shopify 发起任何调用。
 
 三套 App 的固定授权集合均为：`read_products`。App 只需要解析关联商品的标题与 handle；写入自己的 app-data metafield 不需要额外 scope。后台 token exchange 后校验响应 `scope`，并通过 `currentAppInstallation.accessScopes` 再次核验安装权限；缺少必要权限时返回 `SHOPIFY_REQUIRED_SCOPES_MISSING`，不会继续建立会话。
 
 本 App **不使用 App Proxy**：前台内容通过 app-data metafield 在服务端渲染，店面不回请 DecoAdmin。
+
+## 安装与会话模型
+
+安装由 **Shopify 托管**，三份 TOML 都不声明 `use_legacy_install_flow`，也不再有 `[auth] redirect_urls`。商家点安装链接后由 Shopify 弹权限授予页，装好后直接把应用打开在 `application_url`。**后台没有任何人工授权入口**：DecoAdmin 侧原来的授权码链路（`InstagramFeedShopifyOAuthController`、`InstagramFeedOAuthService`、`/shopify-authorize`、`/shopify-verify`、`/shopify-app/instagram-feed/oauth/callback`）已全部移除。
+
+会话的唯一建立途径是 App Bridge 的 session token 换 offline token（`ShopifyInstagramFeedAppService::bootstrap`）。`InstagramFeedEmbeddedSession::store()` 在每个内容管理请求上做两件事：
+
+1. 用 session token 的 `dest` 精确匹配 `stores.shopify_domain` 解析店铺（该列全局唯一，因此唯一确定组织）；
+2. 发现 `instagram_feed_installations` 记录不可用（首次打开、令牌被清空、环境切换后 `environment` 不匹配）时，自动补一次 token exchange。
+
+因此商家不需要任何授权动作，**安装即用**；运维也不需要为某个店铺"重新授权"。
+
+前置条件：该店铺必须已在 DecoAdmin 登记且 `shopify_domain` 完全一致，否则返回 `STORE_NOT_CONNECTED`（409）。另外 `app_installations.shopify_connection_id` 非空且带 `(shopify_connection_id, store_id)` 复合外键，所以登记安装记录要求店铺已连接 DecoAdmin 主 App。
+
+## App Home：自托管 iframe 页面
+
+```http
+GET /shopify-app/instagram-feed?shop={shop}.myshopify.com&host=...&embedded=1&id_token=...
+```
+
+这是商家在 Shopify 后台看到的页面，走 Shopify 官方推荐的自托管 iframe 模型（UI 由 DecoAdmin 提供，`shopify-apps/instagram-feed/` 只保留 App 配置与扩展）。
+
+这条路由**不挂 `auth`**（商家没有 DecoAdmin 账号），并且**不输出任何店铺数据**：请求到达时还没有可信身份，壳页面只渲染公开的 client id、接口前缀与环境名，加载 App Bridge 与前端包。真正的身份校验发生在后续每个 API 请求上。
+
+`shopify.embedded-frame` 中间件按 `shop` 下发 `Content-Security-Policy: frame-ancestors https://{shop} https://admin.shopify.com`，并移除 `X-Frame-Options`（两者语义冲突会导致 iframe 白屏）。`shop` 参数格式不合法时退回 `frame-ancestors 'none'`。
+
+前端位于 `resources/js/embedded/instagram-feed*`，是独立于后台主包的第二个 Vite 入口：不走 Inertia、不带 Cookie（`credentials: 'omit'`），每次请求现取一次 session token 作 `Authorization: Bearer`，收到 401 就换新令牌重试一次。
+
+## Shopify App Home：内容管理接口
+
+全部挂 `shopify.id-token:instagram_feed`，前缀 `/api/shopify-app/instagram-feed`。限流力度与后台同类动作一致（同步与转存打外部 API，比一般写操作更严）。
+
+| 方法 | 路径 | 说明 | 限流 |
+| --- | --- | --- | --- |
+| GET | `/overview` | 账号、转存统计、展示组列表、连接状态、能力集 | 60/min |
+| POST | `/account/authorize` | 取 Meta 授权链接（需新窗口打开） | 20/min |
+| POST | `/account/select-page` | 多主页时确认要连接的账号 | 20/min |
+| DELETE | `/account` | 断开 Meta 授权并清理转存产物 | 10/min |
+| POST | `/sync` | 从 Instagram 拉取媒体 | 6/min |
+| POST | `/mirror` | 推进 R2 转存 | 12/min |
+| POST | `/media/{media}/retry-mirror` | 重试单条转存 | 30/min |
+| POST | `/publish` | 发布到店铺前台 | 12/min |
+| GET | `/galleries/{gallery}` | 展示组详情（候选、组内、关联商品） | 60/min |
+| POST | `/galleries` | 新建展示组 | 30/min |
+| PUT | `/galleries/{gallery}` | 重命名 | 30/min |
+| DELETE | `/galleries/{gallery}` | 删除 | 30/min |
+| POST | `/galleries/{gallery}/items` | 加入成员 | 60/min |
+| DELETE | `/galleries/{gallery}/items` | 移出成员 | 60/min |
+| PUT | `/galleries/{gallery}/order` | 保存组内顺序 | 60/min |
+| PUT | `/media/{media}/products` | 保存关联商品 | 60/min |
+
+约定：
+
+- 成功统一为 `{"data": ...}`；业务失败统一为 `{"error": {"code", "message"}}`；入参校验失败沿用 Laravel 的 422 `{"message", "errors"}`。
+- 写操作只回 `{"data": {"message": "..."}}`，不回视图数据，由前端按需重新拉取，避免每个写接口绑定某个页面。
+- `{gallery}` 与 `{media}` 按 `uuid` 隐式绑定，绑定时不带店铺条件，因此控制器与服务层都会显式校验归属，跨店铺的 uuid 返回 404。
+- 读侧数据由 `InstagramFeedPresenter` 拼装，与 DecoAdmin 后台页面共用同一份结构，避免两边分叉。
+- 内嵌环境里没有 DecoAdmin 用户，因此**没有按人的 `instagram_feed.*` 授权**：能在 Shopify 后台打开应用的店铺员工即可操作该店铺内容。这是 Shopify App 的常规信任模型。审计记录 `user_id` 为空、`actor_type` 记 `shopify_app_session`、并附 `shop_domain`。
+- 平台级配置（Meta 应用凭证、R2 存储凭证）**永远不从这条链路暴露**，它们不属于任何店铺。
 
 ## Meta 授权凭证
 
@@ -101,7 +160,9 @@ Accept: application/json
 }
 ```
 
-尚未 bootstrap 时，后台发布会返回 `INSTAGRAM_FEED_APP_SESSION_MISSING`（409），页面同时给出提示。
+这个端点由 App Home 前端在需要时显式调用；此外 `InstagramFeedEmbeddedSession::store()` 会在任何内容管理请求发现会话不可用时自动调用同一段逻辑，所以正常路径下商家不会碰到"会话缺失"。
+
+从 DecoAdmin 后台侧发起发布（例如运维手动操作）时若会话尚未建立，仍会返回 `INSTAGRAM_FEED_APP_SESSION_MISSING`（409）——后台没有 App Bridge 会话，拿不到 session token，无法自行建立。此时正确做法是让商家在 Shopify 后台打开一次应用。
 
 ## Meta OAuth 回调
 
@@ -154,6 +215,10 @@ POST /api/shopify-app/instagram-feed/webhooks
 ```
 
 使用当前环境 Client Secret 校验 Shopify HMAC，与 DecoAdmin 主 App 的 webhook 通道完全隔离。仅支持 `app/uninstalled` 与 `app/scopes_update`。店铺仅取自 `X-Shopify-Shop-Domain`，不信任请求体中的 `shop`。按事件 UUID 与 payload hash 幂等，冲突返回 `409`；原始 payload 加密保存。载荷上限 10MB。
+
+订阅由 **TOML 声明**、Shopify 统一管理与重投：三份配置里各有两条 `[[webhooks.subscriptions]]` 指向本环境的 `/api/shopify-app/instagram-feed/webhooks`。托管安装才允许 app 级订阅，所以原来按店铺注册的 `InstagramFeedWebhookSubscriptionService` 已删除。这样改的好处是「装了但从未打开过应用」的店铺卸载时同样能收到通知——按店铺注册做不到这一点，因为注册发生在授权成功之后。
+
+要扩展监听范围时，`InstagramFeedWebhookService::ALLOWED_TOPICS` 与三份 TOML 的订阅声明**必须成对修改**，否则新 topic 会被 `UNSUPPORTED_WEBHOOK_TOPIC` 拒掉。`scripts/validate-project.mjs` 会校验两条生命周期订阅都在、且地址落在本环境 origin 上。
 
 `app/uninstalled` 会清理该店铺的授权、展示组、媒体记录、R2 对象和 App 会话。媒体多时可能超过 webhook 响应预算被 Shopify 判超时后重投；清理是可续的，重投能接着上次进度继续删，全删完后再重投只是空跑一次。
 
@@ -226,9 +291,23 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 
 调度兜底：`instagram-feed:advance-mirrors` 每 10 分钟推进队列并顺带续期快到期的长效 token，商家不必反复点按钮。
 
-## DecoAdmin 后台
+## DecoAdmin 后台：维护职责
 
-所有后台路由都显式携带 `{organization}` 与 `{store}`，并在控制器内再次校验用户范围和 RBAC：
+内容管理已经搬到 Shopify App Home，后台的定位收敛为**运维与平台配置**：
+
+| 职责 | 位置 | 说明 |
+| --- | --- | --- |
+| 连接状态查看 | 应用中心 → Instagram Feed | 展示 `instagram_feed_installations` 的状态、首次连接、最近校验/检测、最近失败原因。**只读，无人工授权入口** |
+| 连接探活 | `InstagramFeedConnectionHealthService::check()` | 跑一次 `currentAppInstallation`，401/403 → `invalid`，其它失败 → `warning`，查不到安装记录 → `disconnected`，成功 → `connected`。状态口径与主 App 的 `ShopifyConnectionHealthService` 一致 |
+| 平台级凭证 | 应用中心 → Instagram Feed → 应用配置 | Meta 应用凭证与 R2 存储凭证，按 `system.settings.*` 权限，与 `instagram_feed.*` 店铺权限无关 |
+| 转存队列兜底 | `instagram-feed:advance-mirrors` | 每 10 分钟推进转存并续期快到期的长效 token |
+| 安装记录回填 | `instagram-feed:reconcile-installations` | 一次性命令，把已建立会话但缺 `app_installations` 记录的店铺补进应用中心。支持 `--shop=` 与 `--dry-run` |
+| 事件溯源 | `webhook_events` | 该店铺本 App 的全部 webhook 事件，payload 加密保存 |
+| 操作溯源 | `audit_logs` | 来自 Shopify App 的操作 `user_id` 为空、`actor_type = shopify_app_session`，按 `shop_domain` 追溯 |
+
+排障顺序建议：先看后台连接状态卡片的 `last_error`，再看 `webhook_events` 是否收到卸载/权限变更事件，最后看 `audit_logs` 里该店铺的操作序列。
+
+后台仍保留的店铺作用域路由（都显式携带 `{organization}` 与 `{store}`，并在控制器内再次校验用户范围和 RBAC）：
 
 - `GET /organizations/{organization}/stores/{store}/instagram-feed`
 - `POST /organizations/{organization}/stores/{store}/instagram-feed/connect`
@@ -262,7 +341,9 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 }
 ```
 
-常见错误码：`INSTAGRAM_FEED_APP_NOT_CONFIGURED`、`INSTAGRAM_FEED_APP_REGISTRY_CONFLICT`、`INVALID_SHOPIFY_ID_TOKEN`、`SHOPIFY_REQUIRED_SCOPES_MISSING`、`SHOPIFY_APP_NOT_INSTALLED`、`INSTAGRAM_FEED_APP_SESSION_MISSING`、`SHOPIFY_APP_SESSION_INVALID`、`STORE_NOT_CONNECTED`、`STORE_ACCESS_DENIED`、`INVALID_OAUTH_STATE`、`OAUTH_PROVIDER_MISMATCH`、`PROVIDER_NOT_CONFIGURED`、`INSTAGRAM_ACCOUNT_NOT_CONNECTED`、`INSTAGRAM_ACCOUNT_NOT_READY`、`FACEBOOK_NO_INSTAGRAM_ACCOUNT`、`FACEBOOK_PAGE_NOT_FOUND`、`FACEBOOK_AUTHORIZATION_EXPIRED`、`GALLERY_NOT_FOUND`、`GALLERY_NAME_REQUIRED`、`INVALID_PRODUCT_GID`、`R2_NOT_CONFIGURED`、`FEED_PAYLOAD_TOO_LARGE`、`FEED_PUBLISH_FAILED`、`INVALID_WEBHOOK_HMAC`。
+常见错误码：`INSTAGRAM_FEED_APP_NOT_CONFIGURED`、`INSTAGRAM_FEED_APP_REGISTRY_CONFLICT`、`INVALID_SHOPIFY_ID_TOKEN`、`SHOPIFY_REQUIRED_SCOPES_MISSING`、`SHOPIFY_APP_NOT_INSTALLED`、`SHOPIFY_TOKEN_EXCHANGE_FAILED`、`SHOPIFY_TOKEN_EXCHANGE_TIMEOUT`、`INSTAGRAM_FEED_APP_SESSION_MISSING`、`SHOPIFY_APP_SESSION_INVALID`、`SHOPIFY_ADMIN_API_FAILED`、`SHOPIFY_ADMIN_API_TIMEOUT`、`STORE_NOT_CONNECTED`、`STORE_ACCESS_DENIED`、`INVALID_OAUTH_STATE`、`OAUTH_PROVIDER_MISMATCH`、`PROVIDER_NOT_CONFIGURED`、`INSTAGRAM_ACCOUNT_NOT_CONNECTED`、`INSTAGRAM_ACCOUNT_NOT_READY`、`FACEBOOK_NO_INSTAGRAM_ACCOUNT`、`FACEBOOK_PAGE_NOT_FOUND`、`FACEBOOK_AUTHORIZATION_EXPIRED`、`GALLERY_NOT_FOUND`、`GALLERY_NAME_REQUIRED`、`GALLERY_NAME_TOO_LONG`、`GALLERY_REORDER_EMPTY`、`TOO_MANY_GALLERY_ITEMS`、`INSTAGRAM_MEDIA_NOT_FOUND`、`INVALID_PRODUCT_GID`、`TOO_MANY_LINKED_PRODUCTS`、`R2_NOT_CONFIGURED`、`FEED_PAYLOAD_TOO_LARGE`、`FEED_PUBLISH_FAILED`、`INVALID_WEBHOOK_HMAC`、`INVALID_WEBHOOK_HEADERS`、`UNSUPPORTED_WEBHOOK_TOPIC`、`WEBHOOK_ID_CONFLICT`、`WEBHOOK_PAYLOAD_TOO_LARGE`、`INSTAGRAM_FEED_ACTION_FAILED`。
+
+`SHOPIFY_ADMIN_API_FAILED` 的文案会带上 Shopify 的真实 HTTP 状态与 GraphQL `errors[].message`，并对 `shpat_` / `shpca_` / `shppa_` / `shpss_` 前缀的令牌做脱敏后截断到 200 字符。同一条失败也会写入 `instagram_feed_installations.last_error`，后台连接状态卡片直接可见。
 
 ## 数据库迁移
 
@@ -273,5 +354,7 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 - `instagram_galleries`：展示组。唯一键 `[store_id, handle]`，`handle` 是随机短哈希而非组名派生，改名不影响主题引用。
 - `instagram_feed_installations`：本 App 的店铺会话，保存 AppInstallation GID 与加密的 offline token。
 - `instagram_gallery_items`：组内成员与组内顺序。唯一键 `[gallery_id, media_id]`。
+
+`database/migrations/2026_09_07_000100_add_connection_state_to_instagram_feed_installations_table.php` 补充连接状态字段：`status`（`connected` / `warning` / `invalid` / `disconnected`）、`installed_by`、`uninstalled_at`、`last_api_check`、`last_error`、`last_error_at`。字段集刻意对齐 `shopify_connections`，这样两个 App 的连接健康度可以用同一套判读口径。
 
 原 Prisma schema 中的 `InstagramMedia.enabled` / `position` 是迁移期遗留字段（编排已全部走 GalleryItem），未迁移；`Session` 表由 Laravel 自身会话机制取代。

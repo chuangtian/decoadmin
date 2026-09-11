@@ -35,7 +35,6 @@ use App\Http\Controllers\GoogleSearchConsoleOAuthController;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Controllers\InstagramFeedController;
 use App\Http\Controllers\InstagramFeedMetaCallbackController;
-use App\Http\Controllers\InstagramFeedShopifyOAuthController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LiveViewController;
 use App\Http\Controllers\MicrosoftAdsOAuthController;
@@ -202,12 +201,8 @@ Route::get('/shopify-app/instagram-feed', [ShopifyInstagramFeedAppController::cl
     ->middleware(['shopify.embedded-frame', 'throttle:60,1'])
     ->name('instagram-feed.shopify-app.management');
 
-// Shopify 授权码回调：Shopify 直接把浏览器打回来，所以不能挂 auth。
-// 身份靠 state cookie + oauth_states 一次性记录 + HMAC 验签确认。
-Route::get('/shopify-app/instagram-feed/oauth/callback', [InstagramFeedShopifyOAuthController::class, 'callback'])
-    ->middleware('throttle:30,1')
-    ->name('instagram-feed.shopify-oauth.callback');
-
+// 安装由 Shopify 托管：不再有授权码回调，会话统一由 App Bridge 的 session token
+// 走 token exchange 建立（见 ShopifyInstagramFeedAppService::bootstrap）。
 Route::post('/api/shopify-app/instagram-feed/webhooks', ShopifyInstagramFeedWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('instagram-feed.shopify-app.webhooks');
@@ -961,14 +956,6 @@ Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
         Route::get('/', [InstagramFeedController::class, 'index'])
             ->middleware('permission:instagram_feed.view')
             ->name('instagram-feed.index');
-
-        // Shopify App 自身的授权（授权码模式），与下面的 Meta 账号授权是两件事。
-        Route::post('/shopify-authorize', [InstagramFeedShopifyOAuthController::class, 'redirect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
-            ->name('instagram-feed.shopify-oauth.redirect');
-        Route::post('/shopify-verify', [InstagramFeedShopifyOAuthController::class, 'verify'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.shopify-oauth.verify');
 
         Route::post('/connect', [InstagramFeedController::class, 'connect'])
             ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])

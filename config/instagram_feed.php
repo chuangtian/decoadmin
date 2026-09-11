@@ -61,10 +61,6 @@ return [
     // OAuth state 有效期。Meta 回调没有 DecoAdmin 会话，靠签名 state 还原店铺。
     'oauth_state_ttl_seconds' => (int) env('INSTAGRAM_FEED_OAUTH_STATE_TTL', 900),
 
-    // Shopify App 自身授权（授权码模式）的 state 有效期，单位分钟。
-    // 与 Meta 授权是两条独立链路：这条走 oauth_states 表 + httpOnly cookie。
-    'oauth_state_ttl_minutes' => (int) env('INSTAGRAM_FEED_SHOPIFY_STATE_TTL_MINUTES', 10),
-
     // Instagram API with Instagram Login（Basic Display API 已于 2024-12 下线）
     'instagram' => [
         'app_id' => env('INSTAGRAM_FEED_INSTAGRAM_APP_ID'),
