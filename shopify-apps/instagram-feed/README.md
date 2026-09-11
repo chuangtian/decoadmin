@@ -12,8 +12,11 @@ DecoAdmin（Laravel）根项目里，本目录没有独立的 Node / Remix / Pri
 | App Bridge 接口 `connection` / `bootstrap` | 根项目 `ShopifyInstagramFeedAppController` |
 | Meta OAuth 与合规回调 | 根项目 `InstagramFeedMetaCallbackController` |
 | Webhook 接收 | 根项目 `ShopifyInstagramFeedWebhookController` |
-| 账号、同步、R2 转存、展示组、发布 | 根项目 `app/Services/InstagramFeed` |
-| 后台页面 | 根项目 `resources/js/Pages/InstagramFeed` |
+| 账号、同步、R2 转存、展示组、前台交付 | 根项目 `app/Services/InstagramFeed` |
+| App Home 前端（内容管理 + 应用配置两个页签） | 根项目 `resources/js/embedded/instagram-feed` |
+| 内容管理与配置接口 | 根项目 `ShopifyInstagramFeedContentController` |
+| 店铺级 Meta / R2 凭证 | 根项目 `InstagramFeedStoreCredentials` + `instagram_feed_store_settings` 表 |
+| DecoAdmin 后台只读运维视图 | 根项目 `resources/js/Pages/InstagramFeed/Index.vue` |
 | 账号、组织、店铺、权限、数据库 | 根项目 |
 
 `shopify app deploy` 只发布 Shopify App 版本（配置 + 扩展），**不会**部署 Laravel。
@@ -155,9 +158,26 @@ App Home 走 Shopify 官方推荐的自托管 iframe 模型：页面由 DecoAdmi
 （`/shopify-app/instagram-feed`，前端在根项目 `resources/js/embedded/instagram-feed*`），
 本目录只保留 App 配置与扩展。
 
+## 商家在应用里做什么
+
+App Home 有两个页签：
+
+- **内容管理**：连接 Instagram 账号、同步内容、看转存进度与失败原因、建展示组并编排组内内容。
+  没有「发布」按钮 —— 内容一变就自动同步到店铺前台。
+- **应用配置**：填自己店铺的 Meta 应用凭证（Instagram / Facebook 至少一条）和 Cloudflare R2
+  存储凭证。凭证按店铺存在 DecoAdmin 的 `instagram_feed_store_settings` 表，密钥加密且不回显，
+  留空提交表示保持原值。一个店铺改自己的凭证不影响其它店铺。
+
+同一环境下所有店铺共用同一个 Meta OAuth 回调地址，应用配置页签会把它列出并提供复制按钮，
+商家要把它填进自己 Meta 应用的 OAuth 设置里。
+
+DecoAdmin 后台那一页是**只读**的：只看连接状态、转存素材统计与失败原因、展示区列表，
+没有任何编辑入口，后端也没有对应的写路由。
+
 ## 安全约定
 
 - 不要把 Client Secret、Access Token、Meta 凭证或 R2 密钥写进 TOML、源码或文档。
+  商家的 Meta / R2 凭证由他们自己在应用配置页签填写，加密存在 DecoAdmin 数据库里。
 - 保持 `embedded = true`，并保持安装为 Shopify 托管：后端已经没有授权码回调可用，
   重新声明 `use_legacy_install_flow` 会让安装流程直接断掉。`validate-project.mjs` 会拦住这种改动。
 - 保持自动改写 URL 关闭，避免 CLI 覆盖已部署地址。

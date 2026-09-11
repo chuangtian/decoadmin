@@ -11,9 +11,15 @@ use JsonException;
  *
  * 两条授权路线用的密钥不同，逐个试；全部不匹配时返回 null，调用方一律当作
  * 无效请求处理，不回显任何信息。
+ *
+ * 凭证按店铺存之后，回调里没有任何店铺线索（signed_request 只带 Meta 用户 ID），
+ * 所以候选密钥 = 平台级两条 + 所有店铺自己配的那些。命中后由
+ * InstagramAccountService::purgeByMetaUser() 按 Meta 用户 ID 找出真正受影响的店铺。
  */
 class MetaSignedRequestValidator
 {
+    public function __construct(private InstagramFeedStoreCredentials $credentials) {}
+
     /** @return array{user_id: string, algorithm: string|null, issued_at: int|null}|null */
     public function parse(?string $signedRequest): ?array
     {
@@ -73,10 +79,12 @@ class MetaSignedRequestValidator
     /** @return list<string> */
     private function candidateSecrets(): array
     {
-        return array_values(array_filter([
+        $secrets = array_filter([
             (string) config('instagram_feed.instagram.app_secret'),
             (string) config('instagram_feed.facebook.app_secret'),
-        ], fn (string $secret): bool => $secret !== ''));
+        ], fn (string $secret): bool => $secret !== '');
+
+        return array_values(array_unique([...$secrets, ...$this->credentials->allMetaAppSecrets()]));
     }
 
     private function base64UrlDecode(string $value): ?string

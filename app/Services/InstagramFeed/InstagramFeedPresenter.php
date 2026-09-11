@@ -147,7 +147,7 @@ class InstagramFeedPresenter
             str_contains($reason, '404') || str_contains($reason, 'not found')
                 => 'Instagram 上已找不到这条内容，可能已被删除。',
             str_contains($reason, '401') || str_contains($reason, 'signature')
-                => '存储凭证校验失败，请联系管理员检查存储配置。',
+                => '存储凭证校验失败。请到「应用配置」页签重新填写 R2 的 Access Key ID 与 Secret（Secret 不回显，必须整条重填）。',
             str_contains($reason, 'too large') || str_contains($reason, 'max_object_bytes')
                 => '文件超过单个文件上限，已跳过。',
             str_contains($reason, 'disk') || str_contains($reason, 'space')

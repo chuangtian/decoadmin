@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\InstagramFeedException;
 use App\Services\InstagramFeed\InstagramAccountService;
+use App\Services\InstagramFeed\InstagramFeedStoreCredentials;
 use App\Services\InstagramFeed\MetaOAuthStateService;
 use App\Services\InstagramFeed\MetaSignedRequestValidator;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,7 @@ class InstagramFeedMetaCallbackController extends Controller
         private MetaOAuthStateService $states,
         private InstagramAccountService $accounts,
         private MetaSignedRequestValidator $signedRequests,
+        private InstagramFeedStoreCredentials $credentials,
     ) {}
 
     /**
@@ -54,6 +56,10 @@ class InstagramFeedMetaCallbackController extends Controller
                 throw new InstagramFeedException('OAUTH_CODE_MISSING', '未收到授权码，请重试一次。', 400);
             }
 
+            // 换 token 要用发起授权的那个店铺自己的 Meta 应用密钥，所以必须在
+            // state 还原出店铺之后、调用 Graph API 之前加载它的凭证。
+            $this->credentials->apply($consumed['store']);
+
             $result = $provider === 'facebook_login'
                 ? $this->accounts->completeFacebookLogin($consumed['store'], $consumed['user'], $code)
                 : $this->accounts->completeInstagramLogin($consumed['store'], $consumed['user'], $code);
@@ -66,14 +72,14 @@ class InstagramFeedMetaCallbackController extends Controller
         if ($result['needs_page_selection']) {
             return $this->popup(
                 '授权成功，还要选一个账号',
-                '你有多个主页关联了 Instagram 账号，回到 DecoAdmin 后台选择要展示的那个。',
+                '你有多个主页关联了 Instagram 账号，关掉这个窗口后回到应用页面选择要展示的那个。',
                 true,
             );
         }
 
         return $this->popup(
             '已连接 @'.(string) $result['account']->username,
-            '回到 DecoAdmin 后台点击「同步内容」就能把媒体拉进来。',
+            '关掉这个窗口后回到应用页面，点「同步内容」就能把媒体拉进来。',
             true,
         );
     }

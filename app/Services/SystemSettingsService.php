@@ -21,14 +21,11 @@ class SystemSettingsService
         'mail' => ['enabled', 'host', 'port', 'encryption', 'username', 'password', 'from_address', 'from_name', 'timeout'],
         'feishu' => ['enabled', 'app_id', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url'],
         'student_ai' => ['gemini_api_key', 'gemini_model', 'auto_approval_threshold'],
-        'instagram_meta' => ['instagram_app_id', 'instagram_app_secret', 'facebook_app_id', 'facebook_app_secret', 'facebook_login_config_id'],
-        'instagram_r2' => ['account_id', 'access_key_id', 'secret_access_key', 'bucket', 'public_base_url'],
     ];
 
     /** @var list<string> */
     private const SECRET_KEYS = [
         'password', 'app_secret', 'verification_token', 'encrypt_key', 'bot_webhook_url', 'gemini_api_key',
-        'instagram_app_secret', 'facebook_app_secret', 'secret_access_key',
     ];
 
     /**
@@ -37,7 +34,7 @@ class SystemSettingsService
      *
      * @var list<string>
      */
-    private const WRITE_ONLY_KEYS = ['gemini_api_key', 'instagram_app_secret', 'facebook_app_secret', 'secret_access_key'];
+    private const WRITE_ONLY_KEYS = ['gemini_api_key'];
 
     /** @return array<string, mixed> */
     public function sectionForFrontend(string $section, bool $includeSecrets): array
@@ -170,7 +167,6 @@ class SystemSettingsService
         ]);
         date_default_timezone_set('UTC');
         app()->setLocale((string) $general['locale']);
-        $this->applyInstagramFeedConfiguration($settings['instagram_meta'], $settings['instagram_r2']);
 
         if (! $settings['mail']['enabled']) {
             return;
@@ -196,31 +192,12 @@ class SystemSettingsService
     }
 
     /**
-     * Instagram Feed 的 Meta 应用凭证和 R2 存储凭证在后台维护，
-     * 数据库有值就覆盖 config，没值时保持 .env 兜底。
-     * R2Client / InstagramApiClient / FacebookApiClient 都是调用时才读 config，
-     * 所以这里覆盖后无需改动它们。
+     * Instagram Feed 的 Meta 应用凭证与 R2 存储凭证不在这里管：它们按店铺存储，
+     * 由商家在 Shopify App 内嵌页维护，见 InstagramFeed\InstagramFeedStoreCredentials。
+     * 这里只留 .env 作为新店铺的兜底默认值。
      *
-     * @param  array<string, mixed>  $meta
-     * @param  array<string, mixed>  $r2
+     * @return array<string, array<string, mixed>>
      */
-    private function applyInstagramFeedConfiguration(array $meta, array $r2): void
-    {
-        config([
-            'instagram_feed.instagram.app_id' => trim((string) $meta['instagram_app_id']),
-            'instagram_feed.instagram.app_secret' => (string) $meta['instagram_app_secret'],
-            'instagram_feed.facebook.app_id' => trim((string) $meta['facebook_app_id']),
-            'instagram_feed.facebook.app_secret' => (string) $meta['facebook_app_secret'],
-            'instagram_feed.facebook.login_config_id' => trim((string) $meta['facebook_login_config_id']) ?: null,
-            'instagram_feed.r2.account_id' => trim((string) $r2['account_id']),
-            'instagram_feed.r2.access_key_id' => trim((string) $r2['access_key_id']),
-            'instagram_feed.r2.secret_access_key' => (string) $r2['secret_access_key'],
-            'instagram_feed.r2.bucket' => trim((string) $r2['bucket']),
-            'instagram_feed.r2.public_base_url' => rtrim(trim((string) $r2['public_base_url']), '/'),
-        ]);
-    }
-
-    /** @return array<string, array<string, mixed>> */
     private function all(): array
     {
         return [
@@ -228,8 +205,6 @@ class SystemSettingsService
             'mail' => $this->section('mail'),
             'feishu' => $this->section('feishu'),
             'student_ai' => $this->section('student_ai'),
-            'instagram_meta' => $this->section('instagram_meta'),
-            'instagram_r2' => $this->section('instagram_r2'),
         ];
     }
 
@@ -307,21 +282,6 @@ class SystemSettingsService
                 'gemini_api_key' => '',
                 'gemini_model' => 'gemini-2.5-pro',
                 'auto_approval_threshold' => 80,
-            ],
-            // 未在后台配置时回退到 .env，保证迁移期间已有部署不中断。
-            'instagram_meta' => [
-                'instagram_app_id' => (string) config('instagram_feed.instagram.app_id', ''),
-                'instagram_app_secret' => (string) config('instagram_feed.instagram.app_secret', ''),
-                'facebook_app_id' => (string) config('instagram_feed.facebook.app_id', ''),
-                'facebook_app_secret' => (string) config('instagram_feed.facebook.app_secret', ''),
-                'facebook_login_config_id' => (string) config('instagram_feed.facebook.login_config_id', ''),
-            ],
-            'instagram_r2' => [
-                'account_id' => (string) config('instagram_feed.r2.account_id', ''),
-                'access_key_id' => (string) config('instagram_feed.r2.access_key_id', ''),
-                'secret_access_key' => (string) config('instagram_feed.r2.secret_access_key', ''),
-                'bucket' => (string) config('instagram_feed.r2.bucket', ''),
-                'public_base_url' => (string) config('instagram_feed.r2.public_base_url', ''),
             ],
             default => [],
         };

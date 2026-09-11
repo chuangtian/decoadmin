@@ -10,6 +10,7 @@ use App\Services\InstagramFeed\InstagramAccountService;
 use App\Services\InstagramFeed\InstagramFeedEmbeddedSession;
 use App\Services\InstagramFeed\InstagramFeedPresenter;
 use App\Services\InstagramFeed\InstagramFeedPublisher;
+use App\Services\InstagramFeed\InstagramFeedStoreCredentials;
 use App\Services\InstagramFeed\InstagramGalleryService;
 use App\Services\InstagramFeed\InstagramSyncService;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,9 @@ use Throwable;
  * InstagramFeedEmbeddedSession 完成，信任模型见该服务的类注释。操作者没有 DecoAdmin
  * 用户，所以传给服务层的 actor 一律为 null。
  *
+ * 商家在这里管两类东西：内容（账号、同步、转存、展示组）和应用配置（自己的 Meta 应用
+ * 凭证与 R2 存储凭证）。配置按店铺存，改动只影响自己店铺，密钥永不回显。
+ *
  * 约定：
  * - 成功统一为 {"data": ...}，业务失败统一为 {"error": {"code", "message"}}；
  * - 入参校验失败沿用 Laravel 的 422 {"message", "errors"}；
@@ -41,6 +45,7 @@ class ShopifyInstagramFeedContentController extends Controller
         private InstagramSyncService $sync,
         private InstagramGalleryService $galleries,
         private InstagramFeedPublisher $publisher,
+        private InstagramFeedStoreCredentials $credentials,
     ) {}
 
     /** 概览：账号、转存统计、展示组、App 会话状态。 */
@@ -55,6 +60,63 @@ class ShopifyInstagramFeedContentController extends Controller
             ...$this->presenter->overview($store),
             'capabilities' => $this->session->capabilities(),
         ]);
+    }
+
+    /**
+     * 「应用配置」页签的数据。
+     *
+     * 密钥永不回显，只给 *_configured 布尔值；source 告诉商家这一组是自己配的还是
+     * 在用 DecoAdmin 的平台默认值，否则看到空白的密钥框会以为没配过。
+     */
+    public function settings(Request $request): JsonResponse
+    {
+        return $this->read($request, fn (Store $store): array => $this->credentials->forFrontend($store));
+    }
+
+    /**
+     * 保存本店铺的 Meta 应用凭证。
+     *
+     * 校验规则与 DecoAdmin 后台的平台级端点保持一致，密钥留空表示保持原值。
+     */
+    public function updateMetaSettings(Request $request): JsonResponse
+    {
+        $values = $request->validate([
+            'instagram_app_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'instagram_app_secret' => ['nullable', 'string', 'max:1000'],
+            'facebook_app_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'facebook_app_secret' => ['nullable', 'string', 'max:1000'],
+            'facebook_login_config_id' => ['nullable', 'string', 'max:120', 'regex:/^[0-9]+$/'],
+        ]);
+
+        return $this->write($request, fn (Store $store): string => $this->describeSettingsUpdate(
+            $this->credentials->update('meta', $store, $values, null, $store->shopify_domain),
+            'Instagram / Facebook 应用凭证',
+        ));
+    }
+
+    /** 保存本店铺的 Cloudflare R2 存储凭证。 */
+    public function updateR2Settings(Request $request): JsonResponse
+    {
+        $values = $request->validate([
+            'account_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9]+$/'],
+            'access_key_id' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'secret_access_key' => ['nullable', 'string', 'max:1000'],
+            'bucket' => ['nullable', 'string', 'max:120', 'regex:/^[a-z0-9][a-z0-9.-]*$/'],
+            'public_base_url' => ['nullable', 'url:https', 'max:2000'],
+        ]);
+
+        return $this->write($request, fn (Store $store): string => $this->describeSettingsUpdate(
+            $this->credentials->update('r2', $store, $values, null, $store->shopify_domain),
+            'Cloudflare R2 配置',
+        ));
+    }
+
+    /** @param  list<string>  $changed */
+    private function describeSettingsUpdate(array $changed, string $label): string
+    {
+        return $changed === []
+            ? $label.'没有变化。'
+            : $label.'已保存，立即生效。';
     }
 
     /** 生成 Meta 授权链接。授权要跳出 iframe，在顶层窗口完成。 */
@@ -123,7 +185,7 @@ class ShopifyInstagramFeedContentController extends Controller
             if (! $result['configured']) {
                 throw new InstagramFeedException(
                     'R2_NOT_CONFIGURED',
-                    'Cloudflare R2 尚未配置，请联系 DecoAdmin 管理员补齐存储配置。',
+                    'Cloudflare R2 尚未配置，请到「应用配置」页签填好存储凭证后再转存。',
                     503,
                 );
             }
