@@ -18,15 +18,20 @@ use Illuminate\Http\Request;
  * - 店铺由 shop domain 精确匹配 stores.shopify_domain 得到，所以一次请求只能触及
  *   这一个店铺的数据，跨店铺越权在解析这一步就被挡住。
  * - 内嵌环境里没有 DecoAdmin 用户，因此没有 instagram_feed.* 的按人 RBAC：
- *   凡是能在 Shopify 后台打开这个 App 的店铺员工，就能管理该店铺的 Instagram 内容。
- *   这是 Shopify App 的常规信任模型，审计记录里 user_id 为空、actor_type 记
- *   shopify_app_session、并附 shop_domain。
- * - 平台级配置（Meta 应用凭证、R2 存储凭证）不属于任何店铺，永远不从这条链路暴露，
- *   它们仍然只在 DecoAdmin 后台按 system.settings.* 权限管理。
+ *   凡是能在 Shopify 后台打开这个 App 的店铺员工，就能管理该店铺的 Instagram 内容与
+ *   该店铺自己的应用配置。这是 Shopify App 的常规信任模型，审计记录里 user_id 为空、
+ *   actor_type 记 shopify_app_session、并附 shop_domain。
+ * - 应用配置（Meta 应用凭证、R2 存储凭证）按店铺存储，商家在内嵌页的「应用配置」页签
+ *   里维护自己的那一份，所以一个店铺的改动不会影响其它店铺。店铺没配的项回退到
+ *   DecoAdmin 的平台级默认值，但平台级本身只能在后台按 system.settings.* 权限修改，
+ *   内嵌链路永远读不到、也改不了平台级的密钥明文。
  */
 class InstagramFeedEmbeddedSession
 {
-    public function __construct(private ShopifyInstagramFeedAppService $app) {}
+    public function __construct(
+        private ShopifyInstagramFeedAppService $app,
+        private InstagramFeedStoreCredentials $credentials,
+    ) {}
 
     /**
      * 解析当前请求对应的店铺，并保证本 App 的 Shopify 会话可用。
@@ -51,6 +56,10 @@ class InstagramFeedEmbeddedSession
             // 首次打开、令牌被清空、或环境切换后 environment 不再匹配，都走这里重建。
             $this->app->bootstrap($store, (string) $request->attributes->get('shopify_id_token'));
         }
+
+        // 这一步之后 Meta / R2 的 config 才是这个店铺的值。放在这里而不是各个接口里，
+        // 是为了让后续新增的内嵌接口默认就带上正确的店铺凭证。
+        $this->credentials->apply($store);
 
         return $store;
     }

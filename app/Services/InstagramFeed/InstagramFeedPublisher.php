@@ -173,17 +173,21 @@ class InstagramFeedPublisher
             'id' => $media->ig_media_id,
             'media_type' => $media->media_type,
             'permalink' => $media->permalink,
+            // 点击封面后弹窗里嵌的就是这个地址：Instagram 官方 embed，不需要令牌，
+            // 视频与轮播都由 Instagram 自己播，绕开它对部分 Reels 不给视频文件的限制。
+            'embed_url' => $media->embedUrl(),
             'caption' => $this->sanitizeCaption($media->caption),
             // R2 是纯对象存储，没有 Shopify CDN 那种 ?width= 变体，直接给原图地址。
-            'video_url' => $media->video_url,
+            // 只有封面图：视频文件不再转存。
             'poster_url' => $media->poster_url,
             'width' => $media->width,
             'height' => $media->height,
-            'duration_ms' => $media->duration_ms,
             'posted_at' => $media->posted_at?->toIso8601String(),
             'products' => $products,
         ];
     }
+
+
 
     /**
      * 文案会被内联进前台的 JSON script 标签，去掉尖括号避免出现 `</script>` 把标签截断。

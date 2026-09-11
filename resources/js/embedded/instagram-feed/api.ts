@@ -9,15 +9,37 @@
  * 所以每个请求都要带 shop；它从令牌里取，避免依赖可被改写的页面地址。
  */
 
+/** App Bridge 的商品选择器返回结构，只取我们用得到的字段。 */
+interface PickedResource {
+    id: string;
+    title?: string;
+}
+
+interface ResourcePickerOptions {
+    type: 'product' | 'variant' | 'collection';
+    action?: 'add' | 'select';
+    multiple?: boolean | number;
+    filter?: { hidden?: boolean; variants?: boolean; draft?: boolean; archived?: boolean; query?: string };
+    /** 打开时预选中的资源。取消勾选再确认即可移除。 */
+    selectionIds?: { id: string }[];
+}
+
 interface AppBridge {
     idToken?: () => Promise<string>;
     auth?: { idToken?: () => Promise<string> };
+    /** 商家确认返回所选资源数组，直接关掉返回 undefined。 */
+    resourcePicker?: (options: ResourcePickerOptions) => Promise<PickedResource[] | undefined>;
 }
 
 declare global {
     interface Window {
         shopify?: AppBridge;
     }
+}
+
+export interface PickedProduct {
+    id: string;
+    title: string;
 }
 
 export class ApiError extends Error {
@@ -56,6 +78,43 @@ async function sessionToken(): Promise<string> {
     }
 
     throw new ApiError('无法获取 Shopify 会话令牌。', 'APP_BRIDGE_UNAVAILABLE', 0);
+}
+
+/**
+ * 打开 Shopify 原生商品选择器。
+ *
+ * 商家不该手抄 `gid://shopify/Product/123456`，所以关联商品走这个选择器：
+ * 它跑在 Shopify 后台里，搜索、分页、权限都由 Shopify 负责，我们只拿回 GID。
+ *
+ * 返回 null 表示商家取消（App Bridge 在这种情况下回 undefined，不是空数组），
+ * 返回空数组表示商家确认了"一个都不选"，语义是清空关联。
+ */
+export async function pickProducts(selectedIds: string[], max: number): Promise<PickedProduct[] | null> {
+    const app = await bridge();
+    if (! app.resourcePicker) {
+        throw new ApiError(
+            '当前 Shopify 后台版本不支持商品选择器，请刷新页面后重试。',
+            'RESOURCE_PICKER_UNAVAILABLE',
+            0,
+        );
+    }
+
+    const picked = await app.resourcePicker({
+        type: 'product',
+        action: 'select',
+        multiple: max,
+        // 我们只存商品级 GID，不进变体层级，避免商家选了变体却存不进去。
+        filter: { variants: false },
+        selectionIds: selectedIds.map(id => ({ id })),
+    });
+
+    if (picked === undefined) {
+        return null;
+    }
+
+    return picked
+        .filter(resource => typeof resource?.id === 'string')
+        .map(resource => ({ id: resource.id, title: resource.title ?? resource.id }));
 }
 
 /** 从 session token 的 dest 取店铺域名。只解码不验签，服务端会独立校验。 */

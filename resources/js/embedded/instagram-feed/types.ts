@@ -1,6 +1,6 @@
 // 与后端 InstagramFeedPresenter 的输出一一对应。
-// 这里的结构必须与 resources/js/Pages/InstagramFeed 下的后台页面保持一致：
-// 两边读的是同一个 presenter，字段一改要同时改。
+// DecoAdmin 后台的 InstagramFeed 页面只读同一个 presenter 的一个子集（连接状态、
+// 转存统计、展示组），所以 presenter 字段一改，这里和后台页面都要跟着改。
 
 export interface Account {
     provider: string;
@@ -77,13 +77,28 @@ export interface Media {
     caption: string | null;
     permalink: string;
     preview_url: string | null;
-    video_url: string | null;
+    /** Instagram 官方 embed 地址，点击封面时嵌进弹窗。脏数据时为 null。 */
+    embed_url: string | null;
     mirror_status: 'pending' | 'processing' | 'ready' | 'failed';
     mirror_error: string | null;
     posted_at: string | null;
     like_count: number | null;
     comments_count: number | null;
     products: LinkedProduct[];
+}
+
+export interface MirrorFailure {
+    id: string;
+    media_type: string;
+    caption: string | null;
+    permalink: string;
+    preview_url: string | null;
+    posted_at: string | null;
+    failed_at: string | null;
+    /** 归纳出的可行动说明 */
+    reason: string;
+    /** 脱敏后的原始信息，排查用 */
+    detail: string;
 }
 
 export interface GalleryDetail {
@@ -93,5 +108,43 @@ export interface GalleryDetail {
     totalCount: number;
     filter: string;
     filters: string[];
+    /** 服务端实际生效的筛选条件，用来回填输入框。 */
+    search: string;
+    from: string | null;
+    to: string | null;
+    /** 满足筛选条件的总条数；大于 candidateLimit 说明候选被截断了。 */
+    matchedCount: number;
+    candidateLimit: number;
     productError: string | null;
+}
+
+// 「应用配置」页签。与后端 InstagramFeedStoreCredentials::forFrontend() 一一对应。
+// 密钥字段永远回空字符串，是否已配置只看 *_configured。
+
+export interface MetaSettings {
+    instagram_app_id: string;
+    instagram_app_secret: string;
+    facebook_app_id: string;
+    facebook_app_secret: string;
+    facebook_login_config_id: string;
+    instagram_app_secret_configured: boolean;
+    facebook_app_secret_configured: boolean;
+}
+
+export interface R2Settings {
+    account_id: string;
+    access_key_id: string;
+    secret_access_key: string;
+    bucket: string;
+    public_base_url: string;
+    secret_access_key_configured: boolean;
+}
+
+export interface StoreSettings {
+    meta: MetaSettings;
+    r2: R2Settings;
+    /** 环境级回调地址，所有店铺共用，要原样填进各自的 Meta 应用。 */
+    callbacks: { instagram: string; facebook: string };
+    /** store = 本店铺自己配的；platform = 在用 DecoAdmin 的平台默认值。 */
+    source: { meta: 'store' | 'platform'; r2: 'store' | 'platform' };
 }

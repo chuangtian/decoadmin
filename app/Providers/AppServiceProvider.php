@@ -19,6 +19,7 @@ use App\Services\AppCenter\GenericAppConfigurationProvider;
 use App\Services\AppCenter\InstagramFeedAppConfigurationProvider;
 use App\Services\AppCenter\PersonalizationAppConfigurationProvider;
 use App\Services\AppCenter\StudentDiscountAppConfigurationProvider;
+use App\Services\InstagramFeed\InstagramFeedStoreCredentials;
 use App\Services\Shopify\Sync\Handlers\CustomerSyncHandler;
 use App\Services\Shopify\Sync\Handlers\InventorySyncHandler;
 use App\Services\Shopify\Sync\Handlers\OrderSyncHandler;
@@ -50,6 +51,9 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentOrganization::class);
         $this->app->scoped(CurrentStore::class);
+        // 必须是单例：它在首次 apply() 时快照平台级凭证作为回退基线，
+        // 每个店铺一个实例就会把上一个店铺的覆盖值当成基线。
+        $this->app->singleton(InstagramFeedStoreCredentials::class);
         // 顺序有意义：AppConfigurationCatalog 取第一个 supports() 命中的 provider，
         // GenericAppConfigurationProvider 无条件返回 true，必须永远排最后。
         $this->app->tag([

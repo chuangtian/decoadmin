@@ -16,7 +16,7 @@ const expectedScopes = 'read_products';
 // 生产与测试是同一个 Shopify App（同一个 client_id）。一个 App 只有一份
 // application_url 与一组 webhook 地址，所以两套配置永远只能有一套生效：
 // 发布测试配置＝生产入口停用，反之亦然。改动某套环境的 origin 时，
-// 三处（application_url、webhook uri、redirect_urls）加上 Laravel 的
+// 两处（application_url、webhook subscription uri）加上 Laravel 的
 // config/instagram_feed.php 必须同步。
 const productionOrigin = 'https://admin.decomkt.com';
 const testOrigin = 'https://testadmin.decomkt.com';
@@ -83,22 +83,45 @@ function assertConfiguration(fileName, origin) {
     contents.includes(`application_url = "${origin}/shopify-app/instagram-feed"`),
     `${fileName} has the wrong Shopify-facing application URL`,
   );
-  // 授权码安装流程下 Shopify 拒绝 app 级 webhook 订阅：
-  // app/uninstalled 与 app/scopes_update 由 DecoAdmin 按店铺注册。
-  check(
-    ! contents.includes('[[webhooks.subscriptions]]'),
-    `${fileName} must not declare app-specific webhook subscriptions while use_legacy_install_flow is enabled`,
-  );
   check(contents.includes('api_version = "'), `${fileName} must pin the webhook api_version`);
-  check(
-    contents.includes(`"${origin}/shopify-app/instagram-feed/oauth/callback"`),
-    `${fileName} has the wrong Shopify OAuth callback URL`,
-  );
+  // 安装由 Shopify 托管，所以 app 级 webhook 订阅直接写在配置里，由 Shopify 统一管理。
+  // 两个生命周期主题必须都在，且地址必须落在本环境的 origin 上 —— 否则测试环境的
+  // 卸载事件会打到生产后端。
+  for (const topic of ['app/uninstalled', 'app/scopes_update']) {
+    check(
+      contents.includes(`topics = [ "${topic}" ]`),
+      `${fileName} must declare the ${topic} webhook subscription`,
+    );
+  }
+  const subscriptionUris = [...contents.matchAll(/uri\s*=\s*"(.*)"/g)].map((match) => match[1]);
+  check(subscriptionUris.length === 2, `${fileName} must declare exactly two webhook subscription URIs`);
+  for (const uri of subscriptionUris) {
+    check(
+      uri === `${origin}/api/shopify-app/instagram-feed/webhooks`,
+      `${fileName} webhook subscription URI must point at ${origin}`,
+    );
+  }
   check(contents.includes('embedded = true'), `${fileName} must stay embedded`);
   check(contents.includes(`scopes = "${expectedScopes}"`), `${fileName} scopes differ from config/instagram_feed.php`);
-  // DecoAdmin 通过授权码回调建立本 App 的 offline token（与 Commerce Hub 一致）。
-  // 改成 Shopify 托管安装前必须先把后端换回 token exchange。
-  check(contents.includes('use_legacy_install_flow = true'), `${fileName} must keep the authorization-code install flow`);
+  // 安装必须保持 Shopify 托管：会话由 App Bridge session token 走 token exchange 建立
+  // （ShopifyInstagramFeedAppService::bootstrap），后端已经没有授权码回调可用。
+  //
+  // 这里只匹配真实赋值行，不匹配注释 —— 否则注释里提到这个键名就会误报。
+  check(
+    ! /^\s*use_legacy_install_flow\s*=/m.test(contents),
+    `${fileName} must keep Shopify-managed installation: the authorization-code callback was removed from DecoAdmin`,
+  );
+  // Shopify CLI 的 schema 仍要求 [auth]，即使托管安装下后端没有授权码回调。
+  // 它必须指向本环境的 App Home 入口 —— 指向已被删除的旧回调路径会 404，
+  // 指向另一套环境则会把商家送去另一个后端。
+  check(
+    contents.includes(`redirect_urls = [ "${origin}/shopify-app/instagram-feed" ]`),
+    `${fileName} must point auth.redirect_urls at ${origin}/shopify-app/instagram-feed`,
+  );
+  check(
+    ! contents.includes('/oauth/callback'),
+    `${fileName} must not reference the removed authorization-code callback`,
+  );
   check(
     contents.includes('automatically_update_urls_on_dev = false'),
     `${fileName} must not rewrite deployed URLs`,
@@ -135,23 +158,20 @@ const selectedOrigin = selectedOrigins[0];
 const selectedEnvironment = environmentByOrigin.get(selectedOrigin);
 assertConfiguration(selectedConfiguration, selectedOrigin);
 
-// 扩展里的 appOrigin 是构建期常量，会随 App 版本一起发布，
-// 因此必须与选中配置指向同一个环境，否则商家会被引导到另一个后端。
-const runtimePath = join(projectRoot, 'extensions/app-home/src/runtime.mjs');
-check(existsSync(runtimePath), 'extensions/app-home/src/runtime.mjs is missing');
-const runtimeContents = readFileSync(runtimePath, 'utf8');
+// App Home 走自托管 iframe 模型（页面由 DecoAdmin 提供），所以这里不能再有
+// admin.app.home.render 扩展 —— 它会占据 App Home 这个坑位，商家从后台导航打开
+// 看到的就是扩展而不是 iframe 页面，两者互斥。
+const appHomeExtension = join(projectRoot, 'extensions/app-home');
 check(
-  runtimeContents.includes(`appOrigin: '${selectedOrigin}'`),
-  `runtime.mjs appOrigin must match ${selectedConfiguration} (${selectedEnvironment}: ${selectedOrigin})`,
+  ! existsSync(appHomeExtension),
+  'extensions/app-home must stay removed: App Home is served as a DecoAdmin-hosted iframe, and an admin.app.home.render extension would take over that surface',
 );
-check(
-  runtimeContents.includes(`environment: '${selectedEnvironment}'`),
-  `runtime.mjs environment must match ${selectedConfiguration} (${selectedEnvironment})`,
-);
-check(
-  runtimeContents.includes(sharedClientId),
-  'runtime.mjs must map the shared Instagram Feed client_id',
-);
+for (const extensionToml of walk(join(projectRoot, 'extensions')).filter((path) => path.endsWith('shopify.extension.toml'))) {
+  check(
+    ! readFileSync(extensionToml, 'utf8').includes('admin.app.home.render'),
+    `${relative(projectRoot, extensionToml).replaceAll('\\', '/')} must not target admin.app.home.render`,
+  );
+}
 
 // 本地隧道环境已废弃：配置文件不能悄悄回来。
 check(

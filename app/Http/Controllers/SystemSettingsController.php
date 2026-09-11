@@ -117,32 +117,6 @@ class SystemSettingsController extends Controller
         return $this->save('student_ai', $values, $request, 'AI 学生证识别设置已保存。');
     }
 
-    public function updateInstagramMeta(Request $request): RedirectResponse
-    {
-        $values = $request->validate([
-            'instagram_app_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'instagram_app_secret' => ['nullable', 'string', 'max:1000'],
-            'facebook_app_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'facebook_app_secret' => ['nullable', 'string', 'max:1000'],
-            'facebook_login_config_id' => ['nullable', 'string', 'max:120', 'regex:/^[0-9]+$/'],
-        ]);
-
-        return $this->save('instagram_meta', $values, $request, 'Instagram / Facebook 应用凭证已保存。');
-    }
-
-    public function updateInstagramR2(Request $request): RedirectResponse
-    {
-        $values = $request->validate([
-            'account_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9]+$/'],
-            'access_key_id' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'secret_access_key' => ['nullable', 'string', 'max:1000'],
-            'bucket' => ['nullable', 'string', 'max:120', 'regex:/^[a-z0-9][a-z0-9.-]*$/'],
-            'public_base_url' => ['nullable', 'url:https', 'max:2000'],
-        ]);
-
-        return $this->save('instagram_r2', $values, $request, 'Cloudflare R2 配置已保存。');
-    }
-
     /** @param array<string, mixed> $values */
     private function save(string $section, array $values, Request $request, string $message): RedirectResponse
     {

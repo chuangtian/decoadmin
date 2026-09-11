@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\InstagramAccount;
+use App\Services\InstagramFeed\InstagramFeedStoreCredentials;
 use App\Services\InstagramFeed\InstagramMirrorService;
 use App\Services\InstagramFeed\InstagramProviderService;
 use App\Services\InstagramFeed\R2Client;
@@ -12,8 +13,11 @@ use Throwable;
 /**
  * 定时推进 Instagram 媒体的 R2 转存，并续期快到期的长效 token。
  *
- * 转存在后台页面上是「点一次搬一批」，媒体多的时候一次点不完；这里兜底把队列
+ * 转存在应用页面上是「点一次搬一批」，媒体多的时候一次点不完；这里兜底把队列
  * 慢慢清空，商家不必反复点按钮。
+ *
+ * 凭证按店铺存，所以「是否配了 R2」也是按店铺判断的：每个店铺进入循环时先加载
+ * 自己的凭证，再检查就绪状态。不能在循环外做一次全局判断就整体跳过。
  */
 class AdvanceInstagramFeedMirrors extends Command
 {
@@ -25,13 +29,8 @@ class AdvanceInstagramFeedMirrors extends Command
         InstagramMirrorService $mirror,
         InstagramProviderService $providers,
         R2Client $r2,
+        InstagramFeedStoreCredentials $credentials,
     ): int {
-        if (! $r2->isConfigured()) {
-            $this->warn('Cloudflare R2 尚未配置，已跳过转存。');
-
-            return self::SUCCESS;
-        }
-
         $storeFilter = $this->option('store');
         $batch = $this->option('batch');
         $batchSize = is_numeric($batch) ? max(1, (int) $batch) : null;
@@ -45,10 +44,21 @@ class AdvanceInstagramFeedMirrors extends Command
         $ready = 0;
         $failed = 0;
         $pending = 0;
+        $skipped = 0;
 
         foreach ($accounts as $account) {
             $store = $account->store;
             if (! $store) {
+                continue;
+            }
+
+            // 必须每个店铺都重新加载：apply() 是进程内的 config 覆盖，
+            // 漏掉一次就会用上一个店铺的凭证去操作这个店铺的数据。
+            $credentials->apply($store);
+
+            if (! $r2->isConfigured()) {
+                $skipped++;
+
                 continue;
             }
 
@@ -75,6 +85,9 @@ class AdvanceInstagramFeedMirrors extends Command
             $pending += $result['pending'];
         }
 
+        if ($skipped > 0) {
+            $this->warn("有 {$skipped} 个店铺未配置 Cloudflare R2，已跳过转存。");
+        }
         $this->info("已转存 {$ready} 条，失败 {$failed} 条，仍待处理 {$pending} 条。");
 
         return self::SUCCESS;

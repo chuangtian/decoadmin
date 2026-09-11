@@ -29,6 +29,7 @@ class InstagramFeedWebhookService
         private ShopifyWebhookHmacValidator $hmacValidator,
         private InstagramFeedAppRegistry $registry,
         private InstagramMirrorService $mirror,
+        private InstagramFeedStoreCredentials $credentials,
     ) {}
 
     /**
@@ -173,6 +174,9 @@ class InstagramFeedWebhookService
      */
     private function handleUninstall(Store $store): array
     {
+        // 要删的是这个店铺自己桶里的对象，先加载它的 R2 凭证。
+        $this->credentials->apply($store);
+
         $purged = $this->mirror->purgeStoreMedia($store);
         $store->instagramGalleries()->delete();
         $store->instagramAccount()->delete();
