@@ -6,6 +6,8 @@ use App\Models\ShopifyProductMonitor;
 use App\Models\StoreAlert;
 use App\Models\StoreNotificationSetting;
 use App\Models\SyncJob;
+use App\Support\SafeDiagnosticMessage;
+use App\Support\StoreAlertPresentation;
 use App\Support\StoreDateTime;
 use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Http;
@@ -102,7 +104,10 @@ class StoreAlertNotificationService
 
     private function plainText(StoreAlert $alert): string
     {
-        return implode("\n", ['DecoAdmin 店铺异常告警', "店铺：{$alert->store->name}", "类型：{$alert->type}", "级别：{$alert->severity}", "标题：{$alert->title}", "说明：{$alert->message}", '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store)]);
+        $message = SafeDiagnosticMessage::sanitize($alert->message);
+        $title = StoreAlertPresentation::title($alert);
+
+        return implode("\n", ['DecoAdmin 店铺异常告警', "店铺：{$alert->store->name}", "类型：{$alert->type}", "级别：{$alert->severity}", "标题：{$title}", "说明：{$message}", '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store)]);
     }
 
     private function enabledForType(StoreNotificationSetting $settings, string $type): bool

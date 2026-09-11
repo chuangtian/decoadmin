@@ -12,6 +12,7 @@ use App\Models\MetaAdInsight;
 use App\Models\MetaAdSet;
 use App\Models\MetaAdSyncShard;
 use App\Models\Store;
+use App\Models\StoreAlert;
 use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
@@ -1067,6 +1068,7 @@ class MetaAdsSyncService
                     ...($shard->result ?? []),
                     'async_report_id' => $reportId,
                     'async_percent' => 0,
+                    'async_poll_count' => 0,
                     'async_submitted_at' => now()->toIso8601String(),
                 ]])->save();
 
@@ -1086,9 +1088,22 @@ class MetaAdsSyncService
                 );
             }
             if ($report['state'] !== 'completed') {
+                $pollCount = max(0, (int) data_get($shard->result, 'async_poll_count', 0)) + 1;
+                if ($this->asyncReportExpired($shard, $pollCount)) {
+                    return $this->recoverFailedAsyncReport(
+                        $shard,
+                        $account,
+                        $sinceDate,
+                        $untilDate,
+                        $reportId,
+                        $replacementShardIds,
+                        'timeout',
+                    );
+                }
                 $shard->forceFill(['result' => [
                     ...($shard->result ?? []),
                     'async_percent' => $report['percent'],
+                    'async_poll_count' => $pollCount,
                     'async_checked_at' => now()->toIso8601String(),
                 ]])->save();
 
@@ -1127,12 +1142,14 @@ class MetaAdsSyncService
         string $untilDate,
         string $reportId,
         array &$replacementShardIds,
+        string $reason = 'failed',
     ): bool {
         $result = $shard->result ?? [];
         $failures = max(0, (int) ($result['async_failure_count'] ?? 0)) + 1;
         $history = array_values(array_filter((array) ($result['async_failed_reports'] ?? []), 'is_array'));
         $history[] = [
             'report_id' => $reportId,
+            'reason' => $reason,
             'failed_at' => now()->toIso8601String(),
         ];
         $history = array_slice($history, -10);
@@ -1174,6 +1191,7 @@ class MetaAdsSyncService
             unset(
                 $result['async_report_id'],
                 $result['async_percent'],
+                $result['async_poll_count'],
                 $result['async_submitted_at'],
                 $result['async_checked_at'],
             );
@@ -1190,9 +1208,33 @@ class MetaAdsSyncService
         }
 
         throw new MetaAdsApiException(
-            "Meta Ads 异步洞察报表在 {$sinceDate} 至 {$untilDate} 范围内连续生成失败。",
+            $reason === 'timeout'
+                ? "Meta Ads 异步洞察报表在 {$sinceDate} 至 {$untilDate} 范围内等待超时。"
+                : "Meta Ads 异步洞察报表在 {$sinceDate} 至 {$untilDate} 范围内连续生成失败。",
             'meta_ads_async_report_terminal_failed',
         );
+    }
+
+    private function asyncReportExpired(MetaAdSyncShard $shard, int $pollCount): bool
+    {
+        $maxPolls = max(1, (int) config('services.meta_ads.async_max_poll_attempts', 120));
+        if ($pollCount >= $maxPolls) {
+            return true;
+        }
+
+        $submittedAt = data_get($shard->result, 'async_submitted_at');
+        if (! is_string($submittedAt) || $submittedAt === '') {
+            return false;
+        }
+
+        try {
+            $timeout = max(60, (int) config('services.meta_ads.async_report_timeout_seconds', 1800));
+
+            return CarbonImmutable::parse($submittedAt)->addSeconds($timeout)->lte(now());
+        } catch (Throwable) {
+            // Old malformed checkpoints are recovered by the bounded poll count.
+            return false;
+        }
     }
 
     /** @return list<int> */
@@ -1527,7 +1569,7 @@ class MetaAdsSyncService
 
     private function resumableJob(Store $store, string $mode): ?SyncJob
     {
-        return SyncJob::query()
+        $job = SyncJob::query()
             ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->getKey())
             ->where('type', self::SYNC_TYPE)
@@ -1536,8 +1578,20 @@ class MetaAdsSyncService
             ->where('created_at', '>=', now()->subHours(48))
             ->latest('id')
             ->get()
-            ->first(fn (SyncJob $job): bool => data_get($job->payload, 'strategy') === 'resumable_shards'
-                && MetaAdSyncShard::query()->where('sync_job_id', $job->getKey())->exists());
+            ->first(fn (SyncJob $candidate): bool => data_get($candidate->payload, 'strategy') === 'resumable_shards'
+                && MetaAdSyncShard::query()->where('sync_job_id', $candidate->getKey())->exists());
+
+        if (! $job || $job->status !== 'failed') {
+            return $job;
+        }
+
+        $terminalFailure = MetaAdSyncShard::query()
+            ->where('sync_job_id', $job->getKey())
+            ->where('status', 'failed')
+            ->where('error_code', 'meta_ads_async_report_terminal_failed')
+            ->exists();
+
+        return $terminalFailure ? null : $job;
     }
 
     private function resumeJob(Store $store, SyncJob $job): void
@@ -1890,6 +1944,18 @@ class MetaAdsSyncService
                 $attributes['last_full_sync_at'] = $finishedAt;
             }
             $state->forceFill($attributes)->save();
+            StoreAlert::query()
+                ->where('organization_id', $job->organization_id)
+                ->where('store_id', $job->store_id)
+                ->where('type', 'sync')
+                ->where('source_type', SyncJob::class)
+                ->whereIn('source_id', SyncJob::query()
+                    ->select('id')
+                    ->where('organization_id', $job->organization_id)
+                    ->where('store_id', $job->store_id)
+                    ->where('type', self::SYNC_TYPE))
+                ->whereIn('status', ['open', 'acknowledged'])
+                ->update(['status' => 'resolved', 'resolved_at' => $finishedAt]);
         });
     }
 

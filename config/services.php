@@ -55,6 +55,8 @@ return [
         'rolling_days' => (int) env('META_ADS_ROLLING_DAYS', 3),
         'initial_full_estimate_minutes' => (int) env('META_ADS_INITIAL_FULL_ESTIMATE_MINUTES', 45),
         'async_poll_interval_seconds' => (int) env('META_ADS_ASYNC_POLL_INTERVAL_SECONDS', 15),
+        'async_report_timeout_seconds' => (int) env('META_ADS_ASYNC_REPORT_TIMEOUT_SECONDS', 1800),
+        'async_max_poll_attempts' => (int) env('META_ADS_ASYNC_MAX_POLL_ATTEMPTS', 120),
         'async_recovery_window_days' => (int) env('META_ADS_ASYNC_RECOVERY_WINDOW_DAYS', 31),
         'async_min_window_days' => (int) env('META_ADS_ASYNC_MIN_WINDOW_DAYS', 7),
         'async_max_resubmissions' => (int) env('META_ADS_ASYNC_MAX_RESUBMISSIONS', 2),

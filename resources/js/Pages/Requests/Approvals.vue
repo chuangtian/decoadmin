@@ -91,7 +91,7 @@ function review(action: 'approve' | 'reject'): void {
                     <option value="approved">已通过</option>
                     <option value="rejected">已驳回</option>
                 </select>
-                <button class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white">筛选</button>
+                <button class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white sm:justify-self-start">筛选</button>
             </form>
 
             <section class="grid gap-4 lg:grid-cols-2">

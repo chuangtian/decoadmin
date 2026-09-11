@@ -247,6 +247,38 @@ class DashboardNotificationFinanceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'store_alert_notification_resent', 'store_id' => $store->id]);
     }
 
+    public function test_alert_and_notification_pages_hide_database_details_from_legacy_records(): void
+    {
+        [$user, $organization, $store] = $this->context('organization-admin');
+        $alert = $this->alert($organization, $store);
+        $alert->update([
+            'title' => 'Shopify 数据同步失败',
+            'message' => "SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'private@example.com' for key 'webhook_events.webhook_id_unique' (Database: decoadmin_staging, SQL: insert into webhook_events ...)",
+            'delivery_error' => 'SQLSTATE[HY000]: database host=internal-db',
+            'context' => ['sync_type' => 'meta_ads'],
+        ]);
+        $session = $this->contextSession($organization, $store);
+
+        $this->actingAs($user)->withSession($session)->get(route('alerts.index'))
+            ->assertOk()
+            ->assertDontSee('SQLSTATE')
+            ->assertDontSee('decoadmin_staging')
+            ->assertDontSee('private@example.com')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('alerts.data.0.title', 'Meta Ads 数据同步失败')
+                ->where('alerts.data.0.message', '数据同步时检测到重复记录冲突，系统会在后续任务中自动重试。')
+                ->where('alerts.data.0.delivery_error', '数据同步过程中发生数据库异常，请稍后重试；详细信息仅保留在服务器日志中。'));
+
+        $this->actingAs($user)->withSession($session)->get(route('notifications.index'))
+            ->assertOk()
+            ->assertDontSee('SQLSTATE')
+            ->assertDontSee('decoadmin_staging')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('notifications.data.0.title', 'Meta Ads 数据同步失败')
+                ->where('notifications.data.0.message', '数据同步时检测到重复记录冲突，系统会在后续任务中自动重试。')
+                ->where('notifications.data.0.delivery_error', '数据同步过程中发生数据库异常，请稍后重试；详细信息仅保留在服务器日志中。'));
+    }
+
     public function test_company_finance_records_are_scoped_and_summarized(): void
     {
         [$user, $organization, $store] = $this->context('organization-admin');

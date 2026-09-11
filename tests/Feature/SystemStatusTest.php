@@ -32,7 +32,7 @@ class SystemStatusTest extends TestCase
                 ->component('System/Status')
                 ->where('systemStatus.summary.status', fn (string $status): bool => in_array($status, ['healthy', 'warning', 'degraded'], true))
                 ->has('systemStatus.services', 6)
-                ->has('systemStatus.queues', 5)
+                ->has('systemStatus.queues', 9)
                 ->has('systemStatus.incidents', 3)
                 ->where('systemStatus.runtime.environment', app()->environment()));
     }
@@ -68,6 +68,7 @@ class SystemStatusTest extends TestCase
             ->assertOk()
             ->assertDontSee($secret)
             ->assertInertia(fn (Assert $page) => $page
+                ->where('systemStatus.summary.status', 'warning')
                 ->where('systemStatus.incidents.0.count', 1)
                 ->where('systemStatus.incidents.1.count', 1));
     }

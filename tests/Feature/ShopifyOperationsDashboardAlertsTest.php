@@ -138,6 +138,28 @@ class ShopifyOperationsDashboardAlertsTest extends TestCase
         Queue::assertPushed(DeliverStoreAlertNotificationJob::class, 1);
     }
 
+    public function test_meta_ads_sync_failure_uses_the_correct_alert_title(): void
+    {
+        Queue::fake();
+        [, $organization, $store] = $this->context('organization-admin');
+        SyncJob::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'type' => 'meta_ads',
+            'direction' => 'pull',
+            'status' => 'failed',
+            'error_code' => 'meta_ads_async_report_terminal_failed',
+            'last_error' => 'Meta Ads 异步洞察报表等待超时。',
+            'failed_at' => now(),
+        ]);
+
+        $this->assertSame(1, app(StoreOperationalAlertService::class)->scan($store)['created']);
+        $alert = StoreAlert::query()->sole();
+        $this->assertSame('Meta Ads 数据同步失败', $alert->title);
+        $this->assertSame('meta_ads_async_report_terminal_failed', $alert->code);
+    }
+
     public function test_alert_actions_enforce_current_store_and_permissions(): void
     {
         [$admin, $organization, $store] = $this->context('organization-admin');
