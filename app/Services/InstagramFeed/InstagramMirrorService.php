@@ -60,7 +60,7 @@ class InstagramMirrorService
                 $failed++;
                 $media->forceFill([
                     'mirror_status' => 'failed',
-                    'mirror_error' => mb_substr($exception->getMessage(), 0, 500),
+                    'mirror_error' => $this->safeFailureReason($exception),
                 ])->save();
             }
         }
@@ -71,6 +71,27 @@ class InstagramMirrorService
             'pending' => $this->queuedCount($store),
             'configured' => true,
         ];
+    }
+
+    /**
+     * 失败原因要落库并展示给商家，所以必须先脱敏。
+     *
+     * HTTP 客户端的异常消息通常带完整请求地址：Instagram 的媒体地址是带签名的，
+     * R2 端点含账号标识，预签名地址还会带 X-Amz-Credential。这些都不该出现在
+     * 商家看到的日志里，所以统一去掉查询串，并抹掉常见的令牌与凭证片段。
+     */
+    private function safeFailureReason(Throwable $exception): string
+    {
+        $reason = $exception->getMessage();
+
+        // 去掉所有 URL 的查询串（签名、凭证都在这里）。
+        $reason = preg_replace('#(https?://[^\s?"\']+)\?[^\s"\']*#i', '$1', $reason) ?? $reason;
+        // 兜底抹掉可能夹带的令牌与访问密钥。
+        $reason = preg_replace('/\b(shp(at|ca|pa|ss)_[A-Za-z0-9]+)\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/\b(AKIA|ASIA)[A-Z0-9]{8,}\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/(?i)\b(x-amz-credential|x-amz-signature|access[_-]?key|secret)\b\S*/', '[redacted]', $reason) ?? $reason;
+
+        return mb_substr(trim($reason), 0, 500);
     }
 
     /**

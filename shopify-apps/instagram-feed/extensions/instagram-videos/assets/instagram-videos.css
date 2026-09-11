@@ -27,6 +27,17 @@
   opacity: 0.75;
 }
 
+/* 只在主题编辑器里出现的可选展示组提示，店面访客看不到。 */
+.igv__hint {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px dashed currentcolor;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+
 /* ---------- 头部 ---------- */
 
 .igv__header {

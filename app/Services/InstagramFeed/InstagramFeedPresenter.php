@@ -7,6 +7,7 @@ use App\Models\InstagramFeedInstallation;
 use App\Models\InstagramGallery;
 use App\Models\InstagramMedia;
 use App\Models\Store;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -97,6 +98,62 @@ class InstagramFeedPresenter
             'appSessionReady' => $installation?->isUsable() ?? false,
             'appSession' => $this->appSession($installation),
         ];
+    }
+
+    /**
+     * 转存失败日志。
+     *
+     * 商家在 Shopify 应用里要能自己看懂为什么失败，所以这里做两件事：
+     * 把原始异常消息再脱敏一次（历史数据可能是脱敏改动之前写入的），
+     * 并对常见失败归纳出一句可行动的说明。
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function mirrorFailures(Store $store, int $limit = 50): array
+    {
+        return InstagramMedia::query()
+            ->where('store_id', $store->id)
+            ->where('mirror_status', 'failed')
+            ->orderByDesc('updated_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (InstagramMedia $media): array => [
+                'id' => $media->uuid,
+                'media_type' => $media->media_type,
+                'caption' => $media->caption === null ? null : Str::limit($media->caption, 60),
+                'permalink' => $media->permalink,
+                'preview_url' => $media->previewUrl(),
+                'posted_at' => $media->posted_at?->toIso8601String(),
+                'failed_at' => $media->updated_at?->toIso8601String(),
+                'reason' => $this->failureReason((string) $media->mirror_error),
+                'detail' => $this->safeReason((string) $media->mirror_error),
+            ])
+            ->all();
+    }
+
+    /** 把技术性错误归纳成商家能行动的一句话。归纳不出来就回退到原始说明。 */
+    private function failureReason(string $raw): string
+    {
+        $reason = mb_strtolower($raw);
+
+        return match (true) {
+            $raw === '' => '转存失败，原因未记录。可以点重试。',
+            str_contains($reason, 'timeout') || str_contains($reason, 'timed out')
+                => '下载或上传超时。视频较大时容易出现，重试通常能过。',
+            str_contains($reason, 'could not resolve host') || str_contains($reason, 'connection')
+                => '网络连接失败，稍后重试。',
+            str_contains($reason, '403') || str_contains($reason, 'forbidden')
+                => 'Instagram 的媒体链接已过期。请先重新同步内容，再重试转存。',
+            str_contains($reason, '404') || str_contains($reason, 'not found')
+                => 'Instagram 上已找不到这条内容，可能已被删除。',
+            str_contains($reason, '401') || str_contains($reason, 'signature')
+                => '存储凭证校验失败，请联系管理员检查存储配置。',
+            str_contains($reason, 'too large') || str_contains($reason, 'max_object_bytes')
+                => '文件超过单个文件上限，已跳过。',
+            str_contains($reason, 'disk') || str_contains($reason, 'space')
+                => '临时磁盘空间不足，稍后重试。',
+            default => '转存失败，详情见下方原始信息。',
+        };
     }
 
     /** @return array<string, mixed>|null */
@@ -198,6 +255,21 @@ class InstagramFeedPresenter
             'comments_count' => $media->comments_count,
             'products' => $products,
         ];
+    }
+
+    /** 展示给商家的原始说明：再抹一次令牌与凭证，去掉 URL 查询串，并截断。 */
+    private function safeReason(string $raw): string
+    {
+        if (trim($raw) === '') {
+            return '';
+        }
+
+        $reason = preg_replace('#(https?://[^\s?"\']+)\?[^\s"\']*#i', '$1', $raw) ?? $raw;
+        $reason = preg_replace('/\b(shp(at|ca|pa|ss)_[A-Za-z0-9]+)\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/\b(AKIA|ASIA)[A-Z0-9]{8,}\b/', '[redacted]', $reason) ?? $reason;
+        $reason = preg_replace('/(?i)\b(x-amz-credential|x-amz-signature|access[_-]?key|secret)\b\S*/', '[redacted]', $reason) ?? $reason;
+
+        return Str::limit(trim($reason), 300);
     }
 
     /**

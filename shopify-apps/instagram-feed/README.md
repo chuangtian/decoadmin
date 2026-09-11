@@ -46,9 +46,10 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
 `shopify.app.production.toml` 保持生产地址不动，它就是切回生产的还原点。
 
 Cloudflare 隧道环境已废弃，`shopify.app.local.toml` 不允许重新出现。
-`validate-project.mjs` 的闸门：每份配置的 `application_url` 与两条 webhook 订阅地址必须同源、
-不得混入另一套环境的域名、不得出现隧道或本地地址，`shopify.app.toml` 必须完整镜像某一套环境，
-安装必须保持 Shopify 托管（不得出现 `use_legacy_install_flow` 或 `[auth]`），
+`validate-project.mjs` 的闸门：每份配置的 `application_url`、两条 webhook 订阅地址与
+`auth.redirect_urls` 必须同源、不得混入另一套环境的域名、不得出现隧道或本地地址，
+`shopify.app.toml` 必须完整镜像某一套环境，安装必须保持 Shopify 托管
+（不得出现 `use_legacy_install_flow`、不得引用 `/oauth/callback`），
 且不得存在 `admin.app.home.render` 扩展。
 
 要让测试与生产真正并行（互不停用），必须先在 Dev Dashboard 新建一个**独立的** App，
@@ -136,8 +137,11 @@ npm run deploy:production
 
 ## 安装与会话
 
-安装由 **Shopify 托管**：配置里不声明 `use_legacy_install_flow`，也没有 `[auth] redirect_urls`。
+安装由 **Shopify 托管**：配置里不声明 `use_legacy_install_flow`。
 商家点安装链接后由 Shopify 弹权限授予页，装好直接打开应用，**不需要任何授权动作**。
+
+`[auth] redirect_urls` 仍要声明（CLI schema 要求），但指向 App Home 入口
+`/shopify-app/instagram-feed` 本身，不是授权回调——后端已经没有回调了。
 
 DecoAdmin 侧的人工授权入口已经全部移除（`InstagramFeedShopifyOAuthController`、
 `InstagramFeedOAuthService`、`/shopify-authorize`、`/shopify-verify`、OAuth 回调路由）。

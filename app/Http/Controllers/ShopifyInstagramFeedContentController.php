@@ -94,6 +94,16 @@ class ShopifyInstagramFeedContentController extends Controller
         });
     }
 
+    /** 手动触发一次前台同步。展示组编排完成后不需要它，这里留给"前台没更新"时自助恢复。 */
+    public function syncStorefrontNow(Request $request): JsonResponse
+    {
+        return $this->write($request, function (Store $store): string {
+            $result = $this->publisher->publish($store, null);
+
+            return "已把 {$result['galleries']} 个展示组、共 {$result['items']} 条内容同步到店铺前台。";
+        });
+    }
+
     public function sync(Request $request): JsonResponse
     {
         return $this->write($request, function (Store $store): string {
@@ -103,7 +113,7 @@ class ShopifyInstagramFeedContentController extends Controller
                 : 'Cloudflare R2 尚未配置，暂未转存';
 
             return "已拉取 {$result['fetched']} 条，新增 {$result['created']} 条，{$mirrorNote}。";
-        });
+        }, syncStorefront: true);
     }
 
     public function mirror(Request $request): JsonResponse
@@ -119,7 +129,7 @@ class ShopifyInstagramFeedContentController extends Controller
             }
 
             return "转存完成 {$result['ready']} 条，失败 {$result['failed']} 条，待处理 {$result['pending']} 条。";
-        });
+        }, syncStorefront: true);
     }
 
     public function retryMirror(Request $request, InstagramMedia $media): JsonResponse
@@ -130,15 +140,34 @@ class ShopifyInstagramFeedContentController extends Controller
             $result = $this->sync->advanceMirrors($store);
 
             return "已重试，成功 {$result['ready']} 条，失败 {$result['failed']} 条。";
-        });
+        }, syncStorefront: true);
     }
 
-    public function publish(Request $request): JsonResponse
+    /** 转存失败日志：商家自己排查用，每条带可行动说明与原始信息。 */
+    public function mirrorFailures(Request $request): JsonResponse
+    {
+        return $this->read($request, fn (Store $store): array => [
+            'failures' => $this->presenter->mirrorFailures($store),
+        ]);
+    }
+
+    /**
+     * 把该店铺所有转存失败的内容重新排队。
+     *
+     * 逐条重试在失败很多时要点很多次，也会撞单条重试的限流，所以给一个整批入口：
+     * 只改状态，实际转存交给页面上的自动推进或后台调度。
+     */
+    public function retryAllMirrorFailures(Request $request): JsonResponse
     {
         return $this->write($request, function (Store $store): string {
-            $result = $this->publisher->publish($store, null);
+            $requeued = InstagramMedia::query()
+                ->where('store_id', $store->id)
+                ->where('mirror_status', 'failed')
+                ->update(['mirror_status' => 'pending', 'mirror_error' => null, 'updated_at' => now()]);
 
-            return "已发布 {$result['galleries']} 个展示组、共 {$result['items']} 条内容到店铺前台。";
+            return $requeued > 0
+                ? "已把 {$requeued} 条失败内容重新排队，转存会自动继续。"
+                : '没有需要重试的内容。';
         });
     }
 
@@ -160,6 +189,7 @@ class ShopifyInstagramFeedContentController extends Controller
         return $this->write(
             $request,
             fn (Store $store): string => '已创建展示组「'.$this->galleries->create($store, $values['name'], null)->name.'」。',
+            syncStorefront: true,
         );
     }
 
@@ -174,7 +204,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->rename($store, $gallery, $values['name'], null);
 
             return '已更新展示组名称。';
-        });
+        }, syncStorefront: true);
     }
 
     public function destroyGallery(Request $request, InstagramGallery $gallery): JsonResponse
@@ -184,7 +214,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->delete($store, $gallery, null);
 
             return '已删除展示组。';
-        });
+        }, syncStorefront: true);
     }
 
     public function addGalleryItems(Request $request, InstagramGallery $gallery): JsonResponse
@@ -195,7 +225,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->assertGalleryOwnership($store, $gallery);
 
             return '已加入 '.$this->galleries->addItems($store, $gallery, $mediaIds, null).' 条内容。';
-        });
+        }, syncStorefront: true);
     }
 
     public function removeGalleryItems(Request $request, InstagramGallery $gallery): JsonResponse
@@ -206,7 +236,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->assertGalleryOwnership($store, $gallery);
 
             return '已移出 '.$this->galleries->removeItems($store, $gallery, $mediaIds, null).' 条内容。';
-        });
+        }, syncStorefront: true);
     }
 
     public function reorderGallery(Request $request, InstagramGallery $gallery): JsonResponse
@@ -218,7 +248,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->reorder($store, $gallery, $mediaIds, null);
 
             return '已保存展示顺序。';
-        });
+        }, syncStorefront: true);
     }
 
     public function updateMediaProducts(Request $request, InstagramMedia $media): JsonResponse
@@ -233,7 +263,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->setMediaProducts($store, $media, array_values($values['product_ids']), null);
 
             return '已保存关联商品。';
-        });
+        }, syncStorefront: true);
     }
 
     /**
@@ -257,12 +287,18 @@ class ShopifyInstagramFeedContentController extends Controller
      *
      * @param  callable(Store): string  $action
      */
-    private function write(Request $request, callable $action): JsonResponse
+    private function write(Request $request, callable $action, bool $syncStorefront = false): JsonResponse
     {
         try {
             $store = $this->session->store($request);
+            $message = $action($store);
 
-            return response()->json(['data' => ['message' => $action($store)]]);
+            // 前台数据没有"发布"按钮：凡是会改变前台展示的动作，完成后立刻同步一次。
+            if ($syncStorefront) {
+                $message .= $this->syncStorefront($store);
+            }
+
+            return response()->json(['data' => ['message' => $message]]);
         } catch (InstagramFeedException $exception) {
             return $this->failure($exception);
         } catch (Throwable $exception) {
@@ -272,6 +308,28 @@ class ShopifyInstagramFeedContentController extends Controller
                 'code' => 'INSTAGRAM_FEED_ACTION_FAILED',
                 'message' => '操作失败，请稍后重试；如果问题持续，请联系管理员。',
             ]], 500);
+        }
+    }
+
+    /**
+     * 把当前内容同步到店铺前台。
+     *
+     * 失败不能推翻已经成功的主动作（内容已经改了），但也不能静默——否则商家以为
+     * 前台已经更新。所以把原因作为后缀附在消息里，同时原因已由 publisher 写进
+     * 安装记录的 last_error，运维在后台也能看到。
+     */
+    private function syncStorefront(Store $store): string
+    {
+        try {
+            $this->publisher->publish($store, null);
+
+            return '';
+        } catch (InstagramFeedException $exception) {
+            return ' 但前台数据更新失败：'.$exception->getMessage();
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return ' 但前台数据更新失败，请稍后重试。';
         }
     }
 

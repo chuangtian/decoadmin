@@ -33,3 +33,8 @@ api_version = "2026-07"
 # 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
 [access_scopes]
 scopes = "read_products"
+
+# 托管安装下后端没有授权码回调，但 Shopify CLI 的 schema 仍要求声明 [auth]。
+# 与 deco-personalization 一致，指向 App Home 入口本身。
+[auth]
+redirect_urls = [ "https://testadmin.decomkt.com/shopify-app/instagram-feed" ]

@@ -111,9 +111,16 @@ function assertConfiguration(fileName, origin) {
     ! /^\s*use_legacy_install_flow\s*=/m.test(contents),
     `${fileName} must keep Shopify-managed installation: the authorization-code callback was removed from DecoAdmin`,
   );
+  // Shopify CLI 的 schema 仍要求 [auth]，即使托管安装下后端没有授权码回调。
+  // 它必须指向本环境的 App Home 入口 —— 指向已被删除的旧回调路径会 404，
+  // 指向另一套环境则会把商家送去另一个后端。
   check(
-    ! /^\s*\[auth\]/m.test(contents) && ! /^\s*redirect_urls\s*=/m.test(contents),
-    `${fileName} must not declare OAuth redirect URLs under Shopify-managed installation`,
+    contents.includes(`redirect_urls = [ "${origin}/shopify-app/instagram-feed" ]`),
+    `${fileName} must point auth.redirect_urls at ${origin}/shopify-app/instagram-feed`,
+  );
+  check(
+    ! contents.includes('/oauth/callback'),
+    `${fileName} must not reference the removed authorization-code callback`,
   );
   check(
     contents.includes('automatically_update_urls_on_dev = false'),
