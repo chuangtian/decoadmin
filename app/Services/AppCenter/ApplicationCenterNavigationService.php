@@ -81,6 +81,11 @@ class ApplicationCenterNavigationService
         $base = "/organizations/{$organization->getKey()}/stores/{$store->getKey()}";
 
         return match (true) {
+            str_starts_with($handle, 'deco-marketing-') => [
+                'name' => '营销自动化',
+                'route' => $base.'/marketing',
+                'permission' => 'marketing.view',
+            ],
             str_starts_with($handle, 'deco-personalization') => [
                 'name' => '个性化推荐',
                 'route' => $base.'/personalization',

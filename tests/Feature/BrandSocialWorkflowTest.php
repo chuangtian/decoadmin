@@ -65,6 +65,40 @@ class BrandSocialWorkflowTest extends TestCase
         $this->assertFalse(BrandSocialPostState::query()->sole()->fresh()->is_hidden);
     }
 
+    public function test_recycle_bin_keeps_source_data_excludes_totals_and_restores_posts(): void
+    {
+        [$user, $organization, $store] = $this->context('operator');
+        $this->createSocialPost($organization, $store, 'recycle-post', [
+            '发布日期' => '2026-08-18', '平台' => 'Instagram', '描述' => 'Recycle test',
+            '帖子类型' => 'Reels', '浏览量' => 250, '点赞' => 10,
+        ]);
+        $payload = ['source_section' => 'natural-traffic:social', 'source_table_key' => 'social-table',
+            'source_record_id' => 'recycle-post', 'status' => 'deleted'];
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store));
+        $this->put(route('natural-traffic.brand-media.posts.visibility'), $payload)->assertRedirect();
+        $this->assertTrue(BrandSocialPostState::query()->sole()->is_deleted);
+        $this->assertDatabaseCount('feishu_bitable_records', 1);
+        // A sync that updates the legacy hidden flag must not revive recycled records.
+        BrandSocialPostState::query()->sole()->update(['is_hidden' => false]);
+        $query = ['date_from' => '2026-08-18', 'date_to' => '2026-08-18', 'comparison' => 'none'];
+        $this->get(route('natural-traffic.brand-media', [...$query, 'content_visibility' => 'deleted']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.kpis.0.value', 0)
+                ->where('dashboard.post_visibility_counts.deleted', 1)
+                ->where('dashboard.post_visibility_counts.hidden', 0)
+                ->where('dashboard.posts.0.record_status', 'deleted'));
+        $this->get(route('natural-traffic.brand-media', [...$query, 'content_visibility' => 'visible']))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page->has('dashboard.posts', 0));
+        $this->put(route('natural-traffic.brand-media.posts.visibility'), [...$payload, 'status' => 'visible'])->assertRedirect();
+        $this->get(route('natural-traffic.brand-media', $query))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->where('dashboard.kpis.0.value', 1)
+                ->where('dashboard.kpis.1.value', 250)
+                ->where('dashboard.post_visibility_counts.visible', 1)
+                ->where('dashboard.post_visibility_counts.deleted', 0)
+                ->where('dashboard.posts.0.record_status', 'visible'));
+    }
+
     public function test_daily_reviews_and_weekly_reports_are_scoped_persisted_and_audited(): void
     {
         [$user, $organization, $store] = $this->context('operator');
@@ -120,7 +154,7 @@ class BrandSocialWorkflowTest extends TestCase
         ]);
         $payload = [
             'source_section' => 'natural-traffic:social', 'source_table_key' => 'social-table',
-            'source_record_id' => 'other-post', 'hidden' => true,
+            'source_record_id' => 'other-post', 'status' => 'deleted',
         ];
 
         $this->actingAs($viewer)->withSession($this->contextSession($organization, $store))

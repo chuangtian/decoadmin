@@ -25,7 +25,7 @@ const dateLabel = (value: string | null, timezone: string) => value ? formatDate
         <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div v-if="stores.data.length" class="overflow-x-auto">
                 <table class="min-w-[1120px] w-full text-left text-sm">
-                    <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <thead class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500">
                         <tr><th class="px-5 py-3.5">店铺名称</th><th class="px-5 py-3.5">Shopify 域名</th><th class="px-5 py-3.5">平台</th><th class="px-5 py-3.5">状态</th><th class="px-5 py-3.5">连接状态</th><th class="px-5 py-3.5 text-center">应用数量</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">

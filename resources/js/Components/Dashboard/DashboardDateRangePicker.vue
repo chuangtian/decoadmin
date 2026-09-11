@@ -255,9 +255,9 @@ function apply() {
     <div class="relative">
         <button type="button" class="flex min-w-56 items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-slate-300" @click="open = !open">
             <span>
-                <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">统计时间</span>
+                <span class="block text-xs font-semibold uppercase tracking-wider text-slate-400">统计时间</span>
                 <strong class="mt-0.5 block text-sm text-slate-900">{{ rangeLabel }}</strong>
-                <small v-if="comparison" class="mt-1 block max-w-64 truncate text-[11px] font-medium text-sky-600">对比：{{ comparisonButtonLabel }}</small>
+                <small v-if="comparison" class="mt-1 block max-w-64 truncate text-xs font-medium text-sky-600">对比：{{ comparisonButtonLabel }}</small>
             </span>
             <span class="text-slate-400">⌄</span>
         </button>
@@ -282,7 +282,7 @@ function apply() {
                     </button>
 
                     <div v-if="comparison" class="mt-2 border-t border-slate-200 px-3 pt-4">
-                        <div class="flex items-center justify-between"><p class="text-sm font-semibold text-slate-800">环比</p><span class="text-[11px] text-slate-400">选择对比周期</span></div>
+                        <div class="flex items-center justify-between"><p class="text-sm font-semibold text-slate-800">环比</p><span class="text-xs text-slate-400">选择对比周期</span></div>
                         <div class="mt-3 grid grid-cols-2 gap-2">
                             <button v-for="option in comparisonOptions" :key="option.value" type="button" class="rounded-xl border px-2 py-2 text-xs font-semibold transition" :class="comparisonMode === option.value ? 'border-sky-400 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="chooseComparison(option.value)">{{ option.label }}</button>
                         </div>

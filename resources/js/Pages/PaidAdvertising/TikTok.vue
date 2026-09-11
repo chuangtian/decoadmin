@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -108,7 +109,7 @@ const busy = computed(() => syncing.value || ['pending', 'syncing', 'backfilling
 const selectedAccount = computed(() => overview.value?.accounts.find((item) => item.id === filters.value.account));
 
 const trendChart = computed(() => {
-    const width = 760, height = 330, left = 58, right = 56, top = 42, bottom = 48;
+    const width = 760, height = 330, left = 88, right = 96, top = 64, bottom = 48;
     const plotWidth = width - left - right, plotHeight = height - top - bottom;
     const current = overview.value?.trend ?? [], previous = overview.value?.previous_trend ?? [];
     const amountMax = Math.max(1, ...current.map(p => p.spend), ...previous.map(p => p.spend)) * 1.12;
@@ -329,8 +330,8 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 </div>
                             </div>
                             <div v-if="trendChart.points.length" class="relative mt-4 w-full" @mouseleave="hoveredTrend = null">
-                                <svg class="h-auto w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="TikTok Ads 每日花费与 ROAS 趋势">
-                                    <g v-for="tick in trendChart.ticks" :key="tick.y"><line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line"/><text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text><text :x="trendChart.width-48" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text></g>
+                                <svg v-readable-chart class="h-auto w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="TikTok Ads 每日花费与 ROAS 趋势">
+                                    <g v-for="tick in trendChart.ticks" :key="tick.y"><line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line"/><text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text><text :x="trendChart.width-trendChart.right+12" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text></g>
                                     <g v-for="point in trendChart.points" :key="point.date"><rect :x="point.x-16" :y="point.previousBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.previousBarY" class="bar prior"/><rect :x="point.x+2" :y="point.currentBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.currentBarY" class="bar current"/><text :x="point.x" :y="trendChart.height-17" text-anchor="middle">{{ point.date.slice(5) }}</text><rect :x="point.x-trendChart.step/2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" @mouseenter="hoveredTrend=point.index"/></g>
                                     <polyline :points="trendChart.currentLine" class="roi current-roi"/><polyline :points="trendChart.previousLine" class="roi prior-roi"/>
                                     <line v-if="activeTrend" :x1="activeTrend.x" :x2="activeTrend.x" :y1="trendChart.top" :y2="trendChart.top+trendChart.plotHeight" class="hover-line"/>
@@ -373,11 +374,11 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                         </div>
 
                         <div v-if="trendChart.points.length" class="relative mt-6 w-full" @mouseleave="hoveredTrend = null">
-                            <svg class="h-auto min-h-[360px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="TikTok Ads 每日花费与 ROAS 趋势分析">
+                            <svg v-readable-chart class="h-auto min-h-[360px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="TikTok Ads 每日花费与 ROAS 趋势分析">
                                 <g v-for="tick in trendChart.ticks" :key="tick.y">
                                     <line :x1="trendChart.left" :x2="trendChart.width-trendChart.right" :y1="tick.y" :y2="tick.y" class="grid-line" />
                                     <text x="4" :y="tick.y+4">{{ compact(tick.amount) }}</text>
-                                    <text :x="trendChart.width-48" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text>
+                                    <text :x="trendChart.width-trendChart.right+12" :y="tick.y+4">{{ tick.roi.toFixed(0) }}×</text>
                                 </g>
                                 <g v-for="point in trendChart.points" :key="point.date">
                                     <rect :x="point.x-16" :y="point.previousBarY" width="14" :height="trendChart.top+trendChart.plotHeight-point.previousBarY" class="bar prior" />
@@ -475,7 +476,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                                 <p class="mt-1 text-sm text-slate-500">按花费最高的 6 个广告系列比较</p>
                             </div>
                             <div v-if="campaignRoasChart.rows.length" class="mt-7 overflow-x-auto">
-                                <svg class="min-w-[620px] w-full" :viewBox="`0 0 ${campaignRoasChart.width} ${campaignRoasChart.height}`" role="img" aria-label="TikTok 广告系列 ROAS 对比">
+                                <svg v-readable-chart class="min-w-[620px] w-full" :viewBox="`0 0 ${campaignRoasChart.width} ${campaignRoasChart.height}`" role="img" aria-label="TikTok 广告系列 ROAS 对比">
                                     <g v-for="tick in campaignRoasChart.ticks" :key="tick.x">
                                         <line :x1="tick.x" :x2="tick.x" :y1="campaignRoasChart.top-8" :y2="campaignRoasChart.height-24" class="grid-line" />
                                         <text :x="tick.x" :y="campaignRoasChart.height-6" text-anchor="middle">{{ tick.value.toFixed(0) }}×</text>
@@ -547,7 +548,7 @@ onBeforeUnmount(() => { if (poller) clearInterval(poller); });
                         >
                             <div class="flex items-start justify-between gap-3">
                                 <h3 class="line-clamp-2 min-h-12 text-base font-semibold leading-6 text-slate-950">{{ creative.name }}</h3>
-                                <span class="shrink-0 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white">{{ creative.format || 'VIDEO' }}</span>
+                                <span class="shrink-0 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">{{ creative.format || 'VIDEO' }}</span>
                             </div>
                             <p v-if="creative.body" class="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{{ creative.body }}</p>
                             <p v-else class="mt-3 min-h-10 text-sm text-slate-400">暂无广告文案</p>

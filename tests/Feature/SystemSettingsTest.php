@@ -33,7 +33,7 @@ class SystemSettingsTest extends TestCase
                 ->component('System/Settings')
                 ->where('canUpdate', true)
                 ->has('settings.platform_name')
-                ->has('timezones'));
+                ->where('timezones', fn ($zones): bool => collect($zones)->contains('UTC')));
 
         $this->actingAs($user)
             ->withSession($this->contextSession($organization, $store))

@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 
 #[Fillable([
     'uuid', 'organization_id', 'store_id', 'source_section', 'source_table_key', 'source_record_id',
-    'is_hidden', 'hidden_by', 'hidden_at',
+    'is_hidden', 'is_deleted', 'hidden_by', 'hidden_at',
 ])]
 class BrandSocialPostState extends Model
 {
@@ -42,6 +42,7 @@ class BrandSocialPostState extends Model
     {
         return [
             'is_hidden' => 'boolean',
+            'is_deleted' => 'boolean',
             'hidden_at' => 'datetime',
         ];
     }

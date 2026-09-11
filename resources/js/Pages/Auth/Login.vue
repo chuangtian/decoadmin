@@ -9,7 +9,7 @@ const submit = () => form.post('/login', { onFinish: () => form.reset('password'
 
 <template>
     <Head title="登录" />
-    <AuthLayout class="font-scale-110" title="欢迎回来" description="登录后进入管理工作台。">
+    <AuthLayout title="欢迎回来" description="登录后进入管理工作台。">
         <div v-if="status" class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ status }}</div>
         <form class="space-y-5" @submit.prevent="submit">
             <div><label for="email" class="mb-2 block text-sm font-semibold text-slate-700">工作邮箱</label><input id="email" v-model="form.email" type="email" autocomplete="username" autofocus required class="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" placeholder="you@company.com"><p v-if="form.errors.email" class="mt-2 text-sm text-rose-600">{{ form.errors.email }}</p></div>

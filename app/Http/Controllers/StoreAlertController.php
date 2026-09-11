@@ -17,7 +17,7 @@ class StoreAlertController extends Controller
     {
         $filters = $request->validate([
             'status' => ['nullable', 'in:open,acknowledged,resolved'],
-            'type' => ['nullable', 'in:connection,sync,webhook'],
+            'type' => ['nullable', 'in:connection,sync,webhook,discount,product'],
         ]);
 
         return Inertia::render('Alerts/Index', [

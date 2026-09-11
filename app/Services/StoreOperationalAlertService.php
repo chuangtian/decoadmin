@@ -9,6 +9,9 @@ use App\Models\StoreAlert;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Models\WebhookEvent;
+use App\Services\Advertising\AdvertisingChannelSyncService;
+use App\Support\StoreDateTime;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 
@@ -68,7 +71,7 @@ class StoreOperationalAlertService
         );
 
         if ($alert->wasRecentlyCreated) {
-            DeliverStoreAlertNotificationJob::dispatch($alert->id)->onQueue('notifications');
+            DeliverStoreAlertNotificationJob::dispatch($alert->id)->onQueue('notifications')->afterCommit();
         }
 
         return $alert->wasRecentlyCreated;
@@ -104,29 +107,47 @@ class StoreOperationalAlertService
     private function syncAlerts(Store $store): int
     {
         return SyncJob::query()
+            ->where('organization_id', $store->organization_id)
             ->where('store_id', $store->id)
             ->where('status', 'failed')
             ->where('created_at', '>=', now()->subDays(7))
             ->get()
-            ->sum(fn (SyncJob $job): int => (int) $this->record(
-                $store,
-                'sync',
-                SyncJob::class,
-                $job->id,
-                $job->error_code ?: 'shopify_sync_failed',
-                'Shopify 数据同步失败',
-                $job->last_error ?: '同步任务执行失败，请查看任务详情。',
-                'error',
-                [
-                    'sync_type' => $job->type,
-                    'sync_mode' => $job->mode,
-                    'job_uuid' => $job->uuid,
-                    'correlation_id' => $job->correlation_id,
-                    'attempts' => $job->attempts,
-                    'max_attempts' => $job->max_attempts,
-                ],
-                $job->failed_at ?? $job->updated_at,
-            ));
+            ->sum(function (SyncJob $job) use ($store): int {
+                $advertising = str_starts_with($job->type, 'advertising_channel:');
+                $channel = $advertising ? substr($job->type, strlen('advertising_channel:')) : null;
+                $failure = (array) data_get($job->payload, 'failure', []);
+                if ($channel === 'criteo' && ($failure['transient'] ?? false)
+                    && filled($failure['first_failed_at'] ?? null)
+                    && CarbonImmutable::parse($failure['first_failed_at'])->gt(now()->subHour())) {
+                    return 0;
+                }
+                $label = AdvertisingChannelSyncService::CHANNELS[$channel]['label'] ?? '广告渠道';
+                $message = $job->last_error ?: '同步任务执行失败，请查看任务详情。';
+                if ($advertising && filled($failure['retry_at'] ?? null)) {
+                    $message .= "\n最早重试时间：".StoreDateTime::format($failure['retry_at'], $store).'（等待下一轮定时任务）';
+                }
+
+                return (int) $this->record(
+                    $store,
+                    'sync',
+                    SyncJob::class,
+                    $job->id,
+                    $advertising ? 'advertising_channel_sync_failed' : ($job->error_code ?: 'shopify_sync_failed'),
+                    $advertising ? $label.' 广告数据同步失败' : 'Shopify 数据同步失败',
+                    $message,
+                    'error',
+                    [
+                        'sync_type' => $job->type,
+                        'sync_mode' => $job->mode,
+                        'job_uuid' => $job->uuid,
+                        'correlation_id' => $job->correlation_id,
+                        'attempts' => $job->attempts,
+                        'max_attempts' => $job->max_attempts,
+                        ...($advertising ? ['channel' => $channel, 'error_code' => $job->error_code, 'http_status' => $failure['http_status'] ?? null] : []),
+                    ],
+                    $job->failed_at ?? $job->updated_at,
+                );
+            });
     }
 
     private function syncStateAlerts(Store $store): int
@@ -160,7 +181,8 @@ class StoreOperationalAlertService
                     );
                 }
 
-                if ($state->consecutive_failures >= max(1, (int) config('shopify.scheduled_sync.max_attempts', 3))) {
+                if (! str_starts_with($state->sync_type, 'advertising_channel:')
+                    && $state->consecutive_failures >= max(1, (int) config('shopify.scheduled_sync.max_attempts', 3))) {
                     $created += (int) $this->record(
                         $store,
                         'sync',

@@ -24,6 +24,6 @@ const emit = defineEmits<{ navigate: [] }>();
     >
         <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-800" />
         <span class="truncate">{{ item.name }}</span>
-        <span class="ml-auto shrink-0 rounded-full border border-white/8 px-1.5 py-0.5 text-[8px] tracking-wide text-slate-600">即将开放</span>
+        <span class="ml-auto shrink-0 rounded-full border border-white/8 px-1.5 py-0.5 text-xs tracking-wide text-slate-600">即将开放</span>
     </div>
 </template>

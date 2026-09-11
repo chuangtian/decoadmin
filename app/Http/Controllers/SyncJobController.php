@@ -66,7 +66,7 @@ class SyncJobController extends Controller
             ->when($storeId > 0, fn ($query) => $query->where('store_id', $storeId))
             ->when($mode !== '', fn ($query) => $query->where('mode', $mode))
             ->with([
-                'store:id,organization_id,name,shopify_domain',
+                'store:id,organization_id,name,shopify_domain,timezone',
                 'appInstallation:id,app_id,status',
                 'appInstallation.app:id,name,handle',
             ])
@@ -80,7 +80,7 @@ class SyncJobController extends Controller
                 ->where('status', 'active')
                 ->with('app:id,name,handle')])
             ->orderBy('name')
-            ->get(['id', 'organization_id', 'name', 'shopify_domain']);
+            ->get(['id', 'organization_id', 'name', 'shopify_domain', 'timezone']);
         $stores = $storeModels->map(fn (Store $store) => [
             'id' => $store->id,
             'name' => $store->name,
@@ -150,7 +150,7 @@ class SyncJobController extends Controller
 
         return Inertia::render('Sync/Show', [
             'syncJob' => new SyncJobDetailResource($syncJob->load([
-                'store:id,organization_id,name,shopify_domain',
+                'store:id,organization_id,name,shopify_domain,timezone',
                 'appInstallation:id,app_id,status',
                 'appInstallation.app:id,name,handle',
             ])),

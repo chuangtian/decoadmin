@@ -55,6 +55,7 @@ class SeoGoalDashboardService
         [$actuals, $dateRange, $availableMonths] = $this->dailyActuals($table, $month);
         $workActuals = $this->workActuals($store, $month);
         $actuals = [...$actuals, ...$workActuals];
+        $hasMonthData = $dateRange['days'] > 0 || array_sum($workActuals) > 0;
         $targets = self::MONTHLY_TARGETS[$month] ?? self::DEFAULT_TARGETS;
         $daysInMonth = CarbonImmutable::createFromFormat('Y-m-d', $month.'-01', 'Asia/Shanghai')->daysInMonth;
         $monthPosition = $month <=> $now->format('Y-m');
@@ -86,13 +87,13 @@ class SeoGoalDashboardService
                 'gap' => round(max($target - $current, 0), 2),
                 'pace' => round($pace, 6),
                 'pace_kind' => in_array($id, ['seo_gmv', 'industry_clicks', 'blog_clicks'], true) ? 'data' : 'calendar',
-                'status' => $this->status($completion, $pace, $forecastRate),
+                'status' => $hasMonthData ? $this->status($completion, $pace, $forecastRate) : 'no_data',
             ];
         }
 
         $expectedCount = collect($metrics)->filter(fn (array $metric): bool => $metric['forecast_rate'] >= 1)->count();
-        $catchUpCount = collect($metrics)->filter(fn (array $metric): bool => $metric['completion'] < $metric['pace'] && $metric['forecast_rate'] < 1)->count();
-        $overall = $catchUpCount >= 3 ? 'catch_up' : ($catchUpCount > 0 ? 'manageable' : 'normal');
+        $catchUpCount = collect($metrics)->filter(fn (array $metric): bool => $metric['status'] !== 'no_data' && $metric['completion'] < $metric['pace'] && $metric['forecast_rate'] < 1)->count();
+        $overall = ! $hasMonthData ? 'no_data' : ($catchUpCount >= 3 ? 'catch_up' : ($catchUpCount > 0 ? 'manageable' : 'normal'));
         $lastSyncedAt = collect([$table?->synced_at, SeoGoalWorkRecord::query()
             ->forOrganization((int) $store->organization_id)
             ->forStore((int) $store->id)

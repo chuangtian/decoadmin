@@ -67,7 +67,7 @@ function applyCustom() {
     <div class="relative">
         <button type="button" class="flex min-w-48 items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-slate-300" @click="open = !open">
             <span>
-                <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">对比周期</span>
+                <span class="block text-xs font-semibold uppercase tracking-wider text-slate-400">对比周期</span>
                 <strong class="mt-0.5 block text-sm text-slate-900">{{ buttonLabel }}</strong>
             </span>
             <span class="text-slate-400">⌄</span>

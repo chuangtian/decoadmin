@@ -6,6 +6,7 @@ use App\Models\Organization;
 use App\Models\Permission;
 use App\Models\Store;
 use App\Services\AppCenter\ApplicationCenterNavigationService;
+use App\Services\AppCenter\ApplicationInstallationAccessService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
@@ -29,6 +30,9 @@ class HandleInertiaRequests extends Middleware
         $permissions = [];
         $availableOrganizations = [];
         $applicationNavigation = [];
+        $applicationAvailability = [
+            ApplicationInstallationAccessService::REFERRAL => false,
+        ];
 
         if ($user) {
             [$organization, $store] = $this->resolveContext($request, $organization, $store);
@@ -83,6 +87,8 @@ class HandleInertiaRequests extends Middleware
             if ($organization && $store) {
                 $applicationNavigation = app(ApplicationCenterNavigationService::class)
                     ->forStore($organization, $store, $permissions);
+                $applicationAvailability[ApplicationInstallationAccessService::REFERRAL] = app(ApplicationInstallationAccessService::class)
+                    ->isActive(ApplicationInstallationAccessService::REFERRAL, $organization, $store);
             }
         }
 
@@ -114,6 +120,7 @@ class HandleInertiaRequests extends Middleware
             ] : null,
             'availableOrganizations' => $availableOrganizations,
             'applicationNavigation' => $applicationNavigation,
+            'applicationAvailability' => $applicationAvailability,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

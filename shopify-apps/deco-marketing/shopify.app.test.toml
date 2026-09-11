@@ -1,0 +1,16 @@
+client_id = "585f2358bad476bbc13e71ede3b78bee"
+name = "Deco Marketing Test"
+application_url = "https://testadmin.decomkt.com/shopify-app/marketing"
+embedded = true
+[build]
+automatically_update_urls_on_dev = false
+[access_scopes]
+scopes = "read_discounts,read_orders,read_customers,read_products,read_inventory,read_fulfillments"
+use_legacy_install_flow = false
+[auth]
+redirect_urls = ["https://testadmin.decomkt.com/shopify-app/marketing"]
+[webhooks]
+api_version = "2026-07"
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled", "orders/create", "orders/updated", "orders/paid", "orders/cancelled", "refunds/create", "customers/create", "customers/update", "customers/delete", "inventory_levels/update", "fulfillments/create", "fulfillments/update"]
+uri = "https://testadmin.decomkt.com/api/shopify-app/marketing/webhooks"

@@ -77,7 +77,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                 <button type="button" class="block w-full p-5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset sm:p-6" :aria-label="`查看文案：${item.title}`" @click="open(item)">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <h3 class="min-w-0 line-clamp-1 font-semibold text-slate-900" :title="item.title">{{ item.title }}</h3>
-                        <div class="flex shrink-0 flex-wrap gap-2 text-[11px] font-semibold text-slate-500">
+                        <div class="flex shrink-0 flex-wrap gap-2 text-xs font-semibold text-slate-500">
                             <span class="max-w-44 truncate rounded-lg bg-slate-100 px-2.5 py-1.5" :title="item.account_name">{{ item.account_name }}</span>
                             <span class="max-w-72 truncate rounded-lg bg-slate-100 px-2.5 py-1.5" :title="item.campaign_name">{{ item.campaign_name }}</span>
                         </div>

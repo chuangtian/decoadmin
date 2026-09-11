@@ -145,6 +145,22 @@ class SyncCenterTest extends TestCase
         $this->assertSame('error', $syncJob->logs[array_key_last($syncJob->logs)]['level']);
     }
 
+    public function test_sync_list_and_detail_preserve_the_job_store_timezone(): void
+    {
+        [$admin, $organization, $store, $installation] = $this->context('organization-admin');
+        $store->update(['timezone' => 'America/Los_Angeles']);
+        $job = $this->syncJob($organization, $store, $installation, 'completed');
+        $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
+            ->get(route('sync.index'))->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('syncJobs.data.0.store.timezone', 'America/Los_Angeles')
+                ->where('syncStatus.0.store.timezone', 'America/Los_Angeles'));
+        $this->actingAs($admin)->withSession($this->contextSession($organization, $store))
+            ->get(route('sync.show', $job))->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('syncJob.data.store.timezone', 'America/Los_Angeles'));
+    }
+
     public function test_sync_jobs_are_isolated_by_organization_and_store_scope(): void
     {
         [$admin, $organization, $store, $installation] = $this->context('organization-admin');

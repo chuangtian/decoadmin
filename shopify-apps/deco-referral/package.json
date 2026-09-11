@@ -1,0 +1,21 @@
+{
+  "name": "deco-referral",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "workspaces": [
+    "extensions/*"
+  ],
+  "scripts": {
+    "check": "node scripts/validate-project.mjs",
+    "build:portal": "esbuild resources/portal/index.js --bundle --minify --platform=browser --outfile=resources/portal/portal.js",
+    "test:tracking": "node --test scripts/tracking.test.mjs"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  },
+  "author": "tianchuang",
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}

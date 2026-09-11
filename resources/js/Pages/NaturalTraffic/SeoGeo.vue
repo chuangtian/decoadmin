@@ -6,7 +6,7 @@ import SeoGa4SourcePanel from '../../Components/NaturalTraffic/SeoGa4SourcePanel
 import SeoGscSourcePanel from '../../Components/NaturalTraffic/SeoGscSourcePanel.vue';
 import SeoOverviewPanel from '../../Components/NaturalTraffic/SeoOverviewPanel.vue';
 
-type MetricStatus = 'leading' | 'achievable' | 'catch_up' | 'high_risk';
+type MetricStatus = 'leading' | 'achievable' | 'catch_up' | 'high_risk' | 'no_data';
 type MetricCategory = 'outcome' | 'traffic' | 'work';
 type Metric = {
     id: string;
@@ -35,7 +35,7 @@ type Dashboard = {
     data_through: string | null;
     data_range: { from: string | null; through: string | null; days: number };
     progress: { data: number; calendar: number };
-    summary: { overall: 'catch_up' | 'manageable' | 'normal'; expected_count: number; total_count: number; catch_up_count: number };
+    summary: { overall: 'catch_up' | 'manageable' | 'normal' | 'no_data'; expected_count: number; total_count: number; catch_up_count: number };
     metrics: Metric[];
     data_ready: boolean;
 };
@@ -67,6 +67,7 @@ const categoryTabs: Array<{ id: 'all' | MetricCategory; label: string }> = [
     { id: 'work', label: '动作' },
 ];
 const statusMeta: Record<MetricStatus, { label: string; badge: string; bar: string; accent: string }> = {
+    no_data: { label: '暂无数据', badge: 'bg-slate-50 text-slate-600 ring-slate-200', bar: 'bg-slate-300', accent: 'border-t-slate-300' },
     leading: { label: '领先', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200', bar: 'bg-emerald-500', accent: 'border-t-emerald-500' },
     achievable: { label: '可达成', badge: 'bg-teal-50 text-teal-700 ring-teal-200', bar: 'bg-teal-500', accent: 'border-t-teal-500' },
     catch_up: { label: '需追赶', badge: 'bg-amber-50 text-amber-700 ring-amber-200', bar: 'bg-amber-400', accent: 'border-t-amber-400' },
@@ -86,10 +87,12 @@ const filteredMetrics = computed(() => activeCategory.value === 'all'
     ? (props.dashboard?.metrics ?? [])
     : (props.dashboard?.metrics ?? []).filter((metric) => metric.category === activeCategory.value));
 const focusActions = computed(() => (props.dashboard?.metrics ?? [])
-    .filter((metric) => metric.forecast_rate < 1.2)
+    .filter((metric) => metric.status !== 'no_data' && metric.forecast_rate < 1.2)
     .sort((a, b) => a.forecast_rate - b.forecast_rate));
 const sourcesConfigured = computed(() => props.sourceStatus.daily.configured && props.sourceStatus.work.configured);
+const noMonthData = computed(() => props.dashboard?.summary.overall === 'no_data');
 const overallMeta = computed(() => ({
+    no_data: { title: '暂无数据', note: '所选月份尚无同步记录，暂不判断目标进度', color: 'text-slate-600', line: 'bg-slate-300' },
     catch_up: { title: '需追赶', note: '多项指标落后，建议集中补进度', color: 'text-amber-700', line: 'bg-amber-400' },
     manageable: { title: '基本可控', note: '少量指标需要重点跟进', color: 'text-blue-700', line: 'bg-blue-500' },
     normal: { title: '节奏正常', note: '当前指标整体符合进度预期', color: 'text-emerald-700', line: 'bg-emerald-500' },
@@ -237,12 +240,12 @@ function paceLeft(metric: Metric): string {
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p class="text-xs font-bold uppercase tracking-wider text-slate-400">预计达标</p>
-                    <p class="mt-3 text-3xl font-black tabular-nums text-slate-950">{{ dashboard.summary.expected_count }}/{{ dashboard.summary.total_count }}</p>
+                    <p class="mt-3 text-3xl font-black tabular-nums text-slate-950">{{ noMonthData ? '—' : `${dashboard.summary.expected_count}/${dashboard.summary.total_count}` }}</p>
                     <p class="mt-1 text-sm text-slate-500">月底预计可达标数</p>
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p class="text-xs font-bold uppercase tracking-wider text-slate-400">需要追赶</p>
-                    <p class="mt-3 text-3xl font-black tabular-nums text-rose-600">{{ dashboard.summary.catch_up_count }}</p>
+                    <p class="mt-3 text-3xl font-black tabular-nums text-rose-600">{{ noMonthData ? '—' : dashboard.summary.catch_up_count }}</p>
                     <p class="mt-1 text-sm text-slate-500">低于进度线且预计不达标</p>
                 </article>
                 <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -289,7 +292,7 @@ function paceLeft(metric: Metric): string {
                             <span class="rounded-lg px-2.5 py-1 text-xs font-black ring-1 ring-inset" :class="statusMeta[metric.status].badge">{{ statusMeta[metric.status].label }}</span>
                         </div>
                         <div class="mt-7 flex items-end gap-2">
-                            <strong class="text-4xl font-black tracking-tight tabular-nums text-slate-950">{{ formatValue(metric.current, metric) }}</strong>
+                            <strong class="text-4xl font-black tracking-tight tabular-nums text-slate-950">{{ metric.status === 'no_data' ? '—' : formatValue(metric.current, metric) }}</strong>
                             <span class="pb-1 text-sm font-bold text-slate-400">/ {{ formatValue(metric.target, metric) }}</span>
                         </div>
                         <div class="relative mt-6 h-2.5 rounded-full bg-slate-100">
@@ -298,22 +301,22 @@ function paceLeft(metric: Metric): string {
                         </div>
                         <div class="mt-5 grid grid-cols-3 gap-2">
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">完成度</p>
+                                <p class="text-xs font-bold text-slate-400">完成度</p>
                                 <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ formatPercent(metric.completion) }}</p>
                             </div>
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">应完成</p>
+                                <p class="text-xs font-bold text-slate-400">应完成</p>
                                 <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ formatValue(metric.expected, metric) }}</p>
                             </div>
                             <div class="rounded-xl bg-slate-50 p-3">
-                                <p class="text-[11px] font-bold text-slate-400">月底预估</p>
-                                <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ formatValue(metric.forecast, metric) }}</p>
+                                <p class="text-xs font-bold text-slate-400">月底预估</p>
+                                <p class="mt-1 text-sm font-black tabular-nums text-slate-800">{{ metric.status === 'no_data' ? '—' : formatValue(metric.forecast, metric) }}</p>
                             </div>
                         </div>
                         <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-xs">
-                            <span class="text-slate-500">预计达成 <strong class="text-slate-800">{{ formatPercent(metric.forecast_rate, 1) }}</strong></span>
-                            <span v-if="metric.gap > 0" class="text-slate-400">差距 {{ formatValue(metric.gap, metric) }}</span>
-                            <span v-else class="font-bold text-emerald-600">已超目标</span>
+                            <span class="text-slate-500">预计达成 <strong class="text-slate-800">{{ metric.status === 'no_data' ? '—' : formatPercent(metric.forecast_rate, 1) }}</strong></span>
+                            <span v-if="metric.status !== 'no_data' && metric.gap > 0" class="text-slate-400">差距 {{ formatValue(metric.gap, metric) }}</span>
+                            <span v-else-if="metric.status !== 'no_data'" class="font-bold text-emerald-600">已超目标</span>
                         </div>
                     </article>
                 </div>
@@ -337,6 +340,7 @@ function paceLeft(metric: Metric): string {
                         <span class="w-fit shrink-0 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">{{ advice[metric.id]?.owner || 'SEO' }}</span>
                     </div>
                 </div>
+                <div v-else-if="noMonthData" class="mt-5 rounded-2xl bg-slate-50 p-6 text-sm font-semibold text-slate-600">所选月份尚无同步记录，数据到达后再生成进度判断与建议。</div>
                 <div v-else class="mt-5 rounded-2xl bg-emerald-50 p-6 text-sm font-semibold text-emerald-700">当前所有指标的月底预计达成率均不低于 120%，暂无重点追赶项。</div>
             </section>
             </template>

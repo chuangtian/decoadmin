@@ -75,7 +75,7 @@ const currentInstallationStatus = (app: ShopifyApp) => app.current_store_install
                 <div v-if="apps.data.length">
                     <div class="hidden overflow-x-auto md:block">
                         <table class="w-full min-w-[880px] text-left text-sm">
-                            <thead class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            <thead class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500">
                                 <tr><th class="px-5 py-3.5">应用名称</th><th class="px-5 py-3.5">类型</th><th class="px-5 py-3.5">应用状态</th><th class="px-5 py-3.5">当前店铺</th><th class="px-5 py-3.5">创建时间</th><th class="px-5 py-3.5 text-right">操作</th></tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">

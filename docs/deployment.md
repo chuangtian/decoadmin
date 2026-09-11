@@ -13,6 +13,18 @@ The production Compose file does not mount the repository into containers. Only 
 
 ## VPS prerequisites
 
+### Configured SSH access (local workstation)
+
+- Host: `45.76.77.146`, SSH user: `root`, port: `22`.
+- User-provided private-key path: `/Users/tianchuang/Downloads/key-uh9wq9m7.pem`.
+- Record the path only. Never copy private-key contents into this repository, logs, chat, or committed configuration. Keep file permissions restricted to the current user (`0600`).
+- This path is workstation-specific. Use it for already-authorized deployments without asking for the key again; if authentication fails, diagnose and report the failure without exposing the key.
+- Select the requested environment before any server write. Test: `/opt/decoadmin/staging`, environment file `/opt/decoadmin/staging/.env.staging`, Compose project `decoadmin-staging`, URL `https://testadmin.decomkt.com`. Production: `/opt/decoadmin/production`; a test deployment never authorizes production changes.
+
+```bash
+ssh -i /Users/tianchuang/Downloads/key-uh9wq9m7.pem -o IdentitiesOnly=yes root@45.76.77.146
+```
+
 1. Install Docker Engine with the Compose plugin.
 2. Clone the private repository on the VPS.
 3. Configure DNS for the Staging or Production hostname.
@@ -176,6 +188,16 @@ SHOPIFY_SYNC_STALLED_AFTER_MINUTES=45
 部署后应确认 `shopify:incremental-sync`、`shopify:daily-sync-reconciliation`、`shopify:weekly-full-sync` 和 `shopify:webhook-subscription-reconciliation` 均出现在调度列表中，并在“系统状态”页面确认 Scheduler、Horizon 与 `shopify-sync` 队列正常。
 
 ## Release procedure
+
+### Source of truth and reproducibility
+
+Use `origin/test` for test releases. The server repository is `/opt/decoadmin/repository`; `/opt/decoadmin/staging` may be an exported deployment directory without `.git`.
+
+Fetch `origin/test`, record its full commit SHA, and export that exact commit to a new release directory (for example with `git archive`). Run validation and build images from that export. Keep the environment file outside the Git export and supply it separately to Compose. Never overlay source from an old container or a developer's uncommitted working tree onto the build context.
+
+Label or record the same full source SHA for the app, nginx, and any workers being released. Deploy only within the explicitly authorized environment and service scope. After deployment, verify health and the source revision; a stale `RELEASE` file is not sufficient evidence. Reconcile unexpected source differences into Git before another release rather than carrying them forward as uncommitted patches.
+
+The commands below assume a clean Git checkout. Do not run the Git commands in an exported staging directory. The reconciliation recorded in `test-source-reconciliation-20260909.md` did not deploy services.
 
 ```bash
 git fetch --all --prune

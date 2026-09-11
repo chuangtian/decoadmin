@@ -10,6 +10,9 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
+if (config('product_monitoring.enabled', true)) {
+    Schedule::command('shopify:monitor-products')->everyFiveMinutes()->onOneServer()->withoutOverlapping(60);
+}
 Schedule::call([SystemStatusService::class, 'recordSchedulerHeartbeat'])
     ->name('system:scheduler-heartbeat')
     ->everyMinute()
@@ -98,6 +101,13 @@ if (config('services.meta_ads.sync_enabled', true)) {
 }
 
 if (config('services.advertising_sync.enabled', true)) {
+    Schedule::command('advertising-channels:sync google --mode=reconcile')
+        ->name('advertising-channels:google:daily-attribution-reconciliation')
+        ->dailyAt('04:47')
+        ->timezone('UTC')
+        ->onOneServer()
+        ->withoutOverlapping(120);
+
     foreach (['google' => 17, 'tiktok' => 29, 'bing' => 41, 'criteo' => 53] as $channel => $minute) {
         Schedule::command("advertising-channels:sync {$channel} --mode=incremental")
             ->name("advertising-channels:{$channel}:hourly-store-sync")
@@ -121,6 +131,15 @@ if (config('services.feishu_table.paid_advertising_goal_sync_enabled', true)) {
         ->name('feishu:paid-advertising-goals-and-all-tables-sync')
         ->dailyAt((string) config('services.feishu_table.paid_advertising_goal_sync_time', '03:40'))
         ->timezone((string) config('services.feishu_table.paid_advertising_goal_sync_timezone', 'Asia/Shanghai'))
+        ->onOneServer()
+        ->withoutOverlapping(120);
+}
+
+if (config('services.feishu_table.mf_daily_report_sync_enabled', true)) {
+    Schedule::command('feishu:sync-mf-daily-reports')
+        ->name('feishu:mf-daily-report-sync-and-delivery')
+        ->dailyAt((string) config('services.feishu_table.mf_daily_report_sync_time', '15:30'))
+        ->timezone((string) config('services.feishu_table.mf_daily_report_sync_timezone', 'Asia/Shanghai'))
         ->onOneServer()
         ->withoutOverlapping(120);
 }
@@ -189,4 +208,13 @@ if (config('shopify.scheduled_sync.enabled')) {
         ->timezone((string) config('shopify.scheduled_sync.timezone', 'America/New_York'))
         ->onOneServer()
         ->withoutOverlapping(60);
+}
+
+// The pilot's queue and maintenance must survive the standard staging deployment.
+if (app()->environment('staging')) {
+    Schedule::command('affiliate:maintenance')
+        ->name('affiliate:pilot-maintenance')
+        ->everyMinute()
+        ->onOneServer()
+        ->withoutOverlapping(5);
 }

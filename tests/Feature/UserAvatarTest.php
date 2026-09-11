@@ -32,6 +32,7 @@ class UserAvatarTest extends TestCase
             ->assertRedirect(route('users.index'));
 
         $user = User::query()->where('email', 'avatar@example.com')->firstOrFail();
+        $this->assertTrue($user->hasVerifiedEmail());
         $this->assertStringStartsWith('/storage/avatars/', $user->avatar_url);
         Storage::disk('public')->assertExists(Str::after($user->avatar_url, '/storage/'));
     }

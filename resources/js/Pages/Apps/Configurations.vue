@@ -50,18 +50,18 @@ const statusClass = (status: string) => ({
                         <div class="flex items-start justify-between gap-3">
                             <div class="flex min-w-0 items-center gap-3">
                                 <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-base font-bold text-emerald-700">{{ application.app.name.charAt(0).toUpperCase() }}</span>
-                                <div class="min-w-0"><p class="truncate text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">{{ application.category }}</p><h2 class="mt-1 truncate text-base font-semibold text-slate-950" :title="application.app.name">{{ application.app.name }}</h2></div>
+                                <div class="min-w-0"><p class="truncate text-xs font-semibold uppercase tracking-[.12em] text-slate-400">{{ application.category }}</p><h2 class="mt-1 truncate text-base font-semibold text-slate-950" :title="application.app.name">{{ application.app.name }}</h2></div>
                             </div>
-                            <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ring-1" :class="statusClass(application.configuration_status)">{{ application.configuration_status_label }}</span>
+                            <span class="shrink-0 rounded-full px-2 py-1 text-xs font-semibold ring-1" :class="statusClass(application.configuration_status)">{{ application.configuration_status_label }}</span>
                         </div>
                         <p class="mt-4 line-clamp-2 min-h-10 text-xs leading-5 text-slate-500">{{ application.description }}</p>
                         <div class="mt-4 grid grid-cols-3 divide-x divide-slate-200 overflow-hidden rounded-xl bg-slate-50">
-                            <div v-for="metric in application.metrics" :key="metric.label" class="min-w-0 px-2.5 py-2.5"><p class="truncate text-[10px] font-semibold text-slate-400" :title="metric.label">{{ metric.label }}</p><p class="mt-1 truncate text-xs font-semibold text-slate-800" :title="metric.value">{{ metric.value }}</p></div>
+                            <div v-for="metric in application.metrics" :key="metric.label" class="min-w-0 px-2.5 py-2.5"><p class="truncate text-xs font-semibold text-slate-400" :title="metric.label">{{ metric.label }}</p><p class="mt-1 truncate text-xs font-semibold text-slate-800" :title="metric.value">{{ metric.value }}</p></div>
                         </div>
                         <p v-if="application.unavailable_reason" class="mt-3 rounded-xl bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-700">{{ application.unavailable_reason }}</p>
                     </div>
                     <div class="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3.5">
-                        <div class="min-w-0"><p class="truncate font-mono text-[11px] text-slate-500" :title="application.app.handle">{{ application.app.handle }}</p><p class="mt-0.5 truncate text-[11px] text-slate-400">连接：{{ application.connection_status || '未知' }}</p></div>
+                        <div class="min-w-0"><p class="truncate font-mono text-xs text-slate-500" :title="application.app.handle">{{ application.app.handle }}</p><p class="mt-0.5 truncate text-xs text-slate-400">连接：{{ application.connection_status || '未知' }}</p></div>
                         <Link v-if="application.management_url" :href="application.management_url" class="shrink-0 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800">{{ application.action_label }} →</Link>
                         <span v-else class="shrink-0 text-xs font-semibold text-slate-400">暂不可管理</span>
                     </div>

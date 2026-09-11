@@ -29,6 +29,7 @@ class AuditLogQueryService
         'brand_social_weekly_report_created' => '品牌官媒周报已创建',
         'brand_social_weekly_report_updated' => '品牌官媒周报已更新',
         'brand_social_weekly_report_deleted' => '品牌官媒周报已删除',
+        'mf_daily_report_sent' => 'Macfox 每日数据汇报已发送',
     ];
 
     /** @var list<string> */
@@ -231,6 +232,7 @@ class AuditLogQueryService
             str_contains($action, 'role'), str_contains($action, 'permission') => '权限管理',
             str_starts_with($action, 'system_settings_') => '系统设置',
             str_starts_with($action, 'brand_social_') => '品牌官媒',
+            str_starts_with($action, 'mf_daily_report_') => '飞书日报',
             default => '系统操作',
         };
     }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 type Judgment = 'reusable' | 'scalable' | 'underperforming' | 'insufficient_data';
@@ -96,8 +97,8 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，广告花费 ${mo
 
         <div v-if="drawablePoints.length" class="chart-scrollbar overflow-x-auto px-3 pb-3 pt-2 sm:px-4">
             <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动预算分配气泡图">
-                    <text :x="plot.left" y="24" class="fill-slate-400 text-[11px] font-medium">ROI</text>
+                <svg v-readable-chart :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动预算分配气泡图">
+                    <text :x="plot.left" y="24" class="fill-slate-400 text-xs font-medium">ROI</text>
 
                     <g v-for="ratio in ticks" :key="`grid-${ratio}`">
                         <line
@@ -107,7 +108,7 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，广告花费 ${mo
                             :y2="plot.bottom - ratio * (plot.bottom - plot.top)"
                             class="stroke-slate-200"
                         />
-                        <text :x="plot.left - 12" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">
+                        <text :x="plot.left - 12" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">
                             {{ (yMaximum * ratio).toFixed(1) }}
                         </text>
                         <line
@@ -117,7 +118,7 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，广告花费 ${mo
                             :y2="plot.bottom"
                             class="stroke-slate-100"
                         />
-                        <text :x="plot.left + ratio * (chartWidth - plot.left - plot.right)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-400 text-[11px] tabular-nums">
+                        <text :x="plot.left + ratio * (chartWidth - plot.left - plot.right)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-400 text-xs tabular-nums">
                             {{ compactMoney(xMaximum * ratio) }}
                         </text>
                     </g>
@@ -132,7 +133,7 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，广告花费 ${mo
                             stroke-dasharray="7 6"
                             stroke-width="2"
                         />
-                        <text :x="chartWidth - plot.right" :y="yAt(breakEvenRoi) - 9" text-anchor="end" class="fill-rose-500 text-[11px] font-semibold">
+                        <text :x="chartWidth - plot.right" :y="yAt(breakEvenRoi) - 9" text-anchor="end" class="fill-rose-500 text-xs font-semibold">
                             保本线 ROI={{ breakEvenRoi }}
                         </text>
                     </template>
@@ -152,7 +153,7 @@ const ariaLabel = (point: PerformanceItem) => `${point.name}，广告花费 ${mo
                             :x="xAt(point.ad_spend ?? 0)"
                             :y="yAt(point.roi ?? 0) + 4"
                             text-anchor="middle"
-                            class="pointer-events-none fill-white text-[11px] font-semibold"
+                            class="pointer-events-none fill-white text-xs font-semibold"
                         ><title>{{ point.name }}</title>{{ shortName(point.name) }}</text>
                         <circle
                             :cx="xAt(point.ad_spend ?? 0)"

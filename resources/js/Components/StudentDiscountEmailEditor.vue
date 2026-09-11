@@ -130,7 +130,7 @@ const textStyle = (block: EmailContentBlock) => ({
 
         <div class="space-y-3 bg-slate-100 p-4">
             <article v-for="(block, index) in blocks" :key="`${block.type}-${index}`" class="group relative rounded-xl border bg-white transition" :class="selectedIndex === index ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'" @click="selectedIndex = index">
-                <div class="absolute -top-2.5 left-3 z-10 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm">{{ blockLabel(block) }}</div>
+                <div class="absolute -top-2.5 left-3 z-10 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-500 shadow-sm">{{ blockLabel(block) }}</div>
                 <div class="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition group-hover:opacity-100" :class="selectedIndex === index ? 'opacity-100' : ''">
                     <button type="button" :disabled="disabled || index === 0" class="flex h-7 w-7 items-center justify-center rounded-md bg-white text-xs text-slate-500 shadow ring-1 ring-slate-200 disabled:opacity-30" aria-label="上移" @click.stop="moveBlock(index, -1)">↑</button>
                     <button type="button" :disabled="disabled || index === blocks.length - 1" class="flex h-7 w-7 items-center justify-center rounded-md bg-white text-xs text-slate-500 shadow ring-1 ring-slate-200 disabled:opacity-30" aria-label="下移" @click.stop="moveBlock(index, 1)">↓</button>
@@ -142,18 +142,18 @@ const textStyle = (block: EmailContentBlock) => ({
                 </div>
                 <div v-else-if="block.type === 'button'" class="space-y-3 px-5 py-6 pt-8">
                     <div class="text-center"><input :value="block.text" :disabled="disabled" class="max-w-full border-0 px-6 py-4 text-center outline-none" :class="block.width === 'full' ? 'w-full' : 'w-auto min-w-48'" :style="{ ...textStyle(block), backgroundColor: block.background_color ?? primaryColor }" maxlength="120" aria-label="按钮文字" @focus="selectedIndex = index" @input="patchBlock(index, { text: inputValue($event) })"></div>
-                    <label v-if="selectedIndex === index" class="block"><span class="text-[11px] font-semibold text-slate-500">按钮链接（留空使用店铺首页）</span><input :value="block.url" :disabled="disabled" type="url" maxlength="2048" placeholder="https://…" class="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-400" @input="patchBlock(index, { url: inputValue($event) })"></label>
+                    <label v-if="selectedIndex === index" class="block"><span class="text-xs font-semibold text-slate-500">按钮链接（留空使用店铺首页）</span><input :value="block.url" :disabled="disabled" type="url" maxlength="2048" placeholder="https://…" class="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-400" @input="patchBlock(index, { url: inputValue($event) })"></label>
                 </div>
-                <div v-else-if="block.type === 'discount_code'" class="px-5 py-7 pt-8"><div class="break-all border-[3px] px-4 py-5 text-center font-mono text-xl font-extrabold tracking-wider" :style="{ borderColor: primaryColor }">{{ discountSample }}</div><p class="mt-2 text-center text-[11px] text-slate-400">系统区块，会在发送时填入真实优惠码，不可删除</p></div>
-                <div v-else-if="block.type === 'divider'" class="px-5 py-7" :style="{ paddingTop: `${block.spacing ?? 20}px`, paddingBottom: `${block.spacing ?? 20}px` }"><div class="border-t" :style="{ borderColor: block.color ?? '#E5E7EB' }" /><div v-if="selectedIndex === index" class="mt-3 flex items-center gap-3"><label class="text-[11px] text-slate-500">颜色 <input :value="block.color" type="color" :disabled="disabled" @input="patchBlock(index, { color: inputValue($event) })"></label><label class="text-[11px] text-slate-500">间距 <input :value="block.spacing" type="range" min="8" max="64" :disabled="disabled" @input="patchBlock(index, { spacing: inputNumber($event) })"></label></div></div>
-                <div v-else class="flex items-center justify-center text-[11px] text-slate-400" :style="{ height: `${block.spacing ?? 20}px` }">留白 {{ block.spacing ?? 20 }} px</div>
+                <div v-else-if="block.type === 'discount_code'" class="px-5 py-7 pt-8"><div class="break-all border-[3px] px-4 py-5 text-center font-mono text-xl font-extrabold tracking-wider" :style="{ borderColor: primaryColor }">{{ discountSample }}</div><p class="mt-2 text-center text-xs text-slate-400">系统区块，会在发送时填入真实优惠码，不可删除</p></div>
+                <div v-else-if="block.type === 'divider'" class="px-5 py-7" :style="{ paddingTop: `${block.spacing ?? 20}px`, paddingBottom: `${block.spacing ?? 20}px` }"><div class="border-t" :style="{ borderColor: block.color ?? '#E5E7EB' }" /><div v-if="selectedIndex === index" class="mt-3 flex items-center gap-3"><label class="text-xs text-slate-500">颜色 <input :value="block.color" type="color" :disabled="disabled" @input="patchBlock(index, { color: inputValue($event) })"></label><label class="text-xs text-slate-500">间距 <input :value="block.spacing" type="range" min="8" max="64" :disabled="disabled" @input="patchBlock(index, { spacing: inputNumber($event) })"></label></div></div>
+                <div v-else class="flex items-center justify-center text-xs text-slate-400" :style="{ height: `${block.spacing ?? 20}px` }">留白 {{ block.spacing ?? 20 }} px</div>
             </article>
         </div>
 
         <div class="border-t border-slate-200 bg-white px-4 py-3">
             <p class="text-xs font-semibold text-slate-600">插入安全变量</p>
             <div class="mt-2 flex flex-wrap gap-2"><button v-for="variable in variables" :key="variable.key" type="button" :disabled="disabled" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50" :title="variable.label" @click="insertVariable(variable.key)">{{ variableToken(variable.key) }}</button></div>
-            <p class="mt-2 text-[11px] leading-5 text-slate-400">选中区块后设置字号、粗细、对齐和颜色；按钮链接仅支持 http/https。编辑器不会保存 HTML、脚本或 iframe。</p>
+            <p class="mt-2 text-xs leading-5 text-slate-400">选中区块后设置字号、粗细、对齐和颜色；按钮链接仅支持 http/https。编辑器不会保存 HTML、脚本或 iframe。</p>
         </div>
     </div>
 </template>

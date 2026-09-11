@@ -25,7 +25,7 @@ class SystemSettingsController extends Controller
 
         return $this->render($request, 'System/Settings', 'general', [
             'timezones' => collect(timezone_identifiers_list())
-                ->filter(fn (string $timezone): bool => str_contains($timezone, '/'))
+                ->filter(fn (string $timezone): bool => $timezone === 'UTC' || str_contains($timezone, '/'))
                 ->values()
                 ->all(),
             'aiSettings' => $isSuperAdmin

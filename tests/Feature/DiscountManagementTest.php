@@ -69,6 +69,41 @@ class DiscountManagementTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), $otherStore->shopify_domain));
     }
 
+    public function test_discount_page_uses_and_refreshes_its_own_app_token_without_changing_commerce_connection(): void
+    {
+        [$actor, $organization, $store] = $this->context('store-admin');
+        $product = $this->product($store, '101', 'X1 Bike');
+        $connection = $this->installation($store, 'commerce-token');
+        $connection->update(['scopes' => ['read_products', 'read_orders']]);
+        $before = $connection->refresh()->getRawOriginal();
+        $app = \App\Models\App::query()->create([
+            'name' => 'Student Discount', 'handle' => config('student_discount.active.handle'),
+            'client_id' => config('student_discount.active.client_id'), 'status' => 'active', 'distribution' => 'custom',
+        ]);
+        $installation = \App\Models\AppInstallation::query()->create([
+            'app_id' => $app->id, 'store_id' => $store->id, 'shopify_connection_id' => $connection->id, 'status' => 'active', 'token_type' => 'offline',
+            'granted_scopes' => ['read_products', 'write_discounts', 'write_app_proxy'],
+            'access_token_encrypted' => 'expired-student-token', 'access_token_expires_at' => now()->subHour(),
+            'refresh_token_encrypted' => 'student-refresh', 'refresh_token_expires_at' => now()->addMonth(),
+        ]);
+        config(['student_discount.active.client_secret' => 'student-secret']);
+        Http::fake([
+            "https://{$store->shopify_domain}/admin/oauth/access_token" => Http::response([
+                'access_token' => 'fresh-student-token', 'refresh_token' => 'next-refresh',
+                'expires_in' => 86400, 'refresh_token_expires_in' => 7776000,
+                'scope' => 'read_products,write_discounts,write_app_proxy',
+            ]),
+            "https://{$store->shopify_domain}/admin/api/*" => Http::response($this->listPayload($product)),
+        ]);
+        $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
+            ->get(route('discounts.index'))->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('connection.ready', true)->where('connection.can_write', true));
+        Http::assertSent(fn ($request): bool => $request->hasHeader('X-Shopify-Access-Token', 'fresh-student-token'));
+        Http::assertNotSent(fn ($request): bool => $request->hasHeader('X-Shopify-Access-Token', 'commerce-token'));
+        $this->assertSame($before, $connection->fresh()->getRawOriginal());
+        $this->assertSame('fresh-student-token', $installation->fresh()->access_token_encrypted);
+    }
+
     public function test_store_admin_can_create_current_store_discount_idempotently(): void
     {
         [$actor, $organization, $store] = $this->context('store-admin');
@@ -179,15 +214,8 @@ class DiscountManagementTest extends TestCase
         $response = $this->actingAs($actor)->withSession($this->contextSession($organization, $store))
             ->post(route('discounts.connect'), ['store_id' => $store->id]);
 
-        $response->assertRedirectContains("https://{$store->shopify_domain}/admin/oauth/authorize");
-        $this->assertStringNotContainsString($otherStore->shopify_domain, (string) $response->headers->get('Location'));
-        $state = OAuthState::query()->sole();
-        $this->assertSame($store->id, $state->store_id);
-        $this->assertSame($organization->id, $state->organization_id);
-        $this->assertSame($actor->id, $state->user_id);
-        $this->assertEqualsCanonicalizing(['read_products', 'read_orders', 'read_all_orders', 'read_discounts', 'write_discounts'], $state->scopes);
-        $this->assertSame('existing-commerce-client', $state->app->client_id);
-        $this->assertSame('https://testadmin.decomkt.com/shopify/oauth/callback', $state->redirect_uri);
+        $response->assertRedirect('https://'.$store->shopify_domain.'/admin/apps/'.config('student_discount.active.client_id'));
+        $this->assertDatabaseCount('oauth_states', 0);
         $this->assertSame($before, $otherConnection->fresh()->getRawOriginal());
         $this->assertSame(['read_products', 'read_orders', 'read_all_orders'], $connection->fresh()->scopes);
         $normal = app(ShopifyOAuthService::class)->begin($organization, $actor, $otherStore);

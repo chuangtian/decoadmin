@@ -1,0 +1,4 @@
+TEST KEEP - Deco Referral portal material
+Store: macfox-test-app
+Purpose: retained browser upload and download verification.
+This is test content. Do not use for real promotion or payment.

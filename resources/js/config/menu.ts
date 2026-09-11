@@ -1,3 +1,5 @@
+import { brandProfileSections } from './brandProfile';
+
 export interface MenuItem {
     name: string;
     route?: string;
@@ -9,6 +11,7 @@ export interface MenuItem {
     dynamicChildren?: 'applications';
     comingSoon?: boolean;
     hidden?: boolean;
+    requiresInstalledApp?: 'referral';
 }
 
 export const menu: MenuItem[] = [
@@ -19,6 +22,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: '概览', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
             { name: '活动主题', route: '/campaign-themes', icon: 'campaign', permission: 'reports.view' },
+            { name: '设计需求', route: '/design-requests', icon: 'design-request', permission: 'design_requests.view' },
         ],
     },
     {
@@ -44,6 +48,7 @@ export const menu: MenuItem[] = [
         dynamicChildren: 'applications',
         children: [
             { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
+            { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
         ],
     },
     {
@@ -82,6 +87,23 @@ export const menu: MenuItem[] = [
         ],
     },
     {
+        name: '推荐与联盟',
+        icon: 'campaign',
+        requiresInstalledApp: 'referral',
+        children: [
+            { name: '概览', route: '/affiliate', icon: 'dashboard', permission: 'affiliate.dashboard.view' },
+            { name: '推广计划', route: '/affiliate/programs', icon: 'campaign', permission: 'affiliate.programs.view' },
+            { name: '推广者', route: '/affiliate/promoters', icon: 'users', permission: 'affiliate.promoters.view' },
+            { name: '推荐订单', route: '/affiliate/finance/conversions', icon: 'analytics', permission: 'affiliate.conversions.view' },
+            { name: '佣金账本', route: '/affiliate/finance/commissions', icon: 'analytics', permission: 'affiliate.commissions.view' },
+            { name: '结算中心', route: '/affiliate/finance/payouts', icon: 'analytics', permission: 'affiliate.payouts.view' },
+            { name: '风险审查', route: '/affiliate/finance/risks', icon: 'analytics', permission: 'affiliate.fraud.view' },
+            { name: '推广报表', route: '/affiliate/finance/reports', icon: 'analytics', permission: 'affiliate.dashboard.view' },
+            { name: '顾客奖励', route: '/affiliate/finance/rewards', icon: 'analytics', permission: 'affiliate.promoters.view' },
+            { name: '推广素材', route: '/affiliate/materials', icon: 'analytics', permission: 'affiliate.promoters.view' },
+        ],
+    },
+    {
         name: '舆情监控',
         icon: 'reports',
         children: [
@@ -107,10 +129,16 @@ export const menu: MenuItem[] = [
         permission: 'alerts.view',
     },
     {
-        name: 'Shopify',
-        icon: 'shopify',
+        name: '品牌资料',
+        icon: 'brand-profile',
         section: '系统',
         sectionDivider: true,
+        children: brandProfileSections.map(({ name, route, icon }) => ({ name, route, icon, permission: 'store.view' })),
+    },
+
+    {
+        name: 'Shopify',
+        icon: 'shopify',
         children: [
             { name: '店铺管理', route: '/stores', icon: 'stores', permission: 'store.view' },
             { name: '店铺对比', route: '/analytics/stores', icon: 'stores', permission: 'store.view' },
@@ -123,9 +151,11 @@ export const menu: MenuItem[] = [
     },
     {
         name: '用户管理',
-        route: '/users',
         icon: 'users',
-        permission: 'users.view',
+        children: [
+            { name: '用户', route: '/users', icon: 'users', permission: 'users.view' },
+            { name: '角色', route: '/roles', icon: 'roles', permission: 'roles.view' },
+        ],
     },
     {
         name: '公司财务',
@@ -147,7 +177,6 @@ export const menu: MenuItem[] = [
         icon: 'system',
         children: [
             { name: 'Codex 插件授权', route: '/codex-tokens', icon: 'apps', permission: 'codex.tokens.view' },
-            { name: '角色权限', route: '/roles', icon: 'roles', permission: 'roles.view' },
             { name: '审计日志', route: '/audit-logs', icon: 'audit', permission: 'audit.view' },
             { name: '系统状态', route: '/system/status', icon: 'status', permission: 'system.health.view' },
             { name: '飞书设置', route: '/settings/feishu', icon: 'settings', permission: 'system.settings.view' },

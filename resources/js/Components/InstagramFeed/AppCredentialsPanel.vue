@@ -87,8 +87,8 @@ const saveR2 = () => r2Form.put(props.credentials.endpoints.r2, {
                     <h2 class="mt-1 text-lg font-semibold text-slate-950">Instagram / Facebook 应用凭证</h2>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                    <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1" :class="instagramReady ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">Instagram 登录 {{ instagramReady ? '已就绪' : '未配置' }}</span>
-                    <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1" :class="facebookReady ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">Facebook 登录 {{ facebookReady ? '已就绪' : '未配置' }}</span>
+                    <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="instagramReady ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">Instagram 登录 {{ instagramReady ? '已就绪' : '未配置' }}</span>
+                    <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="facebookReady ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">Facebook 登录 {{ facebookReady ? '已就绪' : '未配置' }}</span>
                 </div>
             </header>
 
@@ -99,11 +99,11 @@ const saveR2 = () => r2Form.put(props.credentials.endpoints.r2, {
                     <dl class="mt-3 grid gap-2 text-xs text-sky-900 sm:grid-cols-2">
                         <div>
                             <dt class="font-semibold">Instagram 回调地址</dt>
-                            <dd class="mt-0.5 truncate font-mono text-[11px] text-sky-700" :title="credentials.callbacks.instagram">{{ credentials.callbacks.instagram }}</dd>
+                            <dd class="mt-0.5 truncate font-mono text-xs text-sky-700" :title="credentials.callbacks.instagram">{{ credentials.callbacks.instagram }}</dd>
                         </div>
                         <div>
                             <dt class="font-semibold">Facebook 回调地址</dt>
-                            <dd class="mt-0.5 truncate font-mono text-[11px] text-sky-700" :title="credentials.callbacks.facebook">{{ credentials.callbacks.facebook }}</dd>
+                            <dd class="mt-0.5 truncate font-mono text-xs text-sky-700" :title="credentials.callbacks.facebook">{{ credentials.callbacks.facebook }}</dd>
                         </div>
                     </dl>
                     <p class="mt-2 text-xs leading-5 text-sky-700">回调地址必须与 Meta 后台 OAuth 设置完全一致，包括协议和结尾斜杠。</p>
@@ -156,7 +156,7 @@ const saveR2 = () => r2Form.put(props.credentials.endpoints.r2, {
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">对象存储</p>
                     <h2 class="mt-1 text-lg font-semibold text-slate-950">Cloudflare R2</h2>
                 </div>
-                <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1" :class="r2Ready ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">{{ r2Ready ? '已就绪' : '未配置' }}</span>
+                <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="r2Ready ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'">{{ r2Ready ? '已就绪' : '未配置' }}</span>
             </header>
 
             <form class="p-5 sm:p-6" @submit.prevent="saveR2">

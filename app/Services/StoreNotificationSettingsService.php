@@ -62,7 +62,7 @@ class StoreNotificationSettingsService
             'mail_password', 'mail_password_configured', 'mail_from_address', 'mail_from_name',
             'mail_recipients', 'feishu_enabled', 'feishu_webhook_url', 'feishu_webhook_configured',
             'feishu_secret', 'feishu_secret_configured', 'notify_sync_failed',
-            'notify_webhook_failed', 'notify_connection_unhealthy', 'notify_discount_monitor',
+            'notify_webhook_failed', 'notify_connection_unhealthy', 'notify_discount_monitor', 'notify_product_monitor',
         ]);
     }
 
@@ -129,11 +129,11 @@ class StoreNotificationSettingsService
 
     private function defaults(): array
     {
-        return ['mail_enabled' => false, 'mail_host' => '', 'mail_port' => 587, 'mail_encryption' => 'tls', 'mail_username' => '', 'mail_from_address' => '', 'mail_from_name' => '', 'mail_recipients' => [], 'feishu_enabled' => false, 'notify_sync_failed' => true, 'notify_webhook_failed' => true, 'notify_connection_unhealthy' => true, 'notify_discount_monitor' => true];
+        return ['mail_enabled' => false, 'mail_host' => '', 'mail_port' => 587, 'mail_encryption' => 'tls', 'mail_username' => '', 'mail_from_address' => '', 'mail_from_name' => '', 'mail_recipients' => [], 'feishu_enabled' => false, 'notify_sync_failed' => true, 'notify_webhook_failed' => true, 'notify_connection_unhealthy' => true, 'notify_discount_monitor' => true, 'notify_product_monitor' => true];
     }
 
     private function safeSnapshot(StoreNotificationSetting $setting): array
     {
-        return Arr::only($setting->attributesToArray(), ['mail_enabled', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_from_address', 'mail_from_name', 'mail_recipients', 'feishu_enabled', 'notify_sync_failed', 'notify_webhook_failed', 'notify_connection_unhealthy', 'notify_discount_monitor']);
+        return Arr::only($setting->attributesToArray(), ['mail_enabled', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_from_address', 'mail_from_name', 'mail_recipients', 'feishu_enabled', 'notify_sync_failed', 'notify_webhook_failed', 'notify_connection_unhealthy', 'notify_discount_monitor', 'notify_product_monitor']);
     }
 }

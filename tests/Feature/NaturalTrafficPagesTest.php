@@ -70,6 +70,33 @@ class NaturalTrafficPagesTest extends TestCase
         }
     }
 
+    public function test_seo_goal_waits_for_data_but_distinguishes_a_recorded_zero(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-05 12:00:00', 'Asia/Shanghai'));
+        [, $organization, $store] = $this->context('operator');
+        $service = app(\App\Services\SeoGoalDashboardService::class);
+        $empty = $service->forStore($store, '2026-09');
+        $this->assertSame('no_data', $empty['summary']['overall']);
+        $this->assertSame(0, $empty['summary']['catch_up_count']);
+        $this->assertSame(['no_data'], array_values(array_unique(array_column($empty['metrics'], 'status'))));
+
+        $table = FeishuBitableTable::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id,
+            'source_section' => 'seo-goal', 'source_table_id' => 'zero-daily-table',
+            'name' => '日数据', 'metadata_encrypted' => [], 'synced_at' => now(),
+        ]);
+        FeishuBitableRecord::query()->create([
+            'organization_id' => $organization->id, 'store_id' => $store->id,
+            'feishu_bitable_table_id' => $table->id, 'source_record_id' => 'zero-day',
+            'fields_encrypted' => ['日期' => '2026-09-04', 'SEOGMV' => 0, '点击-行业词' => 0, '点击-博客' => 0],
+            'synced_at' => now(),
+        ]);
+        $recorded = $service->forStore($store, '2026-09');
+        $this->assertSame(1, $recorded['data_range']['days']);
+        $this->assertSame('high_risk', $recorded['metrics'][0]['status']);
+        $this->assertNotSame('no_data', $recorded['summary']['overall']);
+    }
+
     public function test_seo_goal_dashboard_matches_database_records_and_calculation_rules(): void
     {
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 12:15:05', 'Asia/Shanghai'));
@@ -845,6 +872,17 @@ class NaturalTrafficPagesTest extends TestCase
                 if ($dimensions === ['date', 'page']) {
                     $pageRequests[] = $filters;
                 }
+                $this->assertFalse(in_array('searchAppearance', $dimensions, true) && count($dimensions) > 1);
+                if ($dimensions === ['searchAppearance']) {
+                    yield [['keys' => ['PRODUCT_SNIPPETS']], ['keys' => ['MERCHANT_LISTINGS']]];
+                    return;
+                }
+                if ($dimensions === ['date'] && ($filters[0]['dimension'] ?? null) === 'searchAppearance') {
+                    $this->assertSame('equals', $filters[0]['operator']);
+                    yield [['keys' => ['2026-08-22'], 'clicks' => 7, 'impressions' => 100, 'position' => 3]];
+                    yield [['keys' => ['2026-08-22'], 'clicks' => 0, 'impressions' => 0, 'position' => 0]];
+                    return;
+                }
 
                 if ($dimensions === ['date', 'page'] && $filters === []) {
                     yield [
@@ -871,6 +909,13 @@ class NaturalTrafficPagesTest extends TestCase
 
         app(SeoAnalyticsSyncService::class)->syncRange($store, '2026-08-22', '2026-08-22');
 
+        foreach (['PRODUCT_SNIPPETS', 'MERCHANT_LISTINGS'] as $appearance) {
+            $this->assertDatabaseHas('seo_gsc_breakdown_daily_metrics', [
+                'organization_id' => $organization->id, 'store_id' => $store->id,
+                'metric_date' => '2026-08-22', 'dimension' => 'search_appearance',
+                'value' => $appearance, 'clicks' => 7, 'impressions' => 100,
+            ]);
+        }
         $this->assertCount(3, $pageRequests);
         $this->assertFalse(collect($pageRequests)->contains(
             fn (array $filters): bool => collect($filters)->contains(
@@ -948,6 +993,39 @@ class NaturalTrafficPagesTest extends TestCase
         $this->assertSame(1, SeoGscPage::query()->count());
         $this->assertSame(1, SeoGscQuery::query()->count());
         $this->assertGreaterThan($version, app(SeoAnalyticsCacheVersionService::class)->current($store->id));
+    }
+
+    public function test_influencer_state_changes_are_store_scoped_and_preserve_source_records(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $fields = ['发布日期' => '2026-08-18', '红人title' => 'creator', '浏览' => 20000];
+        $this->archiveRecord($organization, $store, 'natural-traffic:kol', '红人数据', 'state-record', $fields);
+        $table = FeishuBitableTable::query()->where('store_id', $store->id)->sole();
+        $payload = ['source_table_key' => $table->source_table_id, 'source_record_id' => 'state-record'];
+        foreach (['hidden', 'deleted', 'visible'] as $status) {
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->put(route('natural-traffic.influencer-operations.records.state'), [...$payload, 'status' => $status])
+                ->assertRedirect();
+            $this->assertDatabaseHas('influencer_record_states', [...$payload, 'store_id' => $store->id,
+                'organization_id' => $organization->id, 'status' => $status]);
+        }
+        $this->assertSame($fields, FeishuBitableRecord::query()->where('source_record_id', 'state-record')->sole()->fields_encrypted);
+        $other = $organization->stores()->create(['name' => 'Other', 'shopify_domain' => 'other-state.myshopify.com', 'status' => 'active']);
+        $other->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $this->withSession($this->contextSession($organization, $other))
+            ->put(route('natural-traffic.influencer-operations.records.state'), [...$payload, 'status' => 'hidden'])
+            ->assertNotFound();
+        $this->assertDatabaseCount('influencer_record_states', 1);
+    }
+
+    public function test_influencer_state_changes_require_management_permission(): void
+    {
+        [$user, $organization, $store] = $this->context('viewer');
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+            ->put(route('natural-traffic.influencer-operations.records.state'), [
+                'source_table_key' => 'table', 'source_record_id' => 'record', 'status' => 'hidden',
+            ])->assertForbidden();
+        $this->assertDatabaseCount('influencer_record_states', 0);
     }
 
     /** @return array<string, string> */

@@ -24,6 +24,8 @@ class ShopifyDataQueryService
                 ->orWhere('vendor', 'like', "%{$search}%")))
             ->when($status, fn ($query) => $query->where('status', $status))
             ->withCount('variants')
+            ->with(['monitor' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->select(['id', 'product_id', 'is_enabled', 'low_stock_threshold', 'last_checked_at', 'last_success_at', 'last_error'])])
             ->withMin('variants', 'price')
             ->withMax('variants', 'price')
             ->latest('synced_at')

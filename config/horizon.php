@@ -296,6 +296,22 @@ return [
         ],
 
         'staging' => [
+            'supervisor-referral' => [
+                'connection' => 'redis',
+                'queue' => ['affiliate', 'affiliate-notifications'],
+                'balance' => false,
+                'processes' => 1,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'maxTime' => 3600,
+                'maxJobs' => 500,
+                'memory' => 192,
+                'tries' => 4,
+                'timeout' => 100,
+                'backoff' => [30, 120, 600],
+                'sleep' => 2,
+                'nice' => 0,
+            ],
             'supervisor-shopify' => [
                 'processes' => (int) env('HORIZON_PROCESSES', 5),
                 'minProcesses' => (int) env('HORIZON_PROCESSES', 5),

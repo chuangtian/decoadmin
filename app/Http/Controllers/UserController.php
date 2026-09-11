@@ -76,6 +76,7 @@ class UserController extends Controller
                     'status' => $validated['status'] ?? 'active',
                     'avatar_url' => $avatarUrl,
                 ]);
+                $user->markEmailAsVerified();
                 $organization->users()->attach($user, [
                     'status' => 'active',
                     'joined_at' => now(),
