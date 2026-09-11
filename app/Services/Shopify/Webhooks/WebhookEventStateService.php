@@ -3,6 +3,7 @@
 namespace App\Services\Shopify\Webhooks;
 
 use App\Models\WebhookEvent;
+use App\Support\SafeDiagnosticMessage;
 use Illuminate\Support\Facades\DB;
 
 class WebhookEventStateService
@@ -107,6 +108,6 @@ class WebhookEventStateService
             $event->shopifyConnection?->refresh_token_encrypted,
         ], fn ($secret) => is_string($secret) && $secret !== '');
 
-        return mb_substr(str_replace($secrets, '[redacted]', $message), 0, 2000);
+        return SafeDiagnosticMessage::sanitize(str_replace($secrets, '[redacted]', $message));
     }
 }

@@ -25,7 +25,7 @@ const groupLabels: Record<string, string> = {
 
 <template>
     <Head :title="role.data.name" />
-    <AppLayout :breadcrumbs="[{ label: '系统管理' }, { label: '角色权限', href: '/roles' }, { label: role.data.name }]">
+    <AppLayout :breadcrumbs="[{ label: '用户管理', href: '/users' }, { label: '角色', href: '/roles' }, { label: role.data.name }]">
         <div class="mx-auto max-w-5xl">
             <Link href="/roles" class="text-sm font-medium text-slate-500 hover:text-slate-900">← 返回角色列表</Link>
             <div class="mt-4 flex items-start justify-between gap-4"><div><div class="flex items-center gap-2"><h2 class="text-2xl font-semibold">{{ role.data.name }}</h2><span v-if="role.data.is_system" class="rounded bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-600">系统角色</span></div><p class="mt-2 text-sm text-slate-500">{{ role.data.description }}</p></div><div class="flex items-center gap-2"><code class="rounded-md bg-slate-900 px-3 py-2 text-xs text-slate-100">{{ role.data.slug }}</code><button v-if="canDelete" type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50" @click="removeOpen = true">移除角色</button></div></div>

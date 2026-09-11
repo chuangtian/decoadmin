@@ -6,6 +6,8 @@ use App\Models\AuditLog;
 use App\Models\Store;
 use App\Models\StoreAlert;
 use App\Models\User;
+use App\Support\SafeDiagnosticMessage;
+use App\Support\StoreAlertPresentation;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class StoreAlertQueryService
@@ -20,7 +22,16 @@ class StoreAlertQueryService
             ->when($type, fn ($query) => $query->where('type', $type))
             ->latest('occurred_at')
             ->paginate(25)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(function (StoreAlert $alert): StoreAlert {
+                $alert->title = StoreAlertPresentation::title($alert);
+                $alert->message = SafeDiagnosticMessage::sanitize($alert->message);
+                $alert->delivery_error = filled($alert->delivery_error)
+                    ? SafeDiagnosticMessage::sanitize($alert->delivery_error, '通知发送失败。', 500)
+                    : null;
+
+                return $alert;
+            });
     }
 
     public function acknowledge(Store $store, StoreAlert $alert, User $actor): void

@@ -12,6 +12,7 @@ use App\Models\MetaAdSet;
 use App\Models\MetaAdSyncShard;
 use App\Models\Organization;
 use App\Models\Store;
+use App\Models\StoreAlert;
 use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
@@ -762,6 +763,92 @@ class MetaAdsSyncTest extends TestCase
         $this->assertSame(1, $terminal['terminal_failed']);
         $this->assertSame('failed', $shard->fresh()->status);
         $this->assertSame('meta_ads_async_report_terminal_failed', $shard->fresh()->error_code);
+    }
+
+    public function test_pending_async_report_is_recovered_after_its_deadline(): void
+    {
+        config()->set('services.meta_ads.async_report_timeout_seconds', 60);
+        config()->set('services.meta_ads.async_max_poll_attempts', 120);
+        config()->set('services.meta_ads.async_max_resubmissions', 2);
+        $store = $this->configuredStore('Timeout Org', 'timeout-meta-org', 'Timeout Store', 'timeout-meta.myshopify.com', 'timeout-token');
+        $service = app(MetaAdsSyncService::class);
+        $service->orchestrate($store, 'full');
+        $shard = MetaAdSyncShard::query()->where('kind', 'insights')->where('level', 'account')->sole();
+        $shard->forceFill([
+            'since_date' => '2026-08-22',
+            'until_date' => '2026-08-22',
+            'result' => [
+                'async_report_id' => '7004',
+                'async_poll_count' => 3,
+                'async_submitted_at' => now()->subSeconds(61)->toIso8601String(),
+            ],
+        ])->save();
+        $http = new HttpFactory;
+        $http->fake(fn () => Http::response([
+            'async_status' => 'Job Running',
+            'async_percent_completion' => 25,
+        ]));
+        $recoveryService = new MetaAdsSyncService(new MetaAdsApiClient(
+            $http,
+            app(StoreBusinessCredentialService::class),
+        ), app(CurrentYearSyncWindow::class));
+
+        $result = $recoveryService->runShard($shard->fresh());
+        $checkpoint = $shard->fresh()->result;
+
+        $this->assertSame(1, $result['async_pending']);
+        $this->assertNull(data_get($checkpoint, 'async_report_id'));
+        $this->assertNull(data_get($checkpoint, 'async_poll_count'));
+        $this->assertSame(1, data_get($checkpoint, 'async_failure_count'));
+        $this->assertSame('timeout', data_get($checkpoint, 'async_failed_reports.0.reason'));
+    }
+
+    public function test_terminal_async_failure_is_not_resurrected_and_completed_run_resolves_its_alert(): void
+    {
+        $store = $this->configuredStore('Terminal Resume Org', 'terminal-resume', 'Terminal Resume', 'terminal-resume.myshopify.com', 'test-token');
+        $service = app(MetaAdsSyncService::class);
+        $first = $service->orchestrate($store, 'full');
+        $failedShard = MetaAdSyncShard::query()->where('sync_job_id', $first['sync_job_id'])->firstOrFail();
+        $failedShard->forceFill([
+            'status' => 'failed',
+            'error_code' => 'meta_ads_async_report_terminal_failed',
+            'last_error' => 'Meta Ads 异步洞察报表等待超时。',
+            'finished_at' => now(),
+        ])->save();
+        SyncJob::query()->whereKey($first['sync_job_id'])->update([
+            'status' => 'failed',
+            'failed_at' => now(),
+            'finished_at' => now(),
+        ]);
+
+        $second = $service->orchestrate($store, 'full');
+        $this->assertNotSame($first['sync_job_id'], $second['sync_job_id']);
+        $this->assertFalse($second['resumed']);
+
+        StoreAlert::query()->create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'fingerprint' => hash('sha256', 'meta-completed-alert'),
+            'type' => 'sync',
+            'severity' => 'error',
+            'source_type' => SyncJob::class,
+            'source_id' => $first['sync_job_id'],
+            'code' => 'meta_ads_shard_failed',
+            'title' => 'Meta Ads 数据同步失败',
+            'message' => '测试告警',
+            'status' => 'open',
+            'delivery_status' => 'sent',
+            'occurred_at' => now(),
+        ]);
+        MetaAdSyncShard::query()->where('sync_job_id', $second['sync_job_id'])->update([
+            'status' => 'completed',
+            'finished_at' => now(),
+        ]);
+
+        $this->assertTrue($service->finalizeShardedSync($second['sync_job_id']));
+        $alert = StoreAlert::query()->where('source_id', $first['sync_job_id'])->sole();
+        $this->assertSame('resolved', $alert->status);
+        $this->assertNotNull($alert->resolved_at);
     }
 
     public function test_structure_shard_resumes_from_last_successful_page_cursor(): void
