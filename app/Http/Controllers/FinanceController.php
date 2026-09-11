@@ -6,6 +6,7 @@ use App\Http\Requests\StoreFinanceCategoryRequest;
 use App\Http\Requests\StoreFinanceEntryRequest;
 use App\Models\FinanceEntry;
 use App\Models\PersonalRequest;
+use App\Services\BusinessNotificationService;
 use App\Services\FinanceService;
 use App\Support\CurrentOrganization;
 use Illuminate\Http\JsonResponse;
@@ -83,14 +84,29 @@ class FinanceController extends Controller
         return back()->with('success', '收支记录已删除。');
     }
 
-    public function recordExpenseRequestPayment(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance): RedirectResponse
+    public function recordExpenseRequestPayment(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance, BusinessNotificationService $notifications): RedirectResponse
     {
         $validated = $request->validate([
             'paid_on' => ['required', 'date', 'before_or_equal:today'],
             'payment_reference' => ['nullable', 'string', 'max:180'],
         ]);
         $renewal = $personalRequest->payment_status === 'paid';
-        $finance->recordExpenseRequestPayment($currentOrganization->require(), $request->user(), $personalRequest, $validated);
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        $finance->recordExpenseRequestPayment($organization, $user, $personalRequest, $validated);
+        $personalRequest->refresh();
+        $paymentId = (int) $personalRequest->payments()->latest('id')->value('id');
+        $notifications->notify(
+            $organization,
+            [$personalRequest->submitter_id],
+            $user,
+            $renewal ? 'expense_request.renewed' : 'expense_request.paid',
+            $renewal ? '软件续费已完成' : '费用申请已付款',
+            "{$personalRequest->reference_no}：{$personalRequest->title}",
+            route('expense-requests.index', [], false),
+            $personalRequest,
+            "personal-request:{$personalRequest->uuid}:payment:{$paymentId}",
+        );
 
         return back()->with('success', $renewal ? '续费记录已保存，下次续费日期已顺延。' : '付款已确认。');
     }

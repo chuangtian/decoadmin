@@ -8,6 +8,7 @@ use App\Models\PersonalRequest;
 use App\Models\PersonalRequestAttachment;
 use App\Models\User;
 use App\Services\Authorization\PersonalPermissionService;
+use App\Services\BusinessNotificationService;
 use App\Support\CurrentOrganization;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -28,7 +29,10 @@ class PersonalRequestController extends Controller
 
     private const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 
-    public function __construct(private PersonalPermissionService $permissions) {}
+    public function __construct(
+        private PersonalPermissionService $permissions,
+        private BusinessNotificationService $notifications,
+    ) {}
 
     public function technicalIndex(Request $request, CurrentOrganization $context): Response
     {
@@ -153,6 +157,7 @@ class PersonalRequestController extends Controller
         unset($validated['images']);
         $item = $this->createWithAttachments($organization, $user, ['kind' => 'technical', 'status' => 'pending_approval', ...$validated], $images);
         $this->audit($item, $user, 'technical_request_created');
+        $this->notifyApprovers($organization, $user, $item, '新的技术需求待审批');
 
         return back()->with('success', "技术需求 {$item->reference_no} 已提交审批。");
     }
@@ -176,6 +181,7 @@ class PersonalRequestController extends Controller
         unset($validated['images']);
         $item = $this->createWithAttachments($organization, $user, ['kind' => 'expense', 'status' => 'pending_approval', ...$validated], $images);
         $this->audit($item, $user, 'expense_claim_created');
+        $this->notifyApprovers($organization, $user, $item, '新的报销申请待审批');
 
         return back()->with('success', "报销申请 {$item->reference_no} 已提交审批。");
     }
@@ -204,6 +210,7 @@ class PersonalRequestController extends Controller
         unset($validated['images']);
         $item = $this->createWithAttachments($organization, $user, ['kind' => 'expense_request', 'status' => 'pending_approval', ...$validated], $images);
         $this->audit($item, $user, 'expense_request_created');
+        $this->notifyApprovers($organization, $user, $item, '新的费用申请待审批');
 
         return back()->with('success', "费用申请 {$item->reference_no} 已提交审批。");
     }
@@ -234,6 +241,51 @@ class PersonalRequestController extends Controller
             $this->audit($personalRequest, $user, $approved ? 'personal_request_approved' : 'personal_request_rejected');
         });
 
+        $kindLabel = match ($personalRequest->kind) {
+            'technical' => '技术需求',
+            'expense_request' => '费用申请',
+            default => '报销申请',
+        };
+        $this->notifications->notify(
+            $organization,
+            [$personalRequest->submitter_id],
+            $user,
+            "{$personalRequest->kind}.reviewed",
+            $approved ? "{$kindLabel}审批已通过" : "{$kindLabel}审批未通过",
+            "{$personalRequest->reference_no}：{$personalRequest->title}",
+            $this->personalRequestUrl($personalRequest),
+            $personalRequest,
+            "personal-request:{$personalRequest->uuid}:reviewed:{$personalRequest->status}",
+        );
+
+        if ($approved && $personalRequest->kind === 'technical') {
+            $this->notifications->notify(
+                $organization,
+                $this->notifications->usersWithPermission($organization, 'technical_requests.manage', ['developer', 'super-admin']),
+                $user,
+                'technical_request.approved',
+                '有新的技术需求可以接受',
+                "{$personalRequest->reference_no}：{$personalRequest->title}",
+                route('technical-requests.index', ['search' => $personalRequest->reference_no], false),
+                $personalRequest,
+                "personal-request:{$personalRequest->uuid}:available",
+            );
+        }
+
+        if ($approved && $personalRequest->kind === 'expense_request') {
+            $this->notifications->notify(
+                $organization,
+                $this->notifications->usersWithPermission($organization, 'finance.manage'),
+                $user,
+                'expense_request.payment_required',
+                '有新的费用申请待付款',
+                "{$personalRequest->reference_no}：{$personalRequest->title}",
+                route('finance.renewals', [], false),
+                $personalRequest,
+                "personal-request:{$personalRequest->uuid}:payment-required",
+            );
+        }
+
         return back()->with('success', $approved ? '申请已通过。' : '申请已驳回。');
     }
 
@@ -257,6 +309,20 @@ class PersonalRequestController extends Controller
             return true;
         });
 
+        if ($accepted) {
+            $this->notifications->notify(
+                $organization,
+                [$personalRequest->submitter_id],
+                $user,
+                'technical_request.accepted',
+                '技术需求已被接受',
+                "{$user->name} 已接受 {$personalRequest->reference_no}：{$personalRequest->title}",
+                route('technical-requests.index', ['search' => $personalRequest->reference_no], false),
+                $personalRequest,
+                "personal-request:{$personalRequest->uuid}:accepted",
+            );
+        }
+
         return $accepted ? back()->with('success', '技术需求已接受。') : back()->withErrors(['accept' => '该需求当前无法接受。']);
     }
 
@@ -269,10 +335,24 @@ class PersonalRequestController extends Controller
         $validated = $request->validate(['action' => ['required', Rule::in(['progress', 'complete'])], 'note' => ['nullable', 'string', 'max:3000', 'required_if:action,progress']]);
         $complete = $validated['action'] === 'complete';
         $note = trim((string) ($validated['note'] ?? ''));
-        DB::transaction(function () use ($complete, $note, $personalRequest, $user): void {
+        $progressLogId = DB::transaction(function () use ($complete, $note, $personalRequest, $user): int {
             $personalRequest->forceFill(['status' => $complete ? 'completed' : 'in_progress', 'completed_at' => $complete ? now() : null])->save();
-            $personalRequest->progressLogs()->create(['user_id' => $user->id, 'action' => $complete ? 'completed' : 'progress', 'content' => $note !== '' ? $note : null]);
+            $progressLog = $personalRequest->progressLogs()->create(['user_id' => $user->id, 'action' => $complete ? 'completed' : 'progress', 'content' => $note !== '' ? $note : null]);
+
+            return (int) $progressLog->id;
         });
+
+        $this->notifications->notify(
+            $organization,
+            [$personalRequest->submitter_id],
+            $user,
+            $complete ? 'technical_request.completed' : 'technical_request.progressed',
+            $complete ? '技术需求已完成' : '技术需求有新进展',
+            "{$personalRequest->reference_no}：{$personalRequest->title}",
+            route('technical-requests.index', ['search' => $personalRequest->reference_no], false),
+            $personalRequest,
+            "personal-request:{$personalRequest->uuid}:progress:{$progressLogId}",
+        );
 
         return back()->with('success', $complete ? '技术需求已完成。' : '进展已提交。');
     }
@@ -351,6 +431,30 @@ class PersonalRequestController extends Controller
     private function hasRole(User $user, Organization $organization, array $slugs): bool
     {
         return $user->isSuperAdmin() || $user->roles()->where('user_roles.organization_id', $organization->id)->whereIn('roles.slug', $slugs)->exists();
+    }
+
+    private function notifyApprovers(Organization $organization, User $user, PersonalRequest $item, string $title): void
+    {
+        $this->notifications->notify(
+            $organization,
+            $this->notifications->usersWithPermission($organization, 'request_approvals.manage', ['super-admin']),
+            $user,
+            "{$item->kind}.submitted",
+            $title,
+            "{$user->name} 提交了 {$item->reference_no}：{$item->title}",
+            route('request-approvals.index', [], false),
+            $item,
+            "personal-request:{$item->uuid}:submitted",
+        );
+    }
+
+    private function personalRequestUrl(PersonalRequest $item): string
+    {
+        return match ($item->kind) {
+            'technical' => route('technical-requests.index', ['search' => $item->reference_no], false),
+            'expense_request' => route('expense-requests.index', [], false),
+            default => route('expense-claims.index', [], false),
+        };
     }
 
     private function audit(PersonalRequest $item, User $user, string $action): void

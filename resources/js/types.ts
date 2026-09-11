@@ -371,6 +371,7 @@ export interface SharedProps {
         permissions: string[];
     };
     currentOrganization: { id: number; name: string; code: string } | null;
+    realtime: { enabled: boolean; key: string };
     currentStore: (StoreOption & { organization_id: number }) | null;
     availableOrganizations: OrganizationOption[];
     applicationNavigation: ApplicationNavigationItem[];

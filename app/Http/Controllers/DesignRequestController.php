@@ -8,6 +8,7 @@ use App\Models\DesignRequestAttachment;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Authorization\PersonalPermissionService;
+use App\Services\BusinessNotificationService;
 use App\Support\CurrentOrganization;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,7 +33,10 @@ class DesignRequestController extends Controller
 
     private const STATUSES = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'cancelled'];
 
-    public function __construct(private PersonalPermissionService $permissions) {}
+    public function __construct(
+        private PersonalPermissionService $permissions,
+        private BusinessNotificationService $notifications,
+    ) {}
 
     public function index(Request $request, CurrentOrganization $currentOrganization): Response
     {
@@ -163,6 +167,18 @@ class DesignRequestController extends Controller
             throw $exception;
         }
 
+        $this->notifications->notify(
+            $organization,
+            $this->notifications->usersWithPermission($organization, 'design_requests.manage', self::FULL_ACCESS_ROLES),
+            $user,
+            'design_request.submitted',
+            '有新的设计需求',
+            "{$user->name} 提交了 {$designRequest->reference_no}：{$designRequest->task_name}",
+            route('design-requests.index', ['tab' => 'list', 'search' => $designRequest->reference_no], false),
+            $designRequest,
+            "design-request:{$designRequest->uuid}:submitted",
+        );
+
         return back()->with('success', "任务 {$designRequest->reference_no} 已提交。");
     }
 
@@ -217,7 +233,7 @@ class DesignRequestController extends Controller
         $completed = $validated['action'] === 'complete';
         $timezone = $this->timezone($user);
 
-        DB::transaction(function () use ($completed, $designRequest, $note, $timezone, $user): void {
+        $progressLogId = DB::transaction(function () use ($completed, $designRequest, $note, $timezone, $user): int {
             $old = $designRequest->only(['status', 'actual_delivery_date', 'delivery_note']);
             $designRequest->forceFill([
                 'status' => $completed ? 'completed' : 'in_progress',
@@ -225,13 +241,27 @@ class DesignRequestController extends Controller
                 'delivery_note' => $note !== '' ? $note : $designRequest->delivery_note,
                 'updated_by' => $user->id,
             ])->save();
-            $designRequest->progressLogs()->create([
+            $progressLog = $designRequest->progressLogs()->create([
                 'user_id' => $user->id,
                 'action' => $completed ? 'completed' : 'progress',
                 'content' => $note !== '' ? $note : null,
             ]);
             $this->audit($designRequest, $user, $completed ? 'design_request_completed' : 'design_request_progressed', $old, $designRequest->only(array_keys($old)));
+
+            return (int) $progressLog->id;
         });
+
+        $this->notifications->notify(
+            $organization,
+            [$designRequest->requester_id],
+            $user,
+            $completed ? 'design_request.completed' : 'design_request.progressed',
+            $completed ? '设计需求已完成' : '设计需求有新进展',
+            "{$designRequest->reference_no}：{$designRequest->task_name}",
+            route('design-requests.index', ['tab' => 'list', 'search' => $designRequest->reference_no], false),
+            $designRequest,
+            "design-request:{$designRequest->uuid}:progress:{$progressLogId}",
+        );
 
         return back()->with('success', $completed
             ? "任务 {$designRequest->reference_no} 已完成。"
@@ -279,6 +309,18 @@ class DesignRequestController extends Controller
         if (! $accepted) {
             return back()->withErrors(['accept' => '该任务已被其他人接受。']);
         }
+
+        $this->notifications->notify(
+            $organization,
+            [$designRequest->requester_id],
+            $user,
+            'design_request.accepted',
+            '设计需求已被接受',
+            "{$user->name} 已接受 {$designRequest->reference_no}：{$designRequest->task_name}",
+            route('design-requests.index', ['tab' => 'list', 'search' => $designRequest->reference_no], false),
+            $designRequest,
+            "design-request:{$designRequest->uuid}:accepted",
+        );
 
         return back()->with('success', "任务 {$designRequest->reference_no} 已由你接受。");
     }

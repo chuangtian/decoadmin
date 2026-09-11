@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Models\BusinessNotification;
 use App\Models\Organization;
 use App\Models\PersonalRequest;
 use App\Models\PersonalRequestAttachment;
@@ -46,6 +47,7 @@ class PersonalRequestWorkflowTest extends TestCase
         $this->assertSame('technical', $item->kind);
         $this->assertSame('pending_approval', $item->status);
         Storage::disk('local')->assertExists($attachment->path);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $approver->id, 'type' => 'technical.submitted']);
 
         $this->get(route('technical-requests.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
             ->component('Requests/Technical')->where('scope', 'mine')->where('requests.total', 1));
@@ -58,6 +60,8 @@ class PersonalRequestWorkflowTest extends TestCase
         $this->put(route('request-approvals.review', $item), ['action' => 'approve', 'note' => '范围清楚，同意开发'])
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('approved', $item->fresh()->status);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $employee->id, 'type' => 'technical.reviewed']);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $developer->id, 'type' => 'technical_request.approved']);
 
         $this->actingAs($developer)->withSession($this->contextSession($organization, $store))
             ->get(route('technical-requests.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
@@ -69,6 +73,7 @@ class PersonalRequestWorkflowTest extends TestCase
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('completed', $item->fresh()->status);
         $this->assertDatabaseCount('personal_request_progress_logs', 4);
+        $this->assertSame(4, BusinessNotification::query()->where('user_id', $employee->id)->count());
     }
 
     public function test_expense_claim_requires_invoice_and_can_be_rejected_with_a_reason(): void
@@ -97,6 +102,7 @@ class PersonalRequestWorkflowTest extends TestCase
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('rejected', $item->fresh()->status);
         $this->assertSame('请补充付款凭证', $item->fresh()->review_note);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $employee->id, 'type' => 'expense.reviewed']);
     }
 
     public function test_cost_application_is_visible_to_submitter_and_only_super_admin_can_approve(): void
@@ -150,6 +156,7 @@ class PersonalRequestWorkflowTest extends TestCase
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('approved', $item->fresh()->status);
         $this->assertSame('pending', $item->fresh()->payment_status);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $organizationAdmin->id, 'type' => 'expense_request.payment_required']);
 
         $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
             ->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-09-11'])
@@ -173,6 +180,7 @@ class PersonalRequestWorkflowTest extends TestCase
             'payment_reference' => 'PAY-INITIAL-001',
         ])->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('paid', $item->fresh()->payment_status);
+        $this->assertDatabaseHas('business_notifications', ['user_id' => $employee->id, 'type' => 'expense_request.paid']);
         $this->assertSame('2027-09-11', $item->fresh()->next_renewal_on->toDateString());
         $initialPayment = PersonalRequestPayment::query()->sole();
         $this->assertSame($item->id, $initialPayment->personal_request_id);

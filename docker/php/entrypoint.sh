@@ -26,6 +26,9 @@ if [ "${1:-}" = "/usr/local/bin/setup-app" ]; then
     if [ ! -e public/storage ] && [ ! -L public/storage ]; then
         php artisan storage:link --no-interaction
     fi
+    # bootstrap/cache is a persistent deployment volume, so refresh the package
+    # manifest before optimizing when a release adds or removes a Laravel package.
+    php artisan package:discover --ansi --no-interaction
     php artisan migrate --force --no-interaction
 
     if [ "${APP_ENV:-}" = "staging" ] || [ "${APP_ENV:-}" = "production" ]; then
