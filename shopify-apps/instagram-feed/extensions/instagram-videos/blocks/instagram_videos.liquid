@@ -263,6 +263,38 @@
         ]
       {%- endcapture -%}
       <script type="application/json" data-igv-json>{{ feed_json }}</script>
+
+      {%- comment -%}
+        弹窗骨架放在模板里而不是拼在 JS 字符串里：标记归模板管，也让 app block 的
+        JS 体积留在 Shopify 的 10KB 限额内。JS 负责克隆一份挂到 body 上 ——
+        必须挂 body，否则主题里任何带 transform 的祖先都会让 position: fixed 失效。
+      {%- endcomment -%}
+      <template data-igv-lightbox-template>
+        <div class="igv-lightbox" hidden role="dialog" aria-modal="true" aria-label="Instagram 帖子">
+          <div class="igv-lightbox__dialog">
+            <button class="igv-lightbox__button igv-lightbox__close" type="button" data-igv-close aria-label="关闭">&times;</button>
+            <button class="igv-lightbox__button igv-lightbox__prev" type="button" data-igv-lb-prev aria-label="上一条">&#8249;</button>
+            <button class="igv-lightbox__button igv-lightbox__next" type="button" data-igv-lb-next aria-label="下一条">&#8250;</button>
+            <div class="igv-lightbox__frame">
+              <p class="igv-lightbox__loading" data-igv-loading>正在从 Instagram 加载帖子…</p>
+              <iframe
+                class="igv-lightbox__embed"
+                data-igv-embed
+                title="Instagram 帖子"
+                frameborder="0"
+                scrolling="no"
+                allowtransparency="true"
+                allow="encrypted-media; picture-in-picture"
+                referrerpolicy="strict-origin-when-cross-origin"
+              ></iframe>
+            </div>
+            <div class="igv-lightbox__meta">
+              <p class="igv-lightbox__caption" data-igv-caption></p>
+              <div class="igv-lightbox__links" data-igv-links></div>
+            </div>
+          </div>
+        </div>
+      </template>
     {%- endif -%}
   </div>
 {%- endif -%}
