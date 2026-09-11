@@ -64,16 +64,28 @@ GET /shopify-app/instagram-feed?shop={shop}.myshopify.com&host=...&embedded=1&id
 | GET | `/mirror-failures` | 转存失败日志（归纳原因 + 脱敏原始信息，最多 50 条） | 60/min |
 | POST | `/mirror-failures/retry` | 把全部失败项改回 `pending` 重新排队 | 12/min |
 | POST | `/storefront-sync` | 手动把当前内容推到店铺前台（兜底，正常不需要） | 12/min |
-| GET | `/galleries/{gallery}` | 展示组详情（候选、组内、关联商品） | 60/min |
+| GET | `/galleries/{gallery}` | 展示组详情（候选、组内、关联商品）。可选 `filter` / `search` / `from` / `to` | 60/min |
 | POST | `/galleries` | 新建展示组 | 30/min |
 | PUT | `/galleries/{gallery}` | 重命名 | 30/min |
 | DELETE | `/galleries/{gallery}` | 删除 | 30/min |
 | POST | `/galleries/{gallery}/items` | 加入成员 | 60/min |
 | DELETE | `/galleries/{gallery}/items` | 移出成员 | 60/min |
 | PUT | `/galleries/{gallery}/order` | 保存组内顺序 | 60/min |
-| PUT | `/media/{media}/products` | 保存关联商品 | 60/min |
+| PUT | `/media/{media}/products` | 保存关联商品（空数组表示清除关联） | 60/min |
 
 **没有「发布到前台」接口**：凡是会改变前台展示的写操作（同步、转存、重试、建组/改名/删组、加成员/移出/排序、关联商品）在成功后自动同步一次前台，失败原因作为消息后缀附在响应里。`/storefront-sync` 只是「前台没跟上」时的自助恢复入口。
+
+**商品 GID 从哪来**：前端不让商家手填，走 App Bridge 的 `shopify.resourcePicker({ type: 'product' })`（封装在 `api.ts` 的 `pickProducts()`）。选择器跑在 Shopify 后台里，搜索、分页与可见性都由 Shopify 负责，只需要 `read_products`。打开时用 `selectionIds` 预选当前已关联的商品，`filter: { variants: false }` 阻止下钻到变体（我们只存商品级 GID）。商家直接关掉选择器时 App Bridge 返回 `undefined`（不是空数组），前端据此区分「取消」与「清空关联」。
+
+**候选怎么找**：媒体库上千条，所以搜索与筛选全在服务端做，前端只负责传参。`/galleries/{gallery}` 接受四个可选参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `filter` | `all`（默认）/ `VIDEO` / `IMAGE`。`IMAGE` 连带算上 `CAROUSEL_ALBUM` |
+| `search` | 按文案模糊匹配，最长 100 字符。`%` `_` `\` 会被转义，不会被当成通配符 |
+| `from` / `to` | 发布日期区间，`YYYY-MM-DD`，含当天（`from` 取 00:00、`to` 取 23:59:59）。`to` 必须不早于 `from` |
+
+候选恒按 `posted_at` 倒序（最新在前），一次最多返回 `candidateLimit`（200）条。响应里回传 `search` / `from` / `to` 供前端回填输入框，另给 `matchedCount`（符合条件的总数）—— 大于返回条数就说明被截断了，前端据此提示商家继续收窄。组内成员一侧**不受这些参数影响**：拖拽排序要按全量重写 `position`，被筛掉会串号。
 
 约定：
 
@@ -101,13 +113,28 @@ App ID、App Secret 和 Facebook 登录配置 ID 由**商家自己**在 Shopify 
 
 ## Cloudflare R2
 
-Instagram CDN 链接带签名会过期，同步后必须把视频与封面转存到 R2，对外用绑定在桶上的自定义域名给永久地址。相关变量：`INSTAGRAM_FEED_R2_ACCOUNT_ID`、`INSTAGRAM_FEED_R2_ACCESS_KEY_ID`、`INSTAGRAM_FEED_R2_SECRET_ACCESS_KEY`、`INSTAGRAM_FEED_R2_BUCKET`、`INSTAGRAM_FEED_R2_PUBLIC_BASE_URL`。
+Instagram CDN 链接带签名会过期，同步后必须把**封面图**转存到 R2，对外用绑定在桶上的自定义域名给永久地址。相关变量：`INSTAGRAM_FEED_R2_ACCOUNT_ID`、`INSTAGRAM_FEED_R2_ACCESS_KEY_ID`、`INSTAGRAM_FEED_R2_SECRET_ACCESS_KEY`、`INSTAGRAM_FEED_R2_BUCKET`、`INSTAGRAM_FEED_R2_PUBLIC_BASE_URL`。
 
-这五项同样由商家在「应用配置」页签按店铺维护，`.env` 只作兜底。五项必须全部填齐才算就绪。**换桶不会迁移旧素材**：`video_url` / `poster_url` 是转存当时写死的完整地址，仍指向旧桶，要重新转存才会搬过来。
+这五项同样由商家在「应用配置」页签按店铺维护，`.env` 只作兜底。五项必须全部填齐才算就绪。**换桶不会迁移旧素材**：`poster_url` 是转存当时写死的完整地址，仍指向旧桶，要重新转存才会搬过来。
 
-R2 未配置时同步只拉取元数据、不转存，且未转存的内容不会发布到前台。对象 key 为 `{环境}/{店铺域名}/videos/{ig_media_id}.mp4` 与 `{环境}/{店铺域名}/posters/{ig_media_id}.jpg`，按环境与店铺隔离，重复转存是覆盖而不是堆积。
+R2 未配置时同步只拉取元数据、不转存，且未转存的内容不会发布到前台。对象 key 为 `{环境}/{店铺域名}/posters/{ig_media_id}.jpg`，按环境与店铺隔离，重复转存是覆盖而不是堆积。
 
 转存实现不把文件读进内存：下载走 HTTP 客户端 `sink` 落临时文件，上传走文件流，单文件上限由 `INSTAGRAM_FEED_MIRROR_MAX_OBJECT_BYTES` 控制（默认 200MB）。R2 请求使用手写 AWS SigV4 签名，不引入 aws-sdk。
+
+签名踩过的坑（改 `R2Client::signedRequest()` 前先读）：`Content-Type` 必须参与签名（在 `SignedHeaders` 里），但**不能同时**出现在 `withHeaders()` 和 `withBody()` 里。Laravel 的 `withHeaders()` 用 `array_merge_recursive` 合并，`'content-type'` 与 `'Content-Type'` 会各留一份，Guzzle 合并同名头后实际发出 `video/mp4, video/mp4`，与签名用的单值对不上，R2 一律回 403 `SignatureDoesNotMatch`。GET / DELETE 没有 body 也没有 Content-Type，所以只有上传会踩到 —— 现象极像「密钥填错了」，排查时容易被带偏。判别方法：用同一份凭证发一个最小化签名 GET（例如 ListObjectsV2），能过就说明凭证没问题，问题在上传路径。
+
+## 不转存视频文件
+
+Instagram 出于下载与版权保护，会对部分 Reels **静默省略 `media_url` 字段** —— HTTP 200、没有报错、字段整个不存在（不是 `null`），加 `debug=all` 也没有任何说明。触发条件是「使用了平台授权音乐」或「该 Reel 关闭了允许下载」，两者 API 都不暴露。实测某店铺 553 条 REELS 里有 65 条（约 12%）如此，散落在 2023-08 到 2026-01 整个区间，与发布时间无关，靠重试永远拿不到。
+
+`thumbnail_url` 对所有视频都稳定返回，所以：
+
+- 转存只搬封面图（`InstagramMirrorService::mirrorOne()`）；
+- 播放交给点击封面后弹窗里的 **Instagram 官方 embed**（`{permalink}/embed/captioned`，见 `InstagramMedia::embedUrl()`）。embed 不需要令牌、不需要 `oembed_read` 审核，Instagram 也不下发 `X-Frame-Options` / `frame-ancestors`，可直接 iframe；视频与轮播都由 Instagram 自己渲染，不涉及版权问题。
+
+顺带的好处：省掉大量视频存储与带宽，转存速度快了一个量级，且不再有「视频拿不到」这一类失败。
+
+历史数据用 `instagram-feed:purge-mirrored-videos` 收尾（`--store=` / `--dry-run` / `--chunk=`）：删掉 R2 里遗留的视频对象并清空 `video_key` / `video_url`，同时把「`ready` 但没有封面」的条目重置为 `pending`（旧逻辑允许视频成功、封面失败，这类条目在纯图片网格里会是空白）。`mirrorOne()` 也会在重新转存单条时顺手删掉它遗留的视频对象。
 
 ## 应用配置：按店铺存储
 
@@ -304,12 +331,11 @@ POST /api/shopify-app/instagram-feed/webhooks
           "id": "17900000000000000",
           "media_type": "VIDEO",
           "permalink": "https://www.instagram.com/reel/...",
+          "embed_url": "https://www.instagram.com/reel/.../embed/captioned",
           "caption": "文案",
-          "video_url": "https://cdn.example.com/local/macfox-us.myshopify.com/videos/179....mp4",
           "poster_url": "https://cdn.example.com/local/macfox-us.myshopify.com/posters/179....jpg",
           "width": null,
           "height": null,
-          "duration_ms": null,
           "posted_at": "2026-08-20T02:00:00+00:00",
           "products": [{ "handle": "macfox-x2", "title": "MacFox X2" }]
         }
@@ -323,6 +349,7 @@ POST /api/shopify-app/instagram-feed/webhooks
 约定：
 
 - 每组只包含 `mirror_status = ready` 的媒体，未转存完的还挂在会过期的 IG CDN 上，不会发布；
+- 只有 `poster_url`，没有 `video_url` —— 视频文件不转存，播放走 `embed_url`（见「不转存视频文件」）；
 - 每组条数上限 50，文案截断到 300 字符并去掉尖括号，避免内联进 JSON script 标签时出现 `</script>` 截断标签；
 - 顶层 `items` 是旧版兼容字段，指向第一个组，供还没升级到按组选择的主题使用；
 - 已删除的商品解析不到，会被自动过滤，不会把死链发到前台；
@@ -331,15 +358,33 @@ POST /api/shopify-app/instagram-feed/webhooks
 
 Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取，商家在区块设置 `gallery_handle` 里填写展示组标识来指定展示哪一组；留空或找不到时回退到第一个组，并只在主题编辑器里提示。
 
+前台渲染：网格/轮播里每个条目就是一张封面图（`<img>`，没有 `<video>`）。`show_posted_at` 控制是否在封面下方显示发布日期。
+
+**点击行为**由区块设置 `click_action` 二选一，两种都在服务端渲染成对应元素，禁用 JS 也能用：
+
+| 取值 | 渲染成 | 行为 |
+| --- | --- | --- |
+| `modal`（默认） | `<button data-igv-open>` | 打开弹窗，把 `embed_url` 塞进 iframe。访客不离开店铺 |
+| `link` | `<a target="_blank">` | 在新标签打开 `permalink` |
+
+选 `modal` 时才会输出那段 `data-igv-json`（弹窗要用的数据），选 `link` 时连 JSON 都不渲染。JS 侧靠根元素的 `data-click-action` 判断是否接管点击。**关闭弹窗必须清掉 iframe 的 `src`** —— 不清的话 Instagram 会在后台继续播，有声音的 Reels 尤其明显。
+
+**轮播控件**分两套布局：
+
+- 桌面端：箭头绝对定位、竖直居中压在轨道左右边缘，圆点指示器 CSS 隐藏（一屏能看好几条，圆点没有信息量）；
+- 移动端（≤749px）：`.igv__viewport` 变成 `flex-wrap`，轨道单独占一行，箭头改 `position: static` 用 `order` 排到轨道下方靠左，圆点跟在箭头后面。用 `order` 而不是改 DOM 顺序，桌面端才能继续复用同一组按钮。
+
+箭头到边界是 `disabled` 而不是 `hidden`：隐藏会让另一侧按钮的位置发生跳动。圆点按「屏」生成而不是按条目 —— 列数由 CSS 变量控制，条目数和可翻页数不是一回事，所以页数只能在浏览器里按 `scrollWidth / clientWidth` 算，服务端渲染不出来。图片是懒加载的，`window.load` 后会重算一次页数。
+
 ## 同步与转存
 
-同步流程：拉取 Instagram 媒体 → 差量落库 → 推进 R2 转存。
+同步流程：拉取 Instagram 媒体 → 差量落库 → 推进 R2 封面转存。
 
 - 分页按游标翻到底，游标重复即中止，防止死循环；上限由 `INSTAGRAM_FEED_FETCH_ALL_ITEMS` 控制（默认 2000），单页 50 条；
 - Instagram Login 首次请求带 `like_count` / `comments_count`，部分账号取不到时降级为精简字段重试一次；
 - 已转存成功且元数据未变的条目直接跳过。IG 的媒体地址每次同步都带新签名，若逐条比对会让每次同步退化成上千次无意义写入；
 - 转存状态机 `pending → processing → ready / failed`。`processing` 是占位状态，进程中断会留在这里，超过 `INSTAGRAM_FEED_MIRROR_STALE_SECONDS`（默认 300）后下一轮重新捞出重试；
-- 视频用 IG 缩略图当封面，图片本身就是封面。视频已转存成功但封面失败时不整条失败，前台 `<video>` 没有 poster 也能播；
+- 视频取 `thumbnail_url` 当封面（回退 `media_url`），图片与轮播取 `media_url`（回退 `thumbnail_url`）。两个都拿不到才失败，错误码文案为「Instagram 没有返回可用的图片地址。」；
 - 单次转存条数由 `INSTAGRAM_FEED_MIRROR_BATCH_SIZE`（默认 10）控制，串行处理。
 
 调度兜底：`instagram-feed:advance-mirrors` 每 10 分钟推进队列并顺带续期快到期的长效 token，商家不必反复点按钮。
@@ -356,6 +401,7 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 | 连接探活 | `InstagramFeedConnectionHealthService::check()` | 跑一次 `currentAppInstallation`，401/403 → `invalid`，其它失败 → `warning`，查不到安装记录 → `disconnected`，成功 → `connected`。状态口径与主 App 的 `ShopifyConnectionHealthService` 一致 |
 | 转存队列兜底 | `instagram-feed:advance-mirrors` | 每 10 分钟推进转存并续期快到期的长效 token。凭证按店铺加载，每个店铺单独判断 R2 是否就绪 |
 | 安装记录回填 | `instagram-feed:reconcile-installations` | 一次性命令，把已建立会话但缺 `app_installations` 记录的店铺补进应用中心。支持 `--shop=` 与 `--dry-run` |
+| 旧视频对象清理 | `instagram-feed:purge-mirrored-videos` | 一次性命令，转存改为只搬封面后收尾：删 R2 遗留视频对象、清空 `video_key` / `video_url`、把缺封面的 `ready` 条目重置为 `pending`。支持 `--store=` / `--dry-run` / `--chunk=` |
 | 事件溯源 | `webhook_events` | 该店铺本 App 的全部 webhook 事件，payload 加密保存 |
 | 操作溯源 | `audit_logs` | 来自 Shopify App 的操作 `user_id` 为空、`actor_type = shopify_app_session`，按 `shop_domain` 追溯。配置改动记 `instagram_feed_store_settings_updated`，只记字段名不记值 |
 

@@ -58,8 +58,7 @@
     id="igv-{{ block.id }}"
     data-igv
     data-layout="{{ block.settings.layout }}"
-    data-autoplay="{{ block.settings.autoplay }}"
-    data-lightbox="{{ block.settings.enable_lightbox }}"
+    data-click-action="{{ block.settings.click_action }}"
     style="
       --igv-columns: {{ block.settings.columns_desktop }};
       --igv-columns-mobile: {{ block.settings.columns_mobile }};
@@ -121,7 +120,7 @@
           class="igv__arrow igv__arrow--prev"
           type="button"
           data-igv-prev
-          aria-label="上一个视频"
+          aria-label="上一条内容"
           hidden
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -134,22 +133,12 @@
         {%- for item in items limit: block.settings.items_to_show -%}
           <li class="igv__item" data-igv-item data-index="{{ forloop.index0 }}">
             <div class="igv__media">
-              {%- if item.video_url != blank -%}
-                <video
-                  class="igv__video"
-                  data-igv-video
-                  poster="{{ item.poster_url }}"
-                  preload="none"
-                  muted
-                  loop
-                  playsinline
-                  disablepictureinpicture
-                  {% if block.settings.autoplay == false %}controls{% endif %}
-                  aria-label="{{ item.caption | default: 'Instagram 视频' | strip_newlines | truncate: 100 | escape }}"
-                >
-                  <source src="{{ item.video_url }}" type="video/mp4">
-                </video>
-              {%- elsif item.poster_url != blank -%}
+              {%- comment -%}
+                只展示封面图。视频文件不再转存 —— Instagram 对部分 Reels（用了平台授权
+                音乐或关闭了下载）不返回视频地址，靠重试永远拿不到。播放交给点击后弹窗里的
+                Instagram 官方 embed，内容完整、也不涉及版权问题。
+              {%- endcomment -%}
+              {%- if item.poster_url != blank -%}
                 <img
                   class="igv__image"
                   src="{{ item.poster_url }}"
@@ -160,21 +149,53 @@
                 >
               {%- endif -%}
 
-              {%- if block.settings.enable_lightbox -%}
+              {%- comment -%}
+                点击行为由商家在区块设置里二选一：
+                modal = 按钮，由 JS 打开弹窗嵌 Instagram 官方内容；
+                link  = 直接外链到原帖，在新标签打开。
+                两种都在服务端渲染成对应元素，不靠 JS 兜底，禁用 JS 也能用。
+              {%- endcomment -%}
+              {%- if block.settings.click_action == 'modal' -%}
                 <button
                   class="igv__play"
                   type="button"
                   data-igv-open="{{ forloop.index0 }}"
-                  aria-label="播放视频{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
+                  aria-label="查看这条 Instagram 帖子{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
+                >
+                  <span class="igv__play-icon" aria-hidden="true">
+                    {%- if item.media_type == 'VIDEO' -%}
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M8 5v14l11-7z" fill="currentColor"/>
+                      </svg>
+                    {%- else -%}
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M10 3H4a1 1 0 00-1 1v6M14 3h6a1 1 0 011 1v6M21 14v6a1 1 0 01-1 1h-6M3 14v6a1 1 0 001 1h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                    {%- endif -%}
+                  </span>
+                </button>
+              {%- elsif item.permalink != blank -%}
+                <a
+                  class="igv__play"
+                  href="{{ item.permalink }}"
+                  target="_blank"
+                  rel="noopener nofollow"
+                  aria-label="在 Instagram 查看这条帖子{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
                 >
                   <span class="igv__play-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false">
-                      <path d="M8 5v14l11-7z" fill="currentColor"/>
+                      <path d="M14 5h5v5M19 5l-7 7M11 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                   </span>
-                </button>
+                </a>
               {%- endif -%}
             </div>
+
+            {%- if block.settings.show_posted_at and item.posted_at != blank -%}
+              <p class="igv__date">
+                <time datetime="{{ item.posted_at }}">{{ item.posted_at | date: '%Y-%m-%d' }}</time>
+              </p>
+            {%- endif -%}
 
             {%- if block.settings.show_caption and item.caption != blank -%}
               <p class="igv__caption">{{ item.caption | strip_newlines | truncate: 90 | escape }}</p>
@@ -202,24 +223,33 @@
           class="igv__arrow igv__arrow--next"
           type="button"
           data-igv-next
-          aria-label="下一个视频"
+          aria-label="下一条内容"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
+
+        {%- comment -%}
+          圆点指示器。桌面端按列数一屏能看好几条，圆点意义不大所以 CSS 里隐藏；
+          移动端一屏一条，圆点是唯一的位置反馈。按钮由 JS 按实际页数生成 ——
+          页数取决于容器宽度与列数，服务端算不出来。
+        {%- endcomment -%}
+        <div class="igv__dots" data-igv-dots role="group" aria-label="轮播位置"></div>
       {%- endif -%}
     </div>
 
-    {%- if block.settings.enable_lightbox -%}
+    {%- if block.settings.click_action == 'modal' -%}
       {%- capture feed_json -%}
         [
         {%- for item in items limit: block.settings.items_to_show -%}
           {
-            "video_url": {{ item.video_url | default: '' | json }},
+            "embed_url": {{ item.embed_url | default: '' | json }},
             "poster_url": {{ item.poster_url | default: '' | json }},
             "caption": {{ item.caption | default: '' | json }},
             "permalink": {{ item.permalink | default: '' | json }},
+            "media_type": {{ item.media_type | default: '' | json }},
+            "posted_at": {{ item.posted_at | default: '' | json }},
             "products": [
               {%- for product in item.products -%}
                 {
@@ -239,7 +269,7 @@
 
 {% schema %}
 {
-  "name": "Instagram 视频",
+  "name": "Instagram 内容",
   "target": "section",
   "stylesheet": "instagram-videos.css",
   "javascript": "instagram-videos.js",
@@ -271,8 +301,8 @@
       "id": "media_filter",
       "label": "展示内容",
       "options": [
-        { "value": "videos", "label": "只展示视频" },
-        { "value": "all", "label": "视频和图片" }
+        { "value": "videos", "label": "只展示视频帖（Reels）" },
+        { "value": "all", "label": "全部内容" }
       ],
       "default": "videos"
     },
@@ -360,16 +390,21 @@
       "content": "行为"
     },
     {
-      "type": "checkbox",
-      "id": "autoplay",
-      "label": "进入视野后静音自动播放",
-      "default": true
+      "type": "select",
+      "id": "click_action",
+      "label": "点击封面时",
+      "options": [
+        { "value": "modal", "label": "在弹窗里打开帖子" },
+        { "value": "link", "label": "跳转到 Instagram 帖子" }
+      ],
+      "info": "弹窗里嵌入 Instagram 官方内容，视频可直接播放，访客不离开店铺。跳转则在新标签打开原帖。",
+      "default": "modal"
     },
     {
       "type": "checkbox",
-      "id": "enable_lightbox",
-      "label": "点击放大播放（带声音）",
-      "default": true
+      "id": "show_posted_at",
+      "label": "显示发布日期",
+      "default": false
     },
     {
       "type": "checkbox",

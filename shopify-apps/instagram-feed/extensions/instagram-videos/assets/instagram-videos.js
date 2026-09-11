@@ -1,9 +1,18 @@
-/* Instagram 视频 app block：轮播/网格 + 静音自动播放 + 放大播放 */
+/*
+ * Instagram 内容 app block：轮播/网格 + 点击弹窗看原帖。
+ *
+ * 只展示转存到 R2 的封面图，不自己播视频 —— Instagram 出于版权保护，对部分 Reels
+ * （用了平台授权音乐、或关闭了「允许下载」）根本不返回视频文件地址。所以点击封面
+ * 打开弹窗，里面嵌 Instagram 官方 embed：视频与轮播都由 Instagram 自己渲染，
+ * 内容完整、也不涉及版权问题，且不需要任何令牌。
+ *
+ * iframe 是跨域的，读不到内部高度，所以弹窗用固定宽高比容器并允许内部滚动。
+ */
 (function () {
   "use strict";
 
   var lightbox = null;
-  var lightboxState = { items: [], index: 0, opener: null, root: null };
+  var lightboxState = { items: [], index: 0, opener: null };
 
   /* ------------------------- 工具 ------------------------- */
 
@@ -30,52 +39,6 @@
     }
   }
 
-  function pauseAll(root) {
-    root.querySelectorAll("[data-igv-video]").forEach(function (video) {
-      video.pause();
-    });
-  }
-
-  /* ------------------- 静音自动播放 ------------------- */
-
-  function setupAutoplay(root) {
-    if (root.dataset.autoplay !== "true") return;
-    var videos = root.querySelectorAll("[data-igv-video]");
-    if (!videos.length) return;
-
-    if (!("IntersectionObserver" in window)) {
-      videos.forEach(function (video) {
-        video.setAttribute("controls", "");
-      });
-      return;
-    }
-
-    var observer = new IntersectionObserver(
-      function (entries) {
-        entries.forEach(function (entry) {
-          var video = entry.target;
-          if (entry.isIntersecting) {
-            video.muted = true;
-            var playing = video.play();
-            if (playing && typeof playing.catch === "function") {
-              // 浏览器拒绝自动播放时退回到手动控制
-              playing.catch(function () {
-                video.setAttribute("controls", "");
-              });
-            }
-          } else {
-            video.pause();
-          }
-        });
-      },
-      { threshold: 0.4 },
-    );
-
-    videos.forEach(function (video) {
-      observer.observe(video);
-    });
-  }
-
   /* ----------------------- 轮播 ----------------------- */
 
   function setupCarousel(root) {
@@ -86,7 +49,10 @@
 
     var prev = root.querySelector("[data-igv-prev]");
     var next = root.querySelector("[data-igv-next]");
+    var dotsBox = root.querySelector("[data-igv-dots]");
+    var pageCount = 0;
 
+    // 一次翻一整条（含间距），而不是一整屏：桌面端一屏 4 条时整屏翻会跳过太多。
     function stepSize() {
       var item = list.querySelector(".igv__item");
       if (!item) return list.clientWidth;
@@ -95,10 +61,73 @@
       return item.getBoundingClientRect().width + gap;
     }
 
+    // 圆点按「屏」算，不按条目算：列数由 CSS 变量控制，条目数和可翻页数不是一回事。
+    function pages() {
+      if (list.clientWidth <= 0) return 1;
+      return Math.max(1, Math.ceil(list.scrollWidth / list.clientWidth));
+    }
+
+    function activePage() {
+      if (list.clientWidth <= 0) return 0;
+      var index = Math.round(list.scrollLeft / list.clientWidth);
+      return Math.min(Math.max(index, 0), pages() - 1);
+    }
+
+    function buildDots() {
+      if (!dotsBox) return;
+
+      var total = pages();
+      pageCount = total;
+      dotsBox.textContent = "";
+
+      // 只有一屏就没有位置可言，容器留空即可（CSS 里没有内容自然不占位）。
+      if (total < 2) return;
+
+      for (var index = 0; index < total; index++) {
+        var dot = document.createElement("button");
+        dot.type = "button";
+        dot.className = "igv__dot";
+        // 用 aria-current 而不是 role="tab"：tab 角色要求配套的 tabpanel，
+        // 这里没有面板可指，写了反而让读屏软件报结构错误。
+        dot.setAttribute("aria-label", "第 " + (index + 1) + " 屏");
+        dot.dataset.page = String(index);
+        dot.addEventListener("click", function (event) {
+          var page = parseInt(event.currentTarget.dataset.page, 10) || 0;
+          list.scrollTo({ left: page * list.clientWidth, behavior: "smooth" });
+        });
+        dotsBox.appendChild(dot);
+      }
+    }
+
+    function syncDots() {
+      if (!dotsBox || pageCount < 2) return;
+      var current = activePage();
+      var dots = dotsBox.children;
+      for (var index = 0; index < dots.length; index++) {
+        // 不 disable 当前圆点：那会把它移出 Tab 序列，键盘用户就跳不回来了。
+        // 点当前页只是滚到原位，无副作用。
+        if (index === current) {
+          dots[index].setAttribute("aria-current", "true");
+        } else {
+          dots[index].removeAttribute("aria-current");
+        }
+      }
+    }
+
     var update = throttle(function () {
       var maxScroll = list.scrollWidth - list.clientWidth - 2;
-      if (prev) prev.hidden = list.scrollLeft <= 2;
-      if (next) next.hidden = list.scrollLeft >= maxScroll;
+      // 到边界用禁用而不是隐藏：隐藏会让另一侧按钮的位置发生跳动。
+      if (prev) prev.disabled = list.scrollLeft <= 2;
+      if (next) next.disabled = list.scrollLeft >= maxScroll;
+      syncDots();
+    });
+
+    // 视口变化会改变一屏的条数，页数跟着变，圆点必须重建。
+    var rebuild = throttle(function () {
+      if (pages() !== pageCount) {
+        buildDots();
+      }
+      update();
     });
 
     if (prev) {
@@ -114,11 +143,16 @@
     }
 
     list.addEventListener("scroll", update);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", rebuild);
+
+    // 图片是懒加载的，加载完 scrollWidth 才是最终值，所以载入后再校一次。
+    window.addEventListener("load", rebuild);
+
+    buildDots();
     update();
   }
 
-  /* --------------------- 放大播放 --------------------- */
+  /* --------------------- 帖子弹窗 --------------------- */
 
   function buildLightbox() {
     if (lightbox) return lightbox;
@@ -128,14 +162,25 @@
     lightbox.hidden = true;
     lightbox.setAttribute("role", "dialog");
     lightbox.setAttribute("aria-modal", "true");
-    lightbox.setAttribute("aria-label", "Instagram 视频");
+    lightbox.setAttribute("aria-label", "Instagram 帖子");
 
     lightbox.innerHTML = [
       '<div class="igv-lightbox__dialog">',
       '  <button class="igv-lightbox__button igv-lightbox__close" type="button" aria-label="关闭">&times;</button>',
-      '  <button class="igv-lightbox__button igv-lightbox__prev" type="button" aria-label="上一个">&#8249;</button>',
-      '  <button class="igv-lightbox__button igv-lightbox__next" type="button" aria-label="下一个">&#8250;</button>',
-      '  <video class="igv-lightbox__video" controls playsinline></video>',
+      '  <button class="igv-lightbox__button igv-lightbox__prev" type="button" aria-label="上一条">&#8249;</button>',
+      '  <button class="igv-lightbox__button igv-lightbox__next" type="button" aria-label="下一条">&#8250;</button>',
+      '  <div class="igv-lightbox__frame">',
+      '    <p class="igv-lightbox__loading">正在从 Instagram 加载帖子…</p>',
+      '    <iframe',
+      '      class="igv-lightbox__embed"',
+      '      title="Instagram 帖子"',
+      '      frameborder="0"',
+      '      scrolling="no"',
+      '      allowtransparency="true"',
+      '      allow="encrypted-media; picture-in-picture"',
+      '      referrerpolicy="strict-origin-when-cross-origin"',
+      "    ></iframe>",
+      "  </div>",
       '  <div class="igv-lightbox__meta">',
       '    <p class="igv-lightbox__caption"></p>',
       '    <div class="igv-lightbox__links"></div>',
@@ -155,6 +200,14 @@
       .querySelector(".igv-lightbox__next")
       .addEventListener("click", function () {
         showLightboxItem(lightboxState.index + 1);
+      });
+
+    // iframe 加载完再撤掉占位文案。跨域读不到内容，只能靠 load 事件。
+    lightbox
+      .querySelector(".igv-lightbox__embed")
+      .addEventListener("load", function () {
+        var loading = lightbox.querySelector(".igv-lightbox__loading");
+        if (loading) loading.hidden = true;
       });
 
     lightbox.addEventListener("click", function (event) {
@@ -181,26 +234,20 @@
     lightboxState.index = nextIndex;
 
     var item = items[nextIndex];
-    var video = lightbox.querySelector(".igv-lightbox__video");
+    var frame = lightbox.querySelector(".igv-lightbox__embed");
+    var loading = lightbox.querySelector(".igv-lightbox__loading");
     var caption = lightbox.querySelector(".igv-lightbox__caption");
     var links = lightbox.querySelector(".igv-lightbox__links");
 
-    video.pause();
-    video.removeAttribute("src");
-    if (item.poster_url) {
-      video.setAttribute("poster", item.poster_url);
+    if (item.embed_url) {
+      if (loading) loading.hidden = false;
+      frame.hidden = false;
+      frame.src = item.embed_url;
     } else {
-      video.removeAttribute("poster");
-    }
-
-    if (item.video_url) {
-      video.src = item.video_url;
-      video.muted = false;
-      video.load();
-      var playing = video.play();
-      if (playing && typeof playing.catch === "function") {
-        playing.catch(function () {});
-      }
+      // 没有可嵌地址时只保留下面的外链，不留一个空白 iframe。
+      frame.hidden = true;
+      frame.removeAttribute("src");
+      if (loading) loading.hidden = true;
     }
 
     caption.textContent = item.caption || "";
@@ -231,15 +278,12 @@
     lightbox.querySelector(".igv-lightbox__next").hidden = !multiple;
   }
 
-  function openLightbox(items, index, opener, root) {
+  function openLightbox(items, index, opener) {
     if (!items.length) return;
 
     buildLightbox();
     lightboxState.items = items;
     lightboxState.opener = opener;
-    lightboxState.root = root;
-
-    if (root) pauseAll(root);
 
     lightbox.hidden = false;
     document.documentElement.style.overflow = "hidden";
@@ -250,10 +294,9 @@
   function closeLightbox() {
     if (!lightbox || lightbox.hidden) return;
 
-    var video = lightbox.querySelector(".igv-lightbox__video");
-    video.pause();
-    video.removeAttribute("src");
-    video.load();
+    // 必须清掉 src：留着的话 Instagram 的 iframe 会继续在后台跑（有声音的视频尤其明显）。
+    var frame = lightbox.querySelector(".igv-lightbox__embed");
+    frame.removeAttribute("src");
 
     lightbox.hidden = true;
     document.documentElement.style.overflow = "";
@@ -265,7 +308,8 @@
   }
 
   function setupLightbox(root) {
-    if (root.dataset.lightbox !== "true") return;
+    // 商家选了「跳转到 Instagram 帖子」时，封面已经是服务端渲染的 <a>，这里不接管。
+    if (root.dataset.clickAction !== "modal") return;
 
     var items = readItems(root);
     if (!items.length) return;
@@ -273,7 +317,7 @@
     root.querySelectorAll("[data-igv-open]").forEach(function (trigger) {
       trigger.addEventListener("click", function () {
         var index = parseInt(trigger.getAttribute("data-igv-open"), 10);
-        openLightbox(items, isNaN(index) ? 0 : index, trigger, root);
+        openLightbox(items, isNaN(index) ? 0 : index, trigger);
       });
     });
   }
@@ -284,7 +328,6 @@
     if (!root || root.dataset.igvReady === "true") return;
     root.dataset.igvReady = "true";
 
-    setupAutoplay(root);
     setupCarousel(root);
     setupLightbox(root);
   }
