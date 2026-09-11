@@ -116,8 +116,10 @@ every place that hard-codes it:
 Steps 1 and 3 must agree, otherwise the App Home page loads against one origin
 while Meta redirects to another. `npm run check:project` enforces 1 and 2.
 
-There are no OAuth redirect URLs to update: installation is Shopify-managed and
-DecoAdmin no longer exposes an authorization-code callback.
+`auth.redirect_urls` still has to be declared because the CLI schema requires it,
+but it points at the App Home entry itself rather than an OAuth callback:
+installation is Shopify-managed and DecoAdmin no longer exposes an
+authorization-code callback. Include it in step 1 when the origin changes.
 
 For exact setup and release commands, read
 [`shopify-apps/instagram-feed/README.md`](../shopify-apps/instagram-feed/README.md).

@@ -18,7 +18,9 @@
 
 ## 安装与会话模型
 
-安装由 **Shopify 托管**，三份 TOML 都不声明 `use_legacy_install_flow`，也不再有 `[auth] redirect_urls`。商家点安装链接后由 Shopify 弹权限授予页，装好后直接把应用打开在 `application_url`。**后台没有任何人工授权入口**：DecoAdmin 侧原来的授权码链路（`InstagramFeedShopifyOAuthController`、`InstagramFeedOAuthService`、`/shopify-authorize`、`/shopify-verify`、`/shopify-app/instagram-feed/oauth/callback`）已全部移除。
+安装由 **Shopify 托管**，三份 TOML 都不声明 `use_legacy_install_flow`。商家点安装链接后由 Shopify 弹权限授予页，装好后直接把应用打开在 `application_url`。
+
+`[auth] redirect_urls` 仍然要声明（Shopify CLI 的 schema 要求），但它指向 App Home 入口 `/shopify-app/instagram-feed` 本身，而不是任何授权回调——后端已经没有回调可用。这与 `deco-personalization` 的做法一致。`scripts/validate-project.mjs` 会强制这一点，并拦住任何 `/oauth/callback` 引用。**后台没有任何人工授权入口**：DecoAdmin 侧原来的授权码链路（`InstagramFeedShopifyOAuthController`、`InstagramFeedOAuthService`、`/shopify-authorize`、`/shopify-verify`、`/shopify-app/instagram-feed/oauth/callback`）已全部移除。
 
 会话的唯一建立途径是 App Bridge 的 session token 换 offline token（`ShopifyInstagramFeedAppService::bootstrap`）。`InstagramFeedEmbeddedSession::store()` 在每个内容管理请求上做两件事：
 

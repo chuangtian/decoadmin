@@ -76,7 +76,7 @@ const saveOrder = () => props.run(
     }),
     load,
 );
-const publish = () => props.run(() => props.api.post<{ message: string }>('/publish'));
+
 const retryMirror = (media: Media) => props.run(
     () => props.api.post<{ message: string }>(`/media/${media.id}/retry-mirror`),
     load,
@@ -172,15 +172,7 @@ const typeLabel = (media: Media) => {
                 >
                     保存顺序
                 </button>
-                <button
-                    v-if="capabilities.publish"
-                    type="button"
-                    class="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
-                    :disabled="busy"
-                    @click="publish"
-                >
-                    发布到前台
-                </button>
+
             </div>
         </section>
 
@@ -252,7 +244,8 @@ const typeLabel = (media: Media) => {
             <section class="rounded-2xl border border-slate-200 bg-white p-6">
                 <h2 class="text-lg font-semibold text-slate-950">组内（{{ order.length }}）</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                    拖拽或用上下按钮调整前台顺序，改完点「保存顺序」。只有已转存的内容会发布到前台。
+                    拖拽或用上下按钮调整前台顺序，改完点「保存顺序」，保存后会自动同步到店铺前台。
+                    只有已转存完成的内容会出现在前台。
                 </p>
 
                 <p v-if="order.length === 0" class="mt-5 rounded-xl bg-slate-50 p-5 text-sm text-slate-500">

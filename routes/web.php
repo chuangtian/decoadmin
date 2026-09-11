@@ -249,9 +249,18 @@ Route::prefix('/api/shopify-app/instagram-feed')
             ->middleware('throttle:30,1')
             ->name('instagram-feed.embedded.media.retry-mirror');
 
-        Route::post('/publish', [ShopifyInstagramFeedContentController::class, 'publish'])
+        // 前台数据在内容变化时自动同步，这条只是"前台没更新"时的自助恢复入口。
+        Route::post('/storefront-sync', [ShopifyInstagramFeedContentController::class, 'syncStorefrontNow'])
             ->middleware('throttle:12,1')
-            ->name('instagram-feed.embedded.publish');
+            ->name('instagram-feed.embedded.storefront-sync');
+
+        // 转存失败日志与整批重试。
+        Route::get('/mirror-failures', [ShopifyInstagramFeedContentController::class, 'mirrorFailures'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.mirror-failures');
+        Route::post('/mirror-failures/retry', [ShopifyInstagramFeedContentController::class, 'retryAllMirrorFailures'])
+            ->middleware('throttle:12,1')
+            ->name('instagram-feed.embedded.mirror-failures.retry');
 
         Route::get('/galleries/{gallery}', [ShopifyInstagramFeedContentController::class, 'showGallery'])
             ->middleware('throttle:60,1')

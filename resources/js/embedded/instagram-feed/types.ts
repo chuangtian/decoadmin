@@ -86,6 +86,20 @@ export interface Media {
     products: LinkedProduct[];
 }
 
+export interface MirrorFailure {
+    id: string;
+    media_type: string;
+    caption: string | null;
+    permalink: string;
+    preview_url: string | null;
+    posted_at: string | null;
+    failed_at: string | null;
+    /** 归纳出的可行动说明 */
+    reason: string;
+    /** 脱敏后的原始信息，排查用 */
+    detail: string;
+}
+
 export interface GalleryDetail {
     gallery: { id: string; name: string; handle: string };
     members: Media[];

@@ -39,9 +39,15 @@
     <div class="igv igv--empty">
       <p class="igv__empty-text">
         {%- if gallery_missing -%}
-          找不到标识为「{{ gallery_handle | escape }}」的展示组。请在 DecoAdmin 的 Instagram 内容页面确认组标识后重新填写。
+          找不到标识为「{{ gallery_handle | escape }}」的展示组。请在「Instagram 内容」应用里复制正确的组标识。
+          {%- if feed.galleries.size > 0 -%}
+            当前可用：
+            {%- for gallery in feed.galleries -%}
+              {{ gallery.name | escape }}（{{ gallery.handle }}）{% unless forloop.last %}、{% endunless %}
+            {%- endfor -%}
+          {%- endif -%}
         {%- else -%}
-          还没有可展示的内容。请在 DecoAdmin 的 Instagram 内容页面连接账号、同步内容、把内容加入展示组，然后点「发布到前台」。
+          还没有可展示的内容。请在 Shopify 后台打开「Instagram 内容」应用，连接账号、同步内容，再把内容加入展示组。
         {%- endif -%}
       </p>
     </div>
@@ -65,6 +71,21 @@
       --igv-accent: {{ block.settings.accent_color }};
     "
   >
+    {%- comment -%}
+      主题编辑器里把可选的展示组列出来。区块设置的 schema 是构建期静态的，
+      没法把商家的展示组做成下拉选项，所以在预览里直接给出清单加标识，
+      商家照着填「展示组标识」即可，不用回应用里查。店面访客看不到这段。
+    {%- endcomment -%}
+    {%- if request.design_mode and feed.galleries.size > 0 -%}
+      <p class="igv__hint">
+        可选展示组：
+        {%- for gallery in feed.galleries -%}
+          {{ gallery.name | escape }}（{{ gallery.handle }}）{% unless forloop.last %}、{% endunless %}
+        {%- endfor -%}
+        {%- if gallery_handle == blank %} — 当前未指定，展示第一个组。{% endif -%}
+      </p>
+    {%- endif -%}
+
     {%- if block.settings.heading != blank or block.settings.show_account -%}
       <div class="igv__header">
         {%- if block.settings.heading != blank -%}
@@ -227,7 +248,7 @@
       "type": "text",
       "id": "gallery_handle",
       "label": "展示组标识",
-      "info": "在 DecoAdmin 的 Instagram 内容页面复制展示组标识。留空则展示第一个组。"
+      "info": "留空即展示第一个组。要指定其它组时，从右侧预览里「可选展示组」的清单中复制标识填入；也可以在「Instagram 内容」应用里点“复制标识”。"
     },
     {
       "type": "text",
