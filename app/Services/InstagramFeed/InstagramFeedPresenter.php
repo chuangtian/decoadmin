@@ -146,8 +146,9 @@ class InstagramFeedPresenter
                 => 'Instagram 的媒体链接已过期。请先重新同步内容，再重试转存。',
             str_contains($reason, '404') || str_contains($reason, 'not found')
                 => 'Instagram 上已找不到这条内容，可能已被删除。',
+            // 先让商家重试：签名类失败多半是服务端问题，凭证真的错时重试不会变好。
             str_contains($reason, '401') || str_contains($reason, 'signature')
-                => '存储凭证校验失败。请到「应用配置」页签重新填写 R2 的 Access Key ID 与 Secret（Secret 不回显，必须整条重填）。',
+                => '存储凭证校验失败。请先点重试；如果仍然失败，再到「应用配置」页签确认 R2 的 Access Key ID 与 Secret 是否填对（Secret 不回显，要改就整条重填）。',
             str_contains($reason, 'too large') || str_contains($reason, 'max_object_bytes')
                 => '文件超过单个文件上限，已跳过。',
             str_contains($reason, 'disk') || str_contains($reason, 'space')
