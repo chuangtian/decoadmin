@@ -53,7 +53,19 @@ function apply(): void {
 function open(row: Row): void {
     selected.value = row;
     form.reset();
+    form.clearErrors();
+    form.action = 'approve';
+    form.note = '';
     reviewOpen.value = true;
+}
+
+function closeReview(): void {
+    reviewOpen.value = false;
+    selected.value = null;
+    form.reset();
+    form.clearErrors();
+    form.action = 'approve';
+    form.note = '';
 }
 
 function review(action: 'approve' | 'reject'): void {
@@ -62,8 +74,7 @@ function review(action: 'approve' | 'reject'): void {
     form.put(`/request-approvals/${selected.value.uuid}`, {
         preserveScroll: true,
         onSuccess: () => {
-            reviewOpen.value = false;
-            selected.value = null;
+            closeReview();
         },
     });
 }
@@ -140,11 +151,11 @@ function review(action: 'approve' | 'reject'): void {
         </main>
 
         <Teleport to="body">
-            <dialog :open="reviewOpen" class="fixed inset-0 z-50 m-0 h-full w-full max-w-none bg-slate-950/45 p-4" @click.self="reviewOpen = false">
+            <dialog :open="reviewOpen" class="fixed inset-0 z-50 m-0 h-full w-full max-w-none bg-slate-950/45 p-4" @click.self="closeReview">
                 <form v-if="selected" class="mx-auto mt-[12vh] max-w-xl rounded-3xl bg-white p-7 shadow-2xl" @submit.prevent="review('approve')">
                     <div class="flex justify-between">
                         <div><p class="text-xs font-semibold text-amber-600">{{ selected.reference_no }}</p><h2 class="mt-1 text-xl font-bold">审批：{{ selected.title }}</h2></div>
-                        <button type="button" class="text-2xl text-slate-400" @click="reviewOpen = false">×</button>
+                        <button type="button" class="text-2xl text-slate-400" aria-label="关闭审批" @click="closeReview">×</button>
                     </div>
                     <p class="mt-4 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{{ selected.description }}</p>
                     <dl v-if="selected.kind === 'expense_request' && selected.category === 'software'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
@@ -157,8 +168,8 @@ function review(action: 'approve' | 'reject'): void {
                     <label class="mt-5 block text-sm font-semibold text-slate-700">审批意见<textarea v-model="form.note" maxlength="2000" rows="4" class="mt-2 w-full rounded-xl border-slate-200" placeholder="通过时可选；驳回时必须填写原因"></textarea></label>
                     <p v-if="form.hasErrors" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(form.errors).join('；') }}</p>
                     <div class="mt-6 flex justify-end gap-3">
-                        <button type="button" class="h-11 rounded-xl border border-rose-200 bg-rose-50 px-5 text-sm font-semibold text-rose-700" @click="review('reject')">驳回</button>
-                        <button type="submit" class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white">审批通过</button>
+                        <button type="button" class="h-11 rounded-xl border border-rose-200 bg-rose-50 px-5 text-sm font-semibold text-rose-700 disabled:opacity-50" :disabled="form.processing" @click="review('reject')">驳回</button>
+                        <button type="submit" class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white disabled:opacity-50" :disabled="form.processing">{{ form.processing ? '提交中…' : '审批通过' }}</button>
                     </div>
                 </form>
             </dialog>

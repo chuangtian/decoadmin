@@ -226,6 +226,8 @@ class PersonalRequestController extends Controller
         $validated = $request->validate([
             'action' => ['required', Rule::in(['approve', 'reject'])],
             'note' => ['nullable', 'string', 'max:2000', 'required_if:action,reject'],
+        ], [
+            'note.required_if' => '驳回时必须填写审批意见。',
         ]);
         $approved = $validated['action'] === 'approve';
         $note = trim((string) ($validated['note'] ?? ''));

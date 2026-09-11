@@ -66,6 +66,13 @@ const statusLabels: Record<string, string> = {
     in_progress: "处理中",
     completed: "已完成",
 };
+const logActionLabels: Record<string, string> = {
+    approved: "审批通过",
+    rejected: "审批驳回",
+    accepted: "接受需求",
+    progress: "提交进展",
+    completed: "完成需求",
+};
 const createOpen = ref(false);
 const processOpen = ref(false);
 const selected = ref<Row | null>(null);
@@ -137,8 +144,19 @@ function accept(row: Row): void {
 }
 function openProcess(row: Row): void {
     selected.value = row;
-    processOpen.value = true;
     progressForm.reset();
+    progressForm.clearErrors();
+    progressForm.action = "progress";
+    progressForm.note = "";
+    processOpen.value = true;
+}
+function closeProcess(): void {
+    processOpen.value = false;
+    selected.value = null;
+    progressForm.reset();
+    progressForm.clearErrors();
+    progressForm.action = "progress";
+    progressForm.note = "";
 }
 function saveProgress(action: "progress" | "complete"): void {
     if (!selected.value) return;
@@ -146,8 +164,7 @@ function saveProgress(action: "progress" | "complete"): void {
     progressForm.put(`/technical-requests/${selected.value.uuid}/progress`, {
         preserveScroll: true,
         onSuccess: () => {
-            processOpen.value = false;
-            selected.value = null;
+            closeProcess();
         },
     });
 }
@@ -471,7 +488,7 @@ function saveProgress(action: "progress" | "complete"): void {
             <dialog
                 :open="processOpen"
                 class="fixed inset-0 z-50 m-0 h-full w-full max-w-none bg-slate-950/45 p-4"
-                @click.self="processOpen = false"
+                @click.self="closeProcess"
             >
                 <form
                     v-if="selected"
@@ -490,7 +507,8 @@ function saveProgress(action: "progress" | "complete"): void {
                         <button
                             type="button"
                             class="text-2xl text-slate-400"
-                            @click="processOpen = false"
+                            aria-label="关闭处理"
+                            @click="closeProcess"
                         >
                             ×
                         </button>
@@ -505,7 +523,7 @@ function saveProgress(action: "progress" | "complete"): void {
                             <div
                                 class="flex justify-between text-xs text-slate-400"
                             >
-                                <span>{{ log.user }} · {{ log.action }}</span
+                                <span>{{ log.user }} · {{ logActionLabels[log.action] ?? log.action }}</span
                                 ><span>{{ log.created_at }}</span>
                             </div>
                             <p
@@ -536,12 +554,14 @@ function saveProgress(action: "progress" | "complete"): void {
                     <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
                         <button
                             type="submit"
-                            class="h-11 rounded-xl border border-violet-200 bg-violet-50 px-5 text-sm font-semibold text-violet-700"
+                            class="h-11 rounded-xl border border-violet-200 bg-violet-50 px-5 text-sm font-semibold text-violet-700 disabled:opacity-50"
+                            :disabled="progressForm.processing"
                         >
-                            提交进展</button
+                            {{ progressForm.processing ? "提交中…" : "提交进展" }}</button
                         ><button
                             type="button"
-                            class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white"
+                            class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white disabled:opacity-50"
+                            :disabled="progressForm.processing"
                             @click="saveProgress('complete')"
                         >
                             完成需求

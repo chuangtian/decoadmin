@@ -98,6 +98,9 @@ class PersonalRequestWorkflowTest extends TestCase
         $item = PersonalRequest::query()->sole();
         $this->assertSame('expense', $item->kind);
         $this->actingAs($approver)->withSession($this->contextSession($organization, $store))
+            ->put(route('request-approvals.review', $item), ['action' => 'reject', 'note' => ''])
+            ->assertSessionHasErrors(['note' => '驳回时必须填写审批意见。']);
+        $this->actingAs($approver)->withSession($this->contextSession($organization, $store))
             ->put(route('request-approvals.review', $item), ['action' => 'reject', 'note' => '请补充付款凭证'])
             ->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame('rejected', $item->fresh()->status);
