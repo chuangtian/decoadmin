@@ -229,6 +229,18 @@ Route::prefix('/api/shopify-app/instagram-feed')
             ->middleware('throttle:60,1')
             ->name('instagram-feed.embedded.overview');
 
+        // 「应用配置」页签：本店铺自己的 Meta 应用凭证与 R2 存储凭证。
+        // 密钥只写不回显，写入限流按平台级端点的力度（20/分钟）。
+        Route::get('/settings', [ShopifyInstagramFeedContentController::class, 'settings'])
+            ->middleware('throttle:60,1')
+            ->name('instagram-feed.embedded.settings');
+        Route::put('/settings/meta', [ShopifyInstagramFeedContentController::class, 'updateMetaSettings'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.settings.meta');
+        Route::put('/settings/r2', [ShopifyInstagramFeedContentController::class, 'updateR2Settings'])
+            ->middleware('throttle:20,1')
+            ->name('instagram-feed.embedded.settings.r2');
+
         Route::post('/account/authorize', [ShopifyInstagramFeedContentController::class, 'authorizeAccount'])
             ->middleware('throttle:20,1')
             ->name('instagram-feed.embedded.account.authorize');
@@ -644,14 +656,8 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::put('/settings/feishu', [SystemSettingsController::class, 'updateFeishu'])
         ->middleware('permission:system.settings.update')
         ->name('system.settings.feishu.update');
-    // Instagram / Facebook 应用凭证与 R2 存储是平台级配置，界面放在
-    // 应用中心 → Instagram Feed 的「应用配置」页签里，这里只保留写入端点。
-    Route::put('/settings/instagram-feed/meta', [SystemSettingsController::class, 'updateInstagramMeta'])
-        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
-        ->name('system.settings.instagram-meta.update');
-    Route::put('/settings/instagram-feed/r2', [SystemSettingsController::class, 'updateInstagramR2'])
-        ->middleware(['permission:system.settings.update', 'throttle:20,1'])
-        ->name('system.settings.instagram-r2.update');
+    // Instagram / Facebook 应用凭证与 R2 存储已改为店铺级，由商家在 Shopify App 的
+    // 「应用配置」页签维护（instagram-feed.embedded.settings.*），后台不再提供写入口。
     Route::get('/audit-logs', [AuditLogController::class, 'index'])
         ->middleware('permission:audit.view')
         ->name('audit-logs.index');
@@ -959,61 +965,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
             ->name('personalization.smart-cart.update');
     });
 
+// Instagram Feed 的后台页面只读：连接状态、转存素材统计、展示区。
+// 所有编辑动作（连接账号、同步、转存、展示组编排、应用配置）都在 Shopify App 内嵌页，
+// 见上面的 /api/shopify-app/instagram-feed/* 路由组。这里刻意不提供任何写路由 ——
+// 内嵌页那套按 shop domain 判定店铺，后台再开一份写入口只会多一条要同步维护的边界。
 Route::prefix('/organizations/{organization}/stores/{store}/instagram-feed')
     ->middleware(['auth', 'verified', 'organization.access', 'store.access'])
     ->group(function (): void {
         Route::get('/', [InstagramFeedController::class, 'index'])
             ->middleware('permission:instagram_feed.view')
             ->name('instagram-feed.index');
-
-        Route::post('/connect', [InstagramFeedController::class, 'connect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.connect');
-        Route::post('/select-page', [InstagramFeedController::class, 'selectPage'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:20,1'])
-            ->name('instagram-feed.select-page');
-        Route::delete('/account', [InstagramFeedController::class, 'disconnect'])
-            ->middleware(['permission:instagram_feed.connect', 'throttle:10,1'])
-            ->name('instagram-feed.disconnect');
-
-        // 同步与转存会打 Instagram 与 R2，限流比一般写操作更严。
-        Route::post('/sync', [InstagramFeedController::class, 'sync'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:6,1'])
-            ->name('instagram-feed.sync');
-        Route::post('/mirror', [InstagramFeedController::class, 'mirror'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:12,1'])
-            ->name('instagram-feed.mirror');
-        Route::post('/media/{media}/retry-mirror', [InstagramFeedController::class, 'retryMirror'])
-            ->middleware(['permission:instagram_feed.sync', 'throttle:30,1'])
-            ->name('instagram-feed.media.retry-mirror');
-
-        Route::post('/publish', [InstagramFeedController::class, 'publish'])
-            ->middleware(['permission:instagram_feed.publish', 'throttle:12,1'])
-            ->name('instagram-feed.publish');
-
-        Route::post('/galleries', [InstagramFeedController::class, 'storeGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.store');
-        Route::get('/galleries/{gallery}', [InstagramFeedController::class, 'showGallery'])
-            ->middleware('permission:instagram_feed.gallery.manage')
-            ->name('instagram-feed.galleries.show');
-        Route::put('/galleries/{gallery}', [InstagramFeedController::class, 'updateGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.update');
-        Route::delete('/galleries/{gallery}', [InstagramFeedController::class, 'destroyGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:30,1'])
-            ->name('instagram-feed.galleries.destroy');
-        Route::post('/galleries/{gallery}/items', [InstagramFeedController::class, 'addGalleryItems'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.items.store');
-        Route::delete('/galleries/{gallery}/items', [InstagramFeedController::class, 'removeGalleryItems'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.items.destroy');
-        Route::put('/galleries/{gallery}/order', [InstagramFeedController::class, 'reorderGallery'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.galleries.order');
-
-        Route::put('/media/{media}/products', [InstagramFeedController::class, 'updateMediaProducts'])
-            ->middleware(['permission:instagram_feed.gallery.manage', 'throttle:60,1'])
-            ->name('instagram-feed.media.products');
     });

@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { ApiError, createApiClient } from './api';
 import GalleryEditor from './GalleryEditor.vue';
 import Overview from './Overview.vue';
+import SettingsPanel from './SettingsPanel.vue';
 import type { Overview as OverviewData } from './types';
 
 const props = defineProps<{ apiBase: string; environment: string }>();
@@ -15,6 +16,17 @@ const loading = ref(true);
 const busy = ref(false);
 const openGalleryId = ref<string | null>(null);
 const notice = ref<{ tone: 'success' | 'error'; text: string } | null>(null);
+
+/**
+ * 顶层页签。内容管理里还有「概览 / 展示组编辑」这一层子视图，由 openGalleryId 控制，
+ * 所以切页签时要顺手关掉展示组编辑，避免回到内容页签时停在半路。
+ */
+type Tab = 'content' | 'settings';
+const tab = ref<Tab>('content');
+const switchTab = (next: Tab) => {
+    tab.value = next;
+    openGalleryId.value = null;
+};
 
 let noticeTimer: number | undefined;
 const flash = (tone: 'success' | 'error', text: string) => {
@@ -114,25 +126,57 @@ onMounted(() => {
                 </button>
             </div>
 
-            <GalleryEditor
-                v-else-if="overview && openGalleryId"
-                :api="api"
-                :gallery-id="openGalleryId"
-                :busy="busy"
-                :capabilities="overview.capabilities"
-                :run="run"
-                @back="closeGallery"
-            />
+            <template v-else-if="overview">
+                <nav class="flex gap-1 border-b border-slate-200" aria-label="Instagram Feed 页签">
+                    <button
+                        type="button"
+                        class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                        :class="tab === 'content' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'"
+                        :aria-current="tab === 'content' ? 'page' : undefined"
+                        @click="switchTab('content')"
+                    >
+                        内容管理
+                    </button>
+                    <button
+                        type="button"
+                        class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                        :class="tab === 'settings' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'"
+                        :aria-current="tab === 'settings' ? 'page' : undefined"
+                        @click="switchTab('settings')"
+                    >
+                        应用配置
+                    </button>
+                </nav>
 
-            <Overview
-                v-else-if="overview"
-                :api="api"
-                :overview="overview"
-                :busy="busy"
-                :run="run"
-                :refresh="loadOverview"
-                @open-gallery="openGallery"
-            />
+                <GalleryEditor
+                    v-if="tab === 'content' && openGalleryId"
+                    :api="api"
+                    :gallery-id="openGalleryId"
+                    :busy="busy"
+                    :capabilities="overview.capabilities"
+                    :run="run"
+                    @back="closeGallery"
+                />
+
+                <Overview
+                    v-else-if="tab === 'content'"
+                    :api="api"
+                    :overview="overview"
+                    :busy="busy"
+                    :run="run"
+                    :refresh="loadOverview"
+                    @open-gallery="openGallery"
+                    @open-settings="switchTab('settings')"
+                />
+
+                <SettingsPanel
+                    v-else
+                    :api="api"
+                    :busy="busy"
+                    :environment="environment"
+                    :run="run"
+                />
+            </template>
         </div>
     </div>
 </template>

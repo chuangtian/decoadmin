@@ -20,6 +20,7 @@ class InstagramAccountService
         private InstagramProviderService $providers,
         private MetaOAuthStateService $states,
         private InstagramMirrorService $mirror,
+        private InstagramFeedStoreCredentials $credentials,
     ) {}
 
     /**
@@ -244,6 +245,10 @@ class InstagramAccountService
 
                 continue;
             }
+
+            // 一个 Meta 用户可能授权了多个店铺，每个店铺的 R2 桶可能不同，
+            // 所以每轮都要重新加载该店铺的凭证再删对象。
+            $this->credentials->apply($store);
 
             $purged = $this->mirror->purgeStoreMedia($store);
             $records += $purged['records'];

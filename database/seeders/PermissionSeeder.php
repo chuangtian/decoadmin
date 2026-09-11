@@ -120,11 +120,11 @@ class PermissionSeeder extends Seeder
         'student_discount.email_template.manage',
         'student_discount.analytics.read',
         'student_discount.audit.read',
+        // Instagram Feed 只剩后台只读页要判权；连接、同步、编排、配置都在
+        // Shopify App 内嵌页完成，那条链路按 shop domain 判定店铺、不做按人 RBAC，
+        // 所以 connect / sync / gallery.manage / publish 这四个权限已经退役
+        // （见 2026_09_10_000200 迁移，它把这四条软删除）。
         'instagram_feed.view',
-        'instagram_feed.connect',
-        'instagram_feed.sync',
-        'instagram_feed.gallery.manage',
-        'instagram_feed.publish',
         'personalization.view',
         'personalization.manage',
         'personalization.analytics.read',

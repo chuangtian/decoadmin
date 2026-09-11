@@ -156,23 +156,22 @@ const typeLabel = (media: Media) => {
                     媒体库共 {{ detail.totalCount }} 条。
                 </p>
             </div>
-            <div class="flex flex-wrap gap-2 self-start">
+            <div class="flex shrink-0 flex-wrap items-center gap-2 self-start">
                 <button
                     type="button"
-                    class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    class="shrink-0 whitespace-nowrap rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     @click="emit('back')"
                 >
                     返回概览
                 </button>
                 <button
                     type="button"
-                    class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                    class="shrink-0 whitespace-nowrap rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                     :disabled="!dirty || busy"
                     @click="saveOrder"
                 >
                     保存顺序
                 </button>
-
             </div>
         </section>
 
@@ -184,12 +183,12 @@ const typeLabel = (media: Media) => {
             <section class="rounded-2xl border border-slate-200 bg-white p-6">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <h2 class="text-lg font-semibold text-slate-950">未加入（{{ detail.candidates.length }}）</h2>
-                    <div class="flex gap-1">
+                    <div class="flex shrink-0 gap-1">
                         <button
                             v-for="value in detail.filters"
                             :key="value"
                             type="button"
-                            class="rounded-lg px-3 py-1.5 text-xs font-semibold ring-1"
+                            class="shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold ring-1"
                             :class="value === detail.filter ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'"
                             @click="applyFilter(value)"
                         >
@@ -198,11 +197,11 @@ const typeLabel = (media: Media) => {
                     </div>
                 </div>
 
-                <div class="mt-4 flex items-center justify-between gap-3">
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                     <p class="text-sm text-slate-500">勾选后加入，加入顺序即勾选顺序。</p>
                     <button
                         type="button"
-                        class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                        class="shrink-0 whitespace-nowrap rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                         :disabled="selectedIds.length === 0 || busy"
                         @click="addSelected"
                     >
@@ -298,10 +297,10 @@ const typeLabel = (media: Media) => {
                             <p v-if="media.products.length" class="mt-1.5 text-xs text-slate-600">
                                 关联商品：{{ media.products.map(product => product.title).join('、') }}
                             </p>
-                            <div class="mt-2 flex flex-wrap gap-1.5">
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
                                 <button
                                     type="button"
-                                    class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                    class="shrink-0 whitespace-nowrap rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                                     :disabled="busy"
                                     @click="editProducts(media)"
                                 >
@@ -310,7 +309,7 @@ const typeLabel = (media: Media) => {
                                 <button
                                     v-if="media.mirror_status === 'failed'"
                                     type="button"
-                                    class="rounded-lg border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                                    class="shrink-0 whitespace-nowrap rounded-lg border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
                                     :disabled="busy"
                                     @click="retryMirror(media)"
                                 >
@@ -318,7 +317,7 @@ const typeLabel = (media: Media) => {
                                 </button>
                                 <button
                                     type="button"
-                                    class="rounded-lg border border-rose-300 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                                    class="shrink-0 whitespace-nowrap rounded-lg border border-rose-300 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                                     :disabled="busy"
                                     @click="removeItem(media)"
                                 >
