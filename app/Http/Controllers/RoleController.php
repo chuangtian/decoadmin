@@ -67,6 +67,7 @@ class RoleController extends Controller
         return Inertia::render('Roles/Show', [
             'role' => new RoleResource($role),
             'permissions' => PermissionResource::collection(Permission::query()->orderBy('group')->orderBy('slug')->get()),
+            'canDelete' => ! $role->is_system && $request->user()->can('delete', $role),
         ]);
     }
 
@@ -90,6 +91,7 @@ class RoleController extends Controller
 
     public function destroy(Request $request, Role $role): RedirectResponse|JsonResponse
     {
+        abort_if($role->is_system, 403);
         $this->authorize('delete', $role);
         $role->delete();
 

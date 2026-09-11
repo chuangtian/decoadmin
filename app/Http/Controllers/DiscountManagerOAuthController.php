@@ -2,18 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Exceptions\ShopifyOAuthException;
-use App\Services\Shopify\ShopifyOAuthService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Response;
 
 class DiscountManagerOAuthController extends Controller
 {
-    public function redirect(Request $request, CurrentOrganization $organizations, CurrentStore $stores, ShopifyOAuthService $oauth): Response
+    public function redirect(Request $request, CurrentOrganization $organizations, CurrentStore $stores): Response
     {
         $store = $stores->require();
         $organization = $organizations->require();
@@ -22,15 +19,10 @@ class DiscountManagerOAuthController extends Controller
         abort_unless((int) $store->organization_id === (int) $organization->id && $request->user()->canAccessStore($store), 403);
         abort_unless($request->user()->hasPermission('discounts.manage', $organization, $store), 403);
         $this->authorize('connect', $store);
-        try {
-            $authorization = $oauth->begin($organization, $request->user(), $store, ['read_discounts', 'write_discounts']);
-        } catch (ShopifyOAuthException $exception) {
-            return back()->with('error', $exception->getMessage());
-        }
-        $cookie = new Cookie(ShopifyOAuthService::STATE_COOKIE, $authorization['state'],
-            now()->addMinutes((int) config('shopify.state_ttl_minutes', 10)), '/', null,
-            str_starts_with($authorization['state_record']->redirect_uri, 'https://'), true, false, Cookie::SAMESITE_LAX);
+        $domain = strtolower(trim((string) $store->shopify_domain));
+        $clientId = trim((string) config('student_discount.active.client_id'));
+        abort_unless(preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', $domain) === 1 && $clientId !== '', 409);
 
-        return Inertia::location($authorization['authorization_url'])->withCookie($cookie);
+        return Inertia::location("https://{$domain}/admin/apps/".rawurlencode($clientId));
     }
 }

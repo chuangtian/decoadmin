@@ -25,7 +25,7 @@ const groupLabels: Record<string, string> = {
                 <div class="border-b border-slate-200 px-5 py-4"><h3 class="font-semibold">可用角色</h3></div>
                 <div class="divide-y divide-slate-100">
                     <Link v-for="role in roles.data" :key="role.id" :href="`/roles/${role.id}`" class="flex items-center justify-between px-5 py-4 hover:bg-slate-50">
-                        <div><div class="flex items-center gap-2"><p class="font-medium">{{ role.name }}</p><span v-if="role.is_system" class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">系统</span></div><p class="mt-1 text-sm text-slate-500">{{ role.description }}</p></div>
+                        <div><div class="flex items-center gap-2"><p class="font-medium">{{ role.name }}</p><span v-if="role.is_system" class="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-500">系统</span></div><p class="mt-1 text-sm text-slate-500">{{ role.description }}</p></div>
                         <span class="ml-4 whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700">{{ role.permissions_count }} 项权限</span>
                     </Link>
                 </div>

@@ -545,7 +545,7 @@ const recognitionFields = (result: Record<string, unknown>) => [
 
 <template>
     <Head title="学生优惠" />
-    <AppLayout :breadcrumbs="[{ label: '店铺设置' }, { label: '学生优惠' }]">
+    <AppLayout :breadcrumbs="[{ label: '应用中心' }, { label: '学生优惠' }]">
         <div class="mx-auto max-w-7xl space-y-7">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -599,7 +599,7 @@ const recognitionFields = (result: Record<string, unknown>) => [
                         <span class="min-w-0 flex-1">
                             <span class="flex items-center gap-2">
                                 <span class="block text-sm font-semibold">{{ tab.name }}</span>
-                                <span v-if="tab.value === 'claims'" class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold leading-none text-amber-700" :aria-label="`待审核 ${counts.pending} 条`">{{ counts.pending }}</span>
+                                <span v-if="tab.value === 'claims'" class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-bold leading-none text-amber-700" :aria-label="`待审核 ${counts.pending} 条`">{{ counts.pending }}</span>
                             </span>
                             <span class="mt-0.5 block truncate text-xs text-slate-500">{{ tab.description }}</span>
                         </span>
@@ -716,16 +716,16 @@ const recognitionFields = (result: Record<string, unknown>) => [
                                             <p class="mt-3 leading-5 text-slate-700">{{ recognitionSuggestion(claim.recognition_result) }}</p>
                                             <dl v-if="recognitionFields(claim.recognition_result).length > 0" class="mt-3 grid gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2">
                                                 <div v-for="field in recognitionFields(claim.recognition_result)" :key="field.key" class="min-w-0">
-                                                    <dt class="text-[11px] font-semibold text-slate-400">{{ field.label }}</dt>
+                                                    <dt class="text-xs font-semibold text-slate-400">{{ field.label }}</dt>
                                                     <dd class="mt-0.5 break-words font-medium text-slate-700">{{ field.value }}</dd>
                                                 </div>
                                             </dl>
-                                            <p class="mt-3 border-t border-slate-200 pt-2 text-[11px] leading-4 text-slate-400">该结论仅表示证件版式识别结果，不代表证件真实性或当前在校状态。</p>
+                                            <p class="mt-3 border-t border-slate-200 pt-2 text-xs leading-4 text-slate-400">该结论仅表示证件版式识别结果，不代表证件真实性或当前在校状态。</p>
                                         </div>
                                     </details>
                                 </td>
                                 <td class="px-4 py-4"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.status)">{{ label(claim.status) }}</span><div v-if="claim.discount" class="mt-2"><code class="font-semibold text-slate-900">{{ claim.discount.code }}</code><p class="mt-1 text-xs text-slate-500">有效期至 {{ new Date(claim.discount.expires_at).toLocaleDateString() }}</p></div><p v-if="claim.rejection_reason" class="mt-2 max-w-sm text-xs text-rose-600">{{ claim.rejection_reason }}</p></td>
-                                <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-[11px] text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>
+                                <td class="px-4 py-4"><template v-if="claim.discount"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1" :class="badge(claim.discount.status)">{{ label(claim.discount.status) }}</span><p class="mt-2 text-xs font-semibold text-slate-700">{{ claim.discount.usage_count }}/{{ claim.discount.usage_limit }} 次</p><p class="mt-1 text-xs text-slate-400">{{ claim.discount.last_synced_at ? `同步于 ${new Date(claim.discount.last_synced_at).toLocaleString()}` : '尚未向 Shopify 同步' }}</p></template><span v-else class="text-xs text-slate-400">尚未发码</span></td>
                                 <td class="whitespace-nowrap px-4 py-4 text-xs text-slate-500">{{ new Date(claim.created_at).toLocaleString() }}<p v-if="claim.reviewer" class="mt-1">审核：{{ claim.reviewer }}</p></td>
                                 <td class="px-4 py-4"><div class="flex flex-wrap justify-end gap-2"><button v-if="claim.status === 'pending' && permissions.approve" type="button" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('approve', claim)">通过</button><button v-if="claim.status === 'pending' && permissions.reject" type="button" class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white" @click="openReviewDialog('reject', claim)">拒绝</button><button v-if="permissions.deleteClaim" type="button" class="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="openDelete(claim)">删除</button></div></td>
                             </tr>
@@ -751,11 +751,11 @@ const recognitionFields = (result: Record<string, unknown>) => [
                 <div class="border-b border-slate-100 bg-slate-50/60 p-5 sm:p-7">
                     <div class="grid gap-3 sm:grid-cols-2">
                         <button type="button" class="rounded-2xl border p-4 text-left transition" :class="selectedEmailTemplate === 'approval' ? 'border-emerald-300 bg-emerald-50 ring-1 ring-emerald-200' : 'border-slate-200 bg-white hover:border-slate-300'" @click="selectedEmailTemplate = 'approval'">
-                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">批准与发码邮件</span><span class="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">批准</span></span>
+                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">批准与发码邮件</span><span class="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">批准</span></span>
                             <span class="mt-1 block text-xs leading-5 text-slate-500">教育邮箱快速通过、AI 通过和人工批准后发送。</span>
                         </button>
                         <button type="button" class="rounded-2xl border p-4 text-left transition" :class="selectedEmailTemplate === 'rejection' ? 'border-rose-300 bg-rose-50 ring-1 ring-rose-200' : 'border-slate-200 bg-white hover:border-slate-300'" @click="selectedEmailTemplate = 'rejection'">
-                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">拒绝通知邮件</span><span class="rounded-full bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">拒绝</span></span>
+                            <span class="flex items-center justify-between gap-3"><span class="text-sm font-semibold text-slate-950">拒绝通知邮件</span><span class="rounded-full bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">拒绝</span></span>
                             <span class="mt-1 block text-xs leading-5 text-slate-500">人工拒绝申请后发送，并自动带入拒绝原因。</span>
                         </button>
                     </div>
@@ -788,7 +788,7 @@ const recognitionFields = (result: Record<string, unknown>) => [
 
                         <aside class="space-y-4">
                             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
-                                <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">实时预览</p><p class="mt-1 max-w-xs truncate text-sm font-semibold text-slate-900" :title="emailPreviewSubject">{{ emailPreviewSubject }}</p><p class="mt-0.5 max-w-xs truncate text-[11px] text-slate-400">{{ emailPreviewPreheader }}</p></div><div class="flex rounded-lg bg-slate-100 p-1 text-[11px] font-semibold"><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'desktop' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'mobile' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'mobile'">手机</button></div></div>
+                                <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">实时预览</p><p class="mt-1 max-w-xs truncate text-sm font-semibold text-slate-900" :title="emailPreviewSubject">{{ emailPreviewSubject }}</p><p class="mt-0.5 max-w-xs truncate text-xs text-slate-400">{{ emailPreviewPreheader }}</p></div><div class="flex rounded-lg bg-slate-100 p-1 text-xs font-semibold"><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'desktop' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'desktop'">桌面</button><button type="button" class="rounded-md px-2 py-1" :class="emailPreviewMode === 'mobile' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="emailPreviewMode = 'mobile'">手机</button></div></div>
                                 <div class="overflow-auto bg-slate-200 p-4"><div class="mx-auto bg-white shadow-sm transition-all" :class="emailPreviewMode === 'mobile' ? 'max-w-[320px]' : 'max-w-[560px]'">
                                     <div class="border-b border-slate-100 px-6 py-6 text-center"><img v-if="emailTemplateForm.branding.logo_url" :src="emailTemplateForm.branding.logo_url" :alt="store.name" class="mx-auto max-h-14 max-w-[180px] object-contain" /><p v-else class="text-xl font-extrabold" :style="{ color: emailTemplateForm.branding.primary_color }">{{ store.name }}</p></div>
                                     <div class="px-6 py-7"><template v-for="(block, index) in emailPreviewBlocks" :key="`${block.type}-${index}`"><div v-if="['heading', 'paragraph', 'note'].includes(block.type) && block.text" class="whitespace-pre-line leading-relaxed" :class="block.type === 'heading' ? 'mb-3' : block.type === 'note' ? 'mt-4' : 'my-3'" :style="previewTextStyle(block)">{{ block.text }}</div><div v-else-if="block.type === 'discount_code' && selectedEmailTemplate === 'approval'" class="my-4 break-all border-[3px] px-4 py-5 text-center font-mono text-xl font-extrabold tracking-wider" :style="{ borderColor: emailTemplateForm.branding.primary_color }">{{ emailPreviewCode }}</div><div v-else-if="block.type === 'button' && block.text" class="my-3 text-center"><span class="inline-block px-5 py-4 text-center" :class="block.width === 'full' ? 'w-full' : ''" :style="{ ...previewTextStyle(block), backgroundColor: block.background_color ?? emailTemplateForm.branding.primary_color }">{{ block.text }}</span></div><div v-else-if="block.type === 'divider'" class="border-t" :style="{ marginTop: `${block.spacing ?? 20}px`, marginBottom: `${block.spacing ?? 20}px`, borderColor: block.color ?? '#E5E7EB' }" /><div v-else-if="block.type === 'spacer'" :style="{ height: `${block.spacing ?? 20}px` }" /></template></div>

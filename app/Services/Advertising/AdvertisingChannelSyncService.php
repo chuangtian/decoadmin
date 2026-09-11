@@ -11,6 +11,7 @@ use App\Models\GoogleAdsCampaignDailyMetric;
 use App\Models\GoogleAdsKeywordDailyMetric;
 use App\Models\GoogleAdsSearchTermDailyMetric;
 use App\Models\Store;
+use App\Models\StoreAlert;
 use App\Models\StoreBusinessCredential;
 use App\Models\StoreSyncState;
 use App\Models\SyncJob;
@@ -41,7 +42,8 @@ class AdvertisingChannelSyncService
     public function sync(Store $store, string $channel, string $mode, ?string $credentialVersion = null): void
     {
         $this->assertChannel($channel);
-        if (! in_array($mode, ['priority', 'backfill', 'incremental'], true)) {
+        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile'], true)
+            || ($mode === 'reconcile' && $channel !== 'google')) {
             throw new RuntimeException('广告渠道同步模式无效。');
         }
         if ($store->status !== 'active' || ! $this->configured($store, $channel)) {
@@ -50,10 +52,16 @@ class AdvertisingChannelSyncService
         if ($credentialVersion !== null && ! hash_equals($credentialVersion, $this->credentialVersion($store, $channel))) {
             return;
         }
+        if ($this->cooldownSeconds($store, $channel, $credentialVersion) > 0) {
+            return;
+        }
 
         [$since, $until] = $this->period($store, $mode, $channel);
         $chunks = $this->chunks($since, $until);
         $job = $this->startJob($store, $channel, $mode, $since, $until, count($chunks), $credentialVersion);
+        // Resume the saved reporting window, even if a long cooldown crosses midnight.
+        $chunks = $this->chunks(CarbonImmutable::instance($job->since_at)->setTimezone($since->getTimezone()),
+            CarbonImmutable::instance($job->until_at)->setTimezone($until->getTimezone()));
 
         try {
             $processed = min(count($chunks), max(0, (int) $job->processed_items));
@@ -97,6 +105,40 @@ class AdvertisingChannelSyncService
             ->pluck('credential_key');
 
         return collect($definition['required'])->every(fn (string $key): bool => $configuredKeys->contains($key));
+    }
+
+    public function cooldownSeconds(Store $store, string $channel, ?string $credentialVersion = null): int
+    {
+        if ($channel !== 'criteo') {
+            return 0;
+        }
+        $state = StoreSyncState::query()->where('organization_id', $store->organization_id)
+            ->where('store_id', $store->id)->where('sync_type', $this->syncType($channel))->with('lastJob')->first();
+        if (! $state || ! AdvertisingSyncFailurePolicy::isTransient($state->last_error_code)
+            || ! $state->next_sync_at?->isFuture()
+            || data_get($state->lastJob?->payload, 'credential_version') !== $credentialVersion) {
+            return 0;
+        }
+
+        return (int) ceil(now()->diffInSeconds($state->next_sync_at));
+    }
+
+    public function resumeMode(Store $store, string $channel, string $mode, ?string $credentialVersion): string
+    {
+        if ($channel !== 'criteo' || $mode !== 'incremental') {
+            return $mode;
+        }
+        $state = StoreSyncState::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+            ->where('sync_type', $this->syncType($channel))->with('lastJob')->first();
+        $job = $state?->lastJob;
+        if ($job?->status === 'failed' && $job->created_at->gte(now()->subHours(48))
+            && AdvertisingSyncFailurePolicy::isTransient($job->error_code)
+            && data_get($job->payload, 'credential_version') === $credentialVersion
+            && in_array($job->mode, ['priority', 'backfill'], true)) {
+            return $job->mode;
+        }
+
+        return $mode;
     }
 
     public function channelForProvider(string $provider): ?string
@@ -145,6 +187,11 @@ class AdvertisingChannelSyncService
             'backfill' => [
                 $now->subMonthsNoOverflow(max(1, (int) config('services.advertising_sync.history_months', 6)))->startOfDay(),
                 $now->subDays($priorityDays)->endOfDay(),
+            ],
+            // Refresh historical attribution separately from the lightweight hourly sync.
+            'reconcile' => [
+                $now->subDays(max(1, (int) config('services.advertising_sync.google_reconcile_days', 90)) - 1)->startOfDay(),
+                $now,
             ],
             'incremental' => [
                 $now->subDays($rollingDays - 1)->startOfDay(),
@@ -515,6 +562,9 @@ class AdvertisingChannelSyncService
                 ->where('store_id', $store->getKey())
                 ->where('type', $this->syncType($channel))
                 ->where('mode', $mode)
+                ->when($mode === 'reconcile', fn ($query) => $query
+                    ->where('since_at', $since->utc())
+                    ->where('until_at', $until->utc()))
                 ->whereIn('status', ['running', 'failed'])
                 ->where('created_at', '>=', now()->subHours(48))
                 ->latest('id')
@@ -606,30 +656,53 @@ class AdvertisingChannelSyncService
                 $attributes['last_full_sync_at'] = $finishedAt;
             } elseif ($mode === 'incremental') {
                 $attributes['last_incremental_sync_at'] = $finishedAt;
+                if ($job->type !== $this->syncType('google')) {
+                    $attributes['last_reconciled_at'] = $finishedAt;
+                }
+            } elseif ($mode === 'reconcile') {
                 $attributes['last_reconciled_at'] = $finishedAt;
             }
             $state->forceFill($attributes)->save();
+            StoreAlert::query()->where('organization_id', $job->organization_id)->where('store_id', $job->store_id)
+                ->where('type', 'sync')->where('source_type', SyncJob::class)->where('source_id', $job->id)
+                ->whereIn('status', ['open', 'acknowledged'])->update(['status' => 'resolved', 'resolved_at' => $finishedAt]);
         });
     }
 
     private function failJob(SyncJob $job, Throwable $exception): void
     {
-        DB::transaction(function () use ($job): void {
+        DB::transaction(function () use ($job, $exception): void {
             $finishedAt = now();
-            $message = '广告渠道同步失败，请检查授权或稍后重试。';
+            $channel = (string) data_get($job->payload, 'channel');
+            $failure = AdvertisingSyncFailurePolicy::describe($exception);
+            $previous = (array) data_get($job->payload, 'failure', []);
+            $count = (int) ($previous['occurrences'] ?? 0) + 1;
+            $retryAt = $channel === 'criteo' && $failure['transient']
+                ? $finishedAt->copy()->addSeconds(AdvertisingSyncFailurePolicy::delay($count, $exception)) : null;
+            $firstFailedAt = $previous['first_failed_at'] ?? $finishedAt->toIso8601String();
+            $failure = [...$failure, 'occurrences' => $count, 'first_failed_at' => $firstFailedAt, 'retry_at' => $retryAt?->toIso8601String()];
+            $label = self::CHANNELS[$channel]['label'] ?? '广告渠道';
+            $message = $label.'：'.$failure['reason'].($failure['http_status'] ? '（HTTP '.$failure['http_status'].'）' : '').'。';
+            if ($retryAt) {
+                $message .= '已进入冷却，冷却结束后的下一轮定时任务将自动重试。';
+            }
             $job->forceFill([
                 'status' => 'failed',
                 'failed_items' => max(1, $job->total_items - $job->processed_items),
                 'finished_at' => $finishedAt,
                 'failed_at' => $finishedAt,
                 'last_error' => $message,
-                'error_code' => 'advertising_channel_sync_failed',
+                'error_code' => $failure['code'],
+                'available_at' => $retryAt ?? $finishedAt,
+                'payload' => [...(array) $job->payload, 'failure' => $failure],
             ])->save();
             StoreSyncState::query()->where('last_job_id', $job->getKey())->update([
                 'status' => 'failed',
                 'last_failed_at' => $finishedAt,
-                'last_error_code' => 'advertising_channel_sync_failed',
+                'last_error_code' => $failure['code'],
                 'last_error' => $message,
+                'next_sync_at' => $retryAt ?? $finishedAt,
+                'consecutive_failures' => $count,
                 'updated_at' => $finishedAt,
             ]);
         });

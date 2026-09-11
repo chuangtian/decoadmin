@@ -26,6 +26,6 @@ onBeforeUnmount(() => {
 <template>
     <div class="text-right" :title="`与当前 Shopify 店铺时区一致：${timezone}`">
         <time class="block whitespace-nowrap text-sm font-semibold tabular-nums text-slate-800" :aria-label="`${timezone} 当前时间`">{{ currentTime }}</time>
-        <span class="mt-0.5 block whitespace-nowrap text-[11px] text-slate-500">店铺时间 · {{ timezone }}</span>
+        <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500">店铺时间 · {{ timezone }}</span>
     </div>
 </template>

@@ -329,7 +329,7 @@ function detailValueClass(value: string | number | null, kind: string): string {
                     <span class="absolute inset-x-0 top-0 h-0.5 bg-teal-500" />
                     <p class="text-xs font-semibold text-slate-500">综合 ROAS</p>
                     <p class="mt-3 whitespace-nowrap text-xl font-semibold tracking-tight tabular-nums text-teal-700">{{ roas(summary.values.roas) }}</p>
-                    <p class="mt-1 text-[11px] text-slate-400">本月销售额 ÷ 本月花费</p>
+                    <p class="mt-1 text-xs text-slate-400">本月销售额 ÷ 本月花费</p>
                 </article>
             </div>
 
@@ -411,15 +411,15 @@ function detailValueClass(value: string | number | null, kind: string): string {
                     </div>
                     <dl class="mt-4 grid grid-cols-3 gap-2">
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">目标完成率</dt>
+                            <dt class="text-xs font-medium text-slate-400">目标完成率</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums text-blue-700">{{ percent(summary.facebook.values.completion_rate, 2) }}</dd>
                         </div>
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">时间进度差</dt>
+                            <dt class="text-xs font-medium text-slate-400">时间进度差</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums" :class="facebookAhead ? 'text-emerald-700' : 'text-rose-600'">{{ signedPercent(summary.facebook.values.time_variance) }}</dd>
                         </div>
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">时间进度</dt>
+                            <dt class="text-xs font-medium text-slate-400">时间进度</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums text-slate-700">{{ percent(summary.facebook.values.time_progress, 2) }}</dd>
                         </div>
                     </dl>
@@ -535,15 +535,15 @@ function detailValueClass(value: string | number | null, kind: string): string {
                     </div>
                     <dl class="mt-4 grid grid-cols-3 gap-2">
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">目标完成率</dt>
+                            <dt class="text-xs font-medium text-slate-400">目标完成率</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums" :class="criteoComplete ? 'text-emerald-700' : 'text-orange-700'">{{ percent(summary.criteo.values.completion_rate, 2) }}</dd>
                         </div>
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">时间进度差</dt>
+                            <dt class="text-xs font-medium text-slate-400">时间进度差</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums" :class="criteoAhead ? 'text-emerald-700' : 'text-rose-600'">{{ signedPercent(summary.criteo.values.time_variance) }}</dd>
                         </div>
                         <div class="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-slate-100">
-                            <dt class="text-[11px] font-medium text-slate-400">时间进度</dt>
+                            <dt class="text-xs font-medium text-slate-400">时间进度</dt>
                             <dd class="mt-1 text-sm font-semibold tabular-nums text-slate-700">{{ percent(summary.criteo.values.time_progress, 2) }}</dd>
                         </div>
                     </dl>

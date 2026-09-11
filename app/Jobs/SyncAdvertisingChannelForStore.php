@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Store;
 use App\Services\Advertising\AdvertisingChannelSyncService;
+use App\Services\Advertising\AdvertisingSyncFailurePolicy;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,7 +41,16 @@ class SyncAdvertisingChannelForStore implements ShouldBeUnique, ShouldQueue
             ->where('status', 'active')
             ->first();
         if ($store) {
-            $sync->sync($store, $this->channel, $this->mode, $this->credentialVersion);
+            try {
+                $sync->sync($store, $this->channel, $this->mode, $this->credentialVersion);
+            } catch (\Throwable $exception) {
+                // Business failure remains visible on SyncJob. The hourly scheduler resumes it
+                // after the persisted cooldown; don't also retry it at 120/600 seconds.
+                if ($this->channel === 'criteo' && AdvertisingSyncFailurePolicy::describe($exception)['transient']) {
+                    return;
+                }
+                throw $exception;
+            }
         }
     }
 

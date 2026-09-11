@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface CtrPoint {
@@ -44,7 +45,7 @@ const number = (value: number) => new Intl.NumberFormat('en-US', { maximumFracti
         </header>
         <div class="min-w-0 px-2 pb-3 pt-2 sm:px-4">
             <div class="relative mx-auto w-full" :style="{ maxWidth: chart.width + 'px', aspectRatio: chart.width + ' / ' + chart.height }">
-                <svg :viewBox="'0 0 ' + chart.width + ' ' + chart.height" class="h-full w-full" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Criteo 最近 7 天每日点击率趋势">
+                <svg v-readable-chart :viewBox="'0 0 ' + chart.width + ' ' + chart.height" class="h-full w-full" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Criteo 最近 7 天每日点击率趋势">
                     <title>Criteo 最近 7 天每日 CTR 趋势</title>
                     <defs>
                         <linearGradient id="criteoCtrArea" x1="0" y1="0" x2="0" y2="1">
@@ -54,13 +55,13 @@ const number = (value: number) => new Intl.NumberFormat('en-US', { maximumFracti
                     </defs>
                     <g v-for="ratio in ticks" :key="ratio">
                         <line :x1="chart.left" :x2="chart.width - chart.right" :y1="chart.bottom - ratio * plotHeight" :y2="chart.bottom - ratio * plotHeight" class="stroke-slate-200" stroke-dasharray="4 5" />
-                        <text :x="chart.left - 10" :y="chart.bottom - ratio * plotHeight + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">{{ (maximum * ratio).toFixed(2) }}%</text>
+                        <text :x="chart.left - 10" :y="chart.bottom - ratio * plotHeight + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ (maximum * ratio).toFixed(2) }}%</text>
                     </g>
                     <path v-if="areaPath" :d="areaPath" fill="url(#criteoCtrArea)" />
                     <path v-if="linePath" :d="linePath" fill="none" stroke="#f97316" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5" />
                     <g v-for="(point, index) in points" :key="point.date">
                         <circle :cx="xAt(index)" :cy="yAt(point.ctr)" :r="activeIndex === index ? 6 : 4.5" fill="#f97316" stroke="white" stroke-width="2.5" />
-                        <text :x="xAt(index)" :y="chart.bottom + 29" text-anchor="middle" class="fill-slate-500 text-[11px] tabular-nums">{{ shortDate(point.date) }}</text>
+                        <text :x="xAt(index)" :y="chart.bottom + 29" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ shortDate(point.date) }}</text>
                         <rect :x="xAt(index) - plotWidth / Math.max(1, points.length) / 2" :y="chart.top" :width="plotWidth / Math.max(1, points.length)" :height="plotHeight + 44" fill="transparent" tabindex="0" :aria-label="point.date + '，CTR ' + point.ctr.toFixed(2) + '%'" @mouseenter="hoveredIndex = index" @mouseleave="hoveredIndex = null" @focus="hoveredIndex = index" @blur="hoveredIndex = null" />
                     </g>
                     <line v-if="activePoint" :x1="activeX" :x2="activeX" :y1="chart.top" :y2="chart.bottom" class="stroke-slate-400" stroke-dasharray="5 5" />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface MetaWeeklyPoint {
@@ -122,14 +123,14 @@ const tableValue = (value: string | number | null, format: string) => {
 
             <div v-if="weekly.trend.available" class="meta-chart-scrollbar min-w-0 overflow-x-auto px-2 pb-3 pt-2 sm:px-4">
                 <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                    <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="Meta 周销售额、花费与 ROI 趋势图">
-                        <text :x="plot.left" y="25" class="fill-slate-400 text-[11px] font-medium">销售额 / 花费</text>
-                        <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">ROI</text>
+                    <svg v-readable-chart :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="Meta 周销售额、花费与 ROI 趋势图">
+                        <text :x="plot.left" y="25" class="fill-slate-400 text-xs font-medium">销售额 / 花费</text>
+                        <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-xs font-medium">ROI</text>
 
                         <g v-for="ratio in ticks" :key="ratio">
                             <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" stroke-dasharray="4 5" />
-                            <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[10px] tabular-nums">{{ compactMoney(amountMax * ratio) }}</text>
-                            <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[10px] tabular-nums">{{ (roiMax * ratio).toFixed(1) }}×</text>
+                            <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(amountMax * ratio) }}</text>
+                            <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ (roiMax * ratio).toFixed(1) }}×</text>
                         </g>
 
                         <g v-for="(point, index) in points" :key="point.week">
@@ -140,7 +141,7 @@ const tableValue = (value: string | number | null, format: string) => {
                         <path v-if="roiPath" :d="roiPath" fill="none" stroke="#f97316" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.8" />
                         <g v-for="(point, index) in points" :key="`roi-${point.week}`">
                             <circle v-if="point.roi !== null" :cx="xAt(index)" :cy="roiY(point.roi)" r="4" fill="#f97316" stroke="white" stroke-width="1.5" />
-                            <text :x="xAt(index)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-500 text-[10px] tabular-nums">{{ point.week }}</text>
+                            <text :x="xAt(index)" :y="plot.bottom + 25" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ point.week }}</text>
                             <rect :x="xAt(index) - pointWidth / 2" :y="plot.top" :width="pointWidth" :height="plot.bottom - plot.top + 40" fill="transparent" tabindex="0" @mouseenter="hoveredIndex = index" @mouseleave="hoveredIndex = null" @focus="hoveredIndex = index" @blur="hoveredIndex = null" />
                         </g>
                         <line v-if="hoveredPoint" :x1="hoveredX" :x2="hoveredX" :y1="plot.top" :y2="plot.bottom" class="stroke-slate-400" stroke-dasharray="5 5" />

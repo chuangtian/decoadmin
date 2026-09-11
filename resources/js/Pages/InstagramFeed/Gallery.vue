@@ -207,8 +207,8 @@ const typeLabel = (media: Media) => {
                                 </div>
                                 <div class="min-w-0 flex-1">
                                     <div class="flex flex-wrap items-center gap-1.5">
-                                        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{{ typeLabel(media) }}</span>
-                                        <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="mirrorBadge(media.mirror_status)">{{ mirrorLabel(media.mirror_status) }}</span>
+                                        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{{ typeLabel(media) }}</span>
+                                        <span class="rounded-full px-2 py-0.5 text-xs font-semibold ring-1" :class="mirrorBadge(media.mirror_status)">{{ mirrorLabel(media.mirror_status) }}</span>
                                     </div>
                                     <p class="mt-1.5 line-clamp-2 text-xs text-slate-500">{{ media.caption || '无文案' }}</p>
                                 </div>
@@ -248,9 +248,9 @@ const typeLabel = (media: Media) => {
                             </div>
                             <div class="min-w-0 flex-1">
                                 <div class="flex flex-wrap items-center gap-1.5">
-                                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{{ typeLabel(media) }}</span>
-                                    <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="mirrorBadge(media.mirror_status)">{{ mirrorLabel(media.mirror_status) }}</span>
-                                    <a :href="media.permalink" target="_blank" rel="noopener nofollow" class="text-[11px] font-semibold text-slate-500 underline hover:text-slate-700">原帖</a>
+                                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{{ typeLabel(media) }}</span>
+                                    <span class="rounded-full px-2 py-0.5 text-xs font-semibold ring-1" :class="mirrorBadge(media.mirror_status)">{{ mirrorLabel(media.mirror_status) }}</span>
+                                    <a :href="media.permalink" target="_blank" rel="noopener nofollow" class="text-xs font-semibold text-slate-500 underline hover:text-slate-700">原帖</a>
                                 </div>
                                 <p class="mt-1.5 line-clamp-2 text-xs text-slate-500">{{ media.caption || '无文案' }}</p>
                                 <p v-if="media.mirror_error" class="mt-1 line-clamp-2 text-xs text-rose-600">{{ media.mirror_error }}</p>
@@ -258,9 +258,9 @@ const typeLabel = (media: Media) => {
                                     关联商品：{{ media.products.map(product => product.title).join('、') }}
                                 </p>
                                 <div class="mt-2 flex flex-wrap gap-1.5">
-                                    <button type="button" class="rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50" @click="editProducts(media)">关联商品</button>
-                                    <button v-if="media.mirror_status === 'failed'" type="button" class="rounded-lg border border-amber-300 px-2.5 py-1 text-[11px] font-semibold text-amber-700 hover:bg-amber-50" @click="retryMirror(media)">重试转存</button>
-                                    <button type="button" class="rounded-lg border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50" @click="removeItem(media)">移出</button>
+                                    <button type="button" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" @click="editProducts(media)">关联商品</button>
+                                    <button v-if="media.mirror_status === 'failed'" type="button" class="rounded-lg border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50" @click="retryMirror(media)">重试转存</button>
+                                    <button type="button" class="rounded-lg border border-rose-300 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50" @click="removeItem(media)">移出</button>
                                 </div>
                             </div>
                         </li>

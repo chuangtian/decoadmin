@@ -39,7 +39,7 @@ const copy = async () => {
     <label class="block">
         <span class="flex items-center gap-2 text-sm font-semibold text-slate-800">
             {{ label }}
-            <span v-if="configured" class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">已配置</span>
+            <span v-if="configured" class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">已配置</span>
         </span>
         <span class="mt-2 flex overflow-hidden rounded-xl border border-slate-200 bg-white transition focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-100" :class="{ 'bg-slate-50 opacity-70': disabled }">
             <input

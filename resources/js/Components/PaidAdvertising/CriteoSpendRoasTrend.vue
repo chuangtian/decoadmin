@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface TrendPoint {
@@ -62,14 +63,14 @@ const pointLabel = (point: TrendPoint) => point.date + '，花费 ' + money(poin
 
         <div class="criteo-chart-scroll min-w-0 overflow-x-auto px-2 pb-3 pt-2 sm:px-4">
             <div class="relative mx-auto" :style="{ width: chartWidth + 'px', height: chartHeight + 'px' }">
-                <svg :viewBox="'0 0 ' + chartWidth + ' ' + chartHeight" :width="chartWidth" :height="chartHeight" role="img" aria-label="Criteo 最近 7 天花费柱状图与 ROAS 折线图">
+                <svg v-readable-chart :viewBox="'0 0 ' + chartWidth + ' ' + chartHeight" :width="chartWidth" :height="chartHeight" role="img" aria-label="Criteo 最近 7 天花费柱状图与 ROAS 折线图">
                     <title>Criteo 最近 7 天花费与 ROAS 趋势</title>
-                    <text :x="plot.left" y="25" class="fill-slate-400 text-[11px] font-medium">花费</text>
-                    <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">ROAS</text>
+                    <text :x="plot.left" y="25" class="fill-slate-400 text-xs font-medium">花费</text>
+                    <text :x="chartWidth - plot.right" y="25" text-anchor="end" class="fill-slate-400 text-xs font-medium">ROAS</text>
                     <g v-for="ratio in ticks" :key="ratio">
                         <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" stroke-dasharray="4 5" />
-                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">{{ axisMoney(spendMax * ratio) }}</text>
-                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[11px] tabular-nums">{{ (roasMax * ratio).toFixed(0) }}×</text>
+                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ axisMoney(spendMax * ratio) }}</text>
+                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ (roasMax * ratio).toFixed(0) }}×</text>
                     </g>
                     <g v-for="(point, index) in points" :key="point.date">
                         <rect :x="xAt(index) - barWidth / 2" :y="spendY(point.spend)" :width="barWidth" :height="plot.bottom - spendY(point.spend)" rx="7" fill="#f97316" :fill-opacity="activeIndex === index ? 0.9 : 0.68" />
@@ -77,7 +78,7 @@ const pointLabel = (point: TrendPoint) => point.date + '，花费 ' + money(poin
                     <path v-if="roasPath" :d="roasPath" fill="none" stroke="#10b981" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5" />
                     <g v-for="(point, index) in points" :key="'roas-' + point.date">
                         <circle :cx="xAt(index)" :cy="roasY(point.roas)" :r="activeIndex === index ? 6 : 4.5" fill="#10b981" stroke="white" stroke-width="2.5" />
-                        <text :x="xAt(index)" :y="plot.bottom + 28" text-anchor="middle" class="fill-slate-500 text-[11px] tabular-nums">{{ shortDate(point.date) }}</text>
+                        <text :x="xAt(index)" :y="plot.bottom + 28" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ shortDate(point.date) }}</text>
                         <rect :x="xAt(index) - pointWidth / 2" :y="plot.top" :width="pointWidth" :height="plot.bottom - plot.top + 44" fill="transparent" tabindex="0" :aria-label="pointLabel(point)" @mouseenter="hoveredIndex = index" @mouseleave="hoveredIndex = null" @focus="hoveredIndex = index" @blur="hoveredIndex = null" />
                     </g>
                     <line v-if="activePoint" :x1="activeX" :x2="activeX" :y1="plot.top" :y2="plot.bottom" class="stroke-slate-500" stroke-dasharray="5 5" />

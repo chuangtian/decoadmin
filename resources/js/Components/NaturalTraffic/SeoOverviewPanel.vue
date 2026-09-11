@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { router } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 type Summary = { revenue?: number; sessions?: number; clicks?: number; impressions?: number; ctr?: number; position?: number; ratio?: number; visible_clicks?: number; total_clicks?: number };
 type Trend = { date: string; revenue?: number; sessions?: number; clicks?: number; impressions?: number; ctr?: number; position?: number };
+type GscMetric = 'clicks' | 'impressions' | 'ctr' | 'position';
 type DetailRow = {
     hash: string; label: string; clicks: number; impressions: number; ctr: number; position: number;
     previous: { clicks: number; impressions: number; ctr: number; position: number };
@@ -48,6 +50,9 @@ const filters = ref({ ...props.overview.filters });
 const status = ref({ ...props.syncStatus });
 const syncing = ref(['queued', 'running'].includes(status.value.status));
 const activeModule = ref('total');
+const activeGscMetric = ref<GscMetric>('clicks');
+const gscTrendOpen = ref(true);
+const gscMetricGroup = ref<HTMLDivElement | null>(null);
 const drillType = ref<'queries' | 'pages'>('queries');
 const drillSearch = ref('');
 const drillPage = ref(1);
@@ -84,7 +89,25 @@ const metricCards = computed(() => [
 ]);
 
 const gaChart = computed(() => lineChart(props.overview.ga4.trend, props.overview.ga4.previous_trend, 'revenue'));
-const gscChart = computed(() => lineChart(currentModule.value.trend, currentModule.value.previous_trend, 'clicks'));
+const gscMetricOptions: Array<{ key: GscMetric; label: string }> = [
+    { key: 'clicks', label: '点击' },
+    { key: 'impressions', label: '曝光' },
+    { key: 'ctr', label: 'CTR' },
+    { key: 'position', label: '平均排名' },
+];
+const gscMetricCards = computed(() => gscMetricOptions.map((metric) => ({
+    ...metric,
+    label: metric.key === 'clicks' ? currentModule.value.label : metric.label,
+    value: formatGscMetric(currentModule.value.current[metric.key], metric.key),
+    delta: comparedDelta(currentModule.value.deltas[metric.key]),
+})));
+const gscMetricLabel = computed(() => gscMetricCards.value.find((metric) => metric.key === activeGscMetric.value)!.label);
+const gscChart = computed(() => lineChart(
+    currentModule.value.trend,
+    filters.value.comparison === 'none' ? [] : currentModule.value.previous_trend,
+    activeGscMetric.value,
+));
+const gscHasTrend = computed(() => gscChart.value.current.length > 0 || gscChart.value.previous.length > 0);
 const landingRows = computed(() => landingExpanded.value ? landingPages.value : landingPages.value.slice(0, 7));
 const supportedDrills = computed(() => ({
     queries: !['blog', 'anonymous', 'web'].includes(activeModule.value),
@@ -225,8 +248,18 @@ function changeSort(key: keyof DetailRow): void {
     else { drillSort.value = key; drillDirection.value = key === 'label' ? 'asc' : 'desc'; }
 }
 
-function lineChart(current: Trend[], previous: Trend[], key: 'revenue' | 'clicks') {
-    const width = 920, height = 300, left = 58, right = 22, top = 24, bottom = 42;
+function openGscTrend(metric: GscMetric): void {
+    activeGscMetric.value = metric;
+    gscTrendOpen.value = true;
+}
+
+function closeGscTrend(): void {
+    gscTrendOpen.value = false;
+    gscMetricGroup.value?.querySelector<HTMLButtonElement>(`[data-gsc-metric="${activeGscMetric.value}"]`)?.focus();
+}
+
+function lineChart(current: Trend[], previous: Trend[], key: 'revenue' | GscMetric) {
+    const width = 920, height = 300, left = 80, right = 40, top = 32, bottom = 42;
     const plotWidth = width - left - right, plotHeight = height - top - bottom;
     const max = Math.max(1, ...current.map((row) => Number(row[key] ?? 0)), ...previous.map((row) => Number(row[key] ?? 0))) * 1.12;
     const length = Math.max(current.length, previous.length, 1);
@@ -243,6 +276,17 @@ function lineChart(current: Trend[], previous: Trend[], key: 'revenue' | 'clicks
 }
 
 function number(value: number): string { return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value); }
+function formatGscMetric(value: number | undefined, key: GscMetric, axis = false): string {
+    if (value === undefined) return '—';
+    if (key === 'ctr') return `${value.toFixed(2)}%`;
+    if (key === 'position') return value.toFixed(2);
+    return axis ? compact(value) : number(value);
+}
+function gscDeltaColor(key: GscMetric, value: number | null): string {
+    if (value === null || value === 0) return 'text-slate-400';
+    const improved = key === 'position' ? value < 0 : value > 0;
+    return improved ? 'text-emerald-300' : 'text-rose-300';
+}
 function money(value: number): string { return `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)}`; }
 function percent(value: number): string { return `${value.toFixed(1)}%`; }
 function delta(value: number | null | undefined): string { return value === null || value === undefined ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`; }
@@ -319,11 +363,11 @@ function difference(value: number, suffix = ''): string { return `${value > 0 ? 
             </div>
             <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
                 <div class="overflow-x-auto">
-                    <svg :viewBox="`0 0 ${gaChart.width} ${gaChart.height}`" class="min-w-[720px] w-full" role="img" aria-label="SEO GMV趋势">
-                        <g v-for="tick in gaChart.ticks" :key="tick.y"><line :x1="gaChart.left" :x2="gaChart.width-gaChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/><text :x="gaChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(tick.value) }}</text></g>
+                    <svg v-readable-chart :viewBox="`0 0 ${gaChart.width} ${gaChart.height}`" class="min-w-[720px] w-full" role="img" aria-label="SEO GMV趋势">
+                        <g v-for="tick in gaChart.ticks" :key="tick.y"><line :x1="gaChart.left" :x2="gaChart.width-gaChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/><text :x="gaChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compact(tick.value) }}</text></g>
                         <polyline v-if="filters.comparison !== 'none'" :points="gaChart.previousLine" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="7 6"/>
                         <polyline :points="gaChart.currentLine" fill="none" stroke="#10b981" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        <g v-for="point in gaChart.current" :key="point.date"><circle :cx="point.x" :cy="point.y" r="4" fill="#10b981"><title>{{ point.date }} · {{ money(point.value) }}</title></circle><text v-if="point.index===0 || point.index===gaChart.current.length-1" :x="point.x" :y="gaChart.height-12" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text></g>
+                        <g v-for="point in gaChart.current" :key="point.date"><circle :cx="point.x" :cy="point.y" r="4" fill="#10b981"><title>{{ point.date }} · {{ money(point.value) }}</title></circle><text v-if="point.index===0 || point.index===gaChart.current.length-1" :x="point.x" :y="gaChart.height-12" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text></g>
                     </svg>
                 </div>
                 <div class="space-y-3">
@@ -349,8 +393,89 @@ function difference(value: number, suffix = ''): string { return `${value > 0 ? 
         <section class="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
             <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div><p class="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Search Console</p><h2 class="mt-1 text-xl font-black text-slate-950">搜索表现与页面下钻</h2></div><div class="flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5"><button v-for="option in moduleOptions" :key="option.key" class="rounded-xl px-4 py-2 text-xs font-black transition" :class="activeModule===option.key ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="activeModule=option.key">{{ option.label }}</button></div></div>
             <div class="mt-6 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-                <div class="rounded-2xl bg-slate-950 p-5 text-white"><p class="text-sm font-bold text-slate-400">{{ currentModule.label }}</p><p class="mt-3 text-4xl font-black tabular-nums">{{ number(currentModule.current.clicks ?? 0) }}</p><p class="mt-2 text-xs text-slate-400">{{ currentModule.description }}</p><div class="mt-6 grid grid-cols-2 gap-2 text-xs"><div class="rounded-xl bg-white/10 p-3"><p class="text-slate-400">曝光</p><p class="mt-1 font-black">{{ number(currentModule.current.impressions ?? 0) }}</p></div><div class="rounded-xl bg-white/10 p-3"><p class="text-slate-400">CTR</p><p class="mt-1 font-black">{{ percent(currentModule.current.ctr ?? 0) }}</p></div><div class="rounded-xl bg-white/10 p-3"><p class="text-slate-400">平均排名</p><p class="mt-1 font-black">{{ currentModule.current.position?.toFixed(2) ?? '—' }}</p></div><div class="rounded-xl bg-white/10 p-3"><p class="text-slate-400">{{ comparisonLabel }}</p><p class="mt-1 font-black" :class="(comparedDelta(currentModule.deltas.clicks) ?? 0)>=0 ? 'text-emerald-300':'text-rose-300'">{{ delta(comparedDelta(currentModule.deltas.clicks)) }}</p></div></div></div>
-                <div class="overflow-x-auto"><svg :viewBox="`0 0 ${gscChart.width} ${gscChart.height}`" class="min-w-[720px] w-full" role="img" :aria-label="`${currentModule.label}趋势`"><g v-for="tick in gscChart.ticks" :key="tick.y"><line :x1="gscChart.left" :x2="gscChart.width-gscChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/><text :x="gscChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compact(tick.value) }}</text></g><polyline v-if="filters.comparison!=='none'" :points="gscChart.previousLine" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="7 6"/><polyline :points="gscChart.currentLine" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><g v-for="point in gscChart.current" :key="point.date"><circle :cx="point.x" :cy="point.y" r="4" fill="#2563eb"><title>{{ point.date }} · {{ number(point.value) }}</title></circle><text v-if="point.index===0 || point.index===gscChart.current.length-1" :x="point.x" :y="gscChart.height-12" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text></g></svg></div>
+                <div ref="gscMetricGroup" class="rounded-2xl bg-slate-950 p-3 text-white" role="group" aria-label="搜索表现指标">
+                    <div class="grid grid-cols-1 auto-rows-fr gap-2">
+                        <button
+                            v-for="metric in gscMetricCards"
+                            :key="metric.key"
+                            type="button"
+                            :data-gsc-metric="metric.key"
+                            :aria-pressed="gscTrendOpen && activeGscMetric === metric.key"
+                            :aria-expanded="gscTrendOpen && activeGscMetric === metric.key"
+                            aria-controls="gsc-metric-trend"
+                            class="group min-w-0 rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                            :class="[
+                                gscTrendOpen && activeGscMetric === metric.key
+                                    ? 'border-blue-400 bg-blue-500/20'
+                                    : 'border-transparent bg-white/5 hover:border-white/20 hover:bg-white/10',
+                            ]"
+                            @click="openGscTrend(metric.key)"
+                        >
+                            <span class="flex items-center justify-between gap-2 text-xs font-semibold text-slate-300">
+                                {{ metric.label }}
+                                <svg class="h-3.5 w-3.5 shrink-0 transition" :class="gscTrendOpen && activeGscMetric === metric.key ? 'text-blue-300' : 'text-slate-500 group-hover:text-white'" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 11.5 6 7.5 9 10.5 14 4.5M9.5 4.5H14V9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </span>
+                            <span class="mt-2 block text-xl font-black tracking-tight tabular-nums">{{ metric.value }}</span>
+                            <span class="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+                                <span class="text-slate-400">{{ comparisonLabel }}</span>
+                                <span class="font-bold tabular-nums" :class="gscDeltaColor(metric.key, metric.delta)" :title="metric.delta === null && filters.comparison !== 'none' ? '对比期为 0 或没有可用数据，无法计算变化百分比' : undefined">{{ delta(metric.delta) }}</span>
+                            </span>
+                        </button>
+                    </div>
+                    <p class="px-3 pt-3 text-xs leading-5 text-slate-400">{{ currentModule.description }}</p>
+                </div>
+                <div id="gsc-metric-trend" class="min-w-0">
+                    <Transition
+                        mode="out-in"
+                        enter-active-class="transition duration-200 ease-out motion-reduce:transition-none"
+                        enter-from-class="translate-x-3 opacity-0"
+                        enter-to-class="translate-x-0 opacity-100"
+                        leave-active-class="transition duration-150 ease-in motion-reduce:transition-none"
+                        leave-from-class="translate-x-0 opacity-100"
+                        leave-to-class="translate-x-3 opacity-0"
+                    >
+                        <section v-if="gscTrendOpen" :key="activeGscMetric" class="h-full rounded-2xl border border-blue-100 bg-blue-50/20 p-4" :aria-label="`${gscMetricLabel}趋势详情`" @keydown.esc.stop.prevent="closeGscTrend">
+                            <div class="flex items-start justify-between gap-3">
+                                <div aria-live="polite">
+                                    <h3 class="font-black text-slate-900">{{ gscMetricLabel }}趋势</h3>
+                                    <p class="mt-1 text-xs text-slate-500">{{ overview.filters.date_from }} — {{ overview.filters.date_to }}<span v-if="activeGscMetric === 'position'" class="ml-2">数值越小，排名越靠前</span></p>
+                                </div>
+                                <button type="button" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label="收起趋势图" @click="closeGscTrend">
+                                    <svg class="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                </button>
+                            </div>
+                            <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500">
+                                <span class="inline-flex items-center gap-2"><span class="h-0.5 w-5 rounded bg-blue-600"></span>本期</span>
+                                <span v-if="filters.comparison !== 'none'" class="inline-flex items-center gap-2"><span class="w-5 border-t-2 border-dashed border-slate-400"></span>{{ comparisonPeriodLabel }} · {{ overview.comparison_period.date_from }} — {{ overview.comparison_period.date_to }}</span>
+                            </div>
+                            <div v-if="gscHasTrend" class="mt-2 overflow-x-auto">
+                                <svg v-readable-chart :viewBox="`0 0 ${gscChart.width} ${gscChart.height}`" class="min-w-[540px] w-full" role="img" :aria-label="`${gscMetricLabel}趋势`">
+                                    <g v-for="tick in gscChart.ticks" :key="tick.y">
+                                        <line :x1="gscChart.left" :x2="gscChart.width-gscChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5"/>
+                                        <text :x="gscChart.left-8" :y="tick.y+4" text-anchor="end" fill="#94a3b8" font-size="12">{{ formatGscMetric(tick.value, activeGscMetric, true) }}</text>
+                                    </g>
+                                    <polyline v-if="filters.comparison !== 'none'" :points="gscChart.previousLine" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="7 6"/>
+                                    <polyline :points="gscChart.currentLine" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <g v-for="point in gscChart.previous" :key="point.date">
+                                        <circle :cx="point.x" :cy="point.y" r="3" fill="#94a3b8"><title>{{ comparisonPeriodLabel }} · {{ point.date }} · {{ formatGscMetric(point.value, activeGscMetric) }}</title></circle>
+                                    </g>
+                                    <g v-for="point in gscChart.current" :key="point.date">
+                                        <circle :cx="point.x" :cy="point.y" r="4" fill="#2563eb"><title>本期 · {{ point.date }} · {{ formatGscMetric(point.value, activeGscMetric) }}</title></circle>
+                                        <text v-if="point.index===0 || point.index===gscChart.current.length-1" :x="point.x" :y="gscChart.height-12" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
+                                    </g>
+                                </svg>
+                            </div>
+                            <div v-else class="flex min-h-60 items-center justify-center text-sm text-slate-400">当前日期暂无{{ gscMetricLabel }}趋势数据</div>
+                        </section>
+                        <div v-else key="closed" class="flex h-full min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-6 text-center">
+                            <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-blue-500 shadow-sm">
+                                <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4v16h16M7 14l4-4 4 3 5-7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </span>
+                            <p class="mt-4 text-sm font-semibold text-slate-700">点击指标数字，展开趋势图</p>
+                            <p class="mt-1.5 text-xs leading-5 text-slate-400">查看点击、曝光、CTR 或平均排名的变化</p>
+                        </div>
+                    </Transition>
+                </div>
             </div>
 
             <div class="mt-7 border-t border-slate-100 pt-6">

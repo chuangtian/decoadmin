@@ -65,7 +65,7 @@ class BrandSocialCsvImportService
     /**
      * @return array{platform: string, rows: int, unique_rows: int, created: int, updated: int, unchanged: int, skipped_stale: int, outliers: int, checksum: string}
      */
-    public function import(Store $store, UploadedFile $file): array
+    public function import(Store $store, UploadedFile $file, ?string $expectedPlatform = null): array
     {
         $path = $file->getRealPath();
         if (! is_string($path) || $path === '' || ! is_readable($path)) {
@@ -74,6 +74,18 @@ class BrandSocialCsvImportService
 
         [$headers, $csvRows] = $this->readCsv($path);
         $format = $this->detectFormat($headers);
+        if ($expectedPlatform !== null) {
+            $platform = match ($expectedPlatform) {
+                'instagram' => 'Instagram',
+                'facebook' => 'Facebook',
+                default => throw new RuntimeException('不支持的导入平台。'),
+            };
+            foreach ($csvRows as $row) {
+                if ($this->rowPlatform($row['fields'], $format) !== $platform) {
+                    throw new RuntimeException("所选文件不是 {$platform} 数据，请使用对应平台的导入入口。");
+                }
+            }
+        }
         $csvRows = $this->scopeRecordIds($csvRows, $format);
         [$rows, $duplicateUnchanged, $duplicateStale] = $this->coalesceRows(
             $csvRows,

@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\AuditLog;
 use App\Models\BrandSocialDailyReview;
 use App\Models\BrandSocialWeeklyReport;
+use App\Models\FeishuBitableRecord;
+use App\Models\InfluencerRecordState;
 use App\Models\SeoAnalyticsSyncRun;
 use App\Models\Store;
 use App\Services\NaturalTraffic\BrandSocialCsvImportService;
@@ -22,6 +24,7 @@ use App\Support\CurrentStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -97,10 +100,51 @@ class NaturalTrafficController extends Controller
             ])),
             'configured' => $trafficSync->hasConfiguration($store, $channel),
             'canSync' => $request->user()?->hasPermission('sync.run', $organization, $store) ?? false,
-            ...($channel === 'brand-media' ? [
+            ...(in_array($channel, ['brand-media', 'influencer-operations'], true) ? [
                 'canManage' => $request->user()?->hasPermission('reports.manage', $organization, $store) ?? false,
             ] : []),
         ]);
+    }
+
+    public function updateInfluencerRecordState(Request $request, CurrentOrganization $currentOrganization, CurrentStore $currentStore): RedirectResponse
+    {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        abort_unless($request->user()?->hasPermission('reports.manage', $organization, $store), 403);
+        $data = $request->validate([
+            'source_table_key' => ['required', 'string', 'max:191'],
+            'source_record_id' => ['required', 'string', 'max:191'],
+            'status' => ['required', 'in:visible,hidden,deleted'],
+        ]);
+        $exists = FeishuBitableRecord::query()
+            ->where('organization_id', $organization->id)->where('store_id', $store->id)
+            ->where('source_record_id', $data['source_record_id'])
+            ->whereHas('table', fn ($query) => $query->where('organization_id', $organization->id)
+                ->where('store_id', $store->id)->where('source_section', 'natural-traffic:kol')
+                ->where('source_table_id', $data['source_table_key']))->exists();
+        abort_unless($exists, 404);
+        DB::transaction(function () use ($data, $store, $request): void {
+            $state = InfluencerRecordState::query()->firstOrNew([
+                'organization_id' => $store->organization_id, 'store_id' => $store->id,
+                'source_table_key' => $data['source_table_key'], 'source_record_id' => $data['source_record_id'],
+            ]);
+            $before = $state->status ?? 'visible';
+            $state->status = $data['status'];
+            $state->save();
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id, 'store_id' => $store->id,
+                'user_id' => $request->user()->id, 'action' => 'influencer_record_state_updated',
+                'subject_type' => $state::class, 'subject_id' => $state->id,
+                'metadata' => ['scope' => 'store', 'before' => $before, 'after' => $state->status],
+            ]);
+        });
+
+        return back()->with('success', match ($data['status']) {
+            'hidden' => '已隐藏，不再计入统计和对比。',
+            'deleted' => '已移入回收站，不再计入统计和对比。',
+            default => '已恢复，重新计入统计和对比。',
+        });
     }
 
     public function updateBrandMediaPostVisibility(
@@ -117,22 +161,30 @@ class NaturalTrafficController extends Controller
             'source_section' => ['required', 'string', 'max:80'],
             'source_table_key' => ['required', 'string', 'max:191'],
             'source_record_id' => ['required', 'string', 'max:191'],
-            'hidden' => ['required', 'boolean'],
+            'hidden' => ['required_without:status', 'prohibits:status', 'boolean'],
+            'status' => ['required_without:hidden', 'in:visible,hidden,deleted'],
         ]);
 
+        $status = $validated['status'] ?? ($validated['hidden'] ? 'hidden' : 'visible');
         $workflow->setPostVisibility(
             $store,
             $request->user(),
             $validated['source_section'],
             $validated['source_table_key'],
             $validated['source_record_id'],
-            (bool) $validated['hidden'],
+            $status !== 'visible',
+            $status === 'deleted',
         );
 
-        return back()->with('success', $validated['hidden'] ? '帖子已隐藏，后续统计不再计入。' : '帖子已恢复显示并重新计入统计。');
+        return back()->with('success', match ($status) {
+            'hidden' => '已隐藏，可在「已隐藏帖子」中查看并恢复。',
+            'deleted' => '已移入回收站，可随时恢复。',
+            default => '已恢复，可在「可见帖子」中查看。',
+        });
     }
 
     public function downloadBrandMediaTemplate(
+        Request $request,
         CurrentOrganization $currentOrganization,
         CurrentStore $currentStore,
     ): StreamedResponse {
@@ -140,22 +192,34 @@ class NaturalTrafficController extends Controller
         $store = $currentStore->require();
         abort_unless((int) $store->organization_id === (int) $organization->id, 404);
 
-        return response()->streamDownload(function (): void {
+        $validated = $request->validate(['platform' => ['nullable', 'in:instagram,facebook']]);
+        $platform = $validated['platform'] ?? null;
+        $headers = [
+            '平台', '帖子编号', '发布时间', '帖子类型', '内容来源', '账户账号', '描述',
+            '浏览量', '赞', '评论数', '分享', '固定链接', '显示状态', '数据更新时间',
+        ];
+        $example = [
+            'Instagram', 'example-001', '2026-09-01 09:00:00', 'Reels', '官媒内容', 'brand_account',
+            '示例内容', '10000', '500', '30', '10', 'https://example.com/post', '可见', '2026-09-02 09:00:00',
+        ];
+        if ($platform === 'instagram') {
+            $headers = ['帖子编号', '账户编号', '账户账号', '账户名称', '描述', '时长（秒）', '发布时间', '固定链接', '帖子类型', '浏览量', '覆盖人数', '赞', '分享', '评论', '收藏次数', '数据更新时间'];
+            $example = ['ig-example-001', 'account-001', 'brand_account', '品牌名称', '示例内容', '15', '2026-09-01 09:00:00', 'https://example.com/post', 'Reels', '10000', '8000', '500', '10', '30', '20', '2026-09-02 09:00:00'];
+        } elseif ($platform === 'facebook') {
+            $headers = ['帖子编号', '公共主页编号', '公共主页名称', '标题', '描述', '时长（秒）', '发布时间', '固定链接', '帖子类型', '观看量', '覆盖人数', '心情、评论和分享', '心情', '评论数', '分享次数', '总点击量', '数据更新时间'];
+            $example = ['fb-example-001', 'page-001', '品牌名称', '示例标题', '示例内容', '15', '2026-09-01 09:00:00', 'https://example.com/post', '视频', '10000', '8000', '540', '500', '30', '10', '100', '2026-09-02 09:00:00'];
+        }
+
+        return response()->streamDownload(function () use ($headers, $example): void {
             $output = fopen('php://output', 'wb');
             if ($output === false) {
                 return;
             }
             fwrite($output, "\xEF\xBB\xBF");
-            fputcsv($output, [
-                '平台', '帖子编号', '发布时间', '帖子类型', '内容来源', '账户账号', '描述',
-                '浏览量', '赞', '评论数', '分享', '固定链接', '显示状态', '数据更新时间',
-            ]);
-            fputcsv($output, [
-                'Instagram', 'example-001', '2026-09-01 09:00:00', 'Reels', '官媒内容', 'macfoxbike',
-                '示例内容', '10000', '500', '30', '10', 'https://example.com/post', '可见', '2026-09-02 09:00:00',
-            ]);
+            fputcsv($output, $headers);
+            fputcsv($output, $example);
             fclose($output);
-        }, 'decoadmin-brand-media-template.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }, $platform ? "decoadmin-{$platform}-template.csv" : 'decoadmin-brand-media-template.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     public function upsertBrandMediaDailyReview(
@@ -291,10 +355,11 @@ class NaturalTrafficController extends Controller
         abort_unless($request->user()?->hasPermission('sync.run', $organization, $store), 403);
         $validated = $request->validate([
             'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
+            'platform' => ['nullable', 'in:instagram,facebook'],
         ]);
 
         try {
-            $summary = $importer->import($store, $validated['file']);
+            $summary = $importer->import($store, $validated['file'], $validated['platform'] ?? null);
             AuditLog::query()->create([
                 'organization_id' => $organization->id,
                 'store_id' => $store->id,

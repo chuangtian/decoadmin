@@ -46,7 +46,7 @@ class WebhookEventController extends Controller
                 'id', 'webhook_id', 'organization_id', 'store_id', 'topic', 'status',
                 'processing_result', 'attempts', 'received_at', 'processed_at',
             ])
-            ->with('store:id,organization_id,name,shopify_domain')
+            ->with('store:id,organization_id,name,shopify_domain,timezone')
             ->latest('received_at')
             ->paginate(25)
             ->withQueryString();
@@ -70,7 +70,7 @@ class WebhookEventController extends Controller
 
         return Inertia::render('Webhooks/Show', [
             'event' => new WebhookEventDetailResource($webhookEvent->load([
-                'store:id,organization_id,name,shopify_domain',
+                'store:id,organization_id,name,shopify_domain,timezone',
                 'app:id,name,handle',
             ])),
             'canRetry' => request()->user()->can('retry', $webhookEvent) && $webhookEvent->status === 'failed',

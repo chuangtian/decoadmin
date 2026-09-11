@@ -14,7 +14,11 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY --from=vendor /app/vendor ./vendor
 COPY resources ./resources
+COPY shopify-apps/community-reviews ./shopify-apps/community-reviews
+COPY shopify-apps/deco-marketing ./shopify-apps/deco-marketing
+COPY shopify-apps/deco-referral/resources/admin ./shopify-apps/deco-referral/resources/admin
 COPY vite.config.ts tsconfig.json ./
+COPY scripts/check-typography.mjs ./scripts/check-typography.mjs
 RUN npm run build
 
 FROM php:8.4-fpm-bookworm AS app
@@ -22,15 +26,17 @@ FROM php:8.4-fpm-bookworm AS app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         default-mysql-client \
+        fonts-noto-cjk \
         git \
         libicu-dev \
+        libfreetype6-dev \
         libjpeg62-turbo-dev \
         libpng-dev \
         libwebp-dev \
         libzip-dev \
         procps \
         unzip \
-    && docker-php-ext-configure gd --with-jpeg --with-webp \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" bcmath gd intl opcache pcntl pdo_mysql zip \
     && pecl install redis \
     && docker-php-ext-enable redis \
@@ -46,6 +52,7 @@ COPY docker/php/entrypoint.sh /usr/local/bin/app-entrypoint
 RUN mkdir -p public/build \
     && cp -a /opt/app-build/. public/build/ \
     && chmod +x /usr/local/bin/app-entrypoint \
+    && chmod -R a+rX app bootstrap config database public resources routes shopify-apps \
     && chown -R www-data:www-data storage bootstrap/cache
 
 ENTRYPOINT ["app-entrypoint"]

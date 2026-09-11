@@ -21,6 +21,44 @@ class BrandSocialCsvImportTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_each_platform_template_round_trips_through_its_import_entry(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store));
+
+        foreach (['instagram' => '账户编号', 'facebook' => '公共主页编号'] as $platform => $requiredHeader) {
+            $download = $this->get(route('natural-traffic.brand-media.import-template', ['platform' => $platform]))
+                ->assertOk()->assertDownload("decoadmin-{$platform}-template.csv");
+            $csv = $download->streamedContent();
+            $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+            $this->assertStringContainsString($requiredHeader, $csv);
+            $this->post(route('natural-traffic.brand-media.import'), [
+                'platform' => $platform,
+                'file' => UploadedFile::fake()->createWithContent($platform.'.csv', $csv),
+            ])->assertRedirect()->assertSessionHasNoErrors()->assertSessionHas('success');
+            $record = FeishuBitableRecord::query()->where('source_record_id', 'post:'.($platform === 'instagram' ? 'ig' : 'fb').'-example-001')->sole();
+            $this->assertSame(ucfirst($platform), $record->fields_encrypted['平台']);
+        }
+        $this->assertDatabaseCount('feishu_bitable_records', 2);
+    }
+
+    public function test_platform_import_rejects_a_file_for_the_other_platform_without_writes(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $this->actingAs($user)->withSession($this->contextSession($organization, $store));
+        foreach (['instagram' => 'facebook', 'facebook' => 'instagram'] as $source => $destination) {
+            $csv = $this->get(route('natural-traffic.brand-media.import-template', ['platform' => $source]))
+                ->assertOk()->streamedContent();
+            $this->post(route('natural-traffic.brand-media.import'), [
+                'platform' => $destination,
+                'file' => UploadedFile::fake()->createWithContent('wrong-platform.csv', $csv),
+            ])->assertRedirect()->assertSessionHas('error');
+        }
+        $this->assertDatabaseCount('feishu_bitable_records', 0);
+        $this->assertDatabaseCount('feishu_bitable_tables', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
     public function test_meta_csv_import_is_idempotent_and_applies_instagram_only_outlier_policy(): void
     {
         [$user, $organization, $store] = $this->context('store-admin');

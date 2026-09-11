@@ -3,6 +3,7 @@ import { Head } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import DateRangeFilters from '../../Components/Analytics/DateRangeFilters.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useDeferredReport, type ReportStorage } from '../../composables/useDeferredReport';
 
 interface Metrics {
     net_items_sold: number;
@@ -47,9 +48,16 @@ const props = defineProps<{
         period: { days: number; from: string; to: string; timezone: string; include_test: boolean; include_cancelled: boolean; comparison_from: string; comparison_to: string };
         summary: { models: number; variants: number; net_items_sold: number; total_sales: number; gross_sales: number };
         models: Model[];
-        integration: { source: string; available: boolean; complete: boolean; scope_granted: boolean; error: string | null };
+        integration: { source: string; available: boolean; complete: boolean; scope_granted: boolean; error: string | null; storage?: ReportStorage | null };
     };
 }>();
+
+const { refreshing, timedOut, retry } = useDeferredReport(() => ({
+    key: `${props.store.id}:${props.report.period.from}:${props.report.period.to}`,
+    pending: !props.report.integration.available && Boolean(props.report.integration.storage?.pending || props.report.integration.storage?.refreshing),
+}), ['report']);
+const reportMessage = computed(() => refreshing.value ? '数据正在加载，完成后会自动显示。'
+    : timedOut.value ? '加载时间较长，请重试。' : props.report.integration.error);
 
 const expanded = ref<Set<string>>(new Set(props.report.models.map((model) => model.id)));
 watch(() => props.report.models, (models) => {
@@ -121,15 +129,17 @@ const cards = computed(() => [
             <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <article v-for="card in cards" :key="card.label" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p class="text-sm font-semibold text-slate-500">{{ card.label }}</p>
-                    <p class="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{{ card.value }}</p>
+                    <p class="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{{ !report.integration.available ? '—' : card.value }}</p>
                     <p class="mt-2 text-xs text-slate-400">{{ card.note }}</p>
                 </article>
             </section>
 
-            <section v-if="!report.integration.complete" class="rounded-2xl border px-5 py-4 text-sm" :class="report.integration.available ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-rose-200 bg-rose-50 text-rose-800'">
-                <p class="font-semibold">{{ report.integration.available ? '部分统计暂不可用' : 'Shopify 报表暂不可用' }}</p>
-                <p class="mt-1 opacity-80">{{ report.integration.error || (report.integration.scope_granted ? '请稍后刷新重试。' : '请确认店铺已授予 read_reports 权限。') }}</p>
+            <section v-if="!report.integration.complete" class="rounded-2xl border px-5 py-4 text-sm" :class="refreshing ? 'border-sky-200 bg-sky-50 text-sky-800' : report.integration.available ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-rose-200 bg-rose-50 text-rose-800'">
+                <p class="font-semibold">{{ refreshing ? '正在加载 Shopify 报表' : report.integration.available ? '部分统计暂不可用' : 'Shopify 报表暂不可用' }}</p>
+                <p class="mt-1 opacity-80">{{ reportMessage || (report.integration.scope_granted ? '请稍后刷新重试。' : '请确认店铺已授予 read_reports 权限。') }}</p>
             </section>
+
+            <button v-if="timedOut" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold" @click="retry">重试加载</button>
 
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="flex flex-col gap-4 border-b border-slate-200 px-5 py-5 lg:flex-row lg:items-center lg:justify-between lg:px-7">
@@ -201,7 +211,7 @@ const cards = computed(() => [
                     </article>
                 </div>
 
-                <div v-if="!report.models.length" class="px-6 py-20 text-center"><div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-2xl">⌁</div><h3 class="mt-4 font-semibold text-slate-900">当前区间暂无在售车型销量</h3><p class="mt-2 text-sm text-slate-500">调整顶部时间范围，或确认 Shopify 报表连接状态。</p></div>
+                <div v-if="!report.models.length" class="px-6 py-20 text-center"><div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-2xl">⌁</div><h3 class="mt-4 font-semibold text-slate-900">{{ refreshing ? '正在加载车型销量' : report.integration.available ? '当前区间暂无在售车型销量' : '车型销量暂不可用' }}</h3><p class="mt-2 text-sm text-slate-500">{{ reportMessage || '调整顶部时间范围，或确认 Shopify 报表连接状态。' }}</p></div>
             </section>
 
             <section class="rounded-3xl border border-slate-200 bg-white p-6 text-sm leading-6 text-slate-600 shadow-sm">

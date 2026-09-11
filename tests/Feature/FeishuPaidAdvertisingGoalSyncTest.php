@@ -21,6 +21,43 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_google_weekly_sync_works_without_goal_boards_and_reads_renamed_table(): void
+    {
+        [$organization, $store] = $this->storeContext('google-weekly');
+        [, $otherStore] = $this->storeContext('google-weekly-other');
+        foreach (['app_token' => 'app_weekly', 'table_id' => 'tbl_weekly', 'view_id' => 'vew_weekly'] as $key => $value) {
+            StoreBusinessCredential::query()->create([
+                'organization_id' => $organization->id, 'store_id' => $store->id,
+                'provider' => 'feishu_data_links', 'credential_key' => 'advertising_google_weekly_'.$key,
+                'credential_value' => $value,
+            ]);
+        }
+        $client = \Mockery::mock(\App\Services\Feishu\FeishuBitableClient::class);
+        $client->shouldReceive('tables')->with('app_weekly')->twice()->andReturn([['table_id' => 'tbl_weekly', 'name' => 'Google周报已改名']]);
+        $client->shouldReceive('fields')->with('app_weekly', 'tbl_weekly')->twice()->andReturn([]);
+        $client->shouldReceive('records')->with('app_weekly', 'tbl_weekly', 'vew_weekly', true)->twice()->andReturn([
+            ['record_id' => 'rec_week', 'fields' => [
+                '周' => [['text' => '35周']], '记录日期' => '2026-08-24',
+                '费用' => '100', '转化价值' => '800', 'ROI' => 8, '加购数' => 10,
+                '结账数' => 5, '单次加购成本' => 10, '单次结账成本' => 20,
+                '成交数' => 2, '单次转化成本' => 50,
+            ]],
+        ]);
+        $this->app->instance(\App\Services\Feishu\FeishuBitableClient::class, $client);
+        $sync = app(PaidAdvertisingGoalSyncService::class);
+        foreach ([1, 2] as $attempt) {
+            $result = $sync->syncConfiguredSources($store->id);
+            $this->assertSame(0, $result['failed']);
+            $this->assertSame(1, $result['archived_records']);
+        }
+        $this->assertSame(0, PaidAdvertisingGoalBoard::query()->count());
+        $report = app(\App\Services\Advertising\GoogleAdsWeeklyReportService::class)->forStore($store);
+        $this->assertTrue($report['available']);
+        $this->assertSame(800.0, $report['values']['revenue']);
+        $this->assertCount(1, $report['weeks']);
+        $this->assertFalse(app(\App\Services\Advertising\GoogleAdsWeeklyReportService::class)->forStore($otherStore)['available']);
+    }
+
     public function test_daily_sync_imports_total_and_custom_goal_sources_encrypted_and_idempotently(): void
     {
         Config::set('services.feishu_table.app_id', 'paid_goal_test');

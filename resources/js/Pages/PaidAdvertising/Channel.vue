@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -217,9 +218,9 @@ const campaignColumns: Array<{ key: GoogleCampaignSortKey; label: string; format
 const trendChart = computed(() => {
     const width = 760;
     const height = 330;
-    const left = 62;
-    const right = 54;
-    const top = 42;
+    const left = 128;
+    const right = 112;
+    const top = 72;
     const bottom = 52;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
@@ -256,9 +257,9 @@ const activeTrendPoint = computed(() => hoveredTrendIndex.value === null ? null 
 const ctrChart = computed(() => {
     const width = 680;
     const height = 300;
-    const left = 52;
-    const right = 24;
-    const top = 28;
+    const left = 104;
+    const right = 40;
+    const top = 36;
     const bottom = 44;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
@@ -791,19 +792,19 @@ onBeforeUnmount(() => {
                                 </div>
                             </div>
                             <div v-if="trendChart.points.length" class="relative mt-4 w-full" @mouseleave="hoveredTrendIndex = null">
-                                <svg class="h-auto w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Google Ads 每日花费、销售额与 ROI 趋势">
+                                <svg v-readable-chart class="h-auto w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Google Ads 每日花费、销售额与 ROI 趋势">
                                     <g v-for="tick in trendChart.ticks" :key="tick.y">
                                         <line :x1="trendChart.left" :x2="trendChart.width - trendChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                                        <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compactNumber(tick.amount) }}</text>
-                                        <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="11">{{ tick.roi.toFixed(1) }}×</text>
+                                        <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
+                                        <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.roi.toFixed(1) }}×</text>
                                     </g>
-                                    <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="11">金额</text>
-                                    <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="11">ROI</text>
+                                    <text :x="trendChart.left" y="40" fill="#94a3b8" font-size="12">金额</text>
+                                    <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                     <g v-for="point in trendChart.points" :key="point.date" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                         <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.9" />
                                         <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.9" />
                                         <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" />
-                                        <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="11">{{ point.dateLabel }}</text>
+                                        <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="12">{{ point.dateLabel }}</text>
                                     </g>
                                     <polyline :points="trendChart.linePoints" fill="none" stroke="#ed7d31" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                                     <circle v-for="point in trendChart.points" :key="`roi-${point.date}`" :cx="point.x" :cy="point.roiY" r="4" fill="#ed7d31" stroke="white" stroke-width="2" />
@@ -829,7 +830,7 @@ onBeforeUnmount(() => {
                                 <p class="mt-1 text-xs text-slate-400">曝光 → 点击 → Google Ads 转化</p>
                             </div>
                             <div v-if="funnelChart.length" class="relative mt-4" @mouseleave="hoveredFunnelIndex = null">
-                                <svg class="mx-auto h-auto w-full max-w-[620px]" viewBox="0 0 560 300" role="img" aria-label="Google Ads 曝光、点击与转化漏斗">
+                                <svg v-readable-chart class="mx-auto h-auto w-full max-w-[620px]" viewBox="0 0 560 300" role="img" aria-label="Google Ads 曝光、点击与转化漏斗">
                                     <g v-for="stage in funnelChart" :key="stage.key" class="cursor-pointer" @mouseenter="hoveredFunnelIndex = stage.index">
                                         <polygon :points="stage.points" :fill="stage.color" opacity="0.94" stroke="white" stroke-width="2" />
                                         <text :x="stage.labelX" :y="stage.labelY" :text-anchor="stage.labelAnchor" :fill="stage.labelColor" font-size="13" font-weight="600">{{ stage.label }}</text>
@@ -876,19 +877,19 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
                         <div v-if="trendChart.points.length" class="relative mt-5 w-full" @mouseleave="hoveredTrendIndex = null">
-                            <svg class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Google Ads 每日花费、销售额与 ROI 趋势">
+                            <svg v-readable-chart class="h-auto min-h-[300px] w-full" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="Google Ads 每日花费、销售额与 ROI 趋势">
                                 <g v-for="tick in trendChart.ticks" :key="tick.y">
                                     <line :x1="trendChart.left" :x2="trendChart.width - trendChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                                    <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ compactNumber(tick.amount) }}</text>
-                                    <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="11">{{ tick.roi.toFixed(1) }}×</text>
+                                    <text :x="trendChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ compactNumber(tick.amount) }}</text>
+                                    <text :x="trendChart.width - trendChart.right + 9" :y="tick.y + 4" fill="#94a3b8" font-size="12">{{ tick.roi.toFixed(1) }}×</text>
                                 </g>
-                                <text :x="trendChart.left" y="20" fill="#94a3b8" font-size="11">金额</text>
-                                <text :x="trendChart.width - trendChart.right" y="20" text-anchor="end" fill="#94a3b8" font-size="11">ROI</text>
+                                <text :x="trendChart.left" y="40" fill="#94a3b8" font-size="12">金额</text>
+                                <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                 <g v-for="point in trendChart.points" :key="`trend-${point.date}`" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                     <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.92" />
                                     <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.92" />
                                     <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" />
-                                    <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="11">{{ point.dateLabel }}</text>
+                                    <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="12">{{ point.dateLabel }}</text>
                                 </g>
                                 <polyline :points="trendChart.linePoints" fill="none" stroke="#ed7d31" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                                 <circle v-for="point in trendChart.points" :key="`trend-roi-${point.date}`" :cx="point.x" :cy="point.roiY" r="4" fill="#ed7d31" stroke="white" stroke-width="2" />
@@ -911,7 +912,7 @@ onBeforeUnmount(() => {
                             <h3 class="text-lg font-semibold text-slate-950">每日 CTR 趋势</h3>
                             <p class="mt-1 text-xs text-slate-400">点击数 ÷ 曝光数</p>
                             <div v-if="ctrChart.points.length" class="relative mt-5" @mouseleave="hoveredCtrIndex = null">
-                                <svg class="h-auto w-full" :viewBox="`0 0 ${ctrChart.width} ${ctrChart.height}`" role="img" aria-label="Google Ads 每日 CTR 趋势">
+                                <svg v-readable-chart class="h-auto w-full" :viewBox="`0 0 ${ctrChart.width} ${ctrChart.height}`" role="img" aria-label="Google Ads 每日 CTR 趋势">
                                     <defs>
                                         <linearGradient id="googleCtrArea" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28" />
@@ -920,14 +921,14 @@ onBeforeUnmount(() => {
                                     </defs>
                                     <g v-for="tick in ctrChart.ticks" :key="`ctr-${tick.y}`">
                                         <line :x1="ctrChart.left" :x2="ctrChart.width - ctrChart.right" :y1="tick.y" :y2="tick.y" stroke="#e2e8f0" stroke-dasharray="4 5" />
-                                        <text :x="ctrChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="11">{{ tick.value.toFixed(1) }}%</text>
+                                        <text :x="ctrChart.left - 9" :y="tick.y + 4" text-anchor="end" fill="#94a3b8" font-size="12">{{ tick.value.toFixed(1) }}%</text>
                                     </g>
                                     <polygon :points="ctrChart.areaPoints" fill="url(#googleCtrArea)" />
                                     <polyline :points="ctrChart.linePoints" fill="none" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                                     <g v-for="point in ctrChart.points" :key="`ctr-point-${point.date}`" class="cursor-pointer" @mouseenter="hoveredCtrIndex = point.index">
                                         <rect :x="point.hitX" :y="ctrChart.top" :width="point.hitWidth" :height="ctrChart.plotHeight" fill="transparent" />
                                         <circle :cx="point.x" :cy="point.y" r="4" fill="#3b82f6" stroke="white" stroke-width="2" />
-                                        <text v-if="point.showLabel" :x="point.x" :y="ctrChart.top + ctrChart.plotHeight + 24" text-anchor="middle" fill="#64748b" font-size="11">{{ point.date.slice(5) }}</text>
+                                        <text v-if="point.showLabel" :x="point.x" :y="ctrChart.top + ctrChart.plotHeight + 24" text-anchor="middle" fill="#64748b" font-size="12">{{ point.date.slice(5) }}</text>
                                     </g>
                                     <line v-if="activeCtrPoint" :x1="activeCtrPoint.x" :x2="activeCtrPoint.x" :y1="ctrChart.top" :y2="ctrChart.top + ctrChart.plotHeight" stroke="#64748b" stroke-dasharray="5 5" />
                                 </svg>
@@ -943,7 +944,7 @@ onBeforeUnmount(() => {
                             <h3 class="text-lg font-semibold text-slate-950">广告系列花费占比</h3>
                             <p class="mt-1 text-xs text-slate-400">当前时间段花费最高的 6 个广告系列</p>
                             <div v-if="campaignPie.slices.length" class="relative mt-5 grid items-center gap-4 sm:grid-cols-[minmax(280px,1fr)_minmax(180px,0.8fr)]" @mouseleave="hoveredCampaignIndex = null">
-                                <svg class="mx-auto h-auto w-full max-w-[360px]" viewBox="0 0 320 320" role="img" aria-label="Google Ads 广告系列花费占比">
+                                <svg v-readable-chart class="mx-auto h-auto w-full max-w-[360px]" viewBox="0 0 320 320" role="img" aria-label="Google Ads 广告系列花费占比">
                                     <circle v-if="campaignPie.slices.length === 1" :cx="campaignPie.center" :cy="campaignPie.center" :r="campaignPie.radius" :fill="campaignPie.slices[0].color" class="cursor-pointer" @mouseenter="hoveredCampaignIndex = 0" />
                                     <template v-for="slice in campaignPie.slices" :key="slice.id">
                                         <path v-if="campaignPie.slices.length > 1" :d="slice.path" :fill="slice.color" stroke="white" stroke-width="2" class="cursor-pointer transition-opacity" :opacity="hoveredCampaignIndex === null || hoveredCampaignIndex === slice.index ? 1 : 0.45" @mouseenter="hoveredCampaignIndex = slice.index" />
@@ -981,7 +982,7 @@ onBeforeUnmount(() => {
                                     <tr>
                                         <th v-for="column in dailyColumns" :key="column.key" class="whitespace-nowrap border-b border-slate-200 px-5 py-4">
                                             <button type="button" class="inline-flex items-center gap-2 transition hover:text-blue-600" @click="sortDaily(column.key)">
-                                                {{ column.label }} <span class="text-[10px]">{{ sortMark(column.key) }}</span>
+                                                {{ column.label }} <span class="text-xs">{{ sortMark(column.key) }}</span>
                                             </button>
                                         </th>
                                     </tr>
@@ -1005,7 +1006,7 @@ onBeforeUnmount(() => {
                             <h2 class="text-xl font-semibold text-slate-950">广告系列花费占比</h2>
                             <p class="mt-1 text-sm text-slate-500">当前时间段花费最高的 6 个广告系列</p>
                             <div v-if="campaignPie.slices.length" class="relative mt-5 grid items-center gap-4 sm:grid-cols-[minmax(260px,1fr)_minmax(180px,0.8fr)]" @mouseleave="hoveredCampaignIndex = null">
-                                <svg class="mx-auto h-auto w-full max-w-[340px]" viewBox="0 0 320 320" role="img" aria-label="Google Ads 广告系列花费占比">
+                                <svg v-readable-chart class="mx-auto h-auto w-full max-w-[340px]" viewBox="0 0 320 320" role="img" aria-label="Google Ads 广告系列花费占比">
                                     <circle v-if="campaignPie.slices.length === 1" :cx="campaignPie.center" :cy="campaignPie.center" :r="campaignPie.radius" :fill="campaignPie.slices[0].color" class="cursor-pointer" @mouseenter="hoveredCampaignIndex = 0" />
                                     <template v-for="slice in campaignPie.slices" :key="`campaign-tab-${slice.id}`">
                                         <path v-if="campaignPie.slices.length > 1" :d="slice.path" :fill="slice.color" stroke="white" stroke-width="2" class="cursor-pointer transition-opacity" :opacity="hoveredCampaignIndex === null || hoveredCampaignIndex === slice.index ? 1 : 0.45" @mouseenter="hoveredCampaignIndex = slice.index" />
@@ -1061,7 +1062,7 @@ onBeforeUnmount(() => {
                                     <tr>
                                         <th v-for="column in campaignColumns" :key="column.key" class="whitespace-nowrap border-b border-slate-200 px-4 py-4" :class="column.key === 'name' ? 'min-w-64' : ''">
                                             <button type="button" class="inline-flex items-center gap-2 transition hover:text-blue-600" @click="sortCampaign(column.key)">
-                                                {{ column.label }} <span class="text-[10px]">{{ campaignSortMark(column.key) }}</span>
+                                                {{ column.label }} <span class="text-xs">{{ campaignSortMark(column.key) }}</span>
                                             </button>
                                         </th>
                                     </tr>

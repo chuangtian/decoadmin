@@ -17,11 +17,13 @@ class PermissionSeeder extends Seeder
         'student_discount' => '学生优惠', 'instagram_feed' => 'Instagram Feed',
         'personalization' => '个性化推荐',
         'discounts' => '折扣管理',
+        'affiliate' => '推荐与联盟',
+        'design_requests' => '设计需求',
     ];
 
     /** @var array<string, string> */
     private array $actions = [
-        'view' => '查看', 'update' => '更新', 'create' => '创建', 'delete' => '删除',
+        'view' => '查看', 'view_all' => '查看全部', 'update' => '更新', 'create' => '创建', 'delete' => '删除',
         'connect' => '连接', 'disconnect' => '断开连接', 'authorize' => '授权', 'sync' => '同步',
         'export' => '导出', 'refresh' => '刷新', 'cancel' => '取消', 'refund' => '退款', 'install' => '安装',
         'configure' => '配置', 'uninstall' => '卸载', 'retry' => '重试', 'run' => '执行',
@@ -34,6 +36,12 @@ class PermissionSeeder extends Seeder
         'gallery.manage' => '管理展示组', 'publish' => '发布前台',
         'smart_cart.manage' => '管理 Smart Cart',
         'tokens.view' => '查看授权', 'tokens.manage' => '管理授权',
+        'dashboard.view' => '查看概览', 'programs.view' => '查看推广计划', 'programs.manage' => '管理推广计划',
+        'promoters.view' => '查看推广者', 'promoters.manage' => '管理推广者',
+        'conversions.view' => '查看推荐订单', 'conversions.override' => '纠正订单归因',
+        'commissions.view' => '查看佣金', 'commissions.adjust' => '调整佣金', 'commissions.approve' => '审批佣金',
+        'payouts.view' => '查看结算', 'payouts.create' => '创建结算', 'payouts.confirm' => '确认付款',
+        'fraud.view' => '查看风险', 'fraud.review' => '审核风险', 'settings.manage' => '管理设置',
     ];
 
     /** @var list<string> */
@@ -123,6 +131,27 @@ class PermissionSeeder extends Seeder
         'personalization.smart_cart.manage',
         'discounts.view',
         'discounts.manage',
+        'affiliate.dashboard.view',
+        'affiliate.programs.view',
+        'affiliate.programs.manage',
+        'affiliate.promoters.view',
+        'affiliate.promoters.manage',
+        'affiliate.conversions.view',
+        'affiliate.conversions.override',
+        'affiliate.commissions.view',
+        'affiliate.commissions.adjust',
+        'affiliate.commissions.approve',
+        'affiliate.payouts.view',
+        'affiliate.payouts.create',
+        'affiliate.payouts.confirm',
+        'affiliate.fraud.view',
+        'affiliate.fraud.review',
+        'affiliate.settings.manage',
+        'affiliate.reports.export',
+        'design_requests.view',
+        'design_requests.create',
+        'design_requests.view_all',
+        'design_requests.manage',
     ];
 
     public function run(): void

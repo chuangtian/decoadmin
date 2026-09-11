@@ -24,7 +24,7 @@ const initials = computed(() => {
         : name.slice(0, 2).toUpperCase();
 });
 const sizeClass = computed(() => ({
-    sm: 'h-8 w-8 text-[10px]',
+    sm: 'h-8 w-8 text-xs',
     md: 'h-9 w-9 text-xs',
     lg: 'h-14 w-14 text-base',
     xl: 'h-24 w-24 text-2xl',

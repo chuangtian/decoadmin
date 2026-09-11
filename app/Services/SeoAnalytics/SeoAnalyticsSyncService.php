@@ -275,7 +275,7 @@ class SeoAnalyticsSyncService
 
         $breakdownRecords = [];
         foreach (['country', 'device', 'searchAppearance'] as $dimension) {
-            foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', $dimension]) as $rows) {
+            foreach ($this->breakdownPages($store, $from, $to, $dimension) as $rows) {
                 foreach ($rows as $row) {
                     $date = (string) data_get($row, 'keys.0');
                     $value = trim((string) data_get($row, 'keys.1'));
@@ -315,6 +315,34 @@ class SeoAnalyticsSyncService
         });
 
         return count($typeRecords) + count($breakdownRecords);
+    }
+
+    /** @return \Generator<int, list<array<string, mixed>>> */
+    private function breakdownPages(Store $store, CarbonImmutable $from, CarbonImmutable $to, string $dimension): \Generator
+    {
+        if ($dimension !== 'searchAppearance') {
+            yield from $this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date', $dimension]);
+
+            return;
+        }
+
+        // Google requires discovering appearances alone, then filtering each type by date.
+        $seen = [];
+        foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['searchAppearance']) as $appearances) {
+            foreach ($appearances as $appearance) {
+                $value = trim((string) data_get($appearance, 'keys.0'));
+                if ($value === '' || isset($seen[$value])) {
+                    continue;
+                }
+                $seen[$value] = true;
+                $filters = [['dimension' => 'searchAppearance', 'operator' => 'equals', 'expression' => $value]];
+                foreach ($this->google->gscRowPages($store, $from->toDateString(), $to->toDateString(), ['date'], $filters) as $rows) {
+                    yield array_map(static fn (array $row): array => [
+                        ...$row, 'keys' => [data_get($row, 'keys.0'), $value],
+                    ], $rows);
+                }
+            }
+        }
     }
 
     /**

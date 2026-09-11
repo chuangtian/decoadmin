@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\ShopifyProductMonitor;
 use App\Models\StoreAlert;
 use App\Models\StoreNotificationSetting;
+use App\Models\SyncJob;
 use App\Support\StoreDateTime;
 use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +18,21 @@ class StoreAlertNotificationService
 
     public function deliver(StoreAlert $alert): void
     {
+        if ($alert->type === 'sync' && $alert->source_type === SyncJob::class
+            && str_starts_with((string) data_get($alert->context, 'sync_type'), 'advertising_channel:')
+            && SyncJob::query()->whereKey($alert->source_id)->where('organization_id', $alert->organization_id)
+                ->where('store_id', $alert->store_id)->where('status', 'completed')->exists()) {
+            $alert->update(['delivery_status' => 'skipped', 'delivery_error' => null]);
+
+            return;
+        }
+        if ($alert->type === 'product' && ! ShopifyProductMonitor::whereKey($alert->source_id)
+            ->where('organization_id', $alert->organization_id)->where('store_id', $alert->store_id)
+            ->where('is_enabled', true)->where('generation', data_get($alert->context, 'generation'))->exists()) {
+            $alert->update(['delivery_status' => 'skipped', 'delivery_error' => null]);
+
+            return;
+        }
         $alert->loadMissing('store.notificationSetting');
         $settings = $alert->store->notificationSetting;
         $alert->increment('delivery_attempts');
@@ -95,6 +112,7 @@ class StoreAlertNotificationService
             'webhook' => $settings->notify_webhook_failed,
             'connection' => $settings->notify_connection_unhealthy,
             'discount' => $settings->notify_discount_monitor,
+            'product' => $settings->notify_product_monitor,
             default => false,
         };
     }

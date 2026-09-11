@@ -14,9 +14,10 @@ const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
 // 这些菜单项的真实路径带组织与店铺作用域，菜单里只登记后缀，进入时按当前上下文补全。
-const storeScopedRoutes = ['/student-discounts', '/instagram-feed'];
+const storeScopedRoutes = ['/student-discounts', '/instagram-feed', '/community-reviews', '/affiliate'];
+const isStoreScopedRoute = (route: string) => storeScopedRoutes.some(prefix => route === prefix || route.startsWith(`${prefix}/`));
 const contextualRoute = (route?: string) => {
-    if (!route || !storeScopedRoutes.includes(route)) return route;
+    if (!route || !isStoreScopedRoute(route)) return route;
     const organization = page.props.currentOrganization;
     const store = page.props.currentStore;
     return organization && store
@@ -45,6 +46,7 @@ const dedupeByRoute = (items: MenuItem[]) => {
 
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
+    .filter((item) => !item.requiresInstalledApp || page.props.applicationAvailability[item.requiresInstalledApp])
     .map((item) => {
         const isApplications = item.dynamicChildren === 'applications';
         const children = isApplications
@@ -54,7 +56,7 @@ const visibleMenu = computed<MenuItem[]>(() => menu
             ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
             .map((child) => ({ ...child, route: contextualRoute(child.route) }))
             // 还没选店铺时店铺级路由补不出完整路径，先隐藏，避免点进去 404。
-            .filter((child) => !(child.route && storeScopedRoutes.includes(child.route)));
+            .filter((child) => !(child.route && isStoreScopedRoute(child.route)));
 
         return {
             ...item,
@@ -111,7 +113,7 @@ onBeforeUnmount(rememberScrollPosition);
 <template>
     <div v-if="open" class="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden" @click="emit('close')" />
     <aside
-        class="sidebar-font-scale fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/8 bg-[#0b1220] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 lg:shadow-none"
+        class="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/8 bg-[#0b1220] text-white shadow-2xl transition-[width,transform] duration-200 lg:translate-x-0 lg:shadow-none"
         :class="[open ? 'translate-x-0' : '-translate-x-full', collapsed ? 'lg:w-20' : 'lg:w-72']"
     >
         <button
@@ -128,7 +130,7 @@ onBeforeUnmount(rememberScrollPosition);
             <div class="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 shadow-lg shadow-emerald-950/40">
                 <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h6a4 4 0 0 1 0 8H7V7Z"/><path d="M7 3v18M13 7h4"/></svg>
             </div>
-            <div class="min-w-0" :class="collapsed ? 'lg:hidden' : ''"><p class="text-[11px] font-semibold tracking-[0.22em] text-emerald-400">电商运营系统</p><p class="mt-0.5 truncate font-semibold tracking-tight">{{ page.props.appName }}</p></div>
+            <div class="min-w-0" :class="collapsed ? 'lg:hidden' : ''"><p class="text-xs font-semibold tracking-[0.22em] text-emerald-400">电商运营系统</p><p class="mt-0.5 truncate font-semibold tracking-tight">{{ page.props.appName }}</p></div>
             <button class="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/8 hover:text-white lg:hidden" aria-label="关闭导航" @click="emit('close')">×</button>
         </div>
 
@@ -136,7 +138,7 @@ onBeforeUnmount(rememberScrollPosition);
             <template v-for="group in visibleMenu" :key="group.name">
                 <div
                     v-if="group.section"
-                    class="px-3 pt-2 pb-2 text-[10px] font-semibold tracking-[0.2em] text-slate-600"
+                    class="px-3 pt-2 pb-2 text-xs font-semibold tracking-[0.2em] text-slate-600"
                     :class="[
                         group.sectionDivider ? 'mt-4 border-t border-white/10 pt-5' : '',
                         collapsed ? 'lg:px-2' : '',

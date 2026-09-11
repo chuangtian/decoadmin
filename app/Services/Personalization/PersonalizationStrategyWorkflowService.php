@@ -152,7 +152,8 @@ class PersonalizationStrategyWorkflowService
         $idempotencyKey = $this->uuid($input['idempotency_key'] ?? null, 'INVALID_IDEMPOTENCY_KEY');
         $expectedLock = $this->integer($input['lock_version'] ?? null, 1, PHP_INT_MAX, 'INVALID_DRAFT_LOCK');
         $normalized = $this->normalizeDraft($store, $input['draft'] ?? null);
-        $payloadHash = $this->checksum($normalized);
+        // Hash the request before normalization adds server-generated selection times.
+        $payloadHash = $this->checksum(['strategy' => $strategy->uuid, 'lock_version' => $expectedLock, 'draft' => $input['draft']]);
 
         $version = DB::transaction(function () use ($store, $strategy, $actor, $idempotencyKey, $expectedLock, $normalized, $payloadHash): PersonalizationStrategyVersion {
             if ($existing = $this->idempotentResult($store, $actor, 'autosave_draft', $idempotencyKey, $payloadHash)) {

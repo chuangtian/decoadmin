@@ -42,6 +42,47 @@ class AdvertisingChannelSyncTest extends TestCase
         $this->assertSame('17 * * * *', $event->expression);
     }
 
+    public function test_google_reconciliation_refreshes_old_values_without_duplicates(): void
+    {
+        Queue::fake();
+        [$store] = $this->googleStore();
+        config()->set('services.advertising_sync.google_reconcile_days', 90);
+        config()->set('services.advertising_sync.chunk_days', 30);
+        $event = collect(app(Schedule::class)->events())->first(fn ($event): bool => str_contains((string) $event->command, 'advertising-channels:sync google --mode=reconcile'));
+        $this->assertNotNull($event);
+        $this->assertSame('47 4 * * *', $event->expression);
+        $payload = fn (float $sales): array => [
+            'accounts' => [['external_account_id' => '1234567890', 'currency' => 'USD']],
+            'daily_metrics' => [[
+                'external_account_id' => '1234567890', 'date' => '2026-08-01',
+                'spend' => 100, 'attributed_sales' => $sales,
+            ]],
+        ];
+        $api = Mockery::mock(AdvertisingChannelApiService::class);
+        $api->shouldReceive('syncPayload')->once()->withArgs(fn ($s, $channel, $from, $to): bool => $s->id === $store->id && $channel === 'google' && $from === '2026-08-01' && $to === '2026-08-03')->andReturn($payload(1000));
+        $empty = ['accounts' => [], 'daily_metrics' => []];
+        foreach ([['2026-05-26', '2026-06-24'], ['2026-06-25', '2026-07-24'], ['2026-07-25', '2026-08-23']] as $i => [$from, $to]) {
+            $api->shouldReceive('syncPayload')->twice()->withArgs(fn ($s, $channel, $f, $t): bool => $s->id === $store->id && $channel === 'google' && $f === $from && $t === $to)->andReturn($i === 2 ? $payload(1200) : $empty);
+        }
+        $this->app->instance(AdvertisingChannelApiService::class, $api);
+        $sync = app(AdvertisingChannelSyncService::class);
+        CarbonImmutable::setTestNow('2026-08-03 08:30:00 UTC');
+        $sync->sync($store, 'google', 'incremental');
+        CarbonImmutable::setTestNow('2026-08-23 08:30:00 UTC');
+        $sync->sync($store, 'google', 'reconcile');
+        $sync->sync($store, 'google', 'reconcile');
+        $this->assertSame('1200.000000', AdvertisingChannelDailyMetric::query()->sole()->attributed_sales);
+        $this->assertSame(2, SyncJob::query()->where('mode', 'reconcile')->where('status', 'completed')->count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_reconciliation_cannot_be_dispatched_for_other_channels(): void
+    {
+        Queue::fake();
+        $this->artisan('advertising-channels:sync', ['channel' => 'bing', '--mode' => 'reconcile'])->assertExitCode(2);
+        Queue::assertNothingPushed();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

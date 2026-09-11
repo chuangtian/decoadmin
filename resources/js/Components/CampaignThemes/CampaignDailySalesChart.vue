@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import vReadableChart from '../../directives/readableChart';
 import { computed, ref } from 'vue';
 
 interface DailyPerformancePoint {
@@ -78,13 +79,13 @@ const shortDate = (value: string) => value.slice(5).replace('-', '/');
 
         <div v-if="points.length" class="review-scrollbar min-w-0 overflow-x-auto px-3 pb-3 pt-2 sm:px-4">
             <div class="relative" :style="{ width: `${chartWidth}px`, height: `${chartHeight}px` }">
-                <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动每日销售额、广告花费与 ROI">
-                    <text :x="plot.left" y="27" class="fill-slate-400 text-[11px] font-medium">金额</text>
-                    <text :x="chartWidth - plot.right" y="27" text-anchor="end" class="fill-slate-400 text-[11px] font-medium">ROI</text>
+                <svg v-readable-chart :viewBox="`0 0 ${chartWidth} ${chartHeight}`" :width="chartWidth" :height="chartHeight" role="img" aria-label="活动每日销售额、广告花费与 ROI">
+                    <text :x="plot.left" y="27" class="fill-slate-400 text-xs font-medium">金额</text>
+                    <text :x="chartWidth - plot.right" y="27" text-anchor="end" class="fill-slate-400 text-xs font-medium">ROI</text>
                     <g v-for="ratio in ticks" :key="ratio">
                         <line :x1="plot.left" :x2="chartWidth - plot.right" :y1="plot.bottom - ratio * (plot.bottom - plot.top)" :y2="plot.bottom - ratio * (plot.bottom - plot.top)" class="stroke-slate-200" />
-                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-[11px] tabular-nums">{{ compactMoney(amountMax * ratio) }}</text>
-                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-[11px] tabular-nums">{{ (roiMax * ratio).toFixed(1) }}x</text>
+                        <text :x="plot.left - 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" text-anchor="end" class="fill-slate-400 text-xs tabular-nums">{{ compactMoney(amountMax * ratio) }}</text>
+                        <text :x="chartWidth - plot.right + 10" :y="plot.bottom - ratio * (plot.bottom - plot.top) + 4" class="fill-slate-400 text-xs tabular-nums">{{ (roiMax * ratio).toFixed(1) }}x</text>
                     </g>
 
                     <g v-for="(point, index) in points" :key="point.date">
@@ -113,9 +114,9 @@ const shortDate = (value: string) => value.slice(5).replace('-', '/');
                     <g v-for="(point, index) in points" :key="`point-${point.date}`">
                         <template v-if="point.roi !== null">
                             <circle :cx="xAt(index)" :cy="roiY(point.roi)" r="4.5" fill="#f97316" stroke="white" stroke-width="2" />
-                            <text :x="xAt(index)" :y="roiY(point.roi) - 11" text-anchor="middle" fill="#f97316" class="text-[10px] font-semibold tabular-nums">{{ point.roi.toFixed(2) }}</text>
+                            <text :x="xAt(index)" :y="roiY(point.roi) - 11" text-anchor="middle" fill="#f97316" class="text-xs font-semibold tabular-nums">{{ point.roi.toFixed(2) }}</text>
                         </template>
-                        <text :x="xAt(index)" :y="plot.bottom + 29" text-anchor="middle" class="fill-slate-500 text-[11px] tabular-nums">{{ shortDate(point.date) }}</text>
+                        <text :x="xAt(index)" :y="plot.bottom + 29" text-anchor="middle" class="fill-slate-500 text-xs tabular-nums">{{ shortDate(point.date) }}</text>
                         <rect :x="xAt(index) - pointWidth / 2" :y="plot.top" :width="pointWidth" :height="plot.bottom - plot.top + 45" fill="transparent" tabindex="0" @mouseenter="hoveredIndex = index" @mouseleave="hoveredIndex = null" @focus="hoveredIndex = index" @blur="hoveredIndex = null" />
                     </g>
                     <line v-if="hoveredPoint" :x1="hoveredX" :x2="hoveredX" :y1="plot.top" :y2="plot.bottom" class="stroke-slate-400" stroke-dasharray="5 5" />
