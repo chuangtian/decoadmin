@@ -7,6 +7,7 @@ use App\Http\Middleware\InstalledApplicationMiddleware;
 use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
+use App\Http\Middleware\PersonalPermissionMiddleware;
 use App\Http\Middleware\ResolveCurrentStore;
 use App\Http\Middleware\ShopifyEmbeddedFrameHeaders;
 use App\Http\Middleware\StoreAccessMiddleware;
@@ -60,6 +61,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'app.installed' => InstalledApplicationMiddleware::class,
             'organization.access' => OrganizationAccessMiddleware::class,
             'permission' => PermissionMiddleware::class,
+            'personal.permission' => PersonalPermissionMiddleware::class,
             'store.context' => ResolveCurrentStore::class,
             'store.access' => StoreAccessMiddleware::class,
             'shopify.app-proxy' => VerifyShopifyAppProxy::class,

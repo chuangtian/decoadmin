@@ -27,6 +27,9 @@ class SidebarMenuAuthorizationTest extends TestCase
         );
         $this->assertStringContainsString("name: '用户', route: '/users'", $userManagement);
         $this->assertStringContainsString("name: '角色', route: '/roles'", $userManagement);
+        $this->assertStringContainsString("{ name: '财务', route: '/finance'", $menu);
+        $this->assertStringContainsString("{ name: '续费', route: '/finance/renewals'", $menu);
+        $this->assertStringContainsString("{ name: '续费历史记录', route: '/finance/renewal-history'", $menu);
         $this->assertLessThan(
             strpos($userManagement, "name: '角色'"),
             strpos($userManagement, "name: '用户'"),
@@ -34,6 +37,29 @@ class SidebarMenuAuthorizationTest extends TestCase
         $system = substr($menu, strpos($menu, "name: '系统管理'"));
         $this->assertStringNotContainsString("name: '角色权限'", $menu);
         $this->assertStringNotContainsString("route: '/roles'", $system);
+    }
+
+    public function test_request_and_expense_modules_are_in_a_personal_section_before_store_operations(): void
+    {
+        $menu = file_get_contents(resource_path('js/config/menu.ts'));
+
+        $this->assertIsString($menu);
+        $personalPosition = strpos($menu, "section: '个人'");
+        $storePosition = strpos($menu, "section: '店铺运营'");
+        $requestCenterStart = strpos($menu, "name: '需求和报销'");
+        $workbenchStart = strpos($menu, "name: '工作台'");
+        $workbench = substr($menu, $workbenchStart, strpos($menu, "name: '业务中心'") - $workbenchStart);
+        $requestCenter = substr($menu, $requestCenterStart, $storePosition - $requestCenterStart);
+
+        $this->assertNotFalse($personalPosition);
+        $this->assertNotFalse($storePosition);
+        $this->assertLessThan($storePosition, $personalPosition);
+        $this->assertStringContainsString("name: '设计需求', route: '/design-requests'", $requestCenter);
+        $this->assertStringContainsString("name: '技术需求', route: '/technical-requests'", $requestCenter);
+        $this->assertStringContainsString("name: '费用申请', route: '/expense-requests'", $requestCenter);
+        $this->assertStringContainsString("name: '需求审批', route: '/request-approvals'", $requestCenter);
+        $this->assertStringContainsString("name: '发票报销', route: '/expense-claims'", $requestCenter);
+        $this->assertStringNotContainsString("name: '设计需求'", $workbench);
     }
 
     public function test_referral_navigation_requires_an_installed_app_and_a_granted_permission(): void
