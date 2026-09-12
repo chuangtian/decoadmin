@@ -33,3 +33,15 @@
 - Six frontend runtime tests cover each verification source and preview non-submission. Backend suite: 34 tests / 185 assertions. Type-check, typography and build passed before the form release; rerun for follow-up.
 - Widget page's obsolete “theme blocks unavailable” copy corrected: theme app block exists, third-party integrations remain pending.
 - Theme placement and full Loox-equivalent functionality are not yet accepted by this record.
+
+## Follow-up release and theme acceptance
+
+- Verified running test-backend source: `4257674469d5d53d70b609007f2eedc3b26c6cdf`; app/nginx tags are `deco-reviews-form-4257674469d5d53d70b609007f2eedc3b26c6cdf`. Backup uses the same full SHA under `/opt/decoadmin/backups/deco-reviews-form-...`.
+- Shopify fix version: `deco-reviews-qa-20260913-4257674`, ID `1126458851329`.
+- Running storefront.js and Index.vue hashes match the clean source. Health passed and production container IDs remained identical.
+- Added only the Deco Reviews app section to **Horizon draft 164659659000** in macfox-test-app, default product template. Saved the draft; after reload the section remains present and Save is disabled. Never clicked Publish; the store's active theme remains separate.
+- Test product preview: `macfox-m16-brake-levers`. Real Shopify App Proxy returns the four published synthetic reviews in the authenticated browser. The pending fixture is absent.
+- After refreshing following deployment, the theme widget displays four reviews / average 3.5. All merchant fixtures correctly show **Source not verified**, not Verified purchase.
+- Selecting five stars reduces the displayed list to the sole five-star fixture. Mobile theme preview visually checked: readable card content, disclosure and pagination fit inside the narrow preview without horizontal overflow.
+- Storefront password protection was not removed. A cookie-less HTTP probe redirects to the password page; the authorized browser's proxy request succeeds.
+- This accepts installation, form save/preview, real proxy feed, basic theme placement, filtering and narrow-screen layout only. Full Loox parity, live invite/email delivery, media end-to-end, rewards, referrals and channel syndication remain outside this completed batch.

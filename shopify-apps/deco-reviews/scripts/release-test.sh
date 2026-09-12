@@ -42,7 +42,7 @@ for review_attempt in $(seq 1 30); do
     if test "$review_attempt" = 30; then echo 'Staging health failed; inspect backup and restore prior image tags.' >&2; exit 1; fi
     sleep 2
 done
-"${review_compose[@]}" exec -T app php artisan horizon:status
+"${review_compose[@]}" exec -T --interactive=false app php artisan horizon:status
 docker exec decoadmin-staging-app-1 sha256sum shopify-apps/deco-reviews/backend/Services/FormService.php shopify-apps/deco-reviews/frontend/Pages/DecoReviews/Index.vue
 sha256sum shopify-apps/deco-reviews/backend/Services/FormService.php shopify-apps/deco-reviews/frontend/Pages/DecoReviews/Index.vue
 docker ps --filter label=com.docker.compose.project=decoadmin-production --format '{{.ID}} {{.Image}} {{.Names}}' > "$review_backup/production-after.txt"
