@@ -28,7 +28,7 @@ const props = defineProps<{
     store: { id: number; name: string };
     notifications: Page<Row>;
     filters: { status?: string; type?: string };
-    channels: { mail: boolean; feishu: boolean };
+    channels: { in_app: boolean; mail?: boolean; feishu?: boolean };
 }>();
 const form = useForm({
     status: props.filters.status ?? "",
@@ -59,6 +59,8 @@ const statusClass = (value: string) =>
 const typeLabel = (value: string) =>
     ({ sync: "数据同步", webhook: "Webhook", connection: "连接状态" })[value] ??
     value;
+const channelLabel = (value: string) =>
+    ({ mail: "邮箱（历史）", feishu: "飞书（历史）", in_app: "站内通知" })[value] ?? "站内通知";
 const { formatDateTime: date } = useStoreDateTime();
 </script>
 <template>
@@ -79,26 +81,18 @@ const { formatDateTime: date } = useStoreDateTime();
                         通知中心
                     </h1>
                     <p class="mt-2 text-sm text-slate-500">
-                        查看异常告警通过店铺邮箱和飞书机器人的发送结果。
+                        店铺异常告警仅通过站内通知发送给超级管理员和技术人员。
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <span
                         class="rounded-full px-3 py-1.5 text-xs font-semibold"
                         :class="
-                            channels.mail
+                            channels.in_app
                                 ? 'bg-emerald-50 text-emerald-700'
                                 : 'bg-slate-100 text-slate-500'
                         "
-                        >邮箱 {{ channels.mail ? "已启用" : "未启用" }}</span
-                    ><span
-                        class="rounded-full px-3 py-1.5 text-xs font-semibold"
-                        :class="
-                            channels.feishu
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : 'bg-slate-100 text-slate-500'
-                        "
-                        >飞书 {{ channels.feishu ? "已启用" : "未启用" }}</span
+                        >站内通知 {{ channels.in_app ? "已启用" : "未启用" }}</span>
                     >
                 </div>
             </header>
@@ -153,9 +147,7 @@ const { formatDateTime: date } = useStoreDateTime();
                                     v-for="channel in item.channels"
                                     :key="channel"
                                     class="text-xs font-semibold text-slate-400"
-                                    >{{
-                                        channel === "mail" ? "邮箱" : "飞书"
-                                    }}</span
+                                    >{{ channelLabel(channel) }}</span
                                 >
                             </div>
                             <h2 class="mt-3 font-semibold text-slate-950">

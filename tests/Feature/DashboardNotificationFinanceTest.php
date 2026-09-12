@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Events\BusinessNotificationCreated;
 use App\Jobs\DeliverStoreAlertNotificationJob;
+use App\Models\BusinessNotification;
 use App\Models\FinanceCategory;
 use App\Models\FinanceEntry;
 use App\Models\InventoryItem;
@@ -21,13 +23,11 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Mail\Mailer;
-use Illuminate\Mail\MailManager;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
-use Mockery;
 use Tests\TestCase;
 
 class DashboardNotificationFinanceTest extends TestCase
@@ -182,9 +182,29 @@ class DashboardNotificationFinanceTest extends TestCase
                 ->where('comparison.stores.1.id', $store->id));
     }
 
-    public function test_notification_center_sends_configured_channels_and_tracks_attempts(): void
+    public function test_store_alerts_only_create_in_app_notifications_for_super_admins_and_developers(): void
     {
         [$user, $organization, $store] = $this->context('organization-admin');
+        $developer = User::factory()->create(['email_verified_at' => now()]);
+        $organization->users()->attach($developer, ['status' => 'active', 'joined_at' => now()]);
+        $store->members()->attach($developer, ['status' => 'active', 'joined_at' => now()]);
+        $developerRole = Role::query()->whereBelongsTo($organization)->where('slug', 'developer')->firstOrFail();
+        $developer->roles()->attach($developerRole, ['organization_id' => $organization->id, 'store_id' => null]);
+
+        $otherStoreDeveloper = User::factory()->create(['email_verified_at' => now()]);
+        $organization->users()->attach($otherStoreDeveloper, ['status' => 'active', 'joined_at' => now()]);
+        $otherStore = $this->addStore($otherStoreDeveloper, $organization, 'EU Store', 'alerts-eu.myshopify.com');
+        $otherStoreDeveloper->roles()->attach($developerRole, [
+            'organization_id' => $organization->id,
+            'store_id' => $otherStore->id,
+        ]);
+
+        $superAdmin = User::factory()->create([
+            'email_verified_at' => now(),
+            'metadata' => ['is_super_admin' => true],
+        ]);
+        $organization->users()->attach($superAdmin, ['status' => 'active', 'joined_at' => now()]);
+
         StoreNotificationSetting::query()->create([
             'organization_id' => $organization->id,
             'store_id' => $store->id,
@@ -203,21 +223,40 @@ class DashboardNotificationFinanceTest extends TestCase
             'notify_connection_unhealthy' => true,
         ]);
         $alert = $this->alert($organization, $store);
-        Http::fake(['open.feishu.cn/*' => Http::response(['code' => 0], 200)]);
-        $mailer = Mockery::mock(Mailer::class);
-        $mailer->shouldReceive('raw')->once();
-        $manager = Mockery::mock(MailManager::class);
-        $manager->shouldReceive('build')->once()->andReturn($mailer);
+        Http::fake();
+        Event::fake([BusinessNotificationCreated::class]);
 
-        (new StoreAlertNotificationService($manager))->deliver($alert);
+        app(StoreAlertNotificationService::class)->deliver($alert);
 
         $alert->refresh();
         $this->assertSame('sent', $alert->delivery_status);
         $this->assertSame(1, $alert->delivery_attempts);
-        $this->assertEqualsCanonicalizing(['mail', 'feishu'], $alert->context['notification_channels']);
+        $this->assertSame(['in_app'], $alert->context['notification_channels']);
         $this->assertNotNull($alert->notified_at);
         $this->assertNotNull($alert->last_delivery_at);
-        Http::assertSentCount(1);
+        Http::assertNothingSent();
+        $this->assertEqualsCanonicalizing(
+            [$developer->id, $superAdmin->id],
+            BusinessNotification::query()->pluck('user_id')->all(),
+        );
+        $this->assertFalse(BusinessNotification::query()->where('user_id', $user->id)->exists());
+        $this->assertFalse(BusinessNotification::query()->where('user_id', $otherStoreDeveloper->id)->exists());
+        $developerNotification = BusinessNotification::query()->where('user_id', $developer->id)->sole();
+        $this->assertSame('US Store · 同步失败', $developerNotification->title);
+        $this->assertStringContainsString('店铺时间：', $developerNotification->message);
+        $this->assertSame(route('store-alerts.open', $alert, false), $developerNotification->action_url);
+        Event::assertDispatchedTimes(BusinessNotificationCreated::class, 2);
+
+        $this->actingAs($otherStoreDeveloper)
+            ->withSession(['current_organization_id' => $organization->id])
+            ->get($developerNotification->action_url)
+            ->assertNotFound();
+
+        $this->actingAs($developer)
+            ->withSession(['current_organization_id' => $organization->id])
+            ->get($developerNotification->action_url)
+            ->assertRedirect(route('alerts.index'))
+            ->assertSessionHas('current_store_id', $store->id);
 
         $this->actingAs($user)->withSession($this->contextSession($organization, $store))
             ->get(route('notifications.index'))
@@ -227,8 +266,7 @@ class DashboardNotificationFinanceTest extends TestCase
                 ->has('notifications.data', 1)
                 ->where('notifications.data.0.delivery_status', 'sent')
                 ->where('notifications.data.0.delivery_attempts', 1)
-                ->where('channels.mail', true)
-                ->where('channels.feishu', true));
+                ->where('channels.in_app', true));
     }
 
     public function test_notification_resend_is_store_scoped_and_queued(): void

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Events\BusinessNotificationCreated;
 use App\Models\BusinessNotification;
 use App\Models\Organization;
+use App\Models\Store;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -13,8 +14,16 @@ use Illuminate\Support\Facades\DB;
 class BusinessNotificationService
 {
     /** @return array<int, int> */
-    public function usersWithPermission(Organization $organization, string $permission, array $requiredRoles = []): array
-    {
+    public function usersWithPermission(
+        Organization $organization,
+        string $permission,
+        array $requiredRoles = [],
+        ?Store $store = null,
+    ): array {
+        if ($store && (int) $store->organization_id !== (int) $organization->id) {
+            return [];
+        }
+
         return User::query()
             ->whereNull('users.deleted_at')
             ->where('users.status', 'active')
@@ -22,22 +31,38 @@ class BusinessNotificationService
                 $query->whereJsonContains('users.metadata->is_super_admin', true)
                     ->orWhereHas('organizations', fn (Builder $query) => $query->whereKey($organization->id));
             })
-            ->where(function (Builder $query) use ($organization, $permission): void {
+            ->when($store, fn (Builder $query) => $query->where(function (Builder $query) use ($store): void {
+                $query->whereJsonContains('users.metadata->is_super_admin', true)
+                    ->orWhereHas('stores', fn (Builder $query) => $query->whereKey($store->id));
+            }))
+            ->where(function (Builder $query) use ($organization, $permission, $store): void {
                 $query->whereJsonContains('users.metadata->is_super_admin', true)
                     ->orWhereHas('roles', fn (Builder $query) => $query
                         ->where('user_roles.organization_id', $organization->id)
+                        ->when($store, fn (Builder $query) => $query->where(function (Builder $query) use ($store): void {
+                            $query->whereNull('user_roles.store_id')
+                                ->orWhere('user_roles.store_id', $store->id);
+                        }))
                         ->whereHas('permissions', fn (Builder $query) => $query->where('permissions.slug', $permission)));
             })
-            ->when($requiredRoles !== [], function (Builder $query) use ($organization, $requiredRoles): void {
-                $query->where(function (Builder $query) use ($organization, $requiredRoles): void {
+            ->when($requiredRoles !== [], function (Builder $query) use ($organization, $requiredRoles, $store): void {
+                $query->where(function (Builder $query) use ($organization, $requiredRoles, $store): void {
                     if (in_array('super-admin', $requiredRoles, true)) {
                         $query->whereJsonContains('users.metadata->is_super_admin', true)
                             ->orWhereHas('roles', fn (Builder $query) => $query
                                 ->where('user_roles.organization_id', $organization->id)
+                                ->when($store, fn (Builder $query) => $query->where(function (Builder $query) use ($store): void {
+                                    $query->whereNull('user_roles.store_id')
+                                        ->orWhere('user_roles.store_id', $store->id);
+                                }))
                                 ->whereIn('roles.slug', $requiredRoles));
                     } else {
                         $query->whereHas('roles', fn (Builder $query) => $query
                             ->where('user_roles.organization_id', $organization->id)
+                            ->when($store, fn (Builder $query) => $query->where(function (Builder $query) use ($store): void {
+                                $query->whereNull('user_roles.store_id')
+                                    ->orWhere('user_roles.store_id', $store->id);
+                            }))
                             ->whereIn('roles.slug', $requiredRoles));
                     }
                 });

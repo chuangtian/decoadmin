@@ -427,6 +427,8 @@ Route::middleware(['auth', 'verified', 'organization.access'])->group(function (
         ->middleware('throttle:60,1')->name('business-notifications.read-all');
     Route::patch('/business-notifications/{businessNotification}/read', [BusinessNotificationController::class, 'read'])
         ->middleware('throttle:120,1')->name('business-notifications.read');
+    Route::get('/store-alerts/{storeAlert}/open', [StoreAlertController::class, 'open'])
+        ->middleware('throttle:120,1')->name('store-alerts.open');
 
     Route::get('/design-requests', [DesignRequestController::class, 'index'])
         ->middleware('personal.permission:design_requests.view')->name('design-requests.index');
