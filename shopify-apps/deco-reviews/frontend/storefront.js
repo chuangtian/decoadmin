@@ -31,7 +31,7 @@
   };
   const disclosure = (root, review) => {
     const row = element("div", "dr-disclosures");
-    if (review.verified_source) row.append(element("span", "dr-badge", `${label(root, "verified", "Verified purchase")} · ${review.verified_source}`));
+    if (review.verified_source === "order") row.append(element("span", "dr-badge", label(root, "verified", "Verified purchase")));
     else row.append(element("span", "dr-source", label(root, "unverified", "Source not verified")));
     if (review.incentivized) row.append(element("span", "dr-badge dr-badge--incentive", label(root, "incentivized", "Incentivized review")));
     return row;
