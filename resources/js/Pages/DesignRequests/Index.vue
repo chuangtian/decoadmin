@@ -393,6 +393,17 @@ onBeforeUnmount(() => {
                     <header class="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 sm:px-8"><div class="min-w-0"><p class="text-xs font-semibold text-blue-600">{{ selected.reference_no }}</p><h2 class="mt-1 truncate text-xl font-bold text-slate-950">{{ selected.task_name }}</h2><div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500"><span>负责人：<strong class="font-medium text-slate-700">{{ selected.designer }}</strong></span><span>计划交付：<strong class="font-medium text-slate-700">{{ selected.planned_delivery_date }}</strong></span></div></div><button type="button" aria-label="关闭处理" class="grid h-9 w-9 shrink-0 place-items-center rounded-full text-2xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" @click="editOpen = false">×</button></header>
                     <div class="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/60 px-6 py-6 sm:px-8">
                         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 class="text-sm font-semibold text-slate-900">任务描述</h3><p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{{ selected.description }}</p></section>
+                        <section v-if="selected.images.length" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-slate-900">任务附件</h3>
+                                <button type="button" class="text-sm font-semibold text-blue-600" @click="openLightbox(selected.images)">查看全部 {{ selected.images.length }} 张</button>
+                            </div>
+                            <div class="mt-3 flex gap-2 overflow-x-auto">
+                                <button v-for="(image, index) in selected.images" :key="image.uuid" type="button" class="h-20 w-24 shrink-0 overflow-hidden rounded-xl border border-slate-200" @click="openLightbox(selected.images, index)">
+                                    <img :src="image.url" :alt="image.name" class="h-full w-full object-cover" />
+                                </button>
+                            </div>
+                        </section>
                         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                             <div class="flex items-center justify-between"><div><h3 class="text-base font-semibold text-slate-900">进展记录</h3><p class="mt-1 text-xs text-slate-500">进展、交付和改稿都会保留；验收通过后任务结束。</p></div><span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">{{ selected.progress_logs.length }} 条</span></div>
                             <ol v-if="selected.progress_logs.length" class="mt-5 space-y-4 border-l-2 border-slate-100 pl-5">

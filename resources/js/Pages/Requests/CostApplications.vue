@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router, useForm } from "@inertiajs/vue3";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import Pagination from "../../Components/Navigation/Pagination.vue";
 import AppLayout from "../../Layouts/AppLayout.vue";
 
@@ -14,6 +14,7 @@ type Row = {
     currency: string;
     desired_date: string;
     status: string;
+    approval_required: boolean;
     submitter: string;
     reviewer: string | null;
     review_note: string | null;
@@ -21,12 +22,16 @@ type Row = {
     software_url: string | null;
     software_account: string | null;
     software_password_set: boolean;
+    software_payment_method: string | null;
     renewal_mode: string | null;
     billing_cycle: string | null;
     payment_status: "pending" | "paid" | null;
     payer: string | null;
     paid_on: string | null;
     next_renewal_on: string | null;
+    renewal_status: "active" | "cancelled";
+    cancelled_on: string | null;
+    can_cancel_renewal: boolean;
     payment_reference: string | null;
     attachments: Array<{ uuid: string; name: string; url: string }>;
 };
@@ -40,6 +45,7 @@ const props = defineProps<{
     canCreate: boolean;
     filters: { status: string };
     options: { categories: string[] };
+    today: string;
     requests: Page;
 }>();
 const categoryLabels: Record<string, string> = {
@@ -56,19 +62,30 @@ const statusLabels: Record<string, string> = {
     approved: "已通过",
     rejected: "已驳回",
 };
-const requestStatusLabel = (row: Row): string =>
-    row.status === "approved" && row.payment_status
+const requestStatusLabel = (row: Row): string => {
+    if (row.renewal_status === "cancelled") {
+        return "已取消续费";
+    }
+    const paymentLabel = row.payment_status === "paid" ? "已付款" : "待付款";
+    if (!row.approval_required) return `免审批 · ${paymentLabel}`;
+    return row.status === "approved" && row.payment_status
         ? row.payment_status === "paid"
             ? "已付款"
             : "待付款"
         : statusLabels[row.status];
+};
 const requestStatusClass = (row: Row): string =>
-    row.status === "rejected"
-        ? "bg-rose-50 text-rose-700"
-        : row.status === "approved" && row.payment_status === "paid"
-          ? "bg-emerald-50 text-emerald-700"
-          : "bg-amber-50 text-amber-700";
+    row.renewal_status === "cancelled"
+        ? "bg-amber-50 text-amber-700"
+        : row.status === "rejected"
+          ? "bg-rose-50 text-rose-700"
+          : row.status === "approved" && row.payment_status === "paid"
+            ? "bg-emerald-50 text-emerald-700"
+            : !row.approval_required
+              ? "bg-violet-50 text-violet-700"
+              : "bg-amber-50 text-amber-700";
 const createOpen = ref(false);
+const cancelDialogOpen = ref(false);
 const filters = ref({ ...props.filters });
 const files = ref<File[]>([]);
 const form = useForm({
@@ -78,13 +95,21 @@ const form = useForm({
     currency: "CNY",
     desired_date: "",
     description: "",
+    approval_required: true,
     software_url: "",
     software_account: "",
     software_password: "",
+    software_payment_method: "",
     renewal_mode: "manual",
     billing_cycle: "annual",
     images: [] as File[],
 });
+
+const cancelRow = ref<Row | null>(null);
+const cancelForm = useForm({
+    cancelled_on: "",
+});
+
 function apply(): void {
     router.get("/expense-requests", filters.value, {
         preserveState: true,
@@ -105,8 +130,53 @@ function submit(): void {
             form.reset();
             form.category = "software";
             form.currency = "CNY";
+            form.approval_required = true;
             form.renewal_mode = "manual";
             form.billing_cycle = "annual";
+        },
+    });
+}
+
+function isAfterOrEqual(dateA: string, dateB: string): boolean {
+    if (!dateA || !dateB) return false;
+    return dateA >= dateB;
+}
+
+const selectedRow = computed<Row | null>(() => cancelRow.value);
+
+const cancelNotice = computed(() => {
+    const row = selectedRow.value;
+    if (!row || !row.renewal_mode) return "";
+    if (row.renewal_mode !== "automatic") {
+        return "手动续费：取消后仅保留财务已确认的付款记录，不再触发后续续费。";
+    }
+    if (!row.next_renewal_on || !cancelForm.cancelled_on) {
+        return "自动续费：请选择取消日期后系统将自动按规则停止续费。";
+    }
+    return isAfterOrEqual(cancelForm.cancelled_on, row.next_renewal_on)
+        ? "自动续费：取消日大于或等于下次续费日时，将先补记到取消日为止的自动续费，再停止续费。"
+        : "自动续费：取消日早于下次续费日时，不会再产生下一期续费。";
+});
+
+function openCancelRenewal(row: Row): void {
+    cancelRow.value = row;
+    cancelForm.cancelled_on = props.today;
+    cancelDialogOpen.value = true;
+}
+
+function closeCancelRenewal(): void {
+    cancelDialogOpen.value = false;
+    cancelRow.value = null;
+    cancelForm.cancelled_on = "";
+    cancelForm.reset();
+}
+
+function submitCancelRenewal(): void {
+    if (!cancelRow.value) return;
+    cancelForm.put(`/expense-requests/${cancelRow.value.uuid}/cancel-renewal`, {
+        onSuccess: () => {
+            closeCancelRenewal();
+            cancelForm.reset();
         },
     });
 }
@@ -174,7 +244,7 @@ function submit(): void {
             >
                 <div v-if="requests.data.length" class="overflow-x-auto">
                     <table
-                        class="w-full min-w-[1280px] table-fixed text-left text-sm"
+                        class="w-full min-w-[1420px] table-fixed text-left text-sm"
                     >
                         <thead
                             class="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500"
@@ -187,6 +257,7 @@ function submit(): void {
                                 <th class="w-72 px-5 py-4">采购信息</th>
                                 <th class="w-40 px-5 py-4">提交信息</th>
                                 <th class="w-32 px-5 py-4">状态</th>
+                                <th class="w-36 px-5 py-4">操作</th>
                                 <th class="w-44 px-5 py-4">附件 / 审批</th>
                             </tr>
                         </thead>
@@ -236,14 +307,24 @@ function submit(): void {
                                         class="space-y-1.5 text-xs text-slate-600"
                                     >
                                         <a
-                                            :href="row.software_url || '#'"
+                                            v-if="row.software_url"
+                                            :href="row.software_url"
                                             target="_blank"
                                             rel="noreferrer"
                                             class="block truncate font-semibold text-blue-600 hover:underline"
                                             >{{ row.software_url }}</a
                                         >
+                                        <p v-else class="text-slate-400">
+                                            网址：未填写
+                                        </p>
+                                        <p>
+                                            付费方式：{{
+                                                row.software_payment_method ||
+                                                "未填写"
+                                            }}
+                                        </p>
                                         <p class="truncate">
-                                            账号：{{ row.software_account }}
+                                            账号：{{ row.software_account || "未填写" }}
                                         </p>
                                         <p>
                                             密码：{{
@@ -252,7 +333,13 @@ function submit(): void {
                                                     : "未填写"
                                             }}
                                         </p>
-                                        <p>
+                                        <p
+                                            v-if="
+                                                row.renewal_status !==
+                                                'cancelled'
+                                            "
+                                            class="font-semibold text-orange-700"
+                                        >
                                             {{
                                                 row.renewal_mode === "automatic"
                                                     ? "自动续费"
@@ -264,6 +351,34 @@ function submit(): void {
                                                     ? "月付"
                                                     : "年付"
                                             }}
+                                        </p>
+                                        <p
+                                            v-if="
+                                                row.renewal_status ===
+                                                'cancelled'
+                                            "
+                                            class="font-semibold text-amber-700"
+                                        >
+                                            已取消 · {{
+                                                row.renewal_mode === "automatic"
+                                                    ? "自动续费"
+                                                    : "手动续费"
+                                            }}
+                                            ·
+                                            {{
+                                                row.billing_cycle === "monthly"
+                                                    ? "月付"
+                                                    : "年付"
+                                            }}
+                                        </p>
+                                        <p
+                                            v-if="
+                                                row.renewal_status ===
+                                                'cancelled'
+                                            "
+                                            class="text-amber-600"
+                                        >
+                                            取消日期：{{ row.cancelled_on || "未填写" }}
                                         </p>
                                         <p
                                             v-if="row.next_renewal_on"
@@ -287,6 +402,19 @@ function submit(): void {
                                         class="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold"
                                         :class="requestStatusClass(row)"
                                         >{{ requestStatusLabel(row) }}</span
+                                    >
+                                </td>
+                                <td class="px-5 py-5">
+                                    <button
+                                        v-if="row.can_cancel_renewal"
+                                        type="button"
+                                        class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700"
+                                        @click="openCancelRenewal(row)"
+                                    >
+                                        取消续费
+                                    </button>
+                                    <span v-else class="text-sm text-slate-300"
+                                        >—</span
                                     >
                                 </td>
                                 <td class="px-5 py-5">
@@ -412,6 +540,19 @@ function submit(): void {
                                 <option>GBP</option>
                             </select></label
                         >
+                        <fieldset class="sm:col-span-2">
+                            <legend class="text-sm font-semibold text-slate-700">审批方式</legend>
+                            <div class="mt-2 grid gap-3 sm:grid-cols-2">
+                                <label class="flex cursor-pointer gap-3 rounded-xl border p-4 transition" :class="form.approval_required ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-white hover:border-slate-300'">
+                                    <input v-model="form.approval_required" type="radio" :value="true" class="mt-1 border-slate-300 text-orange-600 focus:ring-orange-500" />
+                                    <span><strong class="block text-sm text-slate-800">需要审批</strong><span class="mt-1 block text-xs font-normal leading-5 text-slate-500">提交给超级管理员审批，通过后进入财务待付款。</span></span>
+                                </label>
+                                <label class="flex cursor-pointer gap-3 rounded-xl border p-4 transition" :class="!form.approval_required ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white hover:border-slate-300'">
+                                    <input v-model="form.approval_required" type="radio" :value="false" class="mt-1 border-slate-300 text-violet-600 focus:ring-violet-500" />
+                                    <span><strong class="block text-sm text-slate-800">免审批</strong><span class="mt-1 block text-xs font-normal leading-5 text-slate-500">提交后跳过审批，直接进入财务待付款。</span></span>
+                                </label>
+                            </div>
+                        </fieldset>
                         <section
                             v-if="form.category === 'software'"
                             class="grid gap-4 rounded-2xl border border-orange-200 bg-orange-50/60 p-5 sm:col-span-2 sm:grid-cols-2"
@@ -421,35 +562,40 @@ function submit(): void {
                                     软件采购信息
                                 </h3>
                                 <p class="mt-1 text-xs text-orange-700">
-                                    账号和密码将加密保存；审批通过后由财务付款，后续续费无需重复申请。
+                                    网址与账号密码可选；付费方式为必填。账号和密码会加密保存，请勿填写完整银行卡号或安全码。
                                 </p>
                             </div>
                             <label
                                 class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                                >软件网址<input
+                                >软件网址（可选）<input
                                     v-model="form.software_url"
-                                    required
                                     type="url"
                                     maxlength="500"
                                     class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
                                     placeholder="https://example.com" /></label
                             ><label class="text-sm font-semibold text-slate-700"
-                                >登录账号<input
+                                >登录账号（可选）<input
                                     v-model="form.software_account"
-                                    required
                                     maxlength="255"
                                     autocomplete="off"
                                     class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
                                     placeholder="邮箱或用户名" /></label
                             ><label class="text-sm font-semibold text-slate-700"
-                                >登录密码<input
+                                >登录密码（可选）<input
                                     v-model="form.software_password"
-                                    required
                                     type="password"
                                     maxlength="500"
                                     autocomplete="new-password"
                                     class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
                                     placeholder="输入登录密码" /></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                                >付费方式（必填）<input
+                                    v-model="form.software_payment_method"
+                                    required
+                                    maxlength="255"
+                                    class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
+                                    placeholder="例如：公司信用卡、PayPal、对公转账" /></label
                             ><label class="text-sm font-semibold text-slate-700"
                                 >续费操作<select
                                     v-model="form.renewal_mode"
@@ -507,7 +653,85 @@ function submit(): void {
                         ><button
                             class="h-11 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white"
                         >
-                            提交审批
+                            {{ form.approval_required ? "提交" : "提交并进入待付款" }}
+                        </button>
+                    </div>
+                </form>
+            </dialog></Teleport
+        ><Teleport to="body"
+            ><dialog
+                :open="cancelDialogOpen"
+                class="fixed inset-0 z-50 m-0 h-full w-full max-w-none bg-slate-950/45 p-4"
+                @click.self="closeCancelRenewal"
+            >
+                <form
+                    class="mx-auto mt-[10vh] flex w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+                    @submit.prevent="submitCancelRenewal"
+                >
+                    <div class="flex shrink-0 justify-between p-7 pb-0">
+                        <div>
+                            <h2 class="text-xl font-bold">取消续费</h2>
+                            <p class="mt-1 text-sm text-slate-500">
+                                {{ selectedRow?.title }}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="text-2xl text-slate-400"
+                            @click="closeCancelRenewal"
+                        >
+                            ×
+                        </button>
+                    </div>
+                    <div class="min-h-0 flex-1 px-7 pb-6 pt-6">
+                        <div class="space-y-2 text-sm text-slate-700">
+                            <p>
+                                续费方式：{{
+                                    selectedRow?.renewal_mode === "automatic"
+                                        ? "自动续费"
+                                        : "手动续费"
+                                }}
+                            </p>
+                            <p>
+                                下次续费日期：{{
+                                    selectedRow?.next_renewal_on || "暂无"
+                                }}
+                            </p>
+                            <p class="leading-6 text-amber-700">
+                                {{ cancelNotice }}
+                            </p>
+                        </div>
+                        <label class="mt-6 block text-sm font-semibold text-slate-700">
+                            取消日期（必填）
+                            <input
+                                v-model="cancelForm.cancelled_on"
+                                required
+                                type="date"
+                                :max="today"
+                                class="mt-2 h-11 w-full rounded-xl border-slate-200"
+                            />
+                        </label>
+                        <p
+                            v-if="cancelForm.errors.cancelled_on"
+                            class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
+                        >
+                            {{ cancelForm.errors.cancelled_on }}
+                        </p>
+                    </div>
+                    <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
+                        <button
+                            type="button"
+                            class="h-11 rounded-xl border px-5 text-sm font-semibold"
+                            @click="closeCancelRenewal"
+                        >
+                            取消
+                        </button>
+                        <button
+                            type="submit"
+                            class="h-11 rounded-xl bg-rose-600 px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-rose-300"
+                            :disabled="cancelForm.processing"
+                        >
+                            确认取消续费
                         </button>
                     </div>
                 </form>

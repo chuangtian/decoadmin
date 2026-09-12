@@ -464,6 +464,8 @@ Route::middleware(['auth', 'verified', 'organization.access'])->group(function (
         ->middleware('personal.permission:expense_requests.view')->name('expense-requests.index');
     Route::post('/expense-requests', [PersonalRequestController::class, 'storeExpenseRequest'])
         ->middleware(['personal.permission:expense_requests.create', 'throttle:30,1'])->name('expense-requests.store');
+    Route::put('/expense-requests/{personalRequest}/cancel-renewal', [PersonalRequestController::class, 'cancelExpenseRequestRenewal'])
+        ->middleware(['personal.permission:expense_requests.view', 'throttle:30,1'])->name('expense-requests.cancel-renewal');
     Route::get('/personal-requests/{personalRequest}/attachments/{attachment}', [PersonalRequestController::class, 'attachment'])
         ->middleware('throttle:120,1')->name('personal-requests.attachments.show');
 });
@@ -763,6 +765,9 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/notifications/{storeAlert}/resend', [NotificationCenterController::class, 'resend'])->middleware('permission:alerts.manage')->name('notifications.resend');
 
     Route::get('/finance', [FinanceController::class, 'index'])->middleware('permission:finance.view')->name('finance.index');
+    Route::get('/finance/reimbursements', [FinanceController::class, 'reimbursements'])->middleware('permission:finance.view')->name('finance.reimbursements');
+    Route::post('/finance/reimbursements/{personalRequest}/payment', [FinanceController::class, 'recordExpenseReimbursement'])
+        ->middleware(['permission:finance.manage', 'throttle:60,1'])->name('finance.reimbursements.payment');
     Route::get('/finance/renewals', [FinanceController::class, 'renewals'])->middleware('permission:finance.view')->name('finance.renewals');
     Route::get('/finance/renewal-history', [FinanceController::class, 'renewalHistory'])->middleware('permission:finance.view')->name('finance.renewal-history');
     Route::get('/finance/expense-requests/{personalRequest}/password', [FinanceController::class, 'revealExpenseRequestPassword'])

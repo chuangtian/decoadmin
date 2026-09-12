@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router, useForm } from "@inertiajs/vue3";
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import AppLayout from "../../Layouts/AppLayout.vue";
 
 type Log = {
@@ -35,14 +35,57 @@ type Page = {
     prev_page_url: string | null;
     next_page_url: string | null;
 };
+type Summary = {
+    total: number;
+    pending_approval: number;
+    unassigned: number;
+    in_progress: number;
+    completed: number;
+    overdue: number;
+    on_time_rate: number | null;
+    average_turnaround_days: number | null;
+    status_counts: Record<string, number>;
+    developer_performance: Array<{
+        developer_id: number;
+        developer: string;
+        total: number;
+        in_progress: number;
+        completed: number;
+        overdue: number;
+        on_time_rate: number | null;
+        average_turnaround_days: number | null;
+    }>;
+};
+
 const props = defineProps<{
     scope: "mine" | "all";
     canCreate: boolean;
     canManage: boolean;
-    filters: { status: string; search: string };
+    canViewOverview: boolean;
+    today: string;
+    filters: { tab: "overview" | "list"; status: string; search: string };
     options: { categories: string[]; priorities: string[] };
+    summary: Summary;
     requests: Page;
 }>();
+
+const statusOrder = [
+    "pending_approval",
+    "approved",
+    "assigned",
+    "in_progress",
+    "completed",
+    "rejected",
+] as const;
+const statusColors = {
+    pending_approval: "#f59e0b",
+    approved: "#8b5cf6",
+    assigned: "#6366f1",
+    in_progress: "#2563eb",
+    completed: "#10b981",
+    rejected: "#f97316",
+    unassigned: "#f97316",
+} as const;
 
 const categoryLabels: Record<string, string> = {
     bug: "故障修复",
@@ -73,12 +116,33 @@ const logActionLabels: Record<string, string> = {
     progress: "提交进展",
     completed: "完成需求",
 };
+
+const activeTab = ref<"overview" | "list">(
+    props.canViewOverview ? props.filters.tab : "list",
+);
+const scopeLabel = computed(() =>
+    props.scope === "all" ? "全部技术需求" : "我的技术需求",
+);
+const maxStatusCount = computed(() => {
+    const values = Object.values(props.summary.status_counts ?? {});
+    return Math.max(1, ...values, 0);
+});
+const statusCount = (status: string): number =>
+    props.summary.status_counts?.[status] ?? 0;
+const percentRate = (value: number | null): string =>
+    value === null ? "—" : `${value}%`;
+const formatDays = (value: number | null): string =>
+    value === null ? "—" : `${value} 天`;
+
 const createOpen = ref(false);
 const processOpen = ref(false);
 const selected = ref<Row | null>(null);
 const images = ref<File[]>([]);
 const accepting = ref<string | null>(null);
-const filters = ref({ ...props.filters });
+const filters = ref({
+    status: props.filters.status,
+    search: props.filters.search,
+});
 const form = useForm({
     title: "",
     category: "feature",
@@ -91,20 +155,57 @@ const progressForm = useForm({
     action: "progress" as "progress" | "complete",
     note: "",
 });
+
+watch(
+    () => props.filters,
+    (value) => {
+        filters.value = { status: value.status, search: value.search };
+        activeTab.value = props.canViewOverview ? value.tab : "list";
+    },
+);
+
+function queryParams(
+    overrides: Record<string, string | number> = {},
+): Record<string, string | number> {
+    const values: Record<string, string | number> = {
+        tab: activeTab.value,
+        status: filters.value.status,
+        search: filters.value.search,
+        ...overrides,
+    };
+    Object.keys(values).forEach((key) => {
+        const value = values[key];
+        if (typeof value === "string" && value === "") {
+            delete values[key];
+        }
+    });
+    return values;
+}
+
+function selectTab(tab: "overview" | "list"): void {
+    activeTab.value = tab;
+    router.get("/technical-requests", queryParams({ tab }), {
+        preserveState: true,
+        preserveScroll: true,
+        replace: true,
+    });
+}
+
 function applyFilters(): void {
+    activeTab.value = "list";
     router.get(
         "/technical-requests",
-        Object.fromEntries(
-            Object.entries(filters.value).filter(([, value]) => value),
-        ),
-        { preserveState: true, replace: true },
+        queryParams({ tab: "list", page: 1 }),
+        { preserveState: true, preserveScroll: true, replace: true },
     );
 }
+
 function selectFiles(event: Event): void {
     const input = event.target as HTMLInputElement;
     images.value = Array.from(input.files ?? []).slice(0, 10);
     form.images = images.value;
 }
+
 function pasteImages(event: ClipboardEvent): void {
     const files = Array.from(event.clipboardData?.items ?? [])
         .filter(
@@ -117,6 +218,7 @@ function pasteImages(event: ClipboardEvent): void {
     images.value = [...images.value, ...files].slice(0, 10);
     form.images = images.value;
 }
+
 function submit(): void {
     form.post("/technical-requests", {
         forceFormData: true,
@@ -129,6 +231,7 @@ function submit(): void {
         },
     });
 }
+
 function accept(row: Row): void {
     accepting.value = row.uuid;
     router.post(
@@ -142,6 +245,7 @@ function accept(row: Row): void {
         },
     );
 }
+
 function openProcess(row: Row): void {
     selected.value = row;
     progressForm.reset();
@@ -150,6 +254,7 @@ function openProcess(row: Row): void {
     progressForm.note = "";
     processOpen.value = true;
 }
+
 function closeProcess(): void {
     processOpen.value = false;
     selected.value = null;
@@ -158,6 +263,7 @@ function closeProcess(): void {
     progressForm.action = "progress";
     progressForm.note = "";
 }
+
 function saveProgress(action: "progress" | "complete"): void {
     if (!selected.value) return;
     progressForm.action = action;
@@ -186,15 +292,14 @@ function saveProgress(action: "progress" | "complete"): void {
                 <div>
                     <span
                         class="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700"
-                        >{{
-                            scope === "all" ? "全部技术需求" : "我的技术需求"
-                        }}</span
+                        >{{ scopeLabel }}</span
                     >
                     <h1 class="mt-3 text-2xl font-bold text-slate-950">
                         技术需求
                     </h1>
                     <p class="mt-1.5 text-sm text-slate-500">
-                        提交系统问题、功能开发、数据和自动化需求，审批通过后由开发人员处理。
+                        提交系统问题、功能开发、数据和自动化需求，审批通过后由开发人员处理。数据截至：
+                        {{ today }}
                     </p>
                 </div>
                 <button
@@ -205,33 +310,269 @@ function saveProgress(action: "progress" | "complete"): void {
                     + 新建技术需求
                 </button>
             </header>
-            <form
-                class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(220px,1fr)_180px_auto]"
-                @submit.prevent="applyFilters"
-            >
-                <input
-                    v-model="filters.search"
-                    placeholder="搜索编号、标题或描述"
-                    class="h-11 rounded-xl border-slate-200 text-sm"
-                /><select
-                    v-model="filters.status"
-                    class="h-11 rounded-xl border-slate-200 text-sm"
+
+            <nav class="flex gap-1 border-b border-slate-200" aria-label="技术需求视图">
+                <button
+                    v-if="canViewOverview"
+                    class="border-b-2 px-4 py-3 text-sm font-semibold"
+                    :class="
+                        activeTab === 'overview'
+                            ? 'border-violet-600 text-violet-700'
+                            : 'border-transparent text-slate-500'
+                    "
+                    type="button"
+                    @click="selectTab('overview')"
                 >
-                    <option value="">全部状态</option>
-                    <option
-                        v-for="(label, value) in statusLabels"
-                        :key="value"
-                        :value="value"
-                    >
-                        {{ label }}
-                    </option></select
-                ><button
-                    class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white"
-                >
-                    筛选
+                    效率总览
                 </button>
-            </form>
-            <section class="space-y-3">
+                <button
+                    class="border-b-2 px-4 py-3 text-sm font-semibold"
+                    :class="
+                        activeTab === 'list'
+                            ? 'border-violet-600 text-violet-700'
+                            : 'border-transparent text-slate-500'
+                    "
+                    type="button"
+                    @click="selectTab('list')"
+                >
+                    需求列表 <span class="ml-1 text-xs">{{ summary.total }}</span>
+                </button>
+            </nav>
+
+            <template v-if="activeTab === 'overview' && canViewOverview">
+                <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                        <p class="text-sm text-slate-500">需求总数</p>
+                        <strong
+                            class="mt-2 block text-3xl font-bold text-slate-950"
+                            >{{ summary.total }}</strong
+                        >
+                        <p class="mt-2 text-xs text-slate-400">{{ scopeLabel }}</p>
+                    </article>
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                        <p class="text-sm text-slate-500">处理中</p>
+                        <strong
+                            class="mt-2 block text-3xl font-bold text-blue-600"
+                            >{{ summary.in_progress }}</strong
+                        >
+                        <p class="mt-2 text-xs text-slate-400">已接单且处理中</p>
+                    </article>
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                        <p class="text-sm text-slate-500">已完成</p>
+                        <strong
+                            class="mt-2 block text-3xl font-bold text-emerald-600"
+                            >{{ summary.completed }}</strong
+                        >
+                        <p class="mt-2 text-xs text-slate-400">
+                            按时率 {{ percentRate(summary.on_time_rate) }}
+                        </p>
+                    </article>
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                        <p class="text-sm text-slate-500">已逾期</p>
+                        <strong
+                            class="mt-2 block text-3xl font-bold text-rose-600"
+                            >{{ summary.overdue }}</strong
+                        >
+                        <p class="mt-2 text-xs text-slate-400">含当前逾期任务</p>
+                    </article>
+                </section>
+
+                <section class="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                    >
+                        <h2 class="text-base font-semibold text-slate-900">
+                            状态分布
+                        </h2>
+                        <div class="mt-5 space-y-4">
+                            <div
+                                v-for="status in statusOrder"
+                                :key="status"
+                                class="grid grid-cols-[92px_minmax(0,1fr)_48px] items-center gap-3 text-sm"
+                            >
+                                <span class="text-xs text-slate-600">{{ statusLabels[status] }}</span>
+                                <div class="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                                    <div
+                                        class="h-full rounded-full transition-all"
+                                        :style="{
+                                            width: `${(statusCount(status) / maxStatusCount) * 100}%`,
+                                            background: statusColors[status],
+                                        }"
+                                    ></div>
+                                </div>
+                                <strong class="text-right tabular-nums text-slate-800 text-xs"
+                                    >{{ statusCount(status) }}</strong
+                                >
+                            </div>
+                        </div>
+                    </article>
+                    <article
+                        class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                    >
+                        <h2 class="text-base font-semibold text-slate-900">
+                            交付表现
+                        </h2>
+                        <dl class="mt-5 divide-y divide-slate-100">
+                            <div class="flex items-center justify-between py-4">
+                                <dt class="text-sm text-slate-500">按时率</dt>
+                                <dd
+                                    class="text-xl font-bold tabular-nums text-slate-900"
+                                >
+                                    {{ percentRate(summary.on_time_rate) }}
+                                </dd>
+                            </div>
+                            <div class="flex items-center justify-between py-4">
+                                <dt class="text-sm text-slate-500">
+                                    平均处理周期
+                                </dt>
+                                <dd
+                                    class="text-xl font-bold tabular-nums text-slate-900"
+                                >
+                                    {{ formatDays(summary.average_turnaround_days) }}
+                                </dd>
+                            </div>
+                            <div class="flex items-center justify-between py-4">
+                                <dt class="text-sm text-slate-500">待接受</dt>
+                                <dd
+                                    class="text-xl font-bold tabular-nums text-amber-600"
+                                >
+                                    {{ summary.unassigned }}
+                                </dd>
+                            </div>
+                        </dl>
+                    </article>
+                </section>
+
+                <section
+                    class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                >
+                    <header class="border-b border-slate-100 px-6 py-5">
+                        <h2 class="text-base font-semibold text-slate-900">
+                            开发人员交付概览
+                        </h2>
+                        <p class="mt-1 text-sm text-slate-500">
+                            说明：任务按实际接单开发人员归属统计
+                        </p>
+                    </header>
+                    <div class="overflow-x-auto">
+                        <table
+                            class="w-full min-w-[960px] text-left text-sm"
+                        >
+                            <thead
+                                class="bg-slate-50/80 text-slate-500"
+                            >
+                                <tr>
+                                    <th class="px-6 py-3.5 font-medium">开发人员</th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        接单总数
+                                    </th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        处理中
+                                    </th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        已完成
+                                    </th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        逾期
+                                    </th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        按时率
+                                    </th>
+                                    <th class="px-4 py-3.5 text-right font-medium">
+                                        平均周期
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <tr
+                                    v-for="item in summary.developer_performance"
+                                    :key="item.developer_id"
+                                >
+                                    <td
+                                        class="px-6 py-4 font-semibold text-slate-800"
+                                    >
+                                        {{ item.developer }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-slate-700"
+                                    >
+                                        {{ item.total }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-blue-600"
+                                    >
+                                        {{ item.in_progress }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-emerald-600"
+                                    >
+                                        {{ item.completed }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-rose-600"
+                                    >
+                                        {{ item.overdue }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-slate-700"
+                                    >
+                                        {{ percentRate(item.on_time_rate) }}
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-right tabular-nums text-slate-700"
+                                    >
+                                        {{ formatDays(item.average_turnaround_days) }}
+                                    </td>
+                                </tr>
+                                <tr v-if="!summary.developer_performance.length">
+                                    <td
+                                        colspan="7"
+                                        class="px-6 py-10 text-center text-slate-400"
+                                    >
+                                        暂无交付数据
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </template>
+
+            <section v-else class="space-y-3">
+                <form
+                    class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(220px,1fr)_180px_auto]"
+                    @submit.prevent="applyFilters"
+                >
+                    <input
+                        v-model="filters.search"
+                        placeholder="搜索编号、标题或描述"
+                        class="h-11 rounded-xl border-slate-200 text-sm"
+                    /><select
+                        v-model="filters.status"
+                        class="h-11 rounded-xl border-slate-200 text-sm"
+                    >
+                        <option value="">全部状态</option>
+                        <option
+                            v-for="(label, value) in statusLabels"
+                            :key="value"
+                            :value="value"
+                        >
+                            {{ label }}
+                        </option></select
+                    ><button
+                        class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white"
+                    >
+                        筛选
+                    </button>
+                </form>
                 <article
                     v-for="row in requests.data"
                     :key="row.uuid"
@@ -323,9 +664,8 @@ function saveProgress(action: "progress" | "complete"): void {
                             :disabled="accepting !== null"
                             @click="accept(row)"
                         >
-                            {{
-                                accepting === row.uuid ? "接受中…" : "接受"
-                            }}</button
+                            {{ accepting === row.uuid ? "接受中…" : "接受" }}
+                        </button
                         ><button
                             v-else-if="row.can_process"
                             class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
@@ -342,6 +682,7 @@ function saveProgress(action: "progress" | "complete"): void {
                     暂无技术需求
                 </div>
             </section>
+
             <footer
                 v-if="requests.last_page > 1"
                 class="flex justify-center gap-2"
@@ -396,79 +737,81 @@ function saveProgress(action: "progress" | "complete"): void {
                         </button>
                     </div>
                     <div class="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
-                    <div class="mt-6 grid gap-4 sm:grid-cols-2">
-                        <label
-                            class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                            >需求标题<input
-                                v-model="form.title"
-                                required
-                                maxlength="180"
-                                class="mt-2 h-11 w-full rounded-xl border-slate-200"
-                                placeholder="一句话说明需要解决的问题" /></label
-                        ><label class="text-sm font-semibold text-slate-700"
-                            >需求类型<select
-                                v-model="form.category"
-                                class="mt-2 h-11 w-full rounded-xl border-slate-200"
-                            >
-                                <option
-                                    v-for="item in options.categories"
-                                    :key="item"
-                                    :value="item"
+                        <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                            <label
+                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                                >需求标题<input
+                                    v-model="form.title"
+                                    required
+                                    maxlength="180"
+                                    class="mt-2 h-11 w-full rounded-xl border-slate-200"
+                                    placeholder="一句话说明需要解决的问题" /></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700"
+                                >需求类型<select
+                                    v-model="form.category"
+                                    class="mt-2 h-11 w-full rounded-xl border-slate-200"
                                 >
-                                    {{ categoryLabels[item] }}
-                                </option>
-                            </select></label
-                        ><label class="text-sm font-semibold text-slate-700"
-                            >优先级<select
-                                v-model="form.priority"
-                                class="mt-2 h-11 w-full rounded-xl border-slate-200"
-                            >
-                                <option
-                                    v-for="item in options.priorities"
-                                    :key="item"
-                                    :value="item"
+                                    <option
+                                        v-for="item in options.categories"
+                                        :key="item"
+                                        :value="item"
+                                    >
+                                        {{ categoryLabels[item] }}
+                                    </option>
+                                </select></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700"
+                                >优先级<select
+                                    v-model="form.priority"
+                                    class="mt-2 h-11 w-full rounded-xl border-slate-200"
                                 >
-                                    {{ priorityLabels[item] }}
-                                </option>
-                            </select></label
-                        ><label
-                            class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                            >期望完成日期<input
-                                v-model="form.desired_date"
-                                required
-                                type="date"
-                                class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label
-                        ><label
-                            class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                            >需求描述<textarea
-                                v-model="form.description"
-                                required
-                                rows="7"
-                                maxlength="5000"
-                                class="mt-2 w-full rounded-xl border-slate-200"
-                                placeholder="请说明现状、期望结果、复现步骤或验收标准"
-                                @paste="pasteImages"
-                            ></textarea></label
-                        ><label
-                            class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                            >截图或附件<input
-                                type="file"
-                                multiple
-                                accept="image/*"
-                                class="mt-2 block w-full text-sm"
-                                @change="selectFiles"
-                            /><span
-                                class="mt-1 block text-xs font-normal text-slate-400"
-                                >可直接在描述框粘贴截图，最多 10 张。</span
-                            ></label
+                                    <option
+                                        v-for="item in options.priorities"
+                                        :key="item"
+                                        :value="item"
+                                    >
+                                        {{ priorityLabels[item] }}
+                                    </option>
+                                </select></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                                >期望完成日期<input
+                                    v-model="form.desired_date"
+                                    required
+                                    type="date"
+                                    class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                                >需求描述<textarea
+                                    v-model="form.description"
+                                    required
+                                    rows="7"
+                                    maxlength="5000"
+                                    class="mt-2 w-full rounded-xl border-slate-200"
+                                    placeholder="请说明现状、期望结果、复现步骤或验收标准"
+                                    @paste="pasteImages"
+                                ></textarea></label
+                            ><label
+                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                                >截图或附件<input
+                                    type="file"
+                                    multiple
+                                    accept="image/*"
+                                    class="mt-2 block w-full text-sm"
+                                    @change="selectFiles"
+                                /><span
+                                    class="mt-1 block text-xs font-normal text-slate-400"
+                                    >可直接在描述框粘贴截图，最多 10 张。</span
+                                ></label
+                            >
+                        </div>
+                        <p
+                            v-if="form.hasErrors"
+                            class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
                         >
-                    </div>
-                    <p
-                        v-if="form.hasErrors"
-                        class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-                    >
-                        {{ Object.values(form.errors).join("；") }}
-                    </p>
+                            {{ Object.values(form.errors).join("；") }}
+                        </p>
                     </div>
                     <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
                         <button
@@ -476,11 +819,12 @@ function saveProgress(action: "progress" | "complete"): void {
                             class="h-11 rounded-xl border px-5 text-sm font-semibold"
                             @click="createOpen = false"
                         >
-                            取消</button
+                            取消
+                        </button
                         ><button
                             class="h-11 rounded-xl bg-violet-600 px-5 text-sm font-semibold text-white"
                         >
-                            提交审批
+                            提交
                         </button>
                     </div>
                 </form>
@@ -514,42 +858,42 @@ function saveProgress(action: "progress" | "complete"): void {
                         </button>
                     </div>
                     <div class="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
-                    <div class="mt-6 space-y-3">
-                        <div
-                            v-for="log in selected.progress_logs"
-                            :key="log.uuid"
-                            class="rounded-xl bg-slate-50 p-3"
-                        >
+                        <div class="mt-6 space-y-3">
                             <div
-                                class="flex justify-between text-xs text-slate-400"
+                                v-for="log in selected.progress_logs"
+                                :key="log.uuid"
+                                class="rounded-xl bg-slate-50 p-3"
                             >
-                                <span>{{ log.user }} · {{ logActionLabels[log.action] ?? log.action }}</span
-                                ><span>{{ log.created_at }}</span>
+                                <div
+                                    class="flex justify-between text-xs text-slate-400"
+                                >
+                                    <span>{{ log.user }} · {{ logActionLabels[log.action] ?? log.action }}</span
+                                    ><span>{{ log.created_at }}</span>
+                                </div>
+                                <p
+                                    v-if="log.content"
+                                    class="mt-2 text-sm text-slate-700"
+                                >
+                                    {{ log.content }}
+                                </p>
                             </div>
-                            <p
-                                v-if="log.content"
-                                class="mt-2 text-sm text-slate-700"
-                            >
-                                {{ log.content }}
-                            </p>
                         </div>
-                    </div>
-                    <label
-                        class="mt-5 block text-sm font-semibold text-slate-700"
-                        >进展记录<textarea
-                            v-model="progressForm.note"
-                            rows="5"
-                            maxlength="3000"
-                            class="mt-2 w-full rounded-xl border-slate-200"
-                            placeholder="填写已完成内容、链接或遇到的问题"
-                        ></textarea>
-                    </label>
-                    <p
-                        v-if="progressForm.hasErrors"
-                        class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-                    >
-                        {{ Object.values(progressForm.errors).join("；") }}
-                    </p>
+                        <label
+                            class="mt-5 block text-sm font-semibold text-slate-700"
+                            >进展记录<textarea
+                                v-model="progressForm.note"
+                                rows="5"
+                                maxlength="3000"
+                                class="mt-2 w-full rounded-xl border-slate-200"
+                                placeholder="填写已完成内容、链接或遇到的问题"
+                            ></textarea>
+                        </label>
+                        <p
+                            v-if="progressForm.hasErrors"
+                            class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
+                        >
+                            {{ Object.values(progressForm.errors).join("；") }}
+                        </p>
                     </div>
                     <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
                         <button
