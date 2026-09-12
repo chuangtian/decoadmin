@@ -1,0 +1,15 @@
+query DecoReviewOrder($id: ID!) {
+  shop { shopAddress { countryCodeV2 } }
+  order(id: $id) {
+    id email cancelledAt displayFinancialStatus
+    shippingAddress { countryCodeV2 }
+    customer { defaultEmailAddress { emailAddress marketingState } }
+    fulfillments(first: 100) {
+      status createdAt
+      fulfillmentLineItems(first: 250) {
+        nodes { quantity lineItem { product { id } } }
+        pageInfo { hasNextPage }
+      }
+    }
+  }
+}

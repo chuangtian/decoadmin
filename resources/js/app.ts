@@ -13,9 +13,11 @@ createInertiaApp({
         const pages = import.meta.glob<{ default: DefineComponent }>('./Pages/**/*.vue');
         const communityReviews = import.meta.glob<{ default: DefineComponent }>('../../shopify-apps/community-reviews/frontend/Pages/**/*.vue');
         const marketing = import.meta.glob<{ default: DefineComponent }>('../../shopify-apps/deco-marketing/frontend/Pages/**/*.vue');
+        const reviews = import.meta.glob<{ default: DefineComponent }>('../../shopify-apps/deco-reviews/frontend/Pages/**/*.vue');
         const loader = pages[`./Pages/${name}.vue`]
             ?? communityReviews[`../../shopify-apps/community-reviews/frontend/Pages/${name}.vue`]
-            ?? marketing[`../../shopify-apps/deco-marketing/frontend/Pages/${name}.vue`];
+            ?? marketing[`../../shopify-apps/deco-marketing/frontend/Pages/${name}.vue`]
+            ?? reviews[`../../shopify-apps/deco-reviews/frontend/Pages/${name}.vue`];
         if (!loader) throw new Error(`Page not found: ${name}`);
         const module = await loader();
         return module.default;

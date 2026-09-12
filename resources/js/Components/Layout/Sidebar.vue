@@ -14,7 +14,7 @@ const openGroup = ref<string | null>(null);
 const scrollStorageKey = 'admin-sidebar-scroll-position';
 const openGroupStorageKey = 'sidebar_open_group';
 // 这些菜单项的真实路径带组织与店铺作用域，菜单里只登记后缀，进入时按当前上下文补全。
-const storeScopedRoutes = ['/student-discounts', '/instagram-feed', '/community-reviews', '/affiliate'];
+const storeScopedRoutes = ['/student-discounts', '/instagram-feed', '/community-reviews', '/deco-reviews', '/affiliate'];
 const isStoreScopedRoute = (route: string) => storeScopedRoutes.some(prefix => route === prefix || route.startsWith(`${prefix}/`));
 const contextualRoute = (route?: string) => {
     if (!route || !isStoreScopedRoute(route)) return route;

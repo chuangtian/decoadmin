@@ -1,0 +1,20 @@
+{% liquid
+  assign review_product_id = product.id | default: 0
+  assign review_feed_url = block.settings.proxy_path | append: '/feed?product_id=' | append: review_product_id
+%}
+<section class="dr-widget" data-deco-reviews data-feed-url="{{ review_feed_url | escape }}" data-mode="{{ block.settings.mode | escape }}" data-kind="product" data-star-color="{{ block.settings.star_color }}" data-rating-label="{{ 'deco_reviews.rating_label' | t | escape }}" data-stars-label="{{ 'deco_reviews.stars_label' | t | escape }}" data-reviews="{{ 'deco_reviews.reviews' | t | escape }}" data-verified="{{ 'deco_reviews.verified' | t | escape }}" data-unverified="{{ 'deco_reviews.unverified' | t | escape }}" data-incentivized="{{ 'deco_reviews.incentivized' | t | escape }}" data-reply="{{ 'deco_reviews.reply' | t | escape }}" data-anonymous="{{ 'deco_reviews.anonymous' | t | escape }}" data-loading="{{ 'deco_reviews.loading' | t | escape }}" data-empty="{{ 'deco_reviews.empty' | t | escape }}" data-error="{{ 'deco_reviews.error' | t | escape }}" data-previous="{{ 'deco_reviews.previous' | t | escape }}" data-next="{{ 'deco_reviews.next' | t | escape }}" data-close="{{ 'deco_reviews.close' | t | escape }}" data-open-media="{{ 'deco_reviews.open_media' | t | escape }}" data-review-media="{{ 'deco_reviews.review_media' | t | escape }}" data-media-error="{{ 'deco_reviews.media_error' | t | escape }}" style="--dr-star:{{ block.settings.star_color }}" {{ block.shopify_attributes }}>
+  <header class="dr-header">
+    <h2 class="dr-heading" data-dr-heading>{{ block.settings.heading | escape }}</h2>
+    <div class="dr-summary" data-dr-summary></div>
+  </header>
+  <div class="dr-toolbar">
+    <label class="dr-field">{{ 'deco_reviews.sort' | t }}<select class="dr-select" data-dr-sort><option value="newest">{{ 'deco_reviews.newest' | t }}</option><option value="oldest">{{ 'deco_reviews.oldest' | t }}</option><option value="highest">{{ 'deco_reviews.highest' | t }}</option><option value="lowest">{{ 'deco_reviews.lowest' | t }}</option></select></label>
+    <label class="dr-field">{{ 'deco_reviews.rating' | t }}<select class="dr-select" data-dr-rating><option value="">{{ 'deco_reviews.all_ratings' | t }}</option><option value="5">5 {{ 'deco_reviews.stars_label' | t }}</option><option value="4">4 {{ 'deco_reviews.stars_label' | t }}</option><option value="3">3 {{ 'deco_reviews.stars_label' | t }}</option><option value="2">2 {{ 'deco_reviews.stars_label' | t }}</option><option value="1">1 {{ 'deco_reviews.stars_label' | t }}</option></select></label>
+  </div>
+  <p class="dr-status" role="status" aria-live="polite" data-dr-status>{{ 'deco_reviews.loading' | t }}</p>
+  <div class="dr-list" aria-label="{{ 'deco_reviews.list_label' | t | escape }}" data-dr-list></div>
+  <nav class="dr-pagination" aria-label="{{ 'deco_reviews.pages_label' | t | escape }}" data-dr-pagination></nav>
+</section>
+{% schema %}
+{"name":"t:settings.name","target":"section","stylesheet":"storefront.css","javascript":"storefront.js","settings":[{"type":"text","id":"heading","label":"t:settings.heading","default":"Customer reviews"},{"type":"select","id":"mode","label":"t:settings.mode","options":[{"value":"reviews","label":"t:modes.reviews"},{"value":"stars","label":"t:modes.stars"},{"value":"carousel","label":"t:modes.carousel"},{"value":"trust","label":"t:modes.trust"},{"value":"snippets","label":"t:modes.snippets"},{"value":"gallery","label":"t:modes.gallery"},{"value":"video","label":"t:modes.video"},{"value":"sidebar","label":"t:modes.sidebar"},{"value":"floating","label":"t:modes.floating"}],"default":"reviews"},{"type":"color","id":"star_color","label":"t:settings.star_color","default":"#7C3AED"},{"type":"text","id":"proxy_path","label":"t:settings.proxy_path","default":"/apps/deco-reviews"}]}
+{% endschema %}

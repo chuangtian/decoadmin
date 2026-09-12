@@ -1,0 +1,27 @@
+client_id = "a755a5ea264486246fd8836dab3e004c"
+name = "Deco Reviews (Test)"
+application_url = "https://testadmin.decomkt.com/shopify-app/deco-reviews"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "https://testadmin.decomkt.com/api/shopify-app/deco-reviews/webhooks"
+
+[access_scopes]
+scopes = "read_products,write_app_proxy"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = ["https://testadmin.decomkt.com/shopify-app/deco-reviews"]
+
+[app_proxy]
+url = "https://testadmin.decomkt.com/api/shopify-app/deco-reviews/proxy"
+subpath = "deco-reviews"
+prefix = "apps"

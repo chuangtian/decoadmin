@@ -1,0 +1,22 @@
+<?php
+
+$environment = env('DECO_REVIEWS_ENVIRONMENT', 'local');
+$prefix = 'DECO_REVIEWS_'.strtoupper($environment).'_';
+
+return [
+    'environment' => $environment,
+    'active' => ['client_id' => env($prefix.'CLIENT_ID', ''), 'client_secret' => env($prefix.'CLIENT_SECRET', ''), 'proxy_path' => '/apps/deco-reviews'],
+    // Fail closed until sender configuration and consent policy have been verified per environment.
+    'delivery_enabled' => (bool) env($prefix.'DELIVERY_ENABLED', false),
+    'automation_stores' => array_filter(explode(',', (string) env($prefix.'AUTOMATION_STORES', ''))),
+    'recipient_allowlist' => array_filter(explode(',', (string) env($prefix.'RECIPIENT_ALLOWLIST', ''))),
+    'id_token_leeway_seconds' => 5,
+    'defaults' => [
+        'enabled' => false, 'auto_publish_days' => 14, 'invites_enabled' => false,
+        'domestic_delay_days' => 14, 'international_delay_days' => 21, 'reminder_days' => 7,
+        'star_color' => '#EBBF20', 'corner_style' => 'rounded', 'display_name' => 'initials',
+        'show_verified' => true, 'show_incentive' => true, 'layout' => 'grid', 'page_size' => 12,
+        'heading' => 'Customer reviews', 'reply_to' => '', 'subject' => 'How was your purchase?',
+        'email_body' => 'Please share your honest experience with {product}. All ratings are welcome.', 'marketing_only' => true,
+    ],
+];

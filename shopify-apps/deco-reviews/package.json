@@ -1,0 +1,14 @@
+{
+  "name": "deco-reviews",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build:assets": "node scripts/build-assets.mjs",
+    "check:config:test": "shopify app config validate --config test --json",
+    "build:test": "npm run build:assets && shopify app build --config test",
+    "deploy:test": "npm run build:assets && shopify app deploy --config test",
+    "dev": "shopify app dev --config local"
+  },
+  "devDependencies": { "@shopify/cli": "4.8.0", "esbuild": "0.28.2" }
+}
