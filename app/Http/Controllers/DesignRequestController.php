@@ -61,7 +61,7 @@ class DesignRequestController extends Controller
         $scope = DesignRequest::query()
             ->where('organization_id', $organization->id)
             ->when(! $canViewAll, fn (Builder $query) => $query->where('requester_id', $user->id));
-        $allRows = (clone $scope)->get();
+        $allRows = (clone $scope)->with('designer:id,name')->get();
         $rows = (clone $scope)
             ->with(['requester:id,name', 'requester.roles:id,name', 'designer:id,name', 'attachments', 'progressLogs.user:id,name'])
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
@@ -224,29 +224,29 @@ class DesignRequestController extends Controller
             403,
         );
         abort_unless((int) $designRequest->designer_id === (int) $user->id, 403);
-        abort_if(in_array($designRequest->status, ['completed', 'cancelled'], true), 409, '已结束的任务不能继续处理。');
+        abort_unless(in_array($designRequest->status, ['assigned', 'in_progress'], true), 409, '当前任务状态不能提交进展或交付。');
         $validated = $request->validate([
-            'action' => ['required', Rule::in(['progress', 'complete'])],
-            'progress_note' => ['nullable', 'string', 'max:3000', 'required_if:action,progress'],
+            'action' => ['required', Rule::in(['progress', 'submit_delivery'])],
+            'progress_note' => ['required', 'string', 'max:3000', 'regex:/\S/u'],
         ]);
-        $note = trim((string) ($validated['progress_note'] ?? ''));
-        $completed = $validated['action'] === 'complete';
-        $timezone = $this->timezone($user);
+        $note = trim((string) $validated['progress_note']);
+        $submitted = $validated['action'] === 'submit_delivery';
 
-        $progressLogId = DB::transaction(function () use ($completed, $designRequest, $note, $timezone, $user): int {
-            $old = $designRequest->only(['status', 'actual_delivery_date', 'delivery_note']);
+        $progressLogId = DB::transaction(function () use ($submitted, $designRequest, $note, $user): int {
+            $old = $designRequest->only(['status', 'delivery_submitted_at', 'reviewed_at', 'delivery_note']);
             $designRequest->forceFill([
-                'status' => $completed ? 'completed' : 'in_progress',
-                'actual_delivery_date' => $completed ? today($timezone)->toDateString() : null,
-                'delivery_note' => $note !== '' ? $note : $designRequest->delivery_note,
+                'status' => $submitted ? 'review' : 'in_progress',
+                'delivery_submitted_at' => $submitted ? now() : $designRequest->delivery_submitted_at,
+                'reviewed_at' => $submitted ? null : $designRequest->reviewed_at,
+                'delivery_note' => $submitted ? $note : $designRequest->delivery_note,
                 'updated_by' => $user->id,
             ])->save();
             $progressLog = $designRequest->progressLogs()->create([
                 'user_id' => $user->id,
-                'action' => $completed ? 'completed' : 'progress',
-                'content' => $note !== '' ? $note : null,
+                'action' => $submitted ? 'delivery_submitted' : 'progress',
+                'content' => $note,
             ]);
-            $this->audit($designRequest, $user, $completed ? 'design_request_completed' : 'design_request_progressed', $old, $designRequest->only(array_keys($old)));
+            $this->audit($designRequest, $user, $submitted ? 'design_request_delivery_submitted' : 'design_request_progressed', $old, $designRequest->only(array_keys($old)));
 
             return (int) $progressLog->id;
         });
@@ -255,17 +255,88 @@ class DesignRequestController extends Controller
             $organization,
             [$designRequest->requester_id],
             $user,
-            $completed ? 'design_request.completed' : 'design_request.progressed',
-            $completed ? '设计需求已完成' : '设计需求有新进展',
+            $submitted ? 'design_request.delivery_submitted' : 'design_request.progressed',
+            $submitted ? '设计需求等待验收' : '设计需求有新进展',
             "{$designRequest->reference_no}：{$designRequest->task_name}",
             route('design-requests.index', ['tab' => 'list', 'search' => $designRequest->reference_no], false),
             $designRequest,
             "design-request:{$designRequest->uuid}:progress:{$progressLogId}",
         );
 
-        return back()->with('success', $completed
-            ? "任务 {$designRequest->reference_no} 已完成。"
+        return back()->with('success', $submitted
+            ? "任务 {$designRequest->reference_no} 已提交交付，等待提报人验收。"
             : "任务 {$designRequest->reference_no} 的进展已提交。");
+    }
+
+    public function review(Request $request, DesignRequest $designRequest, CurrentOrganization $currentOrganization): RedirectResponse
+    {
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        abort_unless(
+            $user
+                && (int) $designRequest->organization_id === (int) $organization->id
+                && (int) $designRequest->requester_id === (int) $user->id,
+            404,
+        );
+        $validated = $request->validate([
+            'action' => ['required', Rule::in(['confirm', 'revision'])],
+            'review_note' => ['nullable', 'string', 'max:3000', 'required_if:action,revision', 'regex:/\S/u'],
+        ]);
+        $note = trim((string) ($validated['review_note'] ?? ''));
+        $confirmed = $validated['action'] === 'confirm';
+        $timezone = $this->timezone($user);
+
+        $result = DB::transaction(function () use ($confirmed, $designRequest, $note, $organization, $timezone, $user): array {
+            $item = DesignRequest::query()
+                ->whereKey($designRequest->getKey())
+                ->where('organization_id', $organization->getKey())
+                ->where('requester_id', $user->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            abort_unless($item->status === 'review' && $item->designer_id !== null, 409, '该任务当前不在待验收状态。');
+
+            $old = $item->only(['status', 'revision_count', 'actual_delivery_date', 'reviewed_at', 'completed_at']);
+            $reviewedAt = now();
+            $item->forceFill([
+                'status' => $confirmed ? 'completed' : 'in_progress',
+                'revision_count' => $confirmed ? $item->revision_count : $item->revision_count + 1,
+                'actual_delivery_date' => $confirmed ? $reviewedAt->timezone($timezone)->toDateString() : null,
+                'reviewed_at' => $reviewedAt,
+                'completed_at' => $confirmed ? $reviewedAt : null,
+                'updated_by' => $user->id,
+            ])->save();
+            $progressLog = $item->progressLogs()->create([
+                'user_id' => $user->id,
+                'action' => $confirmed ? 'completed' : 'revision_requested',
+                'content' => $note !== '' ? $note : null,
+            ]);
+            $this->audit($item, $user, $confirmed ? 'design_request_confirmed' : 'design_request_revision_requested', $old, $item->only(array_keys($old)));
+
+            return [
+                'designer_id' => (int) $item->designer_id,
+                'progress_log_id' => (int) $progressLog->id,
+                'revision_count' => (int) $item->revision_count,
+            ];
+        });
+
+        $this->notifications->notify(
+            $organization,
+            [$result['designer_id']],
+            $user,
+            $confirmed ? 'design_request.confirmed' : 'design_request.revision_requested',
+            $confirmed ? '设计需求验收通过' : '设计需求需要改稿',
+            $confirmed
+                ? "{$designRequest->reference_no}：{$designRequest->task_name} 已验收完成"
+                : "{$designRequest->reference_no}：{$designRequest->task_name} 需要第 {$result['revision_count']} 次改稿",
+            route('design-requests.index', ['tab' => 'list', 'search' => $designRequest->reference_no], false),
+            $designRequest,
+            "design-request:{$designRequest->uuid}:review:{$result['progress_log_id']}",
+        );
+
+        return back()->with('success', $confirmed
+            ? "任务 {$designRequest->reference_no} 已验收完成。"
+            : "任务 {$designRequest->reference_no} 已退回改稿。"
+        );
     }
 
     public function accept(Request $request, DesignRequest $designRequest, CurrentOrganization $currentOrganization): RedirectResponse
@@ -290,10 +361,11 @@ class DesignRequestController extends Controller
                 return (int) $item->designer_id === (int) $user->id;
             }
 
-            $old = $item->only(['designer_id', 'status']);
+            $old = $item->only(['designer_id', 'status', 'accepted_at']);
             $item->forceFill([
                 'designer_id' => $user->id,
                 'status' => 'assigned',
+                'accepted_at' => now(),
                 'updated_by' => $user->id,
             ])->save();
             $item->progressLogs()->create([
@@ -301,7 +373,7 @@ class DesignRequestController extends Controller
                 'action' => 'accepted',
                 'content' => null,
             ]);
-            $this->audit($item, $user, 'design_request_accepted', $old, $item->only(['designer_id', 'status']));
+            $this->audit($item, $user, 'design_request_accepted', $old, $item->only(array_keys($old)));
 
             return true;
         });
@@ -339,9 +411,35 @@ class DesignRequestController extends Controller
         $active = $rows->whereNotIn('status', ['completed', 'cancelled']);
         $completed = $rows->where('status', 'completed');
         $overdue = $active->filter(fn (DesignRequest $item) => $item->planned_delivery_date->lt($today))->count();
-        $onTime = $completed->filter(fn (DesignRequest $item) => $item->actual_delivery_date && $item->actual_delivery_date->lte($item->planned_delivery_date))->count();
-        $turnaround = $completed->filter->actual_delivery_date
-            ->map(fn (DesignRequest $item) => $item->requested_on->diffInDays($item->actual_delivery_date));
+        $onTime = $completed->filter(fn (DesignRequest $item) => $this->wasSubmittedOnTime($item, $timezone))->count();
+        $turnaround = $completed->filter->delivery_submitted_at
+            ->map(function (DesignRequest $item): float {
+                $startedAt = $item->accepted_at ?? $item->created_at;
+                $hours = $startedAt->diffInHours($item->delivery_submitted_at, false);
+
+                return max(0, $hours / 24);
+            });
+        $designerPerformance = $rows
+            ->filter(fn (DesignRequest $item) => $item->designer_id !== null)
+            ->groupBy('designer_id')
+            ->map(function (Collection $items) use ($timezone): array {
+                $completedItems = $items->where('status', 'completed');
+                $onTimeCount = $completedItems->filter(fn (DesignRequest $item) => $this->wasSubmittedOnTime($item, $timezone))->count();
+
+                return [
+                    'designer_id' => (int) $items->first()->designer_id,
+                    'designer' => $items->first()->designer?->name ?? '已离职设计师',
+                    'total' => $items->count(),
+                    'in_progress' => $items->whereIn('status', ['assigned', 'in_progress'])->count(),
+                    'pending_review' => $items->where('status', 'review')->count(),
+                    'completed' => $completedItems->count(),
+                    'on_time_rate' => $completedItems->count() ? round($onTimeCount / $completedItems->count() * 100, 1) : null,
+                    'average_revisions' => $completedItems->isNotEmpty() ? round((float) $completedItems->average('revision_count'), 1) : null,
+                ];
+            })
+            ->sortByDesc('completed')
+            ->values()
+            ->all();
 
         return [
             'total' => $rows->count(),
@@ -352,13 +450,24 @@ class DesignRequestController extends Controller
             'on_time_rate' => $completed->count() ? round($onTime / $completed->count() * 100, 1) : null,
             'average_turnaround_days' => $turnaround->isNotEmpty() ? round($turnaround->average(), 1) : null,
             'status_counts' => collect(self::STATUSES)->mapWithKeys(fn (string $status) => [$status => $rows->where('status', $status)->count()])->all(),
+            'designer_performance' => $designerPerformance,
         ];
+    }
+
+    private function wasSubmittedOnTime(DesignRequest $item, string $timezone): bool
+    {
+        $deliveryDate = $item->delivery_submitted_at?->timezone($timezone)->toDateString()
+            ?? $item->actual_delivery_date?->toDateString();
+
+        return $deliveryDate !== null && $deliveryDate <= $item->planned_delivery_date->toDateString();
     }
 
     private function serialize(DesignRequest $item, string $timezone, User $user, bool $canManage): array
     {
         $today = CarbonImmutable::today($timezone);
-        $comparison = $item->actual_delivery_date ?? $today;
+        $comparison = in_array($item->status, ['review', 'completed'], true)
+            ? ($item->delivery_submitted_at?->timezone($timezone)->startOfDay() ?? $item->actual_delivery_date ?? $today)
+            : $today;
         $delayDays = $comparison->gt($item->planned_delivery_date) ? $item->planned_delivery_date->diffInDays($comparison) : 0;
 
         return [
@@ -370,13 +479,20 @@ class DesignRequestController extends Controller
             'requester_role' => $this->requesterRole($item),
             'designer' => $item->designer?->name,
             'requested_on' => $item->requested_on->toDateString(),
+            'submitted_at' => $item->created_at?->timezone($timezone)->format('Y-m-d H:i'),
             'planned_delivery_date' => $item->planned_delivery_date->toDateString(),
             'actual_delivery_date' => $item->actual_delivery_date?->toDateString(),
+            'accepted_at' => $item->accepted_at?->timezone($timezone)->format('Y-m-d H:i'),
+            'delivery_submitted_at' => $item->delivery_submitted_at?->timezone($timezone)->format('Y-m-d H:i'),
+            'reviewed_at' => $item->reviewed_at?->timezone($timezone)->format('Y-m-d H:i'),
+            'completed_at' => $item->completed_at?->timezone($timezone)->format('Y-m-d H:i'),
+            'revision_count' => $item->revision_count,
             'status' => $item->status, 'is_delayed' => $delayDays > 0, 'delay_days' => $delayDays,
             'can_accept' => $canManage && $item->designer_id === null && $item->status === 'pending',
             'can_process' => $canManage
                 && (int) $item->designer_id === (int) $user->id
-                && ! in_array($item->status, ['completed', 'cancelled'], true),
+                && in_array($item->status, ['assigned', 'in_progress'], true),
+            'can_review' => (int) $item->requester_id === (int) $user->id && $item->status === 'review',
             'progress_logs' => $item->progressLogs->map(fn ($log) => [
                 'uuid' => $log->uuid,
                 'action' => $log->action,

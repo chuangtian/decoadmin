@@ -11,8 +11,9 @@ use Illuminate\Support\Str;
 
 #[Fillable([
     'uuid', 'organization_id', 'store_id', 'reference_no', 'task_name', 'request_type', 'priority', 'description',
-    'requester_department', 'requester_id', 'designer_id', 'quantity', 'requested_on',
-    'planned_delivery_date', 'actual_delivery_date', 'status', 'revision_count', 'delivery_note', 'updated_by',
+    'requester_department', 'requester_id', 'designer_id', 'accepted_at', 'quantity', 'requested_on',
+    'planned_delivery_date', 'actual_delivery_date', 'delivery_submitted_at', 'reviewed_at', 'completed_at',
+    'status', 'revision_count', 'delivery_note', 'updated_by',
 ])]
 class DesignRequest extends Model
 {
@@ -70,6 +71,8 @@ class DesignRequest extends Model
     {
         return [
             'requested_on' => 'date', 'planned_delivery_date' => 'date', 'actual_delivery_date' => 'date',
+            'accepted_at' => 'datetime', 'delivery_submitted_at' => 'datetime',
+            'reviewed_at' => 'datetime', 'completed_at' => 'datetime',
             'quantity' => 'integer', 'revision_count' => 'integer',
         ];
     }

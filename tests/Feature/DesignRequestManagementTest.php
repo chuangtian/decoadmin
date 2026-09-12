@@ -63,6 +63,29 @@ class DesignRequestManagementTest extends TestCase
                 ->where('canViewOverview', false));
     }
 
+    public function test_legacy_date_only_completion_never_produces_negative_turnaround(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-12 10:00:00');
+        [$designer, $organization, $store] = $this->context('designer');
+        $requester = $designer;
+        $item = $this->designRequest($organization, $store, $requester, [
+            'designer_id' => $designer->id,
+            'status' => 'completed',
+            'planned_delivery_date' => '2026-09-12',
+            'actual_delivery_date' => '2026-09-12',
+        ]);
+        $item->forceFill([
+            'accepted_at' => null,
+            'delivery_submitted_at' => '2026-09-12 00:00:00',
+        ])->save();
+
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index', ['tab' => 'overview']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.average_turnaround_days', 0));
+    }
+
     public function test_only_designers_developers_and_super_admins_see_all_requests_and_overview(): void
     {
         [$reporter, $organization, $store] = $this->context('viewer');
@@ -94,7 +117,7 @@ class DesignRequestManagementTest extends TestCase
         }
     }
 
-    public function test_designer_sees_all_organization_requests_and_can_assign_and_complete_one(): void
+    public function test_designer_submits_delivery_and_requester_confirms_completion(): void
     {
         CarbonImmutable::setTestNow('2026-09-11 10:00:00');
         [$designer, $organization, $store] = $this->context('designer');
@@ -123,9 +146,11 @@ class DesignRequestManagementTest extends TestCase
         $item->refresh();
         $this->assertSame($designer->id, $item->designer_id);
         $this->assertSame('assigned', $item->status);
+        $this->assertNotNull($item->accepted_at);
         $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_accepted', 'subject_id' => $item->id]);
 
-        $this->get(route('design-requests.index'))
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('requests.data.1.can_accept', false)
@@ -158,27 +183,54 @@ class DesignRequestManagementTest extends TestCase
         ]);
 
         $this->put(route('design-requests.update', $item), [
-            'action' => 'complete',
+            'action' => 'submit_delivery',
             'progress_note' => '文件已交付',
         ])->assertRedirect()->assertSessionHasNoErrors();
 
         $item->refresh();
         $this->assertSame($designer->id, $item->designer_id);
+        $this->assertSame('review', $item->status);
+        $this->assertNotNull($item->delivery_submitted_at);
+        $this->assertNull($item->actual_delivery_date);
+        $this->assertDatabaseHas('design_request_progress_logs', [
+            'design_request_id' => $item->id,
+            'action' => 'delivery_submitted',
+            'content' => '文件已交付',
+        ]);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_delivery_submitted', 'subject_id' => $item->id]);
+
+        $this->put(route('design-requests.update', $item), [
+            'action' => 'progress',
+            'progress_note' => '等待期间继续修改',
+        ])->assertStatus(409);
+
+        $this->actingAs($first)->withSession($this->contextSession($organization, $store));
+        $this->put(route('design-requests.review', $item), [
+            'action' => 'confirm',
+            'review_note' => '验收通过',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $item->refresh();
         $this->assertSame('completed', $item->status);
         $this->assertSame('2026-09-11', $item->actual_delivery_date->toDateString());
+        $this->assertNotNull($item->reviewed_at);
+        $this->assertNotNull($item->completed_at);
         $this->assertDatabaseHas('design_request_progress_logs', [
             'design_request_id' => $item->id,
             'action' => 'completed',
-            'content' => '文件已交付',
+            'content' => '验收通过',
         ]);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_completed', 'subject_id' => $item->id]);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'design_request_confirmed', 'subject_id' => $item->id]);
 
-        $this->get(route('design-requests.index'))
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('requests.data.1.status', 'completed')
+                ->where('requests.data.1.revision_count', 0)
                 ->where('requests.data.1.can_process', false)
-                ->has('requests.data.1.progress_logs', 3));
+                ->where('requests.data.1.can_review', false)
+                ->has('requests.data.1.progress_logs', 4));
     }
 
     public function test_reporter_creation_forces_logged_in_requester_and_safe_initial_state(): void
@@ -219,6 +271,67 @@ class DesignRequestManagementTest extends TestCase
         $this->actingAs($other)->withSession($this->contextSession($organization, $store))
             ->get(route('design-requests.attachments.show', [$item, $attachment]))
             ->assertNotFound();
+    }
+
+    public function test_requester_can_request_revision_and_kpi_workload_stays_with_assigned_designer(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-11 10:00:00');
+        [$designer, $organization, $store] = $this->context('designer');
+        [$reporter] = $this->additionalUser($organization, $store, 'viewer', '提报人');
+        [$other] = $this->additionalUser($organization, $store, 'viewer', '其他员工');
+        $item = $this->designRequest($organization, $store, $reporter, ['planned_delivery_date' => '2026-09-12']);
+
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store));
+        $this->post(route('design-requests.accept', $item))->assertRedirect()->assertSessionHasNoErrors();
+        $this->put(route('design-requests.update', $item), [
+            'action' => 'submit_delivery',
+            'progress_note' => '第一版交付',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->actingAs($other)->withSession($this->contextSession($organization, $store))
+            ->put(route('design-requests.review', $item), [
+                'action' => 'revision',
+                'review_note' => '无权要求改稿',
+            ])->assertNotFound();
+
+        $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
+            ->put(route('design-requests.review', $item), [
+                'action' => 'revision',
+                'review_note' => '请调整移动端文字间距',
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $item->refresh();
+        $this->assertSame('in_progress', $item->status);
+        $this->assertSame(1, $item->revision_count);
+        $this->assertDatabaseHas('design_request_progress_logs', [
+            'design_request_id' => $item->id,
+            'action' => 'revision_requested',
+            'content' => '请调整移动端文字间距',
+        ]);
+
+        $this->put(route('design-requests.review', $item), [
+            'action' => 'confirm',
+        ])->assertStatus(409);
+
+        CarbonImmutable::setTestNow('2026-09-12 09:00:00');
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store))
+            ->put(route('design-requests.update', $item), [
+                'action' => 'submit_delivery',
+                'progress_note' => '第二版交付',
+            ])->assertRedirect()->assertSessionHasNoErrors();
+        $this->actingAs($reporter)->withSession($this->contextSession($organization, $store))
+            ->put(route('design-requests.review', $item), [
+                'action' => 'confirm',
+            ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->actingAs($designer)->withSession($this->contextSession($organization, $store))
+            ->get(route('design-requests.index', ['tab' => 'overview']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.designer_performance.0.designer_id', $designer->id)
+                ->where('summary.designer_performance.0.completed', 1)
+                ->where('summary.designer_performance.0.on_time_rate', 100)
+                ->where('summary.designer_performance.0.average_revisions', 1));
     }
 
     public function test_permissions_block_reporter_updates_but_developer_can_handle_legacy_store_requests(): void
