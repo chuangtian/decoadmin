@@ -12,9 +12,9 @@ use Illuminate\Support\Str;
 #[Fillable([
     'uuid', 'organization_id', 'kind', 'reference_no', 'submitter_id', 'assignee_id', 'reviewer_id',
     'title', 'description', 'category', 'priority', 'desired_date', 'amount', 'currency', 'expense_date',
-    'software_url', 'software_account', 'software_password', 'renewal_mode', 'billing_cycle',
+    'software_url', 'software_account', 'software_password', 'software_payment_method', 'renewal_mode', 'billing_cycle', 'renewal_status',
     'payment_status', 'paid_by', 'paid_on', 'next_renewal_on', 'payment_reference',
-    'status', 'review_note', 'reviewed_at', 'completed_at',
+    'cancelled_on', 'cancelled_by', 'status', 'approval_required', 'review_note', 'reviewed_at', 'accepted_at', 'completed_at',
 ])]
 class PersonalRequest extends Model
 {
@@ -58,6 +58,11 @@ class PersonalRequest extends Model
         return $this->belongsTo(User::class, 'paid_by');
     }
 
+    public function renewalCanceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
     public function attachments(): HasMany
     {
         return $this->hasMany(PersonalRequestAttachment::class)->orderBy('sort_order')->orderBy('id');
@@ -81,9 +86,10 @@ class PersonalRequest extends Model
     protected function casts(): array
     {
         return [
-            'desired_date' => 'date', 'expense_date' => 'date', 'paid_on' => 'date', 'next_renewal_on' => 'date', 'amount' => 'decimal:2',
+            'desired_date' => 'date', 'expense_date' => 'date', 'paid_on' => 'date', 'next_renewal_on' => 'date',
+            'cancelled_on' => 'date', 'amount' => 'decimal:2',
             'software_account' => 'encrypted', 'software_password' => 'encrypted',
-            'reviewed_at' => 'datetime', 'completed_at' => 'datetime',
+            'approval_required' => 'boolean', 'reviewed_at' => 'datetime', 'accepted_at' => 'datetime', 'completed_at' => 'datetime',
         ];
     }
 }

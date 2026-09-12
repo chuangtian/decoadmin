@@ -16,6 +16,7 @@ type Row = {
     currency: string | null;
     expense_date: string | null;
     status: string;
+    approval_required: boolean;
     submitter: string;
     reviewer: string | null;
     review_note: string | null;
@@ -23,6 +24,7 @@ type Row = {
     software_url: string | null;
     software_account: string | null;
     software_password_set: boolean;
+    software_payment_method: string | null;
     renewal_mode: string | null;
     billing_cycle: string | null;
     attachments: Array<{ uuid: string; name: string; url: string }>;
@@ -48,6 +50,59 @@ const form = useForm({ action: 'approve' as 'approve' | 'reject', note: '' });
 
 function apply(): void {
     router.get('/request-approvals', filters.value, { preserveState: true, replace: true });
+}
+
+function goToPage(page: number): void {
+    if (page < 1 || page > props.requests.last_page) return;
+    router.get('/request-approvals', { ...filters.value, page }, { preserveState: true, replace: true });
+}
+
+function requestTypeName(kind: Row['kind']): string {
+    return kind === 'technical' ? '技术需求' : kind === 'expense_request' ? '费用申请' : '发票报销';
+}
+
+function requestTypeClass(kind: Row['kind']): string {
+    return kind === 'technical'
+        ? 'bg-blue-50 text-blue-700'
+        : kind === 'expense_request'
+          ? 'bg-orange-50 text-orange-700'
+          : 'bg-emerald-50 text-emerald-700';
+}
+
+function requestStatusClass(status: string, approvalRequired: boolean): string {
+    if (!approvalRequired) {
+        return 'bg-slate-100 text-slate-700';
+    }
+
+    return status === 'approved'
+        ? 'bg-emerald-50 text-emerald-700'
+        : status === 'rejected'
+          ? 'bg-rose-50 text-rose-700'
+          : 'bg-amber-50 text-amber-700';
+}
+
+function requestRowClass(status: string, approvalRequired: boolean): string {
+    if (!approvalRequired) {
+        return 'bg-white';
+    }
+
+    return status === 'pending_approval'
+        ? 'bg-amber-50/35'
+        : status === 'approved'
+          ? 'bg-emerald-50/35'
+          : 'bg-rose-50/35';
+}
+
+function displayAmountOrDate(row: Row): string {
+    if (row.kind === 'technical') {
+        return row.desired_date ?? '未填写';
+    }
+
+    return `${row.currency ?? ''} ${row.amount ?? '0.00'}`.trim() || '未填写';
+}
+
+function attachmentLabel(total: number): string {
+    return total > 1 ? `+${total - 1}` : '';
 }
 
 function open(row: Row): void {
@@ -105,48 +160,92 @@ function review(action: 'approve' | 'reject'): void {
                 <button class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white sm:justify-self-start">筛选</button>
             </form>
 
-            <section class="grid gap-4 lg:grid-cols-2">
-                <article v-for="row in requests.data" :key="row.uuid" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div class="flex items-start justify-between gap-4">
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span
-                                    class="rounded-full px-2.5 py-1 text-xs font-semibold"
-                                    :class="row.kind === 'technical' ? 'bg-violet-50 text-violet-700' : row.kind === 'expense_request' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'"
-                                >{{ row.kind === 'technical' ? '技术需求' : row.kind === 'expense_request' ? '费用申请' : '发票报销' }}</span>
-                                <span class="font-mono text-xs text-slate-400">{{ row.reference_no }}</span>
-                            </div>
-                            <h2 class="mt-3 font-semibold text-slate-900">{{ row.title }}</h2>
-                        </div>
-                        <span
-                            class="whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold"
-                            :class="row.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : row.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'"
-                        >{{ statusLabels[row.status] }}</span>
+            <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[1080px] text-sm text-slate-700">
+                        <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold">编号/申请信息</th>
+                                <th class="px-4 py-3 text-left font-semibold">类型</th>
+                                <th class="px-4 py-3 text-left font-semibold">提交人/时间</th>
+                                <th class="px-4 py-3 text-left font-semibold">金额或期望日期</th>
+                                <th class="px-4 py-3 text-left font-semibold">附件</th>
+                                <th class="px-4 py-3 text-left font-semibold">状态/审批意见</th>
+                                <th class="px-4 py-3 text-left font-semibold">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template v-if="requests.data.length">
+                                <tr v-for="row in requests.data" :key="row.uuid" :class="[requestRowClass(row.status, row.approval_required), 'border-b border-slate-200']">
+                                    <td class="max-w-[260px] px-4 py-3 align-top">
+                                        <p class="font-mono text-xs text-slate-500">{{ row.reference_no }}</p>
+                                        <p class="mt-1 font-semibold text-slate-900">{{ row.title }}</p>
+                                        <p class="mt-1 line-clamp-2 max-w-[240px] text-slate-500">{{ row.description }}</p>
+                                    </td>
+                                <td class="px-4 py-3 align-top">
+                                        <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="requestTypeClass(row.kind)">
+                                            {{ requestTypeName(row.kind) }}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <p class="font-semibold text-slate-700">{{ row.submitter }}</p>
+                                        <p class="mt-1 text-slate-500">{{ row.created_at }}</p>
+                                    </td>
+                                    <td class="px-4 py-3 align-top whitespace-nowrap">
+                                        <p class="font-semibold text-slate-900">{{ displayAmountOrDate(row) }}</p>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <div v-if="row.attachments.length" class="flex items-center gap-2">
+                                            <a :href="row.attachments[0].url" target="_blank" rel="noreferrer">
+                                                <img :src="row.attachments[0].url" :alt="row.attachments[0].name" class="h-10 w-14 rounded-lg border border-slate-200 object-cover" />
+                                            </a>
+                                            <span v-if="row.attachments.length > 1" class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-slate-900 px-2 text-xs font-semibold text-white">
+                                                {{ attachmentLabel(row.attachments.length) }}
+                                            </span>
+                                        </div>
+                                        <span v-else class="text-slate-400">无</span>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <span
+                                            class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold"
+                                            :class="requestStatusClass(row.status, row.approval_required)"
+                                        >
+                                            {{ row.approval_required ? (statusLabels[row.status] || row.status) : '免审批' }}
+                                        </span>
+                                        <p v-if="row.review_note" class="mt-2 line-clamp-2 max-w-[220px] text-slate-500">{{ row.review_note }}</p>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <button
+                                            v-if="canManage && row.status === 'pending_approval' && row.approval_required"
+                                            class="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                                            @click="open(row)"
+                                        >审批</button>
+                                        <span v-else class="text-slate-400">—</span>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr v-else>
+                                <td colspan="7" class="px-4 py-12 text-center text-slate-400">当前没有需要审批的申请</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div v-if="requests.last_page > 1" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
+                    <p class="text-slate-500">共 {{ requests.total }} 条</p>
+                    <div class="flex items-center gap-2">
+                        <button
+                            class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="requests.current_page <= 1"
+                            @click="goToPage(requests.current_page - 1)"
+                        >上一页</button>
+                        <span class="px-2 text-sm text-slate-500">第 {{ requests.current_page }} / {{ requests.last_page }} 页</span>
+                        <button
+                            class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="requests.current_page >= requests.last_page"
+                            @click="goToPage(requests.current_page + 1)"
+                        >下一页</button>
                     </div>
-
-                    <p class="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{{ row.description }}</p>
-                    <dl class="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-sm">
-                        <div><dt class="text-xs text-slate-400">提交人</dt><dd class="mt-1 font-medium text-slate-700">{{ row.submitter }}</dd></div>
-                        <div><dt class="text-xs text-slate-400">提交时间</dt><dd class="mt-1 text-slate-600">{{ row.created_at }}</dd></div>
-                        <div v-if="row.kind === 'technical'"><dt class="text-xs text-slate-400">期望日期</dt><dd class="mt-1 text-slate-600">{{ row.desired_date }}</dd></div>
-                        <div v-else><dt class="text-xs text-slate-400">{{ row.kind === 'expense_request' ? '申请金额' : '报销金额' }}</dt><dd class="mt-1 font-bold text-slate-900">{{ row.currency }} {{ row.amount }}</dd></div>
-                    </dl>
-
-                    <dl v-if="row.kind === 'expense_request' && row.category === 'software'" class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-xs">
-                        <div class="col-span-2"><dt class="text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a :href="row.software_url || '#'" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ row.software_url }}</a></dd></div>
-                        <div><dt class="text-slate-400">登录账号</dt><dd class="mt-1 truncate font-medium text-slate-700">{{ row.software_account }}</dd></div>
-                        <div><dt class="text-slate-400">登录密码</dt><dd class="mt-1 font-medium text-slate-700">{{ row.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
-                        <div><dt class="text-slate-400">续费操作</dt><dd class="mt-1 font-medium text-slate-700">{{ row.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
-                        <div><dt class="text-slate-400">付费周期</dt><dd class="mt-1 font-medium text-slate-700">{{ row.billing_cycle === 'monthly' ? '月付' : '年付' }}</dd></div>
-                    </dl>
-
-                    <div v-if="row.attachments.length" class="mt-4 flex gap-2">
-                        <a v-for="file in row.attachments.slice(0, 4)" :key="file.uuid" :href="file.url" target="_blank"><img :src="file.url" :alt="file.name" class="h-14 w-16 rounded-lg border object-cover" /></a>
-                    </div>
-                    <div v-if="row.review_note" class="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600"><strong>审批意见：</strong>{{ row.review_note }}</div>
-                    <button v-if="canManage && row.status === 'pending_approval'" class="mt-5 w-full rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white" @click="open(row)">开始审批</button>
-                </article>
-                <div v-if="!requests.data.length" class="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm text-slate-400">当前没有需要审批的申请</div>
+                </div>
             </section>
         </main>
 
@@ -159,8 +258,9 @@ function review(action: 'approve' | 'reject'): void {
                     </div>
                     <p class="mt-4 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{{ selected.description }}</p>
                     <dl v-if="selected.kind === 'expense_request' && selected.category === 'software'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
-                        <div class="col-span-2"><dt class="text-xs text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a :href="selected.software_url || '#'" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ selected.software_url }}</a></dd></div>
-                        <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account }}</dd></div>
+                        <div class="col-span-2"><dt class="text-xs text-slate-400">付费方式</dt><dd class="mt-1 text-slate-700">{{ selected.software_payment_method || '未填写' }}</dd></div>
+                        <div class="col-span-2"><dt class="text-xs text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a v-if="selected.software_url" :href="selected.software_url" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ selected.software_url }}</a><span v-else class="text-slate-400">未填写</span></dd></div>
+                        <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account || '未填写' }}</dd></div>
                         <div><dt class="text-xs text-slate-400">登录密码</dt><dd class="mt-1 text-slate-700">{{ selected.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
                         <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
                         <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ selected.billing_cycle === 'monthly' ? '月付' : '年付' }}</dd></div>

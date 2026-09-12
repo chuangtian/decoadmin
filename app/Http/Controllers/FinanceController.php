@@ -53,6 +53,23 @@ class FinanceController extends Controller
         ]);
     }
 
+    public function reimbursements(Request $request, CurrentOrganization $currentOrganization, FinanceService $finance): Response
+    {
+        $organization = $currentOrganization->require();
+        $filters = $request->validate([
+            'payment_status' => ['nullable', 'in:pending,paid,all'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $data = $finance->reimbursementRequests($organization, $filters);
+
+        return Inertia::render('Finance/Reimbursements', [
+            'organization' => ['id' => $organization->id, 'name' => $organization->name],
+            'canManage' => $request->user()->hasPermission('finance.manage', $organization),
+            'today' => now()->toDateString(),
+            ...$data,
+        ]);
+    }
+
     public function revealExpenseRequestPassword(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance): JsonResponse
     {
         $value = $finance->revealExpenseRequestPassword($currentOrganization->require(), $request->user(), $personalRequest);
@@ -109,5 +126,29 @@ class FinanceController extends Controller
         );
 
         return back()->with('success', $renewal ? '续费记录已保存，下次续费日期已顺延。' : '付款已确认。');
+    }
+
+    public function recordExpenseReimbursement(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance, BusinessNotificationService $notifications): RedirectResponse
+    {
+        $validated = $request->validate([
+            'paid_on' => ['required', 'date', 'before_or_equal:today'],
+            'payment_reference' => ['nullable', 'string', 'max:180'],
+        ]);
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        $item = $finance->recordExpenseReimbursement($organization, $user, $personalRequest, $validated);
+        $notifications->notify(
+            $organization,
+            [$item->submitter_id],
+            $user,
+            'expense.reimbursed',
+            '报销款已打款',
+            "{$item->reference_no}：{$item->title}，{$item->currency} {$item->amount}",
+            route('expense-claims.index', [], false),
+            $item,
+            "personal-request:{$item->uuid}:reimbursed",
+        );
+
+        return back()->with('success', '报销已确认，打款信息已记录。');
     }
 }

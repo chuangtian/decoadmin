@@ -28,6 +28,7 @@ class SidebarMenuAuthorizationTest extends TestCase
         $this->assertStringContainsString("name: '用户', route: '/users'", $userManagement);
         $this->assertStringContainsString("name: '角色', route: '/roles'", $userManagement);
         $this->assertStringContainsString("{ name: '财务', route: '/finance'", $menu);
+        $this->assertStringContainsString("{ name: '报销', route: '/finance/reimbursements'", $menu);
         $this->assertStringContainsString("{ name: '续费', route: '/finance/renewals'", $menu);
         $this->assertStringContainsString("{ name: '续费历史记录', route: '/finance/renewal-history'", $menu);
         $this->assertLessThan(
@@ -46,6 +47,7 @@ class SidebarMenuAuthorizationTest extends TestCase
         $this->assertIsString($menu);
         $personalPosition = strpos($menu, "section: '个人'");
         $storePosition = strpos($menu, "section: '店铺运营'");
+        $profilePosition = strpos($menu, "name: '我的资料'");
         $requestCenterStart = strpos($menu, "name: '需求和报销'");
         $workbenchStart = strpos($menu, "name: '工作台'");
         $workbench = substr($menu, $workbenchStart, strpos($menu, "name: '业务中心'") - $workbenchStart);
@@ -53,7 +55,11 @@ class SidebarMenuAuthorizationTest extends TestCase
 
         $this->assertNotFalse($personalPosition);
         $this->assertNotFalse($storePosition);
+        $this->assertNotFalse($profilePosition);
         $this->assertLessThan($storePosition, $personalPosition);
+        $this->assertLessThan($requestCenterStart, $profilePosition);
+        $this->assertStringContainsString("name: '我的资料',", $menu);
+        $this->assertStringContainsString("route: '/profile'", $menu);
         $this->assertStringContainsString("name: '设计需求', route: '/design-requests'", $requestCenter);
         $this->assertStringContainsString("name: '技术需求', route: '/technical-requests'", $requestCenter);
         $this->assertStringContainsString("name: '费用申请', route: '/expense-requests'", $requestCenter);

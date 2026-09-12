@@ -16,9 +16,15 @@ export interface MenuItem {
 
 export const menu: MenuItem[] = [
     {
+        name: '我的资料',
+        route: '/profile',
+        icon: 'users',
+        section: '个人',
+        permission: 'organization.view',
+    },
+    {
         name: '需求和报销',
         icon: 'design-request',
-        section: '个人',
         children: [
             { name: '设计需求', route: '/design-requests', icon: 'design-request', permission: 'design_requests.view' },
             { name: '技术需求', route: '/technical-requests', icon: 'system', permission: 'technical_requests.view' },
@@ -173,6 +179,7 @@ export const menu: MenuItem[] = [
         icon: 'finance',
         children: [
             { name: '财务', route: '/finance', icon: 'finance', permission: 'finance.view' },
+            { name: '报销', route: '/finance/reimbursements', icon: 'finance', permission: 'finance.view' },
             { name: '续费', route: '/finance/renewals', icon: 'finance', permission: 'finance.view' },
             { name: '续费历史记录', route: '/finance/renewal-history', icon: 'audit', permission: 'finance.view' },
         ],

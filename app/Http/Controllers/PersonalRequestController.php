@@ -9,10 +9,13 @@ use App\Models\PersonalRequestAttachment;
 use App\Models\User;
 use App\Services\Authorization\PersonalPermissionService;
 use App\Services\BusinessNotificationService;
+use App\Services\FinanceService;
 use App\Support\CurrentOrganization;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -29,6 +32,8 @@ class PersonalRequestController extends Controller
 
     private const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 
+    private const TECH_STATUSES = ['pending_approval', 'approved', 'rejected', 'assigned', 'in_progress', 'completed'];
+
     public function __construct(
         private PersonalPermissionService $permissions,
         private BusinessNotificationService $notifications,
@@ -42,13 +47,20 @@ class PersonalRequestController extends Controller
         $canViewAll = $this->hasRole($user, $organization, ['developer', 'super-admin'])
             && $this->permissions->allows($user, $organization, 'technical_requests.view_all');
         $canManage = $canViewAll && $this->permissions->allows($user, $organization, 'technical_requests.manage');
+        $timezone = $this->timezone($user);
         $filters = $request->validate([
-            'status' => ['nullable', 'string', 'max:30'],
+            'tab' => ['nullable', Rule::in(['overview', 'list'])],
+            'status' => ['nullable', Rule::in(self::TECH_STATUSES)],
             'search' => ['nullable', 'string', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
-        $query = PersonalRequest::query()->where('organization_id', $organization->id)->where('kind', 'technical')
-            ->when(! $canViewAll, fn (Builder $query) => $query->where('submitter_id', $user->id))
+        $activeTab = $canViewAll ? ($filters['tab'] ?? 'list') : 'list';
+        $scope = PersonalRequest::query()->where('organization_id', $organization->id)->where('kind', 'technical')
+            ->when(! $canViewAll, fn (Builder $query) => $query->where('submitter_id', $user->id));
+        $allRows = (clone $scope)
+            ->with(['assignee:id,name', 'progressLogs:id,personal_request_id,action,created_at'])
+            ->get();
+        $query = (clone $scope)
             ->with(['submitter:id,name', 'assignee:id,name', 'attachments', 'progressLogs.user:id,name'])
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
             ->when(trim((string) ($filters['search'] ?? '')) !== '', function (Builder $query) use ($filters): void {
@@ -62,8 +74,15 @@ class PersonalRequestController extends Controller
             'scope' => $canViewAll ? 'all' : 'mine',
             'canCreate' => $this->permissions->allows($user, $organization, 'technical_requests.create'),
             'canManage' => $canManage,
-            'filters' => ['status' => $filters['status'] ?? '', 'search' => trim((string) ($filters['search'] ?? ''))],
+            'canViewOverview' => $canViewAll,
+            'today' => CarbonImmutable::today($timezone)->toDateString(),
+            'filters' => [
+                'tab' => $activeTab,
+                'status' => $filters['status'] ?? '',
+                'search' => trim((string) ($filters['search'] ?? '')),
+            ],
             'options' => ['categories' => self::TECH_CATEGORIES, 'priorities' => self::PRIORITIES],
+            'summary' => $this->technicalSummary($allRows, $timezone),
             'requests' => [...$query->toArray(), 'data' => collect($query->items())->map(fn (PersonalRequest $item) => $this->serialize($item, $user, $canManage))->all()],
         ]);
     }
@@ -74,17 +93,24 @@ class PersonalRequestController extends Controller
         $user = $request->user();
         abort_unless($user, 401);
         $canViewAll = $this->permissions->allows($user, $organization, 'expense_claims.view_all');
-        $filters = $request->validate(['status' => ['nullable', 'string', 'max:30'], 'page' => ['nullable', 'integer', 'min:1']]);
+        $filters = $request->validate([
+            'status' => ['nullable', Rule::in(['pending_approval', 'rejected', 'pending_reimbursement', 'reimbursed'])],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $status = $filters['status'] ?? '';
         $query = PersonalRequest::query()->where('organization_id', $organization->id)->where('kind', 'expense')
             ->when(! $canViewAll, fn (Builder $query) => $query->where('submitter_id', $user->id))
             ->with(['submitter:id,name', 'reviewer:id,name', 'payer:id,name', 'attachments'])
-            ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
+            ->when($status === 'pending_approval', fn (Builder $query) => $query->where('status', 'pending_approval'))
+            ->when($status === 'rejected', fn (Builder $query) => $query->where('status', 'rejected'))
+            ->when($status === 'pending_reimbursement', fn (Builder $query) => $query->where('status', 'approved')->where('payment_status', 'pending'))
+            ->when($status === 'reimbursed', fn (Builder $query) => $query->where('status', 'approved')->where('payment_status', 'paid'))
             ->orderByDesc('created_at')->paginate(20)->withQueryString();
 
         return Inertia::render('Requests/Expenses', [
             'scope' => $canViewAll ? 'all' : 'mine',
             'canCreate' => $this->permissions->allows($user, $organization, 'expense_claims.create'),
-            'filters' => ['status' => $filters['status'] ?? ''],
+            'filters' => ['status' => $status],
             'options' => ['categories' => self::EXPENSE_CATEGORIES],
             'requests' => [...$query->toArray(), 'data' => collect($query->items())->map(fn (PersonalRequest $item) => $this->serialize($item, $user, false))->all()],
         ]);
@@ -107,6 +133,7 @@ class PersonalRequestController extends Controller
         return Inertia::render('Requests/CostApplications', [
             'scope' => $canViewAll ? 'all' : 'mine',
             'canCreate' => $this->permissions->allows($user, $organization, 'expense_requests.create'),
+            'today' => now()->toDateString(),
             'filters' => ['status' => $filters['status'] ?? ''],
             'options' => ['categories' => self::EXPENSE_CATEGORIES],
             'requests' => [...$query->toArray(), 'data' => collect($query->items())->map(fn (PersonalRequest $item) => $this->serialize($item, $user, false))->all()],
@@ -198,9 +225,11 @@ class PersonalRequestController extends Controller
             'currency' => ['required', Rule::in(['CNY', 'USD', 'EUR', 'GBP'])],
             'desired_date' => ['required', 'date', 'after_or_equal:today'],
             'description' => ['required', 'string', 'max:5000'],
-            'software_url' => ['exclude_unless:category,software', 'required', 'url:http,https', 'max:500'],
-            'software_account' => ['exclude_unless:category,software', 'required', 'string', 'max:255'],
-            'software_password' => ['exclude_unless:category,software', 'required', 'string', 'max:500'],
+            'approval_required' => ['sometimes', 'boolean'],
+            'software_url' => ['exclude_unless:category,software', 'nullable', 'url:http,https', 'max:500'],
+            'software_account' => ['exclude_unless:category,software', 'nullable', 'string', 'max:255'],
+            'software_password' => ['exclude_unless:category,software', 'nullable', 'string', 'max:500'],
+            'software_payment_method' => ['exclude_unless:category,software', 'required', 'string', 'max:255', 'regex:/\S/u'],
             'renewal_mode' => ['exclude_unless:category,software', 'required', Rule::in(['automatic', 'manual'])],
             'billing_cycle' => ['exclude_unless:category,software', 'required', Rule::in(['monthly', 'annual'])],
             'images' => ['nullable', 'array', 'max:10'],
@@ -208,11 +237,69 @@ class PersonalRequestController extends Controller
         ]);
         $images = $validated['images'] ?? [];
         unset($validated['images']);
-        $item = $this->createWithAttachments($organization, $user, ['kind' => 'expense_request', 'status' => 'pending_approval', ...$validated], $images);
-        $this->audit($item, $user, 'expense_request_created');
-        $this->notifyApprovers($organization, $user, $item, '新的费用申请待审批');
+        $approvalRequired = (bool) ($validated['approval_required'] ?? true);
+        $item = $this->createWithAttachments($organization, $user, [
+            ...$validated,
+            'kind' => 'expense_request',
+            'status' => $approvalRequired ? 'pending_approval' : 'approved',
+            'approval_required' => $approvalRequired,
+            'payment_status' => $approvalRequired ? null : 'pending',
+            'reviewed_at' => $approvalRequired ? null : now(),
+        ], $images);
+        $this->audit($item, $user, $approvalRequired ? 'expense_request_created' : 'expense_request_created_without_approval');
 
-        return back()->with('success', "费用申请 {$item->reference_no} 已提交审批。");
+        if ($approvalRequired) {
+            $this->notifyApprovers($organization, $user, $item, '新的费用申请待审批');
+        } else {
+            $item->progressLogs()->create([
+                'user_id' => $user->id,
+                'action' => 'approval_exempted',
+                'content' => '免审批，直接进入财务待付款。',
+            ]);
+            $this->notifyFinancePaymentRequired($organization, $user, $item);
+        }
+
+        return back()->with('success', $approvalRequired
+            ? "费用申请 {$item->reference_no} 已提交审批。"
+            : "费用申请 {$item->reference_no} 已免审批并提交财务付款。");
+    }
+
+    public function cancelExpenseRequestRenewal(
+        Request $request,
+        PersonalRequest $personalRequest,
+        CurrentOrganization $context,
+        FinanceService $finance,
+    ): RedirectResponse {
+        $organization = $context->require();
+        $user = $request->user();
+        abort_unless($user && (int) $personalRequest->organization_id === (int) $organization->id, 404);
+        abort_unless(
+            (int) $personalRequest->submitter_id === (int) $user->id
+                || $this->hasRole($user, $organization, ['super-admin']),
+            403
+        );
+        $validated = $request->validate([
+            'cancelled_on' => ['required', 'date', 'before_or_equal:today'],
+        ]);
+
+        $item = $finance->cancelSoftwareRenewal($organization, $user, $personalRequest, $validated);
+        $recipients = array_values(array_unique([
+            ...$this->notifications->usersWithPermission($organization, 'finance.manage'),
+            (int) $item->submitter_id,
+        ]));
+        $this->notifications->notify(
+            $organization,
+            $recipients,
+            $user,
+            'expense_request.renewal_cancelled',
+            '持续付费项目已取消',
+            "{$item->reference_no}：{$item->title}，取消日期 {$item->cancelled_on?->toDateString()}",
+            route('finance.renewal-history', ['month' => $item->cancelled_on?->format('Y-m')], false),
+            $item,
+            "personal-request:{$item->uuid}:renewal-cancelled:{$item->cancelled_on?->toDateString()}",
+        );
+
+        return back()->with('success', '续费已取消；取消日前已经发生的付款记录仍保留在财务历史中。');
     }
 
     public function review(Request $request, PersonalRequest $personalRequest, CurrentOrganization $context): RedirectResponse
@@ -234,7 +321,7 @@ class PersonalRequestController extends Controller
         DB::transaction(function () use ($approved, $note, $personalRequest, $user): void {
             $personalRequest->forceFill([
                 'status' => $approved ? 'approved' : 'rejected',
-                'payment_status' => $approved && $personalRequest->kind === 'expense_request' ? 'pending' : null,
+                'payment_status' => $approved && in_array($personalRequest->kind, ['expense_request', 'expense'], true) ? 'pending' : null,
                 'reviewer_id' => $user->id,
                 'review_note' => $note !== '' ? $note : null,
                 'reviewed_at' => now(),
@@ -275,17 +362,11 @@ class PersonalRequestController extends Controller
         }
 
         if ($approved && $personalRequest->kind === 'expense_request') {
-            $this->notifications->notify(
-                $organization,
-                $this->notifications->usersWithPermission($organization, 'finance.manage'),
-                $user,
-                'expense_request.payment_required',
-                '有新的费用申请待付款',
-                "{$personalRequest->reference_no}：{$personalRequest->title}",
-                route('finance.renewals', [], false),
-                $personalRequest,
-                "personal-request:{$personalRequest->uuid}:payment-required",
-            );
+            $this->notifyFinancePaymentRequired($organization, $user, $personalRequest);
+        }
+
+        if ($approved && $personalRequest->kind === 'expense') {
+            $this->notifyFinanceReimbursementRequired($organization, $user, $personalRequest);
         }
 
         return back()->with('success', $approved ? '申请已通过。' : '申请已驳回。');
@@ -305,8 +386,9 @@ class PersonalRequestController extends Controller
             if ($item->status !== 'approved') {
                 return false;
             }
-            $item->forceFill(['assignee_id' => $user->id, 'status' => 'assigned'])->save();
+            $item->forceFill(['assignee_id' => $user->id, 'status' => 'assigned', 'accepted_at' => now()])->save();
             $item->progressLogs()->create(['user_id' => $user->id, 'action' => 'accepted']);
+            $this->audit($item, $user, 'technical_request_accepted');
 
             return true;
         });
@@ -340,6 +422,7 @@ class PersonalRequestController extends Controller
         $progressLogId = DB::transaction(function () use ($complete, $note, $personalRequest, $user): int {
             $personalRequest->forceFill(['status' => $complete ? 'completed' : 'in_progress', 'completed_at' => $complete ? now() : null])->save();
             $progressLog = $personalRequest->progressLogs()->create(['user_id' => $user->id, 'action' => $complete ? 'completed' : 'progress', 'content' => $note !== '' ? $note : null]);
+            $this->audit($personalRequest, $user, $complete ? 'technical_request_completed' : 'technical_request_progressed');
 
             return (int) $progressLog->id;
         });
@@ -372,6 +455,7 @@ class PersonalRequestController extends Controller
         $canSee = (int) $personalRequest->submitter_id === (int) $user->id
             || (int) $personalRequest->assignee_id === (int) $user->id
             || $this->permissions->allows($user, $organization, 'request_approvals.view')
+            || ($personalRequest->kind === 'expense' && $this->permissions->allows($user, $organization, 'finance.view'))
             || $this->permissions->allows($user, $organization, $viewAllPermission);
         abort_unless($canSee && Storage::disk($attachment->disk)->exists($attachment->path), 404);
 
@@ -413,18 +497,27 @@ class PersonalRequestController extends Controller
             'software_url' => $item->software_url,
             'software_account' => $item->software_account,
             'software_password_set' => filled($item->software_password),
+            'software_payment_method' => $item->software_payment_method,
             'renewal_mode' => $item->renewal_mode,
             'billing_cycle' => $item->billing_cycle,
+            'renewal_status' => $item->renewal_status,
             'payment_status' => $item->payment_status,
             'payer' => $item->payer?->name,
             'paid_on' => $item->paid_on?->toDateString(),
             'next_renewal_on' => $item->next_renewal_on?->toDateString(),
+            'cancelled_on' => $item->cancelled_on?->toDateString(),
             'payment_reference' => $item->payment_reference,
-            'status' => $item->status, 'submitter' => $item->submitter?->name, 'assignee' => $item->assignee?->name,
+            'status' => $item->status, 'approval_required' => $item->approval_required,
+            'submitter' => $item->submitter?->name, 'assignee' => $item->assignee?->name,
             'reviewer' => $item->reviewer?->name, 'review_note' => $item->review_note,
             'created_at' => $item->created_at?->format('Y-m-d H:i'), 'reviewed_at' => $item->reviewed_at?->format('Y-m-d H:i'), 'completed_at' => $item->completed_at?->format('Y-m-d H:i'),
             'can_accept' => $canManage && $item->status === 'approved' && $item->assignee_id === null,
             'can_process' => $canManage && (int) $item->assignee_id === (int) $user->id && ! in_array($item->status, ['completed', 'rejected'], true),
+            'can_cancel_renewal' => $item->kind === 'expense_request'
+                && $item->category === 'software'
+                && $item->status === 'approved'
+                && $item->payment_status === 'paid'
+                && $item->renewal_status === 'active',
             'attachments' => $item->attachments->map(fn (PersonalRequestAttachment $attachment) => ['uuid' => $attachment->uuid, 'name' => $attachment->original_name, 'url' => route('personal-requests.attachments.show', [$item, $attachment], false)])->values()->all(),
             'progress_logs' => $item->relationLoaded('progressLogs') ? $item->progressLogs->map(fn ($log) => ['uuid' => $log->uuid, 'action' => $log->action, 'content' => $log->content, 'user' => $log->user?->name, 'created_at' => $log->created_at?->format('Y-m-d H:i')])->values()->all() : [],
         ];
@@ -450,6 +543,36 @@ class PersonalRequestController extends Controller
         );
     }
 
+    private function notifyFinancePaymentRequired(Organization $organization, User $user, PersonalRequest $item): void
+    {
+        $this->notifications->notify(
+            $organization,
+            $this->notifications->usersWithPermission($organization, 'finance.manage'),
+            $user,
+            'expense_request.payment_required',
+            '有新的费用申请待付款',
+            "{$item->reference_no}：{$item->title}",
+            route('finance.renewals', [], false),
+            $item,
+            "personal-request:{$item->uuid}:payment-required",
+        );
+    }
+
+    private function notifyFinanceReimbursementRequired(Organization $organization, User $user, PersonalRequest $item): void
+    {
+        $this->notifications->notify(
+            $organization,
+            $this->notifications->usersWithPermission($organization, 'finance.manage'),
+            $user,
+            'expense.reimbursement_required',
+            '有新的报销申请待打款',
+            "{$item->reference_no}：{$item->title}",
+            route('finance.reimbursements', [], false),
+            $item,
+            "personal-request:{$item->uuid}:reimbursement-required",
+        );
+    }
+
     private function personalRequestUrl(PersonalRequest $item): string
     {
         return match ($item->kind) {
@@ -457,6 +580,105 @@ class PersonalRequestController extends Controller
             'expense_request' => route('expense-requests.index', [], false),
             default => route('expense-claims.index', [], false),
         };
+    }
+
+    /** @param Collection<int, PersonalRequest> $rows */
+    private function technicalSummary(Collection $rows, string $timezone): array
+    {
+        $today = CarbonImmutable::today($timezone);
+        $active = $rows->whereNotIn('status', ['completed', 'rejected']);
+        $completed = $rows->where('status', 'completed');
+        $overdue = $active
+            ->filter(fn (PersonalRequest $item) => $item->desired_date?->lt($today) === true)
+            ->count();
+        $onTime = $completed
+            ->filter(fn (PersonalRequest $item) => $this->wasTechnicalRequestCompletedOnTime($item, $timezone))
+            ->count();
+        $turnaround = $completed
+            ->filter(fn (PersonalRequest $item) => $item->completed_at !== null)
+            ->map(fn (PersonalRequest $item): float => $this->technicalTurnaroundDays($item));
+        $developerPerformance = $rows
+            ->filter(fn (PersonalRequest $item) => $item->assignee_id !== null)
+            ->groupBy('assignee_id')
+            ->map(function (Collection $items) use ($today, $timezone): array {
+                $completedItems = $items->where('status', 'completed');
+                $onTimeCount = $completedItems
+                    ->filter(fn (PersonalRequest $item) => $this->wasTechnicalRequestCompletedOnTime($item, $timezone))
+                    ->count();
+                $completedTurnaround = $completedItems
+                    ->filter(fn (PersonalRequest $item) => $item->completed_at !== null)
+                    ->map(fn (PersonalRequest $item): float => $this->technicalTurnaroundDays($item));
+                $overdueCount = $items
+                    ->whereNotIn('status', ['completed', 'rejected'])
+                    ->filter(fn (PersonalRequest $item) => $item->desired_date?->lt($today) === true)
+                    ->count();
+
+                return [
+                    'developer_id' => (int) $items->first()->assignee_id,
+                    'developer' => $items->first()->assignee?->name ?? '已离职开发人员',
+                    'total' => $items->count(),
+                    'in_progress' => $items->whereIn('status', ['assigned', 'in_progress'])->count(),
+                    'completed' => $completedItems->count(),
+                    'overdue' => $overdueCount,
+                    'on_time_rate' => $completedItems->count()
+                        ? round($onTimeCount / $completedItems->count() * 100, 1)
+                        : null,
+                    'average_turnaround_days' => $completedTurnaround->isNotEmpty()
+                        ? round((float) $completedTurnaround->average(), 1)
+                        : null,
+                ];
+            })
+            ->sortBy([
+                ['completed', 'desc'],
+                ['on_time_rate', 'desc'],
+                ['developer', 'asc'],
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'total' => $rows->count(),
+            'pending_approval' => $rows->where('status', 'pending_approval')->count(),
+            'unassigned' => $rows->where('status', 'approved')->count(),
+            'in_progress' => $rows->whereIn('status', ['assigned', 'in_progress'])->count(),
+            'completed' => $completed->count(),
+            'overdue' => $overdue,
+            'on_time_rate' => $completed->count() ? round($onTime / $completed->count() * 100, 1) : null,
+            'average_turnaround_days' => $turnaround->isNotEmpty() ? round((float) $turnaround->average(), 1) : null,
+            'status_counts' => collect(self::TECH_STATUSES)
+                ->mapWithKeys(fn (string $status) => [$status => $rows->where('status', $status)->count()])
+                ->all(),
+            'developer_performance' => $developerPerformance,
+        ];
+    }
+
+    private function wasTechnicalRequestCompletedOnTime(PersonalRequest $item, string $timezone): bool
+    {
+        return $item->completed_at !== null
+            && $item->desired_date !== null
+            && $item->completed_at->timezone($timezone)->toDateString() <= $item->desired_date->toDateString();
+    }
+
+    private function technicalTurnaroundDays(PersonalRequest $item): float
+    {
+        if ($item->completed_at === null) {
+            return 0.0;
+        }
+
+        $startedAt = $item->accepted_at
+            ?? $item->progressLogs->firstWhere('action', 'accepted')?->created_at
+            ?? $item->reviewed_at
+            ?? $item->created_at;
+        $hours = $startedAt->diffInHours($item->completed_at, false);
+
+        return max(0, $hours / 24);
+    }
+
+    private function timezone(User $user): string
+    {
+        $timezone = filled($user->timezone) ? (string) $user->timezone : (string) config('app.timezone', 'UTC');
+
+        return in_array($timezone, timezone_identifiers_list(\DateTimeZone::ALL_WITH_BC), true) ? $timezone : 'UTC';
     }
 
     private function audit(PersonalRequest $item, User $user, string $action): void
