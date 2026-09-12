@@ -440,6 +440,10 @@ Route::middleware(['auth', 'verified', 'organization.access'])->group(function (
         ->middleware(['personal.permission:design_requests.manage', 'throttle:30,1'])->name('design-requests.accept');
     Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
         ->middleware(['personal.permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
+    Route::put('/design-requests/{designRequest}/review', [DesignRequestController::class, 'review'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:30,1'])->name('design-requests.review');
+    Route::put('/design-requests/{designRequest}/review', [DesignRequestController::class, 'review'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:30,1'])->name('design-requests.review');
     Route::get('/technical-requests', [PersonalRequestController::class, 'technicalIndex'])
         ->middleware('personal.permission:technical_requests.view')->name('technical-requests.index');
     Route::post('/technical-requests', [PersonalRequestController::class, 'storeTechnical'])
