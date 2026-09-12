@@ -205,6 +205,7 @@ class DesignRequestManagementTest extends TestCase
         ])->assertStatus(409);
 
         $this->actingAs($first)->withSession($this->contextSession($organization, $store));
+        $first->update(['timezone' => 'Asia/Shanghai']);
         $this->put(route('design-requests.review', $item), [
             'action' => 'confirm',
             'review_note' => '验收通过',
@@ -215,6 +216,8 @@ class DesignRequestManagementTest extends TestCase
         $this->assertSame('2026-09-11', $item->actual_delivery_date->toDateString());
         $this->assertNotNull($item->reviewed_at);
         $this->assertNotNull($item->completed_at);
+        $this->assertSame('2026-09-11T10:00:00+00:00', $item->reviewed_at->toIso8601String());
+        $this->assertSame('2026-09-11T10:00:00+00:00', $item->completed_at->toIso8601String());
         $this->assertDatabaseHas('design_request_progress_logs', [
             'design_request_id' => $item->id,
             'action' => 'completed',

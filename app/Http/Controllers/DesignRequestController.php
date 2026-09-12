@@ -296,7 +296,7 @@ class DesignRequestController extends Controller
             abort_unless($item->status === 'review' && $item->designer_id !== null, 409, '该任务当前不在待验收状态。');
 
             $old = $item->only(['status', 'revision_count', 'actual_delivery_date', 'reviewed_at', 'completed_at']);
-            $reviewedAt = now();
+            $reviewedAt = CarbonImmutable::now();
             $item->forceFill([
                 'status' => $confirmed ? 'completed' : 'in_progress',
                 'revision_count' => $confirmed ? $item->revision_count : $item->revision_count + 1,

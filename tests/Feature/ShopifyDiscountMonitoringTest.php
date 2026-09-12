@@ -83,7 +83,7 @@ class ShopifyDiscountMonitoringTest extends TestCase
         Queue::assertPushed(DeliverStoreAlertNotificationJob::class, 4);
     }
 
-    public function test_discount_alert_uses_in_app_notification_without_calling_feishu(): void
+    public function test_discount_alert_sends_in_app_and_feishu(): void
     {
         [$store] = $this->monitor();
         $superAdmin = User::factory()->create(['metadata' => ['is_super_admin' => true]]);
@@ -113,7 +113,10 @@ class ShopifyDiscountMonitoringTest extends TestCase
         app(StoreAlertNotificationService::class)->deliver($alert);
 
         $this->assertSame('sent', $alert->fresh()->delivery_status);
-        Http::assertNothingSent();
+        $this->assertEqualsCanonicalizing(['in_app', 'feishu'], $alert->fresh()->context['notification_channels']);
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://open.feishu.cn/open-apis/bot/v2/hook/discount-test'
+            && str_contains((string) data_get($request->data(), 'content.text'), '折扣码：OLD50 → NEW50'));
         $notification = BusinessNotification::query()->sole();
         $this->assertSame($superAdmin->id, $notification->user_id);
         $this->assertStringContainsString('折扣码：OLD50 → NEW50', $notification->message);
@@ -143,8 +146,10 @@ class ShopifyDiscountMonitoringTest extends TestCase
         $this->assertStringContainsString('结束时间：无结束时间 → '.$expected, $alert->message);
         $this->assertSame($instant, $monitor->snapshots()->latest('id')->first()->snapshot['ends_at']);
 
+        Http::fake(['https://open.feishu.cn/*' => Http::response(['code' => 0])]);
         app(StoreAlertNotificationService::class)->deliver($alert);
         $this->assertStringContainsString('店铺时间：'.$expected, BusinessNotification::query()->sole()->message);
+        Http::assertSentCount(1);
         $this->assertSame(CarbonImmutable::parse($instant)->timestamp, $alert->fresh()->occurred_at->timestamp);
         $this->assertSame($timezone, $store->fresh()->timezone);
     }
