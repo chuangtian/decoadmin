@@ -5,6 +5,7 @@ namespace DecoReviews\Controllers;
 use App\Models\Product;
 use App\Models\Store;
 use DecoReviews\Models\Media;
+use DecoReviews\Services\FormService;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewService;
 use Illuminate\Http\Request;
@@ -74,7 +75,8 @@ class StorefrontController
         [$store, $invite] = $invites->resolve($invitation);
         abort_unless(in_array($invite->status, ['sent', 'scheduled', 'completed']), 409);
 
-        return response()->view('deco-reviews::storefront', ['feedUrl' => null, 'submitUrl' => $request->fullUrl(), 'invitationProduct' => ['title' => $invite->product?->title]])
+        return response()->view('deco-reviews::storefront', ['feedUrl' => null, 'submitUrl' => $request->fullUrl(), 'invitationProduct' => ['title' => $invite->product?->title],
+            'formConfig' => app(FormService::class)->forProduct($store, 'product', $invite->product_id)])
             ->header('Cache-Control', 'private, no-store')->header('Referrer-Policy', 'no-referrer');
     }
 
@@ -83,7 +85,10 @@ class StorefrontController
         $request->validate(['consent' => 'accepted']);
         $review = $invites->submit($invitation, $request->all(), $request->file('media', []));
 
-        return response()->json(['data' => ['uuid' => $review->uuid, 'status' => $review->status], 'message' => 'Thank you. Your review has been received.'], 201)->header('Cache-Control', 'no-store');
+        [$store] = $invites->resolve($invitation);
+
+        return response()->json(['data' => ['uuid' => $review->uuid, 'status' => $review->status],
+            'message' => app(FormService::class)->configuration($store)['thank_you']], 201)->header('Cache-Control', 'no-store');
     }
 
     public function unsubscribe(Request $request, string $invitation, InvitationService $invites)

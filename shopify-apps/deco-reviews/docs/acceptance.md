@@ -93,8 +93,8 @@ The current shared renderer is a foundation only. None of the following should b
 
 ### Review form, custom questions, groups, and bundles
 
-- Merchant form editor, localized copy, colors/corners, media toggles, redirect behavior, general review link, and QR code.
-- Custom single-choice, multiple-choice, and rating-scale questions; required/public flags; collection targeting; response storage/export/API representation.
+- Local implementation, not released: merchant copy editor, media toggles, non-submitting saved-form preview, single-choice/multiple-choice/rating-scale questions, required/public flags, product/store targeting, immutable encrypted answer snapshots, and public-field filtering. Form version checks protect both concurrent edits and stale buyer submissions. Covered by `tests/FormTest.php`; live-browser acceptance remains pending.
+- Remaining: multi-language copy management, colors/corners, redirect behavior, general review link, QR code, collection targeting, answer export and Merchant API representation.
 - Product review groups and bundles, shared-display rules, bundle review collection, bundle-page aggregate behavior, and one-request bundle workflow.
 
 ### AI and content reuse

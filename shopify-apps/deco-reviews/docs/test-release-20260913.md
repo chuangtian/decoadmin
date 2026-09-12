@@ -30,6 +30,19 @@ An unfiltered Shopify CLI diagnostic unexpectedly included the new test app secr
 
 Installing into Macfox is a store-level permission action, even if display testing uses only the authorized draft. Obtain explicit confirmation before installation; never publish the draft theme.
 
+### Test credential rotation completed — 2026-09-13
+
+- User explicitly authorized rotation with a strict no-impact-on-store constraint.
+- Verified Shopify installation count and backend installation/token count were zero before revocation.
+- Generated a new secret and revoked the old secret in the settings of app `422616530945` only. The Dashboard now shows one current secret; its value was not printed.
+- Shopify CLI output was captured without returning configuration. The ignored local `.env.test` and protected staging environment were updated; equality checks confirmed the credential changed.
+- Staging configuration cache was regenerated using the updated environment and atomically replaced. PHP-FPM was gracefully reloaded; production was neither restarted nor reconfigured.
+- A non-mutating webhook probe against an unknown synthetic shop returned **401 for the old signature and 200 for the new signature**. No business webhook was executed.
+- Staging health and Horizon status passed. Production environment-file checksum and app container identity/start time were unchanged. Production source is still `b2b0b6c2c058dda277cb0e5cc5e091f4334f1630`.
+- Post-rotation state: sending disabled, empty automation/recipient allowlists, zero reviews/invitations/installations in the new staging module. No app installation or theme change was performed in this step.
+- Protected configuration backup: `/opt/decoadmin/backups/deco-reviews-key-rotation-20260912T193727Z`. The old key is revoked and must not be restored as an active credential.
+- Existing system reviews remain unrelated to this app; no legacy reviews were read, imported, merged or changed.
+
 ## Rollback
 
 - Staging backup: `/opt/decoadmin/backups/deco-reviews-test-20260912T191217Z` (previous source, environment, database dump, image tags and source hashes).

@@ -9,7 +9,13 @@
     <title>Customer reviews</title>
 </head>
 <body>
-<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ csrf_token() }}" data-media-error="Upload up to 5 photos or 1 video.">
+@php
+    $reviewForm = $formConfig ?? [];
+    $allowPhotos = (bool) ($reviewForm['allow_photos'] ?? false);
+    $allowVideo = (bool) ($reviewForm['allow_video'] ?? false);
+    $mediaAccept = implode(',', array_filter([$allowPhotos ? 'image/*' : null, $allowVideo ? 'video/*' : null]));
+@endphp
+<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ csrf_token() }}" data-form-preview="{{ ($formPreview ?? false) ? 'true' : 'false' }}" data-allow-photos="{{ $allowPhotos ? 'true' : 'false' }}" data-allow-video="{{ $allowVideo ? 'true' : 'false' }}" data-thanks="{{ $reviewForm['thank_you'] ?? 'Thank you. Your review was submitted for moderation.' }}" data-preview-message="仅预览，没有提交或保存评价" data-required-answer="Please choose at least one answer." data-media-error="Upload up to 5 photos or 1 video.">
     @if ($feedUrl)
         <header class="dr-header">
             <h1 class="dr-heading" data-dr-heading>Customer reviews</h1>
@@ -27,20 +33,59 @@
         <section class="dr-list" aria-label="Customer reviews" data-dr-list></section>
         <nav class="dr-pagination" aria-label="Review pages" data-dr-pagination></nav>
     @endif
-    @if ($submitUrl)
-        <form class="dr-form" action="{{ $submitUrl }}" method="post" enctype="multipart/form-data" data-dr-form>
+    @if ($submitUrl || ($formPreview ?? false))
+        <form class="dr-form" action="{{ $submitUrl ?? '' }}" method="post" enctype="multipart/form-data" data-dr-form>
             @csrf
-            <h2>Review {{ $invitationProduct['title'] ?? 'your purchase' }}</h2>
+            <input type="hidden" name="form_version" value="{{ $reviewForm['version'] ?? 'initial' }}">
+            <h2>{{ $reviewForm['heading'] ?? 'Review your purchase' }}</h2>
+            @if (!empty($reviewForm['description']))
+                <p>{{ $reviewForm['description'] }}</p>
+            @endif
+            @if (!empty($invitationProduct['title']))
+                <p>{{ $invitationProduct['title'] }}</p>
+            @endif
             <div class="dr-form__grid">
-                <label class="dr-field">Name<input class="dr-input" name="author_name" required maxlength="120" autocomplete="name"></label>
+                <label class="dr-field">{{ $reviewForm['name_label'] ?? 'Name' }}<input class="dr-input" name="author_name" required maxlength="120" autocomplete="name"></label>
                 <label class="dr-field">Rating<select class="dr-select" name="rating" required><option value="">Choose a rating</option><option value="5">5 stars</option><option value="4">4 stars</option><option value="3">3 stars</option><option value="2">2 stars</option><option value="1">1 star</option></select></label>
-                <label class="dr-field">Title<input class="dr-input" name="title" maxlength="160"></label>
+                <label class="dr-field">{{ $reviewForm['title_label'] ?? 'Title' }}<input class="dr-input" name="title" maxlength="200"></label>
             </div>
-            <label class="dr-field">Review<textarea class="dr-textarea" name="body" required maxlength="5000"></textarea></label>
-            <label class="dr-field">Photos or video<input class="dr-input" type="file" name="media[]" accept="image/*,video/*" multiple></label>
-            <small>Upload up to 5 photos or 1 video.</small>
+            <label class="dr-field">{{ $reviewForm['body_label'] ?? 'Review' }}<textarea class="dr-textarea" name="body" required maxlength="10000"></textarea></label>
+            @foreach (($reviewForm['questions'] ?? []) as $question)
+                @php
+                    $multipleQuestion = ($question['type'] ?? '') === 'multiple';
+                    $requiredQuestion = (bool) ($question['required'] ?? false);
+                @endphp
+                <fieldset class="dr-question" {{ $multipleQuestion ? 'data-answer-multiple' : '' }} {{ $requiredQuestion ? 'data-required' : '' }}>
+                    <legend>{{ $question['label'] }}</legend>
+                    @if (($question['type'] ?? '') === 'single')
+                        <div class="dr-question__options">
+                            @foreach (($question['options'] ?? []) as $option)
+                                <label><input type="radio" name="answers[{{ $question['id'] }}]" value="{{ $option }}" {{ $requiredQuestion && $loop->first ? 'required' : '' }}> {{ $option }}</label>
+                            @endforeach
+                        </div>
+                    @elseif (($question['type'] ?? '') === 'multiple')
+                        <div class="dr-question__options">
+                            @foreach (($question['options'] ?? []) as $option)
+                                <label><input type="checkbox" name="answers[{{ $question['id'] }}][]" value="{{ $option }}"> {{ $option }}</label>
+                            @endforeach
+                        </div>
+                    @elseif (($question['type'] ?? '') === 'scale')
+                        <select class="dr-select" name="answers[{{ $question['id'] }}]" {{ $requiredQuestion ? 'required' : '' }}>
+                            <option value="">Choose</option>
+                            @for ($value = (int) ($question['min'] ?? 1); $value <= (int) ($question['max'] ?? 5); $value++)
+                                <option value="{{ $value }}">{{ $value }}</option>
+                            @endfor
+                        </select>
+                    @endif
+                    <small class="dr-question__visibility">{{ ($question['public'] ?? false) ? 'This answer may be shown publicly.' : 'Only the store can see this answer.' }}</small>
+                </fieldset>
+            @endforeach
+            @if ($allowPhotos || $allowVideo)
+                <label class="dr-field">Photos or video<input class="dr-input" type="file" name="media[]" accept="{{ $mediaAccept }}" multiple></label>
+                <small>Upload up to 5 photos or 1 video.</small>
+            @endif
             <label class="dr-checkbox"><input type="checkbox" name="consent" value="1" required><span>I consent to this review and its media being published according to the store’s review terms.</span></label>
-            <button class="dr-button" type="submit">Submit review</button>
+            <button class="dr-button" type="submit">{{ $reviewForm['submit_label'] ?? 'Submit review' }}</button>
             <p role="status" aria-live="polite" data-dr-form-status></p>
         </form>
     @endif

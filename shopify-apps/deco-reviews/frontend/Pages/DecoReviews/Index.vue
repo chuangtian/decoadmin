@@ -2,8 +2,9 @@
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppLayout from '../../../../../resources/js/Layouts/AppLayout.vue';
+import ReviewFormEditor from '../../Components/ReviewFormEditor.vue';
 
-type Tab = 'overview' | 'reviews' | 'invitations' | 'settings' | 'imports' | 'widgets';
+type Tab = 'overview' | 'reviews' | 'invitations' | 'form' | 'settings' | 'imports' | 'widgets';
 type ReviewStatus = 'pending' | 'published' | 'unpublished';
 type ReviewKind = 'product' | 'store';
 type Media = { uuid: string; type: string; url: string };
@@ -12,6 +13,7 @@ type Review = {
     author_name: string; author_email: string | null; rating: number; title: string | null;
     body: string; status: ReviewStatus; featured: boolean; verified_source: 'none' | 'order' | 'import' | 'manual';
     incentivized: boolean; reply: string | null; created_at: string; published_at: string | null; media: Media[];
+    form_answers?: Array<{ question_id: string; label: string; type: string; value: string | string[]; public: boolean }>;
 };
 type Invitation = { uuid: string; order_id: number; status?: string; created_at?: string; due_at?: string | null; sent_at?: string | null; error_code?: string | null };
 type ImportError = { line: number; code: string };
@@ -23,20 +25,26 @@ type Settings = {
     display_name: 'full' | 'initials'; show_verified: boolean; show_incentive: boolean; layout: 'grid' | 'list' | 'mosaic';
     page_size: 6 | 12 | 24; heading: string; reply_to: string; subject: string; email_body: string; marketing_only: boolean;
 };
+type FormConfig = {
+    version: string; heading: string; description: string; name_label: string; title_label: string; body_label: string; submit_label: string;
+    thank_you: string; allow_photos: boolean; allow_video: boolean;
+    questions: Array<{ id: string; label: string; type: 'single' | 'multiple' | 'scale'; required: boolean; public: boolean; kind: 'all' | 'product' | 'store'; product_ids: number[]; options: string[]; min: number; max: number }>;
+};
 
 const props = defineProps<{
     organization: { id: number; name: string }; store: { id: number; name: string }; canManage: boolean; baseUrl: string;
     tab: Tab; filters: Record<string, string | number | null | undefined>; reviews: PageData<Review>; invitations: PageData<Invitation>;
     stats: { total: number; published: number; pending: number; average: number; media: number; invites_sent: number };
-    products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[];
+    products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[]; formConfig: FormConfig;
 }>();
 
 const tabs: Array<{ key: Tab; label: string }> = [
-    { key: 'overview', label: '概览' }, { key: 'reviews', label: '评价' }, { key: 'invitations', label: '邀请' },
+    { key: 'overview', label: '概览' }, { key: 'reviews', label: '评价' }, { key: 'invitations', label: '邀请' }, { key: 'form', label: '表单' },
     { key: 'settings', label: '设置' }, { key: 'imports', label: '导入' }, { key: 'widgets', label: '组件' },
 ];
 const page = usePage<{ flash?: { success?: string; error?: string }; errors?: Record<string, string> }>();
 const notice = ref('');
+const formEditorDirty = ref(false);
 const query = ref({
     kind: String(props.filters.kind || 'product'), status: String(props.filters.status || ''), rating: String(props.filters.rating || ''),
     q: String(props.filters.q || ''), sort: String(props.filters.sort || 'newest'),
@@ -80,7 +88,9 @@ const exportUrl = computed(() => {
     return `${props.baseUrl}/export${params.size ? `?${params}` : ''}`;
 });
 
-const navigate = (tab: Tab, extra: Record<string, unknown> = {}) => router.get(props.baseUrl, { tab, ...extra }, { preserveState: true, preserveScroll: true, replace: true });
+const navigate = (tab: Tab, extra: Record<string, unknown> = {}) => {
+    router.get(props.baseUrl, { tab, ...extra }, { preserveState: true, preserveScroll: true, replace: true });
+};
 const applyFilters = () => navigate('reviews', query.value);
 const goPage = (page: number, area: 'reviews' | 'invitations') => navigate(area, area === 'reviews' ? { ...query.value, page } : { page });
 const toggleAll = (checked: boolean) => { selected.value = checked ? props.reviews.data.map(review => review.uuid) : []; };
@@ -237,6 +247,9 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                             <div class="min-w-0 flex-1">
                                 <div class="flex flex-wrap items-center gap-2"><span class="tracking-wider text-amber-500" :aria-label="`${review.rating} 星`">{{ stars(review.rating) }}</span><span class="rounded-full px-2.5 py-1 text-[12px] font-semibold" :class="statusClass(review.status)">{{ statusLabel(review.status) }}</span><span v-if="review.featured" class="rounded-full bg-violet-50 px-2.5 py-1 text-[12px] font-semibold text-violet-700">精选</span><span v-if="review.verified_source !== 'none'" class="rounded-full bg-blue-50 px-2.5 py-1 text-[12px] font-semibold text-blue-700">已验证来源</span><span v-if="review.incentivized" class="rounded-full bg-orange-50 px-2.5 py-1 text-[12px] font-semibold text-orange-700">激励评价</span></div>
                                 <h3 v-if="review.title" class="mt-3 font-semibold text-slate-950">{{ review.title }}</h3><p class="mt-2 whitespace-pre-wrap leading-6 text-slate-700">{{ review.body }}</p>
+                                <dl v-if="review.form_answers?.length" class="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
+                                    <div v-for="answer in review.form_answers" :key="answer.question_id" class="min-w-0"><dt class="flex flex-wrap items-center gap-2 font-semibold text-slate-700">{{ answer.label }}<span v-if="!answer.public" class="rounded-full bg-slate-200 px-2 py-0.5 text-[12px] font-semibold text-slate-600">仅内部可见</span></dt><dd class="mt-1 break-words text-slate-600">{{ Array.isArray(answer.value) ? answer.value.join('、') : answer.value }}</dd></div>
+                                </dl>
                                 <div v-if="review.media?.length" class="mt-4 flex flex-wrap gap-2"><button v-for="(media, index) in review.media" :key="media.uuid" type="button" class="size-20 overflow-hidden rounded-xl border border-slate-200 bg-slate-100" :aria-label="`查看媒体 ${index + 1}`" @click="showMedia(review, index)"><img v-if="media.type.startsWith('image')" :src="media.url" alt="" class="h-full w-full object-cover" /><span v-else class="flex h-full items-center justify-center text-[12px] font-semibold">查看视频</span></button></div>
                                 <div v-if="review.reply" class="mt-4 rounded-xl bg-slate-50 p-4"><p class="font-semibold text-slate-900">商家回复</p><p class="mt-1 whitespace-pre-wrap text-slate-600">{{ review.reply }}</p></div>
                                 <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-slate-500"><span>{{ review.author_name }}</span><span>{{ review.kind === 'product' ? (review.product_title || '商品评价') : '店铺评价' }}</span><span>{{ formatDate(review.created_at) }}</span><button v-if="canManage" type="button" class="font-semibold text-violet-700" @click="openEditor(review)">审核与回复</button></div>
@@ -253,6 +266,8 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                     <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2"><div class="border-b border-slate-200 px-5 py-4"><h2 class="text-lg font-semibold text-slate-950">邀请记录</h2></div><div v-if="!invitations.data.length" class="px-6 py-16 text-center text-slate-500">还没有邀请记录。</div><div v-for="invitation in invitations.data" :key="invitation.uuid" class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 last:border-0"><div><p class="font-semibold text-slate-950">订单 #{{ invitation.order_id }}</p><p class="mt-1 text-slate-500">{{ invitation.sent_at ? `发送于 ${formatDate(invitation.sent_at)}` : invitation.due_at ? `计划于 ${formatDate(invitation.due_at)}` : `创建于 ${formatDate(invitation.created_at)}` }}</p><p v-if="invitation.error_code" class="mt-1 text-[12px] text-slate-500">条件代码：{{ invitation.error_code }}</p></div><div class="flex items-center gap-3"><span class="rounded-full px-2.5 py-1 text-[12px] font-semibold" :class="statusClass(invitation.status || 'verification_required')">{{ statusLabel(invitation.status || 'verification_required') }}</span><button v-if="canManage && !['cancelled', 'completed', 'unsubscribed'].includes(invitation.status || '')" type="button" class="font-semibold text-red-700" @click="cancelInvitation(invitation)">取消</button></div></div><div v-if="invitations.last_page > 1" class="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button :disabled="invitations.current_page <= 1" class="rounded-lg border px-4 py-2 disabled:opacity-40" @click="goPage(invitations.current_page - 1, 'invitations')">上一页</button><span>{{ invitations.current_page }} / {{ invitations.last_page }}</span><button :disabled="invitations.current_page >= invitations.last_page" class="rounded-lg border px-4 py-2 disabled:opacity-40" @click="goPage(invitations.current_page + 1, 'invitations')">下一页</button></div></section>
                 </section>
             </template>
+
+            <ReviewFormEditor v-else-if="tab === 'form'" :base-url="baseUrl" :can-manage="canManage" :products="products" :form-config="formConfig" @dirty="formEditorDirty = $event" @saved="notice = '评价表单已保存。'" />
 
             <form v-else-if="tab === 'settings'" class="space-y-5" @submit.prevent="saveSettings">
                 <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-wrap items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-950">收集与发布</h2><p class="mt-2 text-slate-500">控制评价展示和购买后邀请节奏。</p></div><label class="flex items-center gap-2 font-semibold"><input v-model="settingsForm.enabled" :disabled="!canManage" type="checkbox" />启用公开评价展示</label></div><div class="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4"><label class="font-medium">自动发布等待天数<input v-model.number="settingsForm.auto_publish_days" :disabled="!canManage" type="number" min="0" placeholder="留空为手动审核" class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">国内订单延迟天数<input v-model.number="settingsForm.domestic_delay_days" :disabled="!canManage" type="number" min="0" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">国际订单延迟天数<input v-model.number="settingsForm.international_delay_days" :disabled="!canManage" type="number" min="0" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">提醒间隔天数<input v-model.number="settingsForm.reminder_days" :disabled="!canManage" type="number" min="0" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label></div><div class="mt-5 flex flex-wrap gap-5"><label class="flex items-center gap-2"><input v-model="settingsForm.invites_enabled" :disabled="!canManage" type="checkbox" />启用邀请排期</label><label class="flex items-center gap-2"><input v-model="settingsForm.marketing_only" :disabled="!canManage" type="checkbox" />仅邀请允许接收营销邮件的客户</label></div></section>

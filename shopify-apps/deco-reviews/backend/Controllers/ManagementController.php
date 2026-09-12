@@ -8,6 +8,7 @@ use App\Models\Store;
 use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Media;
+use DecoReviews\Services\FormService;
 use DecoReviews\Services\ImportService;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewService;
@@ -28,7 +29,7 @@ class ManagementController
     public function index(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets', 'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished', 'rating' => 'nullable|integer|between:1,5', 'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
+        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form', 'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished', 'rating' => 'nullable|integer|between:1,5', 'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
         $settings = $this->reviews->settings($store);
         $rows = $this->reviews->filtered($store, $filters)->with(['product', 'media'])->paginate(15)->withQueryString();
         $rows->through(fn ($review) => $this->reviews->serialize($review, $store, true, $settings));
@@ -46,6 +47,7 @@ class ManagementController
                 'media' => $this->reviews->scoped($store)->whereHas('media')->count(), 'invites_sent' => Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->whereNotNull('sent_at')->count()],
             'products' => Product::where('organization_id', $organization->id)->where('store_id', $store->id)->orderBy('title')->limit(500)->get(['id', 'title']),
             'settings' => $settings,
+            'formConfig' => app(FormService::class)->configuration($store),
             'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
                 ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
         ]);

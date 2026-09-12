@@ -128,9 +128,11 @@ class ReviewService
         $fingerprint = hash('sha256', json_encode([$data['kind'], $data['product_id'], Str::lower(trim($data['author_email'] ?? $data['author_name'])), $data['rating'], trim($data['body'])]));
         $paths = [];
         try {
-            return DB::transaction(function () use ($store, $data, $trusted, $user, $files, $fingerprint, &$paths) {
+            return DB::transaction(function () use ($store, $input, $data, $trusted, $user, $files, $fingerprint, &$paths) {
                 // Serialize inserts and import deduplication for this store.
                 Store::query()->whereKey($store->id)->lockForUpdate()->firstOrFail();
+                $answers = ($trusted['source'] ?? '') === 'email'
+                    ? app(FormService::class)->snapshot($store, $data['kind'], $data['product_id'], $input, $files) : [];
                 if ($existing = $this->scoped($store)->where('fingerprint', $fingerprint)->first()) {
                     return $existing;
                 }
@@ -147,6 +149,7 @@ class ReviewService
                     'reviewed_at' => $trusted['reviewed_at'] ?? now(), 'source' => $trusted['source'] ?? 'merchant',
                     'verified_source' => $trusted['verified_source'] ?? 'none', 'order_id' => $trusted['order_id'] ?? null,
                     'import_id' => $trusted['import_id'] ?? null,
+                    'form_answers' => $answers,
                 ]));
                 foreach ($files as $file) {
                     $uuid = (string) Str::uuid();
@@ -229,9 +232,12 @@ class ReviewService
             'author_name' => $name, 'rating' => $review->rating, 'title' => $review->title, 'body' => $review->body,
             'reply' => $review->reply, 'source' => $review->source, 'verified_source' => $review->verified_source,
             'incentivized' => $review->incentivized, 'created_at' => $review->reviewed_at->toIso8601String(),
+            'answers' => collect($review->form_answers ?? [])->filter(fn ($answer) => ($answer['public'] ?? false) === true)
+                ->map(fn ($answer) => ['label' => $answer['label'], 'value' => $answer['value']])->values()->all(),
             'media' => $review->media->map(fn ($media) => ['uuid' => $media->uuid, 'type' => $media->type,
                 'url' => ($private || $preview) ? route('deco-reviews.media', [$store->organization_id, $store->id, $media->uuid]) : route('deco-reviews.public-media', [$media->uuid])])->values()->all()];
         if ($private) {
+            $data['form_answers'] = $review->form_answers ?? [];
             $data += ['author_email' => $review->author_email, 'product_id' => $review->product_id, 'status' => $review->status,
                 'featured' => $review->featured, 'published_at' => $review->published_at?->toIso8601String(), 'reason' => $review->reason];
         }

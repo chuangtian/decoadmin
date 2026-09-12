@@ -1,6 +1,7 @@
 <?php
 
 use DecoReviews\Controllers\AppController;
+use DecoReviews\Controllers\FormController;
 use DecoReviews\Controllers\ManagementController;
 use DecoReviews\Controllers\StorefrontController;
 use Illuminate\Support\Facades\Route;
@@ -16,12 +17,14 @@ Route::prefix('/organizations/{organization}/stores/{store}/deco-reviews')
         Route::get('/preview', [ManagementController::class, 'preview'])->name('deco-reviews.preview');
         Route::get('/widget-preview', [ManagementController::class, 'widget'])->name('deco-reviews.widget-preview');
         Route::get('/export', [ManagementController::class, 'export'])->middleware('throttle:10,1');
+        Route::get('/form-preview', [FormController::class, 'preview'])->name('deco-reviews.form-preview');
         Route::get('/media/{media}', [ManagementController::class, 'media'])->whereUuid('media')->name('deco-reviews.media');
         Route::middleware(['permission:products.update', 'throttle:30,1'])->group(function () {
             Route::post('/reviews', [ManagementController::class, 'create']);
             Route::post('/reviews/bulk', [ManagementController::class, 'bulk']);
             Route::patch('/reviews/{review}', [ManagementController::class, 'moderate'])->whereUuid('review');
             Route::put('/settings', [ManagementController::class, 'settings']);
+            Route::put('/form', [FormController::class, 'save']);
             Route::post('/invitations', [ManagementController::class, 'invitations']);
             Route::post('/invitations/{invitation}/cancel', [ManagementController::class, 'cancel'])->whereUuid('invitation');
             Route::post('/imports', [ManagementController::class, 'import']);

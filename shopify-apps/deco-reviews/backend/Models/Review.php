@@ -13,11 +13,11 @@ class Review extends Model
 
     protected $guarded = ['id'];
 
-    protected $hidden = ['author_email', 'email_hash', 'fingerprint'];
+    protected $hidden = ['author_email', 'email_hash', 'fingerprint', 'form_answers'];
 
     protected function casts(): array
     {
-        return ['author_email' => 'encrypted', 'featured' => 'boolean', 'incentivized' => 'boolean',
+        return ['author_email' => 'encrypted', 'form_answers' => 'encrypted:array', 'featured' => 'boolean', 'incentivized' => 'boolean',
             'rating' => 'integer', 'publish_at' => 'datetime', 'published_at' => 'datetime', 'reviewed_at' => 'datetime'];
     }
 

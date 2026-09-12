@@ -77,6 +77,14 @@
     body.append(stars(root, review.rating));
     if (review.title) body.append(element("h3", "dr-card__title", review.title));
     body.append(element("p", "dr-card__text", review.body || ""));
+    if (Array.isArray(review.answers) && review.answers.length) {
+      const answers = element("dl", "dr-answers");
+      review.answers.forEach((answer) => {
+        if (!answer?.label || answer.value === undefined || answer.value === null) return;
+        answers.append(element("dt", "", answer.label), element("dd", "", Array.isArray(answer.value) ? answer.value.join(", ") : answer.value));
+      });
+      if (answers.childElementCount) body.append(answers);
+    }
     if (review.reply) {
       const reply = element("blockquote", "dr-reply");
       reply.append(element("strong", "", label(root, "reply", "Store reply")), element("p", "", review.reply));
@@ -242,13 +250,27 @@
       event.preventDefault();
       const formStatus = form.querySelector("[data-dr-form-status]");
       const submit = form.querySelector("button[type=submit]");
+      const missingGroup = [...form.querySelectorAll("[data-answer-multiple][data-required]")]
+        .find((group) => !group.querySelector("input:checked"));
+      if (missingGroup) {
+        const first = missingGroup.querySelector("input");
+        first.setCustomValidity(label(root, "requiredAnswer", "Choose at least one answer."));
+        first.reportValidity();
+        missingGroup.addEventListener("change", () => first.setCustomValidity(""), { once: true });
+        return;
+      }
+      if (root.dataset.formPreview === "true") {
+        formStatus.textContent = label(root, "previewMessage", "Preview only. No review was submitted or saved.");
+        return;
+      }
       formStatus.textContent = label(root, "submitting", "Submitting…");
       submit.disabled = true;
       try {
         const files = [...(form.elements.namedItem("media[]")?.files || [])];
         const videos = files.filter((file) => file.type.startsWith("video/"));
         const photos = files.filter((file) => file.type.startsWith("image/"));
-        if (files.length !== videos.length + photos.length || videos.length > 1 || (videos.length && files.length > 1) || photos.length > 5) {
+        if (files.length !== videos.length + photos.length || videos.length > 1 || (videos.length && files.length > 1) || photos.length > 5
+          || (videos.length && root.dataset.allowVideo !== "true") || (photos.length && root.dataset.allowPhotos !== "true")) {
           throw new Error(label(root, "mediaError", "Upload up to 5 photos or 1 video."));
         }
         const response = await fetch(form.action, { method: "POST", headers: { Accept: "application/json", "X-CSRF-TOKEN": root.dataset.csrf || "" }, body: new FormData(form) });
