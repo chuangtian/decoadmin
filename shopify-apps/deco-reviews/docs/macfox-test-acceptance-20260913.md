@@ -68,3 +68,29 @@
 - Added mixed-media rejection and partial-upload rollback tests. Full backend suite before the final two media tests: 41 tests / 258 assertions. Updated targeted suites: invitation automation 6 tests / 69 assertions; review lifecycle 17 tests / 67 assertions. Frontend runtime: 8 tests passed.
 - Type-check, typography, asset build and production frontend build passed. Vite restarted and ready at port 5173; manifest exists. Shopify test configuration valid.
 - Live pending-media viewer displays the re-encoded synthetic PNG; Escape closes it and restores focus to the original media button. Publishing is prepared but not saved, pending action-time confirmation.
+
+## Follow-up test release
+
+- Deployed exact `origin/test` commit `224ece1eb4fd592ff8c7b0c7bdc8d9e6b8ee86b5` from a clean archive. Backup: `/opt/decoadmin/backups/deco-reviews-form-224ece1eb4fd592ff8c7b0c7bdc8d9e6b8ee86b5`. No new migrations.
+- Health (application/database/Redis) and Horizon passed. Runtime InvitationDelivery, storefront source and plain-text template hashes match the exported source. Production container IDs remain unchanged. Global automated sending is disabled.
+- Shopify test version `deco-reviews-fixes-20260913-224ece1`, ID `1126721388545`, released without scope changes or theme publication.
+- Final combined backend suite: 43 tests / 267 assertions passed. Frontend runtime: 8 tests passed. Type-check, typography, production build, Vite readiness and Shopify config/theme checks passed.
+- Publishing the synthetic review remains unsaved until the outstanding action-time confirmation. This release does not constitute full Loox parity or full video/reminder/channel acceptance.
+
+## Confirmed publication acceptance
+
+- Following the user's action-time confirmation, saved review `6` as published. Management showed “评价已更新” and it disappeared from the pending filter.
+- Public widget preview shows five published reviews, average 3.4, with the three-star DEMO first. It shows the order verification disclosure and an abbreviated author name. The private `Neutral` answer is absent.
+- Opened the published synthetic image and visually verified its decoded content in the public widget viewer.
+- Shopify Horizon draft `164659659000` in macfox-test-app renders the same five reviews / 3.4 average through its actual App Proxy, including the synthetic image, DEMO text and order verification disclosure. The theme remains labelled draft and Save is disabled; no theme publication or edits were performed.
+- This completes the single synthetic order → invitation → inbox → signed form → photo review → moderation → Shopify draft storefront lifecycle only. It does not complete remaining video, live-reminder, reward, referral, widget-parity or channel-integration work.
+
+## Video follow-up in progress
+
+- Generated a three-second 320x180 synthetic color-bar MP4, without audio or personal content. SHA-256 `9dbcdca967eb8f81c719ac97644becdaad97627bd10c3a9d3462c0c57b51eb98`.
+- Scoped acceptance runner created review `7` (`48fd1cc6-a725-4986-8e72-fa3b382a7fe7`) only in Store 1, with one video, pending status and no auto-publish time. This uses the same creation service, not the signed buyer browser upload; do not conflate the two.
+- Local, not-yet-deployed media responses now use binary-file delivery for byte ranges. Regression verifies private preview ranges, published ranges and rejection after withdrawal; existing authorization remains before file delivery.
+- Live video playback remains unverified: Chrome reported it had been changed externally, and the dedicated browser provider failed to load its request-header policy. Do not read an unconfirmed foreground page or call this playback accepted.
+- After the user restored the intended page, Chrome loaded review 7's private video preview and played the synthetic animation to 0:03/0:03. Screenshot and player time confirmed completion. Initial buffering text cleared after load; do not treat it as a proven playback failure.
+- Publishing this synthetic video is prepared but unsaved, pending separate action-time confirmation. The earlier photo-publication confirmation is not reused for this video.
+- Combined backend regression for range support: 44 tests / 280 assertions passed. The small video's existing full-download playback does not itself prove range support; the new 206/416 regression covers the response behavior.

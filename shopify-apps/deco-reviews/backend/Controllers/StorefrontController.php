@@ -67,7 +67,10 @@ class StorefrontController
         abort_unless($this->reviews->settings($store)['enabled'] && $asset->review
             && $asset->review->status === 'published' && (int) $asset->review->organization_id === (int) $store->organization_id && (int) $asset->review->store_id === (int) $store->id, 404);
 
-        return Storage::disk('local')->response($asset->path, null, ['Content-Type' => $asset->mime, 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'no-store']);
+        abort_unless(Storage::disk('local')->exists($asset->path), 404);
+
+        // Binary responses support browser byte ranges for video seeking.
+        return response()->file(Storage::disk('local')->path($asset->path), ['Content-Type' => $asset->mime, 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'no-store']);
     }
 
     public function write(Request $request, string $invitation, InvitationService $invites)

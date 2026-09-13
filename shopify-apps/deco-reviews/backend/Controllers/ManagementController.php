@@ -168,6 +168,8 @@ class ManagementController
         $this->authorize($request, $organization, $store);
         $asset = Media::where('organization_id', $organization->id)->where('store_id', $store->id)->where('uuid', $media)->firstOrFail();
 
-        return Storage::disk('local')->response($asset->path, null, ['Content-Type' => $asset->mime, 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store']);
+        abort_unless(Storage::disk('local')->exists($asset->path), 404);
+
+        return response()->file(Storage::disk('local')->path($asset->path), ['Content-Type' => $asset->mime, 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store']);
     }
 }

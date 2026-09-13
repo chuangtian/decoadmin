@@ -389,6 +389,27 @@ class ReviewsTest extends TestCase
         $this->assertSame([], Storage::disk('local')->allFiles());
     }
 
+    public function test_media_byte_ranges_preserve_publication_and_private_authorization(): void
+    {
+        [$user, $organization, $store] = $this->context();
+        Settings::create(['organization_id' => $organization->id, 'store_id' => $store->id,
+            'values' => array_replace(config('deco_reviews.defaults'), ['enabled' => true])]);
+        $review = app(ReviewService::class)->create($store, $this->reviewInput($this->product($store)),
+            [UploadedFile::fake()->image('photo.png', 20, 20)], $user);
+        $media = $review->media()->firstOrFail();
+        $public = route('deco-reviews.public-media', [$media->uuid]);
+        $private = route('deco-reviews.media', [$organization->id, $store->id, $media->uuid]);
+        $this->get($public, ['Range' => 'bytes=0-9'])->assertNotFound();
+        $this->actingAs($user)->get($private, ['Range' => 'bytes=0-9'])
+            ->assertStatus(206)->assertHeader('Content-Length', '10')->assertHeader('X-Content-Type-Options', 'nosniff');
+        app(ReviewService::class)->moderate($store, $user, [$review->uuid], ['status' => 'published']);
+        $this->get($public, ['Range' => 'bytes=0-9'])->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 0-9/'.$media->size)->assertHeader('Content-Length', '10');
+        $this->get($public, ['Range' => 'bytes=99999999-999999999'])->assertStatus(416);
+        app(ReviewService::class)->moderate($store, $user, [$review->uuid], ['status' => 'unpublished', 'reason' => 'QA withdrawal']);
+        $this->get($public, ['Range' => 'bytes=0-9'])->assertNotFound();
+    }
+
     public function test_invalid_later_image_rolls_back_review_and_already_stored_images(): void
     {
         [$user, , $store] = $this->context();
