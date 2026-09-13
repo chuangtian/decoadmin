@@ -246,8 +246,11 @@
     };
     root.querySelector("[data-dr-sort]")?.addEventListener("change", (event) => { state.sort = event.target.value; state.page = 1; load(); });
     root.querySelector("[data-dr-rating]")?.addEventListener("change", (event) => { state.rating = event.target.value; state.page = 1; load(); });
+    let submitting = false;
+    let submitted = false;
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (submitting || submitted) return;
       const formStatus = form.querySelector("[data-dr-form-status]");
       const submit = form.querySelector("button[type=submit]");
       const missingGroup = [...form.querySelectorAll("[data-answer-multiple][data-required]")]
@@ -264,6 +267,7 @@
         return;
       }
       formStatus.textContent = label(root, "submitting", "Submitting…");
+      submitting = true;
       submit.disabled = true;
       try {
         const files = [...(form.elements.namedItem("media[]")?.files || [])];
@@ -280,11 +284,15 @@
           throw new Error(errors || label(root, "validationError", "Please review the form and try again."));
         }
         form.reset();
+        submitted = true;
         formStatus.textContent = label(root, "thanks", "Thank you. Your review was submitted for moderation.");
+        formStatus.setAttribute("tabindex", "-1");
+        formStatus.focus();
       } catch (error) {
         formStatus.textContent = error.message || label(root, "error", "Something went wrong.");
       } finally {
-        submit.disabled = false;
+        submitting = false;
+        submit.disabled = submitted;
       }
     });
     mounted.set(root, { destroy: () => controller?.abort() });

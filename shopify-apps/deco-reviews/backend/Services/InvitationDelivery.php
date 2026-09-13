@@ -44,7 +44,10 @@ class InvitationDelivery
         $kind = $state === 'sending_reminder' ? 'reminder' : 'initial';
         $content = app(InvitationEmail::class)->content($store, $invite, $kind);
         // SMTP result uncertainty is held by the caller, never silently retried.
-        $sent = Mail::send('deco-reviews::emails.invitation', $content, function ($message) use ($invite, $settings, $content, $kind) {
+        $sent = Mail::send(['html' => 'deco-reviews::emails.invitation', 'text' => 'deco-reviews::emails.invitation-text'], $content, function ($message) use ($invite, $settings, $content, $kind) {
+            // Preserve the authorized SMTP address, but never inherit another app's display name.
+            $senderName = trim(str_replace(["\r", "\n"], ' ', $content['storeName'])).' Reviews';
+            $message->from(config('mail.from.address'), $senderName);
             $message->to($invite->email)->subject($content['subject']);
             if ($settings['reply_to']) {
                 $message->replyTo($settings['reply_to']);

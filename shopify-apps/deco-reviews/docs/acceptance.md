@@ -2,6 +2,8 @@
 
 Updated: 2026-09-13
 
+Current authorization overrides the historical Macfox Bike draft examples below: all further live acceptance targets only **macfox-test-app**, test backend Organization 1 / Store 1. Its Horizon draft is `164659659000`; never publish a theme or operate Macfox Bike. Allow-listed synthetic-order invitation tests to the user-authorized internal recipient are permitted. Historical blanket prohibitions below still apply to real stores/recipients and do not narrow this explicitly approved test scope. See `macfox-test-acceptance-20260913.md` for actual results; this older matrix is not proof that a listed pending case has passed.
+
 This document tracks the standalone `deco-reviews` Shopify app against the read-only Loox audit. It is an engineering checklist, not a claim of full feature parity or a reduction of the requested scope.
 
 ## Status legend

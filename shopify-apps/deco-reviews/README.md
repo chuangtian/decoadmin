@@ -22,7 +22,7 @@ Not yet complete: all 17 Loox widgets and editors, public organic review collect
 - User-authorized theme: Macfox Bike draft **Macfox 学生折扣app 调试**, ID **192562692461**. Never publish this theme or modify the active theme.
 - Current acceptance target (2026-09-13): only Shopify **macfox-test-app.myshopify.com**, mapped to test-backend store **#1**. The user explicitly authorized installation and testing in this store. Do not perform further Macfox Bike theme operations under this authorization. Use `testadmin.decomkt.com`, not local or production, for live acceptance.
 - No real customer mail, live discount changes, or live order automation. Test environment defaults to sending disabled, empty store allowlist and empty recipient allowlist. The draft theme block cannot enable any automation.
-- Current test installation scopes are only `read_products,write_app_proxy`. Order/customer read permissions are deliberately not requested while exercising only the theme. Invitation verification will fail closed without the separately approved scopes.
+- Current test installation scopes are `read_products,read_orders,read_customers,write_app_proxy`. The user approved the order/customer read upgrade for invitation acceptance in macfox-test-app. Other environments and app identities are unchanged.
 - Credentials stay in ignored `.env.test` / server environment files. Never print them or add them to source.
 
 ## Development and validation
@@ -49,6 +49,7 @@ For the backend test image, build from the exact clean Git export with `-f shopi
 - Image uploads are decoded within a 12-million-pixel bound and re-encoded to WebP to remove metadata. Videos remain pending and are not auto-published; codec/transcoding workflows remain on the acceptance backlog.
 - `deco-reviews:publish` runs every five minutes in batches of 500. It uses the policy captured when a review was created, equally for all star ratings.
 - `deco-reviews:dispatch` verifies a bounded batch, using existing `notifications` queue priority without changing Horizon configuration. Explicit environment/shop/recipient gates are required before SMTP is attempted. Uncertain delivery is held for inspection, not retried.
+- Automatic discovery is bounded to new paid orders after the server-owned activation timestamp. One-time reminders recheck fulfillment, suppression and completion; a completed invitation never sends a reminder. Initial and reminder messages have independent copy and preview routes. The full seven-message program remains pending.
 - Custom CSV columns: `product_handle,rating,author_name,body,reviewed_at`; optional `author_email,title`. Maximum 15 MB and 1,000 rows per batch. Imports never infer verified purchase from CSV assertions. Undo withdraws records rather than deleting audit history.
 - The local preview fixture command refuses non-local environments, only targets `macfox-test-app.myshopify.com`, and labels every row DEMO. It must not be run on staging or production.
 

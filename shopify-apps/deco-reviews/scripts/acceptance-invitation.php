@@ -33,8 +33,11 @@ if (! ctype_digit($externalId)) { throw new RuntimeException('Exact test Shopify
 $order = \App\Models\Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)
     ->where('shopify_order_id', $externalId)->where('email', $recipient)->firstOrFail();
 if ($mode === 'run') {
-    $remote = app(\DecoReviews\Services\ShopifyClient::class)->order($store, $externalId);
-    if (($remote['order']['test'] ?? null) !== true || strtolower($remote['order']['email'] ?? '') !== $recipient) {
+    $remote = app(\DecoReviews\Services\ShopifyClient::class)->query($store,
+        'query QATestOrderGuard($id: ID!) { order(id: $id) { test tags email totalPriceSet { shopMoney { amount } } } }', ['id' => 'gid://shopify/Order/'.$externalId]);
+    $synthetic = ($remote['order']['test'] ?? null) === true || (in_array('DECO_REVIEWS_QA', $remote['order']['tags'] ?? [], true)
+        && isset($remote['order']['totalPriceSet']['shopMoney']['amount']) && (float) $remote['order']['totalPriceSet']['shopMoney']['amount'] === 0.0);
+    if (! $synthetic || strtolower($remote['order']['email'] ?? '') !== $recipient) {
         throw new RuntimeException('Only the exact synthetic Shopify order and recipient are allowed.');
     }
     config(['deco_reviews.automation_stores' => [$store->shopify_domain], 'deco_reviews.recipient_allowlist' => [$recipient], 'deco_reviews.delivery_enabled' => true]);

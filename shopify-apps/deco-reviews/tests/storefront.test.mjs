@@ -14,6 +14,7 @@ class Node {
   get childElementCount() { return this.children.length; }
   querySelector() { return null; }
   querySelectorAll() { return []; }
+  focus() { this.focused = true; }
 }
 const content = node => [node.textContent, ...node.children.map(content)].join(' ');
 const source = fs.readFileSync(new URL('../frontend/storefront.js', import.meta.url), 'utf8');
@@ -48,3 +49,30 @@ test('saved-form preview cannot send a review request', async () => {
   assert.equal(requests, 0);
   assert.match(status.textContent, /No review was submitted or saved/);
 });
+
+for (const succeeds of [true, false]) {
+  test(`buyer form prevents parallel submits and ${succeeds ? 'locks after success' : 'permits retry after failure'}`, async () => {
+    const root = new Node(); const form = new Node(); const status = new Node(); const submit = new Node();
+    root.querySelector = key => key === '[data-dr-form]' ? form : null;
+    form.querySelector = key => key === '[data-dr-form-status]' ? status : submit;
+    form.elements = { namedItem: () => ({ files: [] }) };
+    form.reset = () => { form.wasReset = true; };
+    let requests = 0; let resolveRequest;
+    const document = { readyState: 'complete', querySelectorAll: () => [root], addEventListener() {} };
+    vm.runInNewContext(source, { document, URL, AbortController, Intl, FormData: class {}, location: { origin: 'https://example.test' },
+      fetch: () => { requests++; return new Promise(resolve => { resolveRequest = resolve; }); } });
+    const event = { preventDefault() {} };
+    const first = form.events.submit(event);
+    await form.events.submit(event);
+    assert.equal(requests, 1);
+    resolveRequest({ ok: succeeds, json: async () => ({ message: 'Validation failed' }) });
+    await first;
+    assert.equal(submit.disabled, succeeds);
+    assert.equal(Boolean(status.focused), succeeds);
+    assert.equal(Boolean(form.wasReset), succeeds);
+    const retry = form.events.submit(event);
+    assert.equal(requests, succeeds ? 1 : 2);
+    if (!succeeds) resolveRequest({ ok: false, json: async () => ({}) });
+    await retry;
+  });
+}

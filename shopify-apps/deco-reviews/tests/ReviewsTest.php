@@ -372,6 +372,41 @@ class ReviewsTest extends TestCase
         $this->assertSame('video', $review->media()->firstOrFail()->type);
     }
 
+    public function test_rejected_mixed_media_leaves_no_review_or_file(): void
+    {
+        [$user, , $store] = $this->context();
+        $input = $this->reviewInput($this->product($store));
+        try {
+            app(ReviewService::class)->create($store, $input, [
+                UploadedFile::fake()->image('photo.png', 20, 20),
+                UploadedFile::fake()->create('movie.mp4', 20, 'video/mp4'),
+            ], $user);
+            $this->fail('Mixed media must fail validation.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('media', $error->errors());
+        }
+        $this->assertSame(0, Review::count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_invalid_later_image_rolls_back_review_and_already_stored_images(): void
+    {
+        [$user, , $store] = $this->context();
+        $input = $this->reviewInput($this->product($store));
+        try {
+            app(ReviewService::class)->create($store, $input, [
+                UploadedFile::fake()->image('valid.png', 20, 20),
+                UploadedFile::fake()->create('invalid.png', 1, 'image/png'),
+            ], $user);
+            $this->fail('Invalid image bytes must fail validation.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('media', $error->errors());
+        }
+        $this->assertSame(0, Review::count());
+        $this->assertSame(0, \DecoReviews\Models\Media::count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
     public function test_authorized_preview_works_while_public_widget_is_disabled_and_never_exposes_email(): void
     {
         [$user, $organization, $store] = $this->context();

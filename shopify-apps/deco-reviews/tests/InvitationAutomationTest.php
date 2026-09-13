@@ -143,6 +143,30 @@ class InvitationAutomationTest extends TestCase
         return [$user, $organization, $store, $product];
     }
 
+    public function test_invitation_sender_is_store_branded_without_changing_shared_mail_settings(): void
+    {
+        $this->saveSettings(['invites_enabled' => true, 'reminders_enabled' => true]);
+        config(['mail.from.address' => 'sender@example.test', 'mail.from.name' => 'Student Discount']);
+        $order = $this->order($this->store, $this->product, 2999);
+        $invite = $this->invitation($order, 'sending');
+        $delivery = Mockery::mock(InvitationDelivery::class)->makePartial();
+        $delivery->shouldReceive('allowed')->twice()->andReturnTrue();
+        Mail::shouldReceive('send')->twice()->andReturnUsing(function ($view, $content, $callback) use ($invite) {
+            $this->assertSame(['html' => 'deco-reviews::emails.invitation', 'text' => 'deco-reviews::emails.invitation-text'], $view);
+            $email = new \Symfony\Component\Mime\Email;
+            $callback(new \Illuminate\Mail\Message($email));
+            $this->assertSame('sender@example.test', $email->getFrom()[0]->getAddress());
+            $this->assertSame('Safe Test Store Reviews', $email->getFrom()[0]->getName());
+            $this->assertSame($invite->email, $email->getTo()[0]->getAddress());
+            $this->assertSame('Student Discount', config('mail.from.name'));
+
+            return new \stdClass;
+        });
+        $this->assertTrue($delivery->send($this->store, $invite));
+        $invite->update(['status' => 'sending_reminder']);
+        $this->assertTrue($delivery->send($this->store, $invite));
+    }
+
     public function test_reminder_sends_once_and_completed_or_unsubscribed_invitations_never_send(): void
     {
         $this->saveSettings(['invites_enabled' => true, 'reminders_enabled' => true, 'reminder_days' => 7]);
