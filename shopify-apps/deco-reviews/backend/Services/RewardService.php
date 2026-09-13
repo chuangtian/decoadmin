@@ -4,12 +4,15 @@ namespace DecoReviews\Services;
 
 use App\Models\Order;
 use App\Models\Store;
+use App\Models\User;
 use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Reward;
+use DecoReviews\Models\RewardDelivery;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class RewardService
 {
@@ -112,19 +115,61 @@ class RewardService
             } catch (\Throwable) {
                 $discountId = null;
             }
-            Reward::where('organization_id', $organizationId)->where('store_id', $storeId)->whereKey($reward->id)
-                ->where('status', 'issuing')->update($discountId
-                    ? ['status' => 'issued', 'shopify_discount_id' => $discountId, 'issued_at' => now(), 'due_at' => null, 'error_code' => null]
-                    : ['status' => 'held', 'due_at' => null, 'error_code' => 'SHOPIFY_RESULT_REQUIRES_REVIEW']);
-            if ($discountId) {
+            DB::transaction(function () use ($store, $organizationId, $storeId, $reward, $discountId) {
+                $fresh = Reward::where('organization_id', $organizationId)->where('store_id', $storeId)->whereKey($reward->id)
+                    ->where('status', 'issuing')->lockForUpdate()->first();
+                if (! $fresh) {
+                    return;
+                }
+                if (! $discountId) {
+                    $fresh->update(['status' => 'held', 'due_at' => null, 'error_code' => 'SHOPIFY_RESULT_REQUIRES_REVIEW']);
+
+                    return;
+                }
+                $fresh->update(['status' => 'issued', 'shopify_discount_id' => $discountId, 'issued_at' => now(), 'due_at' => null, 'error_code' => null]);
                 Review::where('organization_id', $organizationId)->where('store_id', $storeId)
-                    ->whereKey($reward->review_id)->update(['incentivized' => true]);
-            }
+                    ->whereKey($fresh->review_id)->update(['incentivized' => true]);
+                app(RewardEmailService::class)->scheduleIssued($store, $fresh);
+            });
             app(ReviewService::class)->audit($store, null, $discountId ? 'reward.issued' : 'reward.held', $reward->review_id,
                 ['reward' => $reward->uuid, 'media_kind' => $reward->media_kind]);
         } finally {
             $lock->release();
         }
+    }
+
+    public function reconcileHeld(Store $store, User $user, string $uuid, string $conclusion): void
+    {
+        app(ReviewService::class)->authorize($user, $store, true);
+        if (! in_array($conclusion, ['created', 'not_created'], true)) {
+            throw ValidationException::withMessages(['conclusion' => '必须明确选择已创建或未创建。']);
+        }
+        DB::transaction(function () use ($store, $user, $uuid, $conclusion) {
+            Store::where('organization_id', $store->organization_id)->whereKey($store->id)->lockForUpdate()->firstOrFail();
+            $reward = Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->where('uuid', $uuid)->lockForUpdate()->first();
+            abort_unless($reward, 404);
+            if ($reward->status !== 'held') {
+                throw ValidationException::withMessages(['reward' => '只有待复核奖励可以记录人工结论。']);
+            }
+            if ($conclusion === 'created') {
+                if (! $reward->code || ! $reward->expires_at) {
+                    throw ValidationException::withMessages(['reward' => '奖励记录缺少创建时快照，不能确认已创建。']);
+                }
+                $reward->update(['status' => 'issued', 'issued_at' => now(), 'due_at' => null, 'error_code' => 'MANUALLY_CONFIRMED_CREATED']);
+                Review::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->whereKey($reward->review_id)->update(['incentivized' => true]);
+                app(RewardEmailService::class)->scheduleIssued($store, $reward);
+            } else {
+                $reward->update(['status' => 'failed', 'code' => null, 'code_hash' => null, 'shopify_discount_id' => null,
+                    'due_at' => null, 'error_code' => 'MANUALLY_CONFIRMED_NOT_CREATED']);
+                RewardDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->where('reward_id', $reward->id)->where('status', 'scheduled')
+                    ->update(['status' => 'cancelled', 'due_at' => null, 'error_code' => 'REWARD_NOT_CREATED']);
+            }
+            app(ReviewService::class)->audit($store, $user, 'reward.reconciled', $reward->review_id,
+                ['reward' => $reward->uuid, 'conclusion' => $conclusion]);
+        });
     }
 
     public function history(Store $store): array
@@ -134,24 +179,39 @@ class RewardService
         return Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
             ->select(['id', 'uuid', 'review_id', 'media_kind', 'discount_kind', 'value', 'currency', 'status', 'due_at',
                 'issued_at', 'expires_at', 'created_at', 'error_code'])
-            ->with(['review' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
-                ->select(['id', 'product_id', 'title'])->with(['product' => fn ($product) => $product
-                ->where('organization_id', $store->organization_id)->where('store_id', $store->id)->select(['id', 'title'])])])
-            ->latest('id')->limit(30)->get()->map(fn (Reward $reward) => [
-                'uuid' => $reward->uuid,
-                'media_kind' => $reward->media_kind,
-                'discount_kind' => $reward->discount_kind,
-                'value' => $reward->value,
-                'currency' => $reward->currency,
-                'status' => $reward->status,
-                'review_title' => $reward->review?->title,
-                'product_title' => $reward->review?->product?->title,
-                'due_at' => $reward->due_at?->toIso8601String(),
-                'issued_at' => $reward->issued_at?->toIso8601String(),
-                'expires_at' => $reward->expires_at?->toIso8601String(),
-                'created_at' => $reward->created_at->toIso8601String(),
-                'error_code' => $reward->error_code,
-            ])->all();
+            ->with(['deliveries' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->select(['id', 'reward_id', 'type', 'status', 'due_at', 'sent_at', 'error_code']),
+                'review' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->select(['id', 'product_id', 'title'])->with(['product' => fn ($product) => $product
+                    ->where('organization_id', $store->organization_id)->where('store_id', $store->id)->select(['id', 'title'])])])
+            ->latest('id')->limit(30)->get()->map(function (Reward $reward) {
+                $initial = $reward->deliveries->firstWhere('type', 'reward_issued');
+                $reminder = $reward->deliveries->firstWhere('type', 'reward_reminder');
+
+                return [
+                    'uuid' => $reward->uuid,
+                    'media_kind' => $reward->media_kind,
+                    'discount_kind' => $reward->discount_kind,
+                    'value' => $reward->value,
+                    'currency' => $reward->currency,
+                    'status' => $reward->status,
+                    'review_title' => $reward->review?->title,
+                    'product_title' => $reward->review?->product?->title,
+                    'due_at' => $reward->due_at?->toIso8601String(),
+                    'issued_at' => $reward->issued_at?->toIso8601String(),
+                    'expires_at' => $reward->expires_at?->toIso8601String(),
+                    'created_at' => $reward->created_at->toIso8601String(),
+                    'error_code' => $reward->error_code,
+                    'email_status' => $initial?->status,
+                    'email_due_at' => $initial?->due_at?->toIso8601String(),
+                    'email_sent_at' => $initial?->sent_at?->toIso8601String(),
+                    'email_error_code' => $initial?->error_code,
+                    'reminder_status' => $reminder?->status,
+                    'reminder_due_at' => $reminder?->due_at?->toIso8601String(),
+                    'reminder_sent_at' => $reminder?->sent_at?->toIso8601String(),
+                    'reminder_error_code' => $reminder?->error_code,
+                ];
+            })->all();
     }
 
     private function eligibleMediaKind(Store $store, ?Review $review, array $settings): ?string

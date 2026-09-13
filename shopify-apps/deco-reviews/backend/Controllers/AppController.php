@@ -6,6 +6,7 @@ use App\Models\Store;
 use DecoReviews\Models\Installation;
 use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Reward;
+use DecoReviews\Models\RewardDelivery;
 use DecoReviews\Models\Settings;
 use DecoReviews\Services\ShopifyClient;
 use Illuminate\Http\Request;
@@ -44,6 +45,8 @@ class AppController
                 Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereNotIn('status', ['completed', 'cancelled'])->update(['status' => 'cancelled', 'due_at' => null]);
                 Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('status', 'scheduled')
                     ->update(['status' => 'cancelled', 'due_at' => null]);
+                RewardDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('status', 'scheduled')
+                    ->update(['status' => 'cancelled', 'due_at' => null, 'error_code' => 'APP_UNINSTALLED']);
                 $settings = Settings::where('organization_id', $store->organization_id)->where('store_id', $store->id)->first();
                 if ($settings) {
                     $settings->update(['values' => array_replace($settings->values, ['enabled' => false, 'invites_enabled' => false, 'rewards_enabled' => false])]);

@@ -15,6 +15,7 @@ use DecoReviews\Services\InvitationEmail;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewEmail;
 use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\RewardEmail;
 use DecoReviews\Services\RewardService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -78,8 +79,12 @@ class ManagementController
     public function emailPreview(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $data = $request->validate(['kind' => 'nullable|in:initial,reminder,media_reminder,product_thank_you,store_thank_you,reply_notification']);
+        $data = $request->validate(['kind' => 'nullable|in:initial,reminder,media_reminder,product_thank_you,store_thank_you,reply_notification,reward_issued,reward_reminder']);
         $kind = $data['kind'] ?? 'initial';
+        if (in_array($kind, RewardEmail::TYPES, true)) {
+            return response()->view('deco-reviews::emails.reward', app(RewardEmail::class)->content($store, null, $kind))
+                ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        }
         if (in_array($kind, ReviewEmail::TYPES, true)) {
             return response()->view('deco-reviews::emails.review-message', app(ReviewEmail::class)->content($store, null, $kind))
                 ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
@@ -120,6 +125,15 @@ class ManagementController
         $this->reviews->saveSettings($store, $request->user(), $request->all());
 
         return back()->with('success', '设置已保存，仅影响后续新评价。');
+    }
+
+    public function reconcileReward(Request $request, Organization $organization, Store $store, string $reward, RewardService $rewards)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['conclusion' => 'required|in:created,not_created']);
+        $rewards->reconcileHeld($store, $request->user(), $reward, $values['conclusion']);
+
+        return back()->with('success', '人工核对结论已记录；系统没有重试 Shopify。');
     }
 
     public function invitations(Request $request, Organization $organization, Store $store, InvitationService $invites)

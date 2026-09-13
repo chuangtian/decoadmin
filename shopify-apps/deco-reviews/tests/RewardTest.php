@@ -12,8 +12,11 @@ use DecoReviews\Models\Installation;
 use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Reward;
+use DecoReviews\Models\RewardDelivery;
 use DecoReviews\Models\Settings;
 use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\RewardEmailDelivery;
+use DecoReviews\Services\RewardEmailService;
 use DecoReviews\Services\RewardService;
 use DecoReviews\Services\ShopifyClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,6 +25,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Mockery;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Tests\TestCase;
@@ -144,6 +148,165 @@ class RewardTest extends TestCase
         $this->assertSame(1, $issued->attempts);
         $this->assertNotSame($issued->code, $raw->code);
         $this->assertSame(hash('sha256', $issued->code), $raw->code_hash);
+        $delivery = RewardDelivery::where('reward_id', $reward->id)->where('type', 'reward_issued')->sole();
+        $this->assertSame('scheduled', $delivery->status);
+        $this->assertSame('buyer@example.test', $delivery->recipient);
+        $this->assertNotSame('buyer@example.test', DB::table('deco_review_reward_deliveries')->where('id', $delivery->id)->value('recipient'));
+    }
+
+    public function test_reward_email_and_reminder_each_send_once_after_confirmed_issue(): void
+    {
+        $this->settings(['reward_reminder_enabled' => true, 'reward_reminder_days' => 5]);
+        $reward = $this->issuedReward();
+        $service = app(RewardEmailService::class);
+        $initial = $service->scheduleIssued($this->store, $reward);
+        $this->assertSame($initial->id, $service->scheduleIssued($this->store, $reward)?->id);
+        config(['deco_reviews.automation_stores' => [$this->store->shopify_domain]]);
+        $delivery = Mockery::mock(RewardEmailDelivery::class);
+        $delivery->shouldReceive('cancellationCode')->once()->andReturnNull();
+        $delivery->shouldReceive('transportAllowed')->once()->andReturnTrue();
+        $delivery->shouldReceive('send')->once()->andReturnTrue();
+        $this->app->instance(RewardEmailDelivery::class, $delivery);
+
+        $service->process($this->organization->id, $this->store->id, $initial->uuid);
+        $service->process($this->organization->id, $this->store->id, $initial->uuid);
+
+        $this->assertSame('sent', $initial->fresh()->status);
+        $reminder = RewardDelivery::where('reward_id', $reward->id)->where('type', 'reward_reminder')->sole();
+        $this->assertSame($initial->fresh()->sent_at->copy()->addDays(5)->toIso8601String(), $reminder->due_at->toIso8601String());
+
+        $this->travel(5)->days();
+        $delivery = Mockery::mock(RewardEmailDelivery::class);
+        $delivery->shouldReceive('cancellationCode')->once()->andReturnNull();
+        $delivery->shouldReceive('transportAllowed')->once()->andReturnTrue();
+        $delivery->shouldReceive('send')->once()->andReturnTrue();
+        $this->app->instance(RewardEmailDelivery::class, $delivery);
+        $service->process($this->organization->id, $this->store->id, $reminder->uuid);
+        $service->process($this->organization->id, $this->store->id, $reminder->uuid);
+
+        $this->assertSame('sent', $reminder->fresh()->status);
+        $this->assertSame(2, RewardDelivery::where('reward_id', $reward->id)->count());
+    }
+
+    public function test_uncertain_reward_email_is_held_without_reminder_or_retry(): void
+    {
+        $this->settings(['reward_reminder_enabled' => true, 'reward_reminder_days' => 5]);
+        $reward = $this->issuedReward();
+        $initial = app(RewardEmailService::class)->scheduleIssued($this->store, $reward);
+        config(['deco_reviews.automation_stores' => [$this->store->shopify_domain]]);
+        $delivery = Mockery::mock(RewardEmailDelivery::class);
+        $delivery->shouldReceive('cancellationCode')->once()->andReturnNull();
+        $delivery->shouldReceive('transportAllowed')->once()->andReturnTrue();
+        $delivery->shouldReceive('send')->once()->andReturnFalse();
+        $this->app->instance(RewardEmailDelivery::class, $delivery);
+
+        app(RewardEmailService::class)->process($this->organization->id, $this->store->id, $initial->uuid);
+        app(RewardEmailService::class)->process($this->organization->id, $this->store->id, $initial->uuid);
+
+        $this->assertSame('held', $initial->fresh()->status);
+        $this->assertSame('DELIVERY_RESULT_REQUIRES_REVIEW', $initial->fresh()->error_code);
+        $this->assertSame(1, $initial->fresh()->attempts);
+        $this->assertFalse(RewardDelivery::where('reward_id', $reward->id)->where('type', 'reward_reminder')->exists());
+    }
+
+    public function test_stale_reward_email_cleanup_is_limited_to_allowlisted_stores(): void
+    {
+        $localReward = $this->issuedReward(['body' => 'Local stale delivery']);
+        $localDelivery = app(RewardEmailService::class)->scheduleIssued($this->store, $localReward);
+        DB::table('deco_review_reward_deliveries')->where('id', $localDelivery->id)->update([
+            'status' => 'sending', 'attempts' => 1, 'updated_at' => now()->subMinutes(11),
+        ]);
+
+        $foreignOrganization = Organization::create(['name' => 'Foreign Delivery', 'code' => 'foreign-delivery-'.Str::lower(Str::random(6)), 'status' => 'active']);
+        $foreignStore = $foreignOrganization->stores()->create(['name' => 'Foreign Delivery', 'shopify_domain' => 'foreign-delivery.myshopify.com', 'status' => 'active']);
+        $foreignReview = Review::create(['uuid' => (string) Str::uuid(), 'organization_id' => $foreignOrganization->id, 'store_id' => $foreignStore->id,
+            'kind' => 'store', 'author_name' => 'Foreign', 'author_email' => 'foreign@example.test', 'rating' => 5, 'body' => 'Foreign delivery',
+            'status' => 'published', 'source' => 'email', 'verified_source' => 'none', 'reviewed_at' => now(),
+            'fingerprint' => hash('sha256', Str::uuid()->toString())]);
+        $foreignReward = Reward::create(['uuid' => (string) Str::uuid(), 'organization_id' => $foreignOrganization->id, 'store_id' => $foreignStore->id,
+            'review_id' => $foreignReview->id, 'media_kind' => 'photo', 'discount_kind' => 'percentage', 'value' => 10,
+            'expiration_days' => 30, 'code' => 'DECO-FOREIGN', 'code_hash' => hash('sha256', 'DECO-FOREIGN'),
+            'status' => 'issued', 'issued_at' => now(), 'expires_at' => now()->addDays(30)]);
+        $foreignDelivery = RewardDelivery::create(['uuid' => (string) Str::uuid(), 'organization_id' => $foreignOrganization->id,
+            'store_id' => $foreignStore->id, 'reward_id' => $foreignReward->id, 'type' => 'reward_issued',
+            'recipient' => 'foreign@example.test', 'recipient_hash' => hash('sha256', 'foreign@example.test'),
+            'dedupe_key' => hash('sha256', Str::uuid()->toString()), 'status' => 'sending', 'attempts' => 1]);
+        DB::table('deco_review_reward_deliveries')->where('id', $foreignDelivery->id)->update(['updated_at' => now()->subMinutes(11)]);
+
+        config(['deco_reviews.automation_stores' => [$this->store->shopify_domain]]);
+        $this->artisan('deco-reviews:dispatch-reward-emails')->assertSuccessful();
+
+        $this->assertSame('held', $localDelivery->fresh()->status);
+        $this->assertSame('DELIVERY_RESULT_REQUIRES_REVIEW', $localDelivery->fresh()->error_code);
+        $this->assertSame('sending', $foreignDelivery->fresh()->status);
+    }
+
+    public function test_expired_cancelled_and_disabled_rewards_do_not_send(): void
+    {
+        $reward = $this->issuedReward();
+        $initial = app(RewardEmailService::class)->scheduleIssued($this->store, $reward);
+        $reward->update(['expires_at' => now()->subMinute()]);
+        config(['deco_reviews.automation_stores' => [$this->store->shopify_domain]]);
+        app(RewardEmailService::class)->process($this->organization->id, $this->store->id, $initial->uuid);
+        $this->assertSame('cancelled', $initial->fresh()->status);
+        $this->assertSame('REWARD_EXPIRED', $initial->fresh()->error_code);
+
+        $disabledReward = $this->issuedReward(['body' => 'Disable delivery']);
+        $disabled = app(RewardEmailService::class)->scheduleIssued($this->store, $disabledReward);
+        app(ReviewService::class)->saveSettings($this->store, $this->user, $this->settingsInput(['rewards_enabled' => false]));
+        $this->assertSame('cancelled', $disabled->fresh()->status);
+        $this->assertSame('REWARDS_DISABLED', $disabled->fresh()->error_code);
+
+        $disabledReward->update(['status' => 'cancelled']);
+        $this->assertNull(app(RewardEmailService::class)->scheduleIssued($this->store, $disabledReward));
+    }
+
+    public function test_held_reconciliation_requires_explicit_scoped_admin_conclusion_and_never_retries_shopify(): void
+    {
+        $created = $this->heldReward();
+        $client = Mockery::mock(ShopifyClient::class);
+        $client->shouldNotReceive('createReviewReward');
+        $this->app->instance(ShopifyClient::class, $client);
+        app(RewardService::class)->reconcileHeld($this->store, $this->user, $created->uuid, 'created');
+        $this->assertSame('issued', $created->fresh()->status);
+        $this->assertSame('MANUALLY_CONFIRMED_CREATED', $created->fresh()->error_code);
+        $this->assertTrue(RewardDelivery::where('reward_id', $created->id)->where('type', 'reward_issued')->exists());
+
+        $notCreated = $this->heldReward(['body' => 'Confirmed absent']);
+        app(RewardService::class)->reconcileHeld($this->store, $this->user, $notCreated->uuid, 'not_created');
+        $this->assertSame('failed', $notCreated->fresh()->status);
+        $this->assertNull($notCreated->fresh()->code);
+        $this->assertSame('MANUALLY_CONFIRMED_NOT_CREATED', $notCreated->fresh()->error_code);
+
+        $viaEndpoint = $this->heldReward(['body' => 'Endpoint conclusion']);
+        $base = "/organizations/{$this->organization->id}/stores/{$this->store->id}/deco-reviews";
+        $this->actingAs($this->user)->post($base.'/rewards/'.$viaEndpoint->uuid.'/reconcile', ['conclusion' => 'created'])->assertRedirect();
+        $this->assertSame('issued', $viaEndpoint->fresh()->status);
+
+        $outsider = User::factory()->create(['email_verified_at' => now()]);
+        $blocked = $this->heldReward(['body' => 'Blocked reconciliation']);
+        $this->expectHttpStatus(403, fn () => app(RewardService::class)->reconcileHeld($this->store, $outsider, $blocked->uuid, 'created'));
+        $this->expectHttpStatus(404, fn () => app(RewardService::class)->reconcileHeld($this->store, $this->user, (string) Str::uuid(), 'created'));
+        $this->expectException(ValidationException::class);
+        app(RewardService::class)->reconcileHeld($this->store, $this->user, $blocked->uuid, 'unknown');
+    }
+
+    public function test_reward_previews_escape_copy_and_history_never_leaks_recipient_or_code(): void
+    {
+        $this->settings(['reward_issued_subject' => '<script>Issued</script>', 'reward_issued_body' => '<img src=x onerror=alert(1)>',
+            'reward_reminder_subject' => '<script>Reminder</script>']);
+        $base = "/organizations/{$this->organization->id}/stores/{$this->store->id}/deco-reviews/email-preview";
+        foreach (['reward_issued' => 'Issued', 'reward_reminder' => 'Reminder'] as $type => $marker) {
+            $response = $this->actingAs($this->user)->get($base.'?kind='.$type)->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+            $this->assertStringContainsString('&lt;script&gt;'.$marker.'&lt;/script&gt;', $response->getContent());
+            $this->assertStringNotContainsString('<script>'.$marker.'</script>', $response->getContent());
+        }
+        $reward = $this->issuedReward(['body' => 'Private history']);
+        app(RewardEmailService::class)->scheduleIssued($this->store, $reward);
+        $json = json_encode(app(RewardService::class)->history($this->store));
+        $this->assertStringNotContainsString('buyer@example.test', $json);
+        $this->assertStringNotContainsString($reward->code, $json);
+        $this->assertStringNotContainsString('recipient', $json);
     }
 
     public function test_uncertain_shopify_result_is_held_and_never_retried(): void
@@ -290,6 +453,45 @@ class RewardTest extends TestCase
         $this->assertSame(['all' => true], $shipping['destination']);
         $this->assertSame(['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false], $shipping['combinesWith']);
         Http::assertSentCount(3);
+    }
+
+    private function issuedReward(array $reviewReplace = []): Reward
+    {
+        $review = $this->review($reviewReplace);
+        $this->media($review, 'image');
+        $reward = app(RewardService::class)->schedule($this->store, $review);
+        $code = 'DECO-'.Str::upper(Str::random(16));
+        $reward->update([
+            'status' => 'issued', 'code' => $code, 'code_hash' => hash('sha256', $code),
+            'issued_at' => now(), 'expires_at' => now()->addDays(30), 'due_at' => null,
+        ]);
+
+        return $reward->fresh();
+    }
+
+    private function heldReward(array $reviewReplace = []): Reward
+    {
+        $review = $this->review($reviewReplace);
+        $this->media($review, 'image');
+        $reward = app(RewardService::class)->schedule($this->store, $review);
+        $code = 'DECO-'.Str::upper(Str::random(16));
+        $reward->update([
+            'status' => 'held', 'code' => $code, 'code_hash' => hash('sha256', $code),
+            'expires_at' => now()->addDays(30), 'due_at' => null, 'attempts' => 1,
+            'error_code' => 'SHOPIFY_RESULT_REQUIRES_REVIEW',
+        ]);
+
+        return $reward->fresh();
+    }
+
+    private function expectHttpStatus(int $status, callable $callback): void
+    {
+        try {
+            $callback();
+            $this->fail("Expected HTTP {$status}.");
+        } catch (HttpExceptionInterface $error) {
+            $this->assertSame($status, $error->getStatusCode());
+        }
     }
 
     private function settings(array $replace = []): void

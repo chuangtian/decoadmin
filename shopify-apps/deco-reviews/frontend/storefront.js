@@ -104,8 +104,8 @@
     return article;
   };
   const lightbox = (root, reviews) => {
-    const items = reviews.flatMap((review) => (Array.isArray(review.media) ? review.media : []).map((media) => ({ media, review })));
-    if (!items.length) return { open() {} };
+    const items = reviews.flatMap((review) => (Array.isArray(review.media) ? review.media : []).filter((media) => safeUrl(media.url)).map((media) => ({ media, review })));
+    if (!items.length) return { open() {}, destroy() {} };
     const dialog = element("dialog", "dr-lightbox");
     const close = element("button", "dr-lightbox__close", "×");
     close.type = "button";
@@ -125,19 +125,17 @@
       stage.replaceChildren();
       const item = items[current];
       const url = safeUrl(item.media.url);
+      const media = element(item.media.type === "video" ? "video" : "img");
+      media.src = url;
       if (item.media.type === "video") {
-        const video = element("video");
-        video.src = url;
-        video.controls = true;
-        video.autoplay = true;
-        video.setAttribute("playsinline", "");
-        stage.append(video);
+        media.controls = true;
+        media.autoplay = true;
+        media.setAttribute("playsinline", "");
       } else {
-        const image = element("img");
-        image.src = url;
-        image.alt = item.review.product_title || item.review.title || label(root, "reviewMedia", "Review media");
-        stage.append(image);
+        media.alt = item.review.product_title || item.review.title || label(root, "reviewMedia", "Review media");
       }
+      media.addEventListener("error", () => stage.replaceChildren(element("p", "dr-media-error", label(root, "mediaUnavailable", "This review media is unavailable."))));
+      stage.append(media);
       const caption = element("p", "dr-lightbox__caption", `${item.review.author_name || label(root, "anonymous", "Anonymous")} · ${current + 1}/${items.length}`);
       stage.append(caption);
     };
@@ -148,7 +146,8 @@
     dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
     dialog.addEventListener("keydown", (event) => {
       if (event.key === "ArrowLeft") move(-1);
-      if (event.key === "ArrowRight") move(1);
+      else if (event.key === "ArrowRight") move(1);
+      else if (event.key === "Escape") { event.stopPropagation(); dialog.close(); }
     });
     dialog.addEventListener("close", () => restoreFocus?.focus());
     return {
@@ -161,6 +160,7 @@
         dialog.showModal();
         close.focus();
       },
+      destroy() { dialog.remove(); },
     };
   };
   const renderSummary = (root, payload) => {
@@ -204,19 +204,76 @@
     globalThis.DecoReviewsOrganic?.render(root, payload);
   };
   const mount = (root) => {
-    const form = root.querySelector("[data-dr-form]");
     const hasFeed = Boolean(root.dataset.feedUrl);
-    if (mounted.has(root) || (!hasFeed && !form)) return;
+    if (mounted.has(root) || !hasFeed) return;
     const state = { page: 1, sort: "newest", rating: "", kind: root.dataset.kind || "product" };
     const list = root.querySelector("[data-dr-list]");
     const status = root.querySelector("[data-dr-status]");
+    const pagination = root.querySelector("[data-dr-pagination]");
+    const carousel = root.querySelector("[data-dr-carousel-controls]");
+    const carouselStatus = root.querySelector("[data-dr-carousel-status]");
+    const previousItem = root.querySelector("[data-dr-carousel-previous]");
+    const nextItem = root.querySelector("[data-dr-carousel-next]");
+    const on = (node, type, handler) => node?.addEventListener(type, handler);
     let controller = null;
-    let currentReviews = [];
     let viewer = null;
+    let itemIndex = 0;
+    const setStatus = (message) => {
+      if (!status) return;
+      status.replaceChildren(element("span", "", message));
+    };
+    const updateCarousel = () => {
+      const items = list ? [...list.children] : [];
+      const active = root.dataset.mode === "carousel" && items.length > 0;
+      if (carousel) carousel.hidden = !active;
+      if (!active) { list?.removeAttribute("tabindex"); return; }
+      itemIndex = Math.max(0, Math.min(itemIndex, items.length - 1));
+      list.setAttribute("tabindex", "0");
+      items.forEach((item) => item.setAttribute("tabindex", "-1"));
+      previousItem.disabled = itemIndex === 0;
+      nextItem.disabled = itemIndex === items.length - 1;
+      carouselStatus.textContent = label(root, "itemPosition", "Item {current} of {total}").replace("{current}", itemIndex + 1).replace("{total}", items.length);
+    };
+    const moveItem = (step) => {
+      const items = [...list.children];
+      itemIndex = Math.max(0, Math.min(itemIndex + step, items.length - 1));
+      const item = items[itemIndex];
+      item?.scrollIntoView({ behavior: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest", inline: "start" });
+      item?.focus({ preventScroll: true });
+      updateCarousel();
+    };
+    on(previousItem, "click", () => moveItem(-1));
+    on(nextItem, "click", () => moveItem(1));
+    on(list, "keydown", (event) => {
+      if (root.dataset.mode !== "carousel" || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      moveItem(event.key === "ArrowLeft" ? -1 : 1);
+    });
+    const openWidget = root.querySelector("[data-dr-open]");
+    const closeWidget = root.querySelector("[data-dr-close]");
+    const panel = root.querySelector("[data-dr-panel]");
+    const collapsible = ["sidebar", "floating"].includes(root.dataset.mode);
+    const setPanel = (open, restore = false) => {
+      if (!collapsible) return;
+      panel.hidden = !open;
+      openWidget.hidden = open;
+      openWidget.setAttribute("aria-expanded", String(open));
+      root.dataset.open = String(open);
+      if (open) closeWidget.focus();
+      else if (restore) openWidget.focus();
+    };
+    if (collapsible) {
+      closeWidget.hidden = false;
+      setPanel(false);
+      on(openWidget, "click", () => setPanel(true));
+      on(closeWidget, "click", () => setPanel(false, true));
+      on(root, "keydown", (event) => { if (event.key === "Escape" && root.dataset.open === "true") setPanel(false, true); });
+    }
     const load = async () => {
       controller?.abort();
       controller = new AbortController();
-      if (status) status.textContent = label(root, "loading", "Loading reviews…");
+      root.dataset.state = "loading";
+      setStatus(label(root, "loading", "Loading reviews…"));
       list?.setAttribute("aria-busy", "true");
       try {
         const url = new URL(root.dataset.feedUrl, location.origin);
@@ -228,7 +285,7 @@
         const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
         const payload = await response.json();
         if (!response.ok || !Array.isArray(payload.data)) throw new Error(payload.message || "Unavailable");
-        currentReviews = payload.data;
+        const reviews = payload.data;
         root.style.setProperty("--dr-star", payload.settings?.star_color || root.dataset.starColor || "#7c3aed");
         root.dataset.layout = payload.settings?.layout || root.dataset.layout || "grid";
         root.dataset.corner = payload.settings?.corner_style || "rounded";
@@ -236,30 +293,69 @@
         if (heading && payload.settings?.heading) heading.textContent = payload.settings.heading;
         renderSummary(root, payload);
         renderOrganicForm(root, payload);
+        let rendered = reviews.length;
         if (list) {
+          viewer?.destroy();
           list.replaceChildren();
-          viewer = lightbox(root, currentReviews);
-          currentReviews.forEach((review) => list.append(card(root, review, (mediaIndex, trigger) => viewer.open(review.uuid, mediaIndex, trigger))));
+          viewer = lightbox(root, reviews);
+          if (root.dataset.mode === "gallery") {
+            reviews.forEach((review) => (Array.isArray(review.media) ? review.media : []).forEach((media, index) => {
+              const button = mediaButton(root, media, review, index, (mediaIndex, trigger) => viewer.open(review.uuid, mediaIndex, trigger));
+              if (button) { button.className += " dr-media--gallery"; list.append(button); }
+            }));
+          } else {
+            reviews.filter((review) => root.dataset.mode !== "video" || review.media?.some((media) => media.type === "video" && safeUrl(media.url)))
+              .forEach((review) => list.append(card(root, review, (mediaIndex, trigger) => viewer.open(review.uuid, mediaIndex, trigger))));
+          }
+          rendered = list.childElementCount;
         }
+        itemIndex = 0;
+        updateCarousel();
         renderPager(root, payload.meta, state, load);
-        if (status) status.textContent = currentReviews.length ? "" : label(root, "empty", "No reviews yet.");
+        root.dataset.state = rendered ? "ready" : "empty";
+        setStatus(rendered ? "" : label(root, root.dataset.mode === "gallery" ? "mediaEmpty" : "empty", "No reviews yet."));
       } catch (error) {
-        if (error.name !== "AbortError" && status) status.textContent = label(root, "error", "Reviews are unavailable right now.");
+        if (error.name !== "AbortError") {
+          viewer?.destroy();
+          list?.replaceChildren();
+          pagination?.replaceChildren();
+          updateCarousel();
+          root.dataset.state = "error";
+          setStatus(label(root, "error", "Reviews are unavailable right now."));
+        }
       } finally {
         list?.removeAttribute("aria-busy");
       }
     };
-    root.querySelector("[data-dr-sort]")?.addEventListener("change", (event) => { state.sort = event.target.value; state.page = 1; load(); });
-    root.querySelector("[data-dr-rating]")?.addEventListener("change", (event) => { state.rating = event.target.value; state.page = 1; load(); });
+    on(root.querySelector("[data-dr-sort]"), "change", (event) => { state.sort = event.target.value; state.page = 1; load(); });
+    on(root.querySelector("[data-dr-rating]"), "change", (event) => { state.rating = event.target.value; state.page = 1; load(); });
+    mounted.set(root, { destroy: () => {
+      controller?.abort();
+      viewer?.destroy();
+      mounted.delete(root);
+    } });
+    if (hasFeed) load();
+  };
+  const scan = (scope = document) => scope.querySelectorAll("[data-deco-reviews]").forEach(mount);
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => scan(), { once: true }) : scan();
+  document.addEventListener("shopify:section:load", (event) => scan(event.target));
+  document.addEventListener("shopify:section:unload", (event) => event.target.querySelectorAll("[data-deco-reviews]").forEach((root) => mounted.get(root)?.destroy()));
+})();
+/* DECO_REVIEWS_FORM */
+(() => {
+  const mounted = new WeakSet();
+  const label = (root, key, fallback) => root.dataset[key] || fallback;
+  const mount = (root) => {
+    const form = root.querySelector("[data-dr-form]");
+    if (!form || mounted.has(form)) return;
     let submitting = false;
     let submitted = false;
-    form?.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (submitting || submitted) return;
       const formStatus = form.querySelector("[data-dr-form-status]");
       const submit = form.querySelector("button[type=submit]");
-      const missingGroup = [...form.querySelectorAll("[data-answer-multiple][data-required]")]
-        .find((group) => !group.querySelector("input:checked"));
+      const missingGroup = [...form.querySelectorAll("[data-answer-multiple][data-required]")].find((group) => !group.querySelector("input:checked"));
       if (missingGroup) {
         const first = missingGroup.querySelector("input");
         first.setCustomValidity(label(root, "requiredAnswer", "Choose at least one answer."));
@@ -279,15 +375,10 @@
         const videos = files.filter((file) => file.type.startsWith("video/"));
         const photos = files.filter((file) => file.type.startsWith("image/"));
         if (files.length !== videos.length + photos.length || videos.length > 1 || (videos.length && files.length > 1) || photos.length > 5
-          || (videos.length && root.dataset.allowVideo !== "true") || (photos.length && root.dataset.allowPhotos !== "true")) {
-          throw new Error(label(root, "mediaError", "Upload up to 5 photos or 1 video."));
-        }
+          || (videos.length && root.dataset.allowVideo !== "true") || (photos.length && root.dataset.allowPhotos !== "true")) throw new Error(label(root, "mediaError", "Upload up to 5 photos or 1 video."));
         const response = await fetch(form.action, { method: "POST", headers: { Accept: "application/json", "X-CSRF-TOKEN": root.dataset.csrf || "" }, body: new FormData(form) });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const errors = payload.errors ? Object.values(payload.errors).flat().join(" ") : payload.message;
-          throw new Error(errors || label(root, "validationError", "Please review the form and try again."));
-        }
+        if (!response.ok) throw new Error((payload.errors ? Object.values(payload.errors).flat().join(" ") : payload.message) || label(root, "validationError", "Please review the form and try again."));
         form.reset();
         submitted = true;
         formStatus.textContent = payload.message || label(root, "thanks", "Thank you. Your review was submitted for moderation.");
@@ -300,11 +391,9 @@
         submit.disabled = submitted;
       }
     });
-    mounted.set(root, { destroy: () => controller?.abort() });
-    if (hasFeed) load();
+    mounted.add(form);
   };
   const scan = (scope = document) => scope.querySelectorAll("[data-deco-reviews]").forEach(mount);
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => scan(), { once: true }) : scan();
   document.addEventListener("shopify:section:load", (event) => scan(event.target));
-  document.addEventListener("shopify:section:unload", (event) => event.target.querySelectorAll("[data-deco-reviews]").forEach((root) => mounted.get(root)?.destroy()));
 })();

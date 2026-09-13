@@ -4,6 +4,7 @@ namespace DecoReviews\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Reward extends Model
 {
@@ -21,5 +22,10 @@ class Reward extends Model
     public function review(): BelongsTo
     {
         return $this->belongsTo(Review::class);
+    }
+
+    public function deliveries(): HasMany
+    {
+        return $this->hasMany(RewardDelivery::class);
     }
 }

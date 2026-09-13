@@ -12,6 +12,7 @@ use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Reward;
+use DecoReviews\Models\RewardDelivery;
 use DecoReviews\Models\Settings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +72,9 @@ class ReviewService
             'reward_discount_kind' => ['required', Rule::in(['percentage', 'fixed', 'free_shipping'])],
             'reward_value' => 'required_unless:reward_discount_kind,free_shipping|nullable|numeric|min:0.01|max:10000',
             'reward_currency' => 'required|string|size:3|uppercase', 'reward_expiration_days' => 'required|integer|min:1|max:365',
+            'reward_issued_subject' => 'required|string|max:160', 'reward_issued_body' => 'required|string|max:5000',
+            'reward_reminder_enabled' => 'required|boolean', 'reward_reminder_days' => 'required|integer|min:1|max:364',
+            'reward_reminder_subject' => 'required|string|max:160', 'reward_reminder_body' => 'required|string|max:5000',
             'auto_invites_enabled' => 'sometimes|boolean', 'reminders_enabled' => 'sometimes|boolean',
             'media_reminders_enabled' => 'required|boolean', 'media_reminder_days' => 'required|integer|min:1|max:90',
             'media_reminder_subject' => 'required|string|max:160', 'media_reminder_body' => 'required|string|max:5000',
@@ -85,6 +89,9 @@ class ReviewService
             }
             if ($values['reward_discount_kind'] === 'percentage' && (float) $values['reward_value'] > 100) {
                 throw ValidationException::withMessages(['reward_value' => '百分比奖励不能超过 100。']);
+            }
+            if ($values['reward_reminder_enabled'] && $values['reward_reminder_days'] >= $values['reward_expiration_days']) {
+                throw ValidationException::withMessages(['reward_reminder_days' => '奖励提醒必须早于优惠码到期日。']);
             }
             // Shopify fixed discounts use the shop currency; this value is server-owned.
             $values['reward_currency'] = strtoupper((string) $store->currency);
@@ -105,6 +112,14 @@ class ReviewService
                     $scheduledRewards->whereIn('media_kind', $disabledRewardMedia);
                 }
                 $scheduledRewards->update(['status' => 'cancelled', 'due_at' => null]);
+            }
+            if (! $values['rewards_enabled']) {
+                RewardDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->where('status', 'scheduled')->update(['status' => 'cancelled', 'due_at' => null, 'error_code' => 'REWARDS_DISABLED']);
+            } elseif (! $values['reward_reminder_enabled']) {
+                RewardDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->where('type', 'reward_reminder')->where('status', 'scheduled')
+                    ->update(['status' => 'cancelled', 'due_at' => null, 'error_code' => 'REWARD_REMINDER_DISABLED']);
             }
             $this->audit($store, $user, 'settings.updated');
         });

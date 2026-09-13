@@ -18,11 +18,13 @@ class ReviewsProvider extends ServiceProvider
         $this->loadViewsFrom(__DIR__.'/../views', 'deco-reviews');
         $this->loadRoutesFrom(__DIR__.'/../routes.php');
         if ($this->app->runningInConsole()) {
-            $this->commands([Commands\PublishReviews::class, Commands\DispatchInvitations::class, Commands\DispatchReviewEmails::class, Commands\DispatchRewards::class]);
+            $this->commands([Commands\PublishReviews::class, Commands\DispatchInvitations::class, Commands\DispatchReviewEmails::class,
+                Commands\DispatchRewards::class, Commands\DispatchRewardEmails::class]);
             $this->app->afterResolving(Schedule::class, fn (Schedule $schedule) => $schedule->command('deco-reviews:publish')->everyFiveMinutes()->withoutOverlapping(10));
             $this->app->afterResolving(Schedule::class, fn (Schedule $schedule) => $schedule->command('deco-reviews:dispatch')->everyFiveMinutes()->withoutOverlapping(10));
             $this->app->afterResolving(Schedule::class, fn (Schedule $schedule) => $schedule->command('deco-reviews:dispatch-emails')->everyFiveMinutes()->withoutOverlapping(10));
             $this->app->afterResolving(Schedule::class, fn (Schedule $schedule) => $schedule->command('deco-reviews:dispatch-rewards')->everyFiveMinutes()->withoutOverlapping(10));
+            $this->app->afterResolving(Schedule::class, fn (Schedule $schedule) => $schedule->command('deco-reviews:dispatch-reward-emails')->everyFiveMinutes()->withoutOverlapping(10));
         }
     }
 }
