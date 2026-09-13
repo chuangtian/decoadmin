@@ -12,17 +12,18 @@ Implemented: scoped DecoAdmin review management; product/store reviews; rating-n
 
 Form increment (released to test; not production): configurable buyer form copy, photo/video controls, up to ten single/multiple/scale questions, product/store targeting, mandatory answers, immutable encrypted answer snapshots, explicit public/private visibility, version conflict protection, and a non-submitting saved-form preview. This increment changes only files inside this app; it does not alter shared backend code or other apps.
 
-Not yet complete: all 17 Loox widgets and editors, general/store review links, collection-targeted questions and answer exports, product groups/bundles, reward discount issuance and its reminder, referrals, AI/Studio, review syndication and Merchant API/webhooks. No placeholder is presented as a working external integration.
+Reward increment (implemented locally, not released): an eligible published photo/video review from an order-verified email invitation can create one non-combinable, one-use Shopify percentage, fixed-amount, or free-shipping code. Records are store-scoped and idempotent, codes are encrypted and excluded from management history, Shopify writes require a separate fail-closed environment gate, and uncertain results are held without retry. This increment does not send the reward code to the reviewer and does not implement reward reminder email.
+
+Not yet complete: all 17 Loox widgets and editors, general/store review links, collection-targeted questions and answer exports, product groups/bundles, reward delivery/reminder email and manual held-result reconciliation, referrals, AI/Studio, review syndication and Merchant API/webhooks. No placeholder is presented as a working external integration.
 
 ## Safety and environments
 
 - Only the **test** identity is registered: client ID `a755a5ea264486246fd8836dab3e004c`.
 - Test backend: `https://testadmin.decomkt.com`; management `/organizations/{organization}/stores/{store}/deco-reviews`.
 - Local and production identities remain intentionally blank. Do not reuse test credentials or deploy their incomplete configurations.
-- User-authorized theme: Macfox Bike draft **Macfox 学生折扣app 调试**, ID **192562692461**. Never publish this theme or modify the active theme.
-- Current acceptance target (2026-09-13): only Shopify **macfox-test-app.myshopify.com**, mapped to test-backend store **#1**. The user explicitly authorized installation and testing in this store. Do not perform further Macfox Bike theme operations under this authorization. Use `testadmin.decomkt.com`, not local or production, for live acceptance.
+- Current acceptance target (2026-09-13): only Shopify **macfox-test-app.myshopify.com**, mapped to test-backend store **#1**, and its unpublished **Horizon** draft theme ID **164659659000**. Never publish the theme. Do not perform Macfox Bike theme operations under this authorization. Use `testadmin.decomkt.com`, not local or production, for live acceptance.
 - No real customer mail, live discount changes, or live order automation. Test environment defaults to sending disabled, empty store allowlist and empty recipient allowlist. The draft theme block cannot enable any automation.
-- Current test installation scopes are `read_products,read_orders,read_customers,write_app_proxy`. The user approved the order/customer read upgrade for invitation acceptance in macfox-test-app. Other environments and app identities are unchanged.
+- The test app configuration now requests `read_products,read_orders,read_customers,write_app_proxy,read_discounts,write_discounts`; an existing installation does not receive the added scopes until separately authorized. Local and production app configurations are unchanged.
 - Credentials stay in ignored `.env.test` / server environment files. Never print them or add them to source.
 
 ## Development and validation
@@ -51,6 +52,7 @@ For the backend test image, build from the exact clean Git export with `-f shopi
 - `deco-reviews:publish` runs every five minutes in batches of 500. It uses the policy captured when a review was created, equally for all star ratings.
 - `deco-reviews:dispatch` verifies a bounded batch, using existing `notifications` queue priority without changing Horizon configuration. Explicit environment/shop/recipient gates are required before SMTP is attempted. Uncertain delivery is held for inspection, not retried.
 - Automatic discovery is bounded to new paid orders after the server-owned activation timestamp. One-time reminders recheck fulfillment, suppression and completion; a completed invitation never sends a reminder. Initial and reminder messages have independent copy and preview routes. The full seven-message program remains pending.
+- `deco-reviews:dispatch-rewards` processes only explicitly allow-listed active stores when the independent `DECO_REVIEWS_<ENV>_REWARD_WRITES_ENABLED` gate is true. Eligibility is rechecked immediately before each Shopify mutation. Unpublished reviews or disabled reward/media settings cancel only still-scheduled records; an in-flight or uncertain mutation is held for manual reconciliation and is never blindly retried.
 - Custom CSV columns: `product_handle,rating,author_name,body,reviewed_at`; optional `author_email,title`. Maximum 15 MB and 1,000 rows per batch. Imports never infer verified purchase from CSV assertions. Undo withdraws records rather than deleting audit history.
 - The local preview fixture command refuses non-local environments, only targets `macfox-test-app.myshopify.com`, and labels every row DEMO. It must not be run on staging or production.
 

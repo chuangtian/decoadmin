@@ -2,7 +2,7 @@
 
 Updated: 2026-09-13
 
-Current authorization overrides the historical Macfox Bike draft examples below: all further live acceptance targets only **macfox-test-app**, test backend Organization 1 / Store 1. Its Horizon draft is `164659659000`; never publish a theme or operate Macfox Bike. Allow-listed synthetic-order invitation tests to the user-authorized internal recipient are permitted. Historical blanket prohibitions below still apply to real stores/recipients and do not narrow this explicitly approved test scope. See `macfox-test-acceptance-20260913.md` for actual results; this older matrix is not proof that a listed pending case has passed.
+All live acceptance targets only **macfox-test-app**, test backend Organization 1 / Store 1, and its unpublished Horizon draft theme `164659659000`; never publish a theme or operate Macfox Bike. Allow-listed synthetic-order invitation tests to the user-authorized internal recipient are permitted. Safety prohibitions below still apply to real stores/recipients and do not narrow this explicitly approved test scope. See `macfox-test-acceptance-20260913.md` for actual results; this matrix is not proof that a listed pending case has passed.
 
 This document tracks the standalone `deco-reviews` Shopify app against the read-only Loox audit. It is an engineering checklist, not a claim of full feature parity or a reduction of the requested scope.
 
@@ -17,8 +17,8 @@ This document tracks the standalone `deco-reviews` Shopify app against the read-
 
 ## Non-negotiable safety boundary
 
-- Never modify, publish, or activate the Macfox Bike live theme.
-- Shopify theme testing is limited to the unpublished draft theme named **`Macfox 学生折扣app 调试`**. Confirm the exact theme name and draft role before every operation. Never publish it.
+- Never modify, publish, or activate any Macfox Bike theme.
+- Shopify theme testing is limited to the **macfox-test-app** unpublished Horizon draft theme ID **`164659659000`**. Confirm the exact store, theme ID, and draft role before every operation. Never publish it.
 - Do not send email to real customers. Test delivery must remain disabled or restricted to an explicit internal allow-list with preview/simulation as the default.
 - Do not create, activate, update, or revoke real Shopify discounts.
 - Do not run live order-triggered invitation, reminder, reward, referral, or other automation.
@@ -85,14 +85,14 @@ The current shared renderer is a foundation only. None of the following should b
 ### Email program
 
 - Seven audited messages: initial request, request reminders, photo/video reminder, reward reminder, product-review thank-you, store-review thank-you, and public-reply notification.
-- Implemented in the current working batch: initial request, one request reminder, one later photo/video reminder, product/store thank-you, and public-reply notification. Each follow-up is independently configurable and idempotent; lifecycle recipients are encrypted; uncertain SMTP outcomes are held without blind retry. Reward issuance and the reward reminder remain pending.
+- Implemented in the current working batch: initial request, one request reminder, one later photo/video reminder, product/store thank-you, and public-reply notification. Each follow-up is independently configurable and idempotent; lifecycle recipients are encrypted; uncertain SMTP outcomes are held without blind retry. Discount-code issuance is implemented separately below, but reward delivery and reward reminder email remain pending.
 - Global email styling and per-message overrides, rich content, variables, footer, banner/logo/font/color/corners, localization, test rendering, and delivery audit.
 - First/reminder timing, delivery deferral, historical-order targeting, marketing versus transactional policy, Shopify-marketing unsubscribe interaction, notification recipients, and order-tag exclusion.
 
 ### Rewards and discounts
 
-- Separate photo/video rewards; percentage/fixed/free-shipping options where supported; individual one-use codes versus an existing code; expiration, collection scope, subscription/payment rules, source eligibility, and combination rules.
-- Idempotent issue/revoke/reconcile, refunds, duplicate claims, abuse controls, audit, and safe test simulation. No real discount writes are currently permitted.
+- Implemented locally, not released: separate photo/video switches; percentage, fixed-store-currency, and free-shipping discounts; one non-combinable, one-use code per eligible published order-verified email review; captured expiration; encrypted codes; scoped code-free management history; idempotent scheduling; and a separate fail-closed write gate. Eligibility is rechecked before the Shopify mutation, and uncertain results are held without retry.
+- Remaining: reward delivery/reminder email, collection scope, subscription/payment rules, existing-code mode, revoke and manual reconcile tooling, refund handling, broader abuse controls, and live test simulation. No real discount write was performed for this implementation.
 
 ### Review form, custom questions, groups, and bundles
 
@@ -128,13 +128,13 @@ The current shared renderer is a foundation only. None of the following should b
 ### Branding, localization, domains, plans, and installation
 
 - Logo handling, star icon variants, four audited corner styles, fonts, branding visibility, primary/multiple languages, translation workflow, external-domain allow-list, plan/usage enforcement, and safe theme-install guidance.
-- Theme installation must remain an explicit merchant action. Acceptance testing may target only `Macfox 学生折扣app 调试`, must confirm it is a draft, and must never publish it.
+- Theme installation must remain an explicit merchant action. Acceptance testing may target only macfox-test-app draft `164659659000`, must confirm it remains a draft, and must never publish it.
 
 ## Acceptance cases
 
 ### A. Safety gates
 
-1. Given any theme other than the draft named `Macfox 学生折扣app 调试`, when a test operation is requested, the operation fails before mutation and records no change.
+1. Given any store or theme other than macfox-test-app draft `164659659000`, when a test operation is requested, the operation fails before mutation and records no change.
 2. Given the authorized theme, the system verifies it is unpublished before every mutation; a published/live role fails closed.
 3. No workflow exposes a Publish theme action or changes the live theme assignment.
 4. Email transport defaults to disabled/preview. A non-allow-listed recipient can never reach a provider in test.
@@ -180,7 +180,7 @@ The current shared renderer is a foundation only. None of the following should b
 1. Product feed resolves only the current store's Shopify product ID; store feed never leaks product-scoped or other-store reviews.
 2. Newest, oldest, highest, lowest, rating filters, summary, histogram, featured ordering, and pagination produce stable results.
 3. Empty, loading, error, disabled, invalid-product, and last-page states are accessible and bounded.
-4. Grid, list, and mosaic layouts and every widget mode are verified at desktop and mobile sizes in the authorized draft theme only.
+4. Grid, list, and mosaic layouts and every widget mode are verified at desktop and mobile sizes in macfox-test-app draft `164659659000` only.
 5. Each of the 17 audited widgets receives an independent checklist before it can be marked equivalent; sharing a renderer is insufficient.
 
 ### G. Import/export
@@ -195,7 +195,7 @@ The current shared renderer is a foundation only. None of the following should b
 The following are not accepted until independently provided and verified:
 
 - A dedicated test Shopify app identity, correct minimum scopes, test installation, token exchange, app-proxy signature, webhook secret, callback URLs, and environment mapping.
-- Confirmation that `Macfox 学生折扣app 调试` exists and is an unpublished draft before any theme test.
+- Confirmation that macfox-test-app Horizon theme `164659659000` exists and is unpublished before any theme test.
 - An internal-recipient-only email provider configuration with verified sender, preview mode, idempotency, and bounce/complaint webhooks. This does not authorize sending.
 - A documented legal basis and consent policy for review requests, transactional versus marketing classification, retention, deletion, and unsubscribe behavior.
 - Media scanning/transcoding capability and storage lifecycle policy.
@@ -211,3 +211,11 @@ The following are not accepted until independently provided and verified:
 - Proof that email, discount, referral, and order automation remained disabled and that the live theme was untouched.
 - Sanitized screenshots or recordings from the authorized draft theme only, with no customer or credential data.
 - Known limitations, rollback steps, and the person approving any later expansion of test authority.
+
+## Reward increment validation (2026-09-13)
+
+- Deco Reviews automated suite: 67 tests, 441 assertions passed.
+- Full DecoAdmin Laravel suite completed successfully after the reward changes.
+- Vue type-check, interface typography audit, Shopify test configuration validation, Shopify App build, and production frontend build passed.
+- The independent reward-write master gate remains off; no Shopify discount was created by this validation.
+- The existing macfox-test-app installation still requires separate authorization before the newly requested discount scopes become active.

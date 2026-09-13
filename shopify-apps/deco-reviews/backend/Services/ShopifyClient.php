@@ -58,7 +58,7 @@ class ShopifyClient
         }
         try {
             $response = Http::acceptJson()->withHeaders(['X-Shopify-Access-Token' => $installation->access_token])->connectTimeout(5)->timeout(20)
-                ->post($url, ['query' => $query, 'variables' => (object) $variables]);
+                ->post($url, ['query' => $query, 'variables' => $variables]);
         } catch (\Throwable) {
             throw ValidationException::withMessages(['connection' => 'Shopify 暂不可用，未执行发送。']);
         }
@@ -74,5 +74,39 @@ class ShopifyClient
         $id = str_starts_with($externalId, 'gid://') ? $externalId : 'gid://shopify/Order/'.$externalId;
 
         return $this->query($store, file_get_contents(__DIR__.'/../graphql/order.graphql'), ['id' => $id]);
+    }
+
+    public function createReviewReward(Store $store, string $kind, string $code, string $title, float $value, string $currency, \DateTimeInterface $expiresAt): string
+    {
+        abort_unless(config('deco_reviews.reward_writes_enabled'), 503);
+        abort_unless(in_array($kind, ['percentage', 'fixed', 'free_shipping'], true), 422);
+        if (($kind === 'percentage' && ($value <= 0 || $value > 100)) || ($kind === 'fixed' && $value <= 0)) {
+            throw ValidationException::withMessages(['reward' => '奖励优惠值无效。']);
+        }
+        if ($kind === 'fixed' && strtoupper($currency) !== strtoupper((string) $store->currency)) {
+            throw ValidationException::withMessages(['reward' => '固定金额奖励必须使用店铺币种。']);
+        }
+        $common = ['title' => $title, 'code' => $code, 'startsAt' => now()->toIso8601String(), 'endsAt' => $expiresAt->format(DATE_ATOM),
+            'context' => ['all' => true], 'appliesOncePerCustomer' => true, 'usageLimit' => 1,
+            'combinesWith' => ['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false]];
+        if ($kind === 'free_shipping') {
+            $data = $this->query($store, file_get_contents(__DIR__.'/../graphql/reward-free-shipping.graphql'), [
+                'freeShippingCodeDiscount' => $common + ['destination' => ['all' => true]],
+            ]);
+            $payload = $data['discountCodeFreeShippingCreate'] ?? [];
+        } else {
+            $discount = $kind === 'percentage'
+                ? ['percentage' => round($value / 100, 4)]
+                : ['discountAmount' => ['amount' => number_format($value, 2, '.', ''), 'appliesOnEachItem' => false]];
+            $data = $this->query($store, file_get_contents(__DIR__.'/../graphql/reward-basic.graphql'), [
+                'basicCodeDiscount' => $common + ['customerGets' => ['value' => $discount, 'items' => ['all' => true]]],
+            ]);
+            $payload = $data['discountCodeBasicCreate'] ?? [];
+        }
+        if (! empty($payload['userErrors']) || ! is_string(data_get($payload, 'codeDiscountNode.id'))) {
+            throw ValidationException::withMessages(['reward' => 'Shopify 未接受奖励优惠码，未记录为已发放。']);
+        }
+
+        return $payload['codeDiscountNode']['id'];
     }
 }

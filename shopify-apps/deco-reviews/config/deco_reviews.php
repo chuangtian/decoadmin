@@ -8,6 +8,7 @@ return [
     'active' => ['client_id' => env($prefix.'CLIENT_ID', ''), 'client_secret' => env($prefix.'CLIENT_SECRET', ''), 'proxy_path' => '/apps/deco-reviews'],
     // Fail closed until sender configuration and consent policy have been verified per environment.
     'delivery_enabled' => (bool) env($prefix.'DELIVERY_ENABLED', false),
+    'reward_writes_enabled' => (bool) env($prefix.'REWARD_WRITES_ENABLED', false),
     'automation_stores' => array_filter(explode(',', (string) env($prefix.'AUTOMATION_STORES', ''))),
     'recipient_allowlist' => array_filter(explode(',', (string) env($prefix.'RECIPIENT_ALLOWLIST', ''))),
     'video' => [
@@ -33,6 +34,8 @@ return [
         'store_thank_you_body' => 'Thank you, {author}. Your {rating}-star store review has been received and will follow the store review policy.',
         'reply_notification_enabled' => false, 'reply_notification_subject' => '{store} replied to your review',
         'reply_notification_body' => "The store posted this public reply to your review of {product}:\n\n{reply}",
+        'rewards_enabled' => false, 'photo_reward_enabled' => false, 'video_reward_enabled' => false,
+        'reward_discount_kind' => 'percentage', 'reward_value' => 10, 'reward_currency' => 'USD', 'reward_expiration_days' => 30,
         'domestic_delay_days' => 14, 'international_delay_days' => 21, 'reminder_days' => 7,
         'star_color' => '#EBBF20', 'corner_style' => 'rounded', 'display_name' => 'initials',
         'show_verified' => true, 'show_incentive' => true, 'layout' => 'grid', 'page_size' => 12,

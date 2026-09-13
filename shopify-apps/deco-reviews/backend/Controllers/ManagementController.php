@@ -5,16 +5,17 @@ namespace DecoReviews\Controllers;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Store;
+use DecoReviews\Models\EmailDelivery;
 use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Media;
-use DecoReviews\Models\EmailDelivery;
 use DecoReviews\Services\FormService;
 use DecoReviews\Services\ImportService;
 use DecoReviews\Services\InvitationEmail;
 use DecoReviews\Services\InvitationService;
-use DecoReviews\Services\ReviewService;
 use DecoReviews\Services\ReviewEmail;
+use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\RewardService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
@@ -68,6 +69,7 @@ class ManagementController
                     'due_at' => $delivery->due_at?->toIso8601String(), 'sent_at' => $delivery->sent_at?->toIso8601String(),
                     'created_at' => $delivery->created_at->toIso8601String(), 'error_code' => $delivery->error_code,
                 ]),
+            'rewardHistory' => app(RewardService::class)->history($store),
             'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
                 ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
         ]);

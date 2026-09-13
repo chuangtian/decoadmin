@@ -1,0 +1,6 @@
+mutation DecoReviewRewardBasic($basicCodeDiscount: DiscountCodeBasicInput!) {
+  discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+    codeDiscountNode { id }
+    userErrors { field message }
+  }
+}

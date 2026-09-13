@@ -5,6 +5,7 @@ namespace DecoReviews\Commands;
 use App\Models\Store;
 use DecoReviews\Models\Review;
 use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\RewardService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -28,6 +29,7 @@ class PublishReviews extends Command
                     return;
                 }
                 $review->update(['status' => 'published', 'published_at' => now(), 'publish_at' => null]);
+                app(RewardService::class)->schedule($store, $review);
                 $service->audit($store, null, 'review.auto_published', $review->id);
                 $count++;
             });

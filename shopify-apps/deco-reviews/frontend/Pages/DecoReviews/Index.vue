@@ -17,6 +17,7 @@ type Review = {
 };
 type Invitation = { uuid: string; order_id: number; order_number?: string | null; product_title?: string | null; status?: string; created_at?: string; due_at?: string | null; sent_at?: string | null; reminder_sent_at?: string | null; media_reminder_sent_at?: string | null; completed_at?: string | null; error_code?: string | null };
 type EmailDelivery = { uuid: string; type: 'product_thank_you' | 'store_thank_you' | 'reply_notification'; status: string; review_title?: string | null; product_title?: string | null; due_at?: string | null; sent_at?: string | null; created_at: string; error_code?: string | null };
+type RewardHistory = { uuid: string; media_kind: 'photo' | 'video'; discount_kind: 'percentage' | 'fixed' | 'free_shipping'; value: string | null; currency: string | null; status: string; review_title?: string | null; product_title?: string | null; due_at?: string | null; issued_at?: string | null; expires_at?: string | null; created_at: string; error_code?: string | null };
 type ImportError = { line: number; code: string };
 type ImportRow = { uuid: string; status?: string; imported?: number; skipped?: number; errors?: ImportError[] | null; created_at?: string; undone_at?: string | null; can_undo?: boolean };
 type PageData<T> = { data: T[]; current_page: number; last_page: number; total: number };
@@ -31,6 +32,8 @@ type Settings = {
     product_thank_you_enabled: boolean; product_thank_you_subject: string; product_thank_you_body: string;
     store_thank_you_enabled: boolean; store_thank_you_subject: string; store_thank_you_body: string;
     reply_notification_enabled: boolean; reply_notification_subject: string; reply_notification_body: string;
+    rewards_enabled: boolean; photo_reward_enabled: boolean; video_reward_enabled: boolean;
+    reward_discount_kind: 'percentage' | 'fixed' | 'free_shipping'; reward_value: number | null; reward_currency: string; reward_expiration_days: number;
 };
 type FormConfig = {
     version: string; heading: string; description: string; name_label: string; title_label: string; body_label: string; submit_label: string;
@@ -42,7 +45,7 @@ const props = defineProps<{
     organization: { id: number; name: string }; store: { id: number; name: string }; canManage: boolean; baseUrl: string;
     tab: Tab; filters: Record<string, string | number | null | undefined>; reviews: PageData<Review>; invitations: PageData<Invitation>;
     stats: { total: number; published: number; pending: number; average: number; media: number; invites_sent: number };
-    products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[]; formConfig: FormConfig; emailDeliveries: EmailDelivery[];
+    products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[]; formConfig: FormConfig; emailDeliveries: EmailDelivery[]; rewardHistory: RewardHistory[];
 }>();
 
 const tabs: Array<{ key: Tab; label: string }> = [
@@ -90,9 +93,10 @@ const widgetModes = [
 
 const stars = (rating: number) => '★★★★★'.slice(0, Math.max(0, Math.min(5, rating)));
 const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
-const statusLabel = (status: string) => ({ pending: '待审核', published: '已发布', unpublished: '未发布', verification_required: '待验证履约与发送条件', scheduled: '已排期', sent: '已发送', sending: '正在发送', held: '发送结果待复核', sending_reminder: '正在发送提醒', reminder_held: '提醒发送结果待复核', sending_media_reminder: '正在发送媒体提醒', media_reminder_held: '媒体提醒结果待复核', unsubscribed: '已退订', cancelled: '已取消', completed: '已完成', processing: '处理中', failed: '失败', undone: '已撤销' }[status] || status);
-const statusClass = (status: string) => ({ published: 'bg-emerald-50 text-emerald-700', sent: 'bg-emerald-50 text-emerald-700', pending: 'bg-amber-50 text-amber-700', held: 'bg-amber-50 text-amber-800', reminder_held: 'bg-amber-50 text-amber-800', media_reminder_held: 'bg-amber-50 text-amber-800', unpublished: 'bg-slate-100 text-slate-700', failed: 'bg-red-50 text-red-700', cancelled: 'bg-slate-100 text-slate-600' }[status] || 'bg-blue-50 text-blue-700');
+const statusLabel = (status: string) => ({ pending: '待审核', published: '已发布', unpublished: '未发布', verification_required: '待验证履约与发送条件', scheduled: '已排期', issued: '已在 Shopify 创建', issuing: '正在创建', sent: '已发送', sending: '正在发送', held: '结果待复核', sending_reminder: '正在发送提醒', reminder_held: '提醒发送结果待复核', sending_media_reminder: '正在发送媒体提醒', media_reminder_held: '媒体提醒结果待复核', unsubscribed: '已退订', cancelled: '已取消', completed: '已完成', processing: '处理中', failed: '失败', undone: '已撤销' }[status] || status);
+const statusClass = (status: string) => ({ published: 'bg-emerald-50 text-emerald-700', issued: 'bg-emerald-50 text-emerald-700', sent: 'bg-emerald-50 text-emerald-700', pending: 'bg-amber-50 text-amber-700', held: 'bg-amber-50 text-amber-800', reminder_held: 'bg-amber-50 text-amber-800', media_reminder_held: 'bg-amber-50 text-amber-800', unpublished: 'bg-slate-100 text-slate-700', failed: 'bg-red-50 text-red-700', cancelled: 'bg-slate-100 text-slate-600' }[status] || 'bg-blue-50 text-blue-700');
 const emailTypeLabel = (type: EmailDelivery['type']) => ({ product_thank_you: '商品评价感谢', store_thank_you: '店铺评价感谢', reply_notification: '公开回复通知' }[type]);
+const rewardLabel = (reward: RewardHistory) => reward.discount_kind === 'free_shipping' ? '免运费' : reward.discount_kind === 'percentage' ? `${reward.value}% 折扣` : `${reward.currency || ''} ${reward.value} 固定金额`;
 const exportUrl = computed(() => {
     const params = new URLSearchParams();
     Object.entries(query.value).forEach(([key, value]) => { if (value) params.set(key, value); });
@@ -318,6 +322,14 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                         <span class="rounded-full px-2.5 py-1 text-[12px] font-semibold" :class="statusClass(delivery.status)">{{ statusLabel(delivery.status) }}</span>
                     </div>
                 </section>
+                <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div class="border-b border-slate-200 px-5 py-4"><h2 class="text-lg font-semibold text-slate-950">评价奖励记录</h2><p class="mt-1 text-slate-500">仅显示奖励状态与规则，不显示优惠码、评价者邮箱或 Shopify 内部标识。结果不确定的记录不会自动重试。</p></div>
+                    <div v-if="!rewardHistory.length" class="px-6 py-12 text-center text-slate-500">还没有评价奖励记录。</div>
+                    <div v-for="reward in rewardHistory" :key="reward.uuid" class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 last:border-0">
+                        <div><p class="font-semibold text-slate-950">{{ reward.media_kind === 'video' ? '视频评价奖励' : '图片评价奖励' }} · {{ rewardLabel(reward) }}</p><p class="mt-1 text-slate-600">{{ reward.review_title || reward.product_title || '商品评价' }}</p><p class="mt-1 text-slate-500">{{ reward.issued_at ? `创建于 Shopify：${formatDate(reward.issued_at)}` : reward.due_at ? `计划处理：${formatDate(reward.due_at)}` : `记录创建：${formatDate(reward.created_at)}` }}<span v-if="reward.expires_at"> · 到期：{{ formatDate(reward.expires_at) }}</span></p><p v-if="reward.error_code" class="mt-1 text-[12px] text-slate-500">结果代码：{{ reward.error_code }}</p></div>
+                        <span class="rounded-full px-2.5 py-1 text-[12px] font-semibold" :class="statusClass(reward.status)">{{ statusLabel(reward.status) }}</span>
+                    </div>
+                </section>
             </template>
 
             <ReviewFormEditor v-else-if="tab === 'form'" :base-url="baseUrl" :can-manage="canManage" :products="products" :form-config="formConfig" @dirty="formEditorDirty = $event" @saved="notice = '评价表单已保存。'" />
@@ -358,6 +370,13 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                     <label class="mt-5 flex items-center gap-2 font-semibold"><input v-model="settingsForm.reply_notification_enabled" :disabled="!canManage" type="checkbox" />启用公开回复通知</label>
                     <div class="mt-5 grid gap-5 md:grid-cols-2"><label class="font-medium">主题<input v-model="settingsForm.reply_notification_subject" :disabled="!canManage" maxlength="160" class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium md:col-span-2">正文<textarea v-model="settingsForm.reply_notification_body" :disabled="!canManage" rows="5" class="mt-2 w-full rounded-xl border px-3 py-2.5"></textarea></label></div>
                     <p class="mt-3 text-[12px] text-slate-500">可用变量：{store}、{product}、{author}、{rating}、{reply}。测试环境仍受店铺和收件人白名单限制。</p>
+                </section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 class="text-lg font-semibold text-slate-950">图片与视频评价奖励</h2>
+                    <p class="mt-2 text-slate-500">只奖励邀评订单中已验证购买、已发布且带媒体的评价；手动评价、导入评价和公开表单评价不会获得优惠码。</p>
+                    <div class="mt-5 flex flex-wrap gap-5"><label class="flex items-center gap-2 font-semibold"><input v-model="settingsForm.rewards_enabled" :disabled="!canManage" type="checkbox" />启用评价奖励</label><label class="flex items-center gap-2"><input v-model="settingsForm.photo_reward_enabled" :disabled="!canManage || !settingsForm.rewards_enabled" type="checkbox" />奖励图片评价</label><label class="flex items-center gap-2"><input v-model="settingsForm.video_reward_enabled" :disabled="!canManage || !settingsForm.rewards_enabled" type="checkbox" />奖励视频评价</label></div>
+                    <div class="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-4"><label class="font-medium">优惠类型<select v-model="settingsForm.reward_discount_kind" :disabled="!canManage" class="mt-2 w-full rounded-xl border bg-white px-3 py-2.5"><option value="percentage">百分比折扣</option><option value="fixed">固定金额</option><option value="free_shipping">免运费</option></select></label><label v-if="settingsForm.reward_discount_kind !== 'free_shipping'" class="font-medium">优惠值<input v-model.number="settingsForm.reward_value" :disabled="!canManage" type="number" min="0.01" :max="settingsForm.reward_discount_kind === 'percentage' ? 100 : 10000" step="0.01" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label v-if="settingsForm.reward_discount_kind === 'fixed'" class="font-medium">店铺币种<input v-model="settingsForm.reward_currency" disabled maxlength="3" required class="mt-2 w-full rounded-xl border bg-slate-100 px-3 py-2.5 uppercase" /></label><label class="font-medium">有效天数<input v-model.number="settingsForm.reward_expiration_days" :disabled="!canManage" type="number" min="1" max="365" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label></div>
+                    <p class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">每条评价最多创建一个一次性 Shopify 优惠码，且不与其他优惠叠加。此范围不包含奖励发送或到期提醒邮件；Shopify 返回结果不确定时会停止并等待人工复核，不会重复创建。</p>
                 </section>
                 <div v-if="Object.keys(settingsForm.errors).length" role="alert" class="rounded-xl bg-red-50 p-4 text-red-700"><p v-for="(error, field) in settingsForm.errors" :key="field">{{ error }}</p></div><button :disabled="!canManage || settingsForm.processing" class="rounded-xl bg-violet-700 px-6 py-3 font-semibold text-white disabled:opacity-50">{{ settingsForm.processing ? '保存中…' : '保存设置' }}</button>
             </form>

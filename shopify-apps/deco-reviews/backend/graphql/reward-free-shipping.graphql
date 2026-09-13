@@ -1,0 +1,6 @@
+mutation DecoReviewRewardFreeShipping($freeShippingCodeDiscount: DiscountCodeFreeShippingInput!) {
+  discountCodeFreeShippingCreate(freeShippingCodeDiscount: $freeShippingCodeDiscount) {
+    codeDiscountNode { id }
+    userErrors { field message }
+  }
+}

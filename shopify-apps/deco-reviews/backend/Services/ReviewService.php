@@ -7,10 +7,11 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\Store;
 use App\Models\User;
-use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\EmailDelivery;
+use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
+use DecoReviews\Models\Reward;
 use DecoReviews\Models\Settings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -45,7 +46,7 @@ class ReviewService
     {
         $values = Settings::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)->value('values') ?? [];
 
-        return array_replace(config('deco_reviews.defaults'), $values);
+        return array_replace(config('deco_reviews.defaults'), $values, ['reward_currency' => strtoupper((string) $store->currency)]);
     }
 
     public function saveSettings(Store $store, User $user, array $input): void
@@ -66,6 +67,10 @@ class ReviewService
             'store_thank_you_subject' => 'required|string|max:160', 'store_thank_you_body' => 'required|string|max:5000',
             'reply_notification_enabled' => 'required|boolean', 'reply_notification_subject' => 'required|string|max:160',
             'reply_notification_body' => 'required|string|max:5000',
+            'rewards_enabled' => 'required|boolean', 'photo_reward_enabled' => 'required|boolean', 'video_reward_enabled' => 'required|boolean',
+            'reward_discount_kind' => ['required', Rule::in(['percentage', 'fixed', 'free_shipping'])],
+            'reward_value' => 'required_unless:reward_discount_kind,free_shipping|nullable|numeric|min:0.01|max:10000',
+            'reward_currency' => 'required|string|size:3|uppercase', 'reward_expiration_days' => 'required|integer|min:1|max:365',
             'auto_invites_enabled' => 'sometimes|boolean', 'reminders_enabled' => 'sometimes|boolean',
             'media_reminders_enabled' => 'required|boolean', 'media_reminder_days' => 'required|integer|min:1|max:90',
             'media_reminder_subject' => 'required|string|max:160', 'media_reminder_body' => 'required|string|max:5000',
@@ -78,6 +83,11 @@ class ReviewService
             foreach (['auto_invites_enabled', 'reminders_enabled', 'reminder_subject', 'reminder_body', 'email_button_label', 'email_accent'] as $key) {
                 $values[$key] = $values[$key] ?? $previous[$key];
             }
+            if ($values['reward_discount_kind'] === 'percentage' && (float) $values['reward_value'] > 100) {
+                throw ValidationException::withMessages(['reward_value' => '百分比奖励不能超过 100。']);
+            }
+            // Shopify fixed discounts use the shop currency; this value is server-owned.
+            $values['reward_currency'] = strtoupper((string) $store->currency);
             $values['auto_invites_since'] = $values['auto_invites_enabled']
                 ? ($previous['auto_invites_enabled'] && $previous['auto_invites_since'] ? $previous['auto_invites_since'] : now()->toIso8601String()) : null;
             Settings::query()->updateOrCreate(['store_id' => $store->id, 'organization_id' => $store->organization_id], ['values' => $values]);
@@ -86,6 +96,15 @@ class ReviewService
                     EmailDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
                         ->where('type', $type)->where('status', 'scheduled')->update(['status' => 'cancelled', 'due_at' => null]);
                 }
+            }
+            $disabledRewardMedia = collect(['photo', 'video'])->filter(fn ($kind) => ! $values[$kind.'_reward_enabled'])->all();
+            if (! $values['rewards_enabled'] || $disabledRewardMedia !== []) {
+                $scheduledRewards = Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                    ->where('status', 'scheduled');
+                if ($values['rewards_enabled']) {
+                    $scheduledRewards->whereIn('media_kind', $disabledRewardMedia);
+                }
+                $scheduledRewards->update(['status' => 'cancelled', 'due_at' => null]);
             }
             $this->audit($store, $user, 'settings.updated');
         });
@@ -248,6 +267,9 @@ class ReviewService
                 $this->audit($store, $user, 'review.created', $review->id);
                 if ($review->wasRecentlyCreated) {
                     app(ReviewEmailService::class)->scheduleCreated($store, $review);
+                    if ($review->status === 'published') {
+                        app(RewardService::class)->schedule($store, $review);
+                    }
                 }
 
                 return $review;
@@ -276,6 +298,11 @@ class ReviewService
                     $values['published_at'] = $data['status'] === 'published' ? ($review->published_at ?? now()) : null;
                 }
                 $review->update($values);
+                if ($review->status === 'published') {
+                    app(RewardService::class)->schedule($store, $review);
+                } else {
+                    app(RewardService::class)->cancelScheduled($store, $review);
+                }
                 if (array_key_exists('reply', $data)) {
                     if (filled($data['reply'])) {
                         app(ReviewEmailService::class)->scheduleReply($store, $review);
