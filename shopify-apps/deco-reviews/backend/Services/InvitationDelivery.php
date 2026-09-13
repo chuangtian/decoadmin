@@ -34,14 +34,19 @@ class InvitationDelivery
             return false;
         }
         $state = $invite->fresh()?->status;
-        if (! in_array($state, ['sending', 'sending_reminder'], true) || app(InvitationService::class)->suppressed($store, $invite->email_hash)) {
+        if (! in_array($state, ['sending', 'sending_reminder', 'sending_media_reminder'], true) || app(InvitationService::class)->suppressed($store, $invite->email_hash)) {
             return false;
         }
         $settings = app(ReviewService::class)->settings($store);
         if ($state === 'sending_reminder' && ! $settings['reminders_enabled']) {
             return false;
         }
-        $kind = $state === 'sending_reminder' ? 'reminder' : 'initial';
+        if ($state === 'sending_media_reminder' && ! $settings['media_reminders_enabled']) {
+            return false;
+        }
+        $kind = match ($state) {
+            'sending_reminder' => 'reminder', 'sending_media_reminder' => 'media_reminder', default => 'initial',
+        };
         $content = app(InvitationEmail::class)->content($store, $invite, $kind);
         // SMTP result uncertainty is held by the caller, never silently retried.
         $sent = Mail::send(['html' => 'deco-reviews::emails.invitation', 'text' => 'deco-reviews::emails.invitation-text'], $content, function ($message) use ($invite, $settings, $content, $kind) {

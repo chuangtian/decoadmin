@@ -8,11 +8,13 @@ use App\Models\Store;
 use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Media;
+use DecoReviews\Models\EmailDelivery;
 use DecoReviews\Services\FormService;
 use DecoReviews\Services\ImportService;
 use DecoReviews\Services\InvitationEmail;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\ReviewEmail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
@@ -46,6 +48,7 @@ class ManagementController
             'order_number' => $invite->order?->order_number, 'product_title' => $invite->product?->title,
             'status' => $invite->status, 'due_at' => $invite->due_at?->toIso8601String(), 'sent_at' => $invite->sent_at?->toIso8601String(),
             'reminder_sent_at' => $invite->reminder_sent_at?->toIso8601String(),
+            'media_reminder_sent_at' => $invite->media_reminder_sent_at?->toIso8601String(),
             'completed_at' => $invite->completed_at?->toIso8601String(),
             'created_at' => $invite->created_at->toIso8601String(), 'error_code' => $invite->error_code]);
 
@@ -58,6 +61,13 @@ class ManagementController
             'products' => Product::where('organization_id', $organization->id)->where('store_id', $store->id)->orderBy('title')->limit(500)->get(['id', 'title']),
             'settings' => $settings,
             'formConfig' => app(FormService::class)->configuration($store),
+            'emailDeliveries' => EmailDelivery::where('organization_id', $organization->id)->where('store_id', $store->id)
+                ->with('review.product')->latest('id')->limit(30)->get()->map(fn ($delivery) => [
+                    'uuid' => $delivery->uuid, 'type' => $delivery->type, 'status' => $delivery->status,
+                    'review_title' => $delivery->review?->title, 'product_title' => $delivery->review?->product?->title,
+                    'due_at' => $delivery->due_at?->toIso8601String(), 'sent_at' => $delivery->sent_at?->toIso8601String(),
+                    'created_at' => $delivery->created_at->toIso8601String(), 'error_code' => $delivery->error_code,
+                ]),
             'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
                 ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
         ]);
@@ -66,9 +76,14 @@ class ManagementController
     public function emailPreview(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $data = $request->validate(['kind' => 'nullable|in:initial,reminder']);
+        $data = $request->validate(['kind' => 'nullable|in:initial,reminder,media_reminder,product_thank_you,store_thank_you,reply_notification']);
+        $kind = $data['kind'] ?? 'initial';
+        if (in_array($kind, ReviewEmail::TYPES, true)) {
+            return response()->view('deco-reviews::emails.review-message', app(ReviewEmail::class)->content($store, null, $kind))
+                ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        }
 
-        return response()->view('deco-reviews::emails.invitation', app(InvitationEmail::class)->content($store, null, $data['kind'] ?? 'initial'))
+        return response()->view('deco-reviews::emails.invitation', app(InvitationEmail::class)->content($store, null, $kind))
             ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
     }
 

@@ -8,11 +8,11 @@ User-confirmed data boundary (2026-09-13): existing system reviews are unrelated
 
 This is a **core test version, not full Loox parity**. The detailed remaining scope and acceptance plan live in [docs/acceptance.md](docs/acceptance.md).
 
-Implemented: scoped DecoAdmin review management; product/store reviews; rating-neutral moderation and scheduled publishing; merchant replies and featured reviews; encrypted private email; image re-encoding and manual video moderation; signed order-bound buyer forms; signed app-proxy product review collection with mandatory moderation; exact product/fulfillment invitation verification; SMTP uncertainty hold with no blind retry; explicit per-store automation gates; custom CSV import/deduplication/seven-day withdrawal; formula-safe export; nine storefront display modes and media viewer.
+Implemented: scoped DecoAdmin review management; product/store reviews; rating-neutral moderation and scheduled publishing; merchant replies and featured reviews; encrypted private email; image re-encoding and manual video moderation; signed order-bound buyer forms; signed app-proxy product review collection with mandatory moderation; exact product/fulfillment invitation verification; separate request and photo/video reminders; product/store thank-you and public-reply lifecycle messages with encrypted recipients, idempotency, audit and SMTP uncertainty hold; explicit per-store automation gates; custom CSV import/deduplication/seven-day withdrawal; formula-safe export; nine storefront display modes and media viewer.
 
 Form increment (released to test; not production): configurable buyer form copy, photo/video controls, up to ten single/multiple/scale questions, product/store targeting, mandatory answers, immutable encrypted answer snapshots, explicit public/private visibility, version conflict protection, and a non-submitting saved-form preview. This increment changes only files inside this app; it does not alter shared backend code or other apps.
 
-Not yet complete: all 17 Loox widgets and editors, general/store review links, collection-targeted questions and answer exports, product groups/bundles, seven-message email program, reward discount issuance, referrals, AI/Studio, review syndication and Merchant API/webhooks. No placeholder is presented as a working external integration.
+Not yet complete: all 17 Loox widgets and editors, general/store review links, collection-targeted questions and answer exports, product groups/bundles, reward discount issuance and its reminder, referrals, AI/Studio, review syndication and Merchant API/webhooks. No placeholder is presented as a working external integration.
 
 ## Safety and environments
 

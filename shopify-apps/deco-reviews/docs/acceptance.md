@@ -85,6 +85,7 @@ The current shared renderer is a foundation only. None of the following should b
 ### Email program
 
 - Seven audited messages: initial request, request reminders, photo/video reminder, reward reminder, product-review thank-you, store-review thank-you, and public-reply notification.
+- Implemented in the current working batch: initial request, one request reminder, one later photo/video reminder, product/store thank-you, and public-reply notification. Each follow-up is independently configurable and idempotent; lifecycle recipients are encrypted; uncertain SMTP outcomes are held without blind retry. Reward issuance and the reward reminder remain pending.
 - Global email styling and per-message overrides, rich content, variables, footer, banner/logo/font/color/corners, localization, test rendering, and delivery audit.
 - First/reminder timing, delivery deferral, historical-order targeting, marketing versus transactional policy, Shopify-marketing unsubscribe interaction, notification recipients, and order-tag exclusion.
 

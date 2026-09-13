@@ -26,9 +26,12 @@ class InvitationProcessor
         }
         try {
             $invite = Invitation::where('organization_id', $organizationId)->where('store_id', $storeId)->where('uuid', $uuid)->first();
-            $reminder = $invite && $invite->status === 'sent' && $invite->sent_at && ! $invite->reminder_sent_at && $settings['reminders_enabled']
+            $requestReminder = $invite && $invite->status === 'sent' && $invite->sent_at && ! $invite->reminder_sent_at && $settings['reminders_enabled']
                 && $invite->sent_at->copy()->addDays($settings['reminder_days'])->lte(now());
-            if (! $invite || (! $reminder && (! in_array($invite->status, ['verification_required', 'waiting_fulfillment', 'scheduled']) || $invite->sent_at))) {
+            $mediaReminder = $invite && $invite->status === 'sent' && $invite->reminder_sent_at && ! $invite->media_reminder_sent_at
+                && $settings['media_reminders_enabled'] && $invite->reminder_sent_at->copy()->addDays($settings['media_reminder_days'])->lte(now());
+            $followupKind = $requestReminder ? 'reminder' : ($mediaReminder ? 'media_reminder' : null);
+            if (! $invite || (! $followupKind && (! in_array($invite->status, ['verification_required', 'waiting_fulfillment', 'scheduled']) || $invite->sent_at))) {
                 return;
             }
             // A concurrent unsubscribe/cancel/completion must not be overwritten after an API read.
@@ -108,16 +111,23 @@ class InvitationProcessor
             }
             $domestic = data_get($order, 'shippingAddress.countryCodeV2') && data_get($order, 'shippingAddress.countryCodeV2') === data_get($snapshot, 'shop.shopAddress.countryCodeV2');
             $due = $fulfilledAt->addDays($settings[$domestic ? 'domestic_delay_days' : 'international_delay_days']);
-            if ($reminder) {
+            if ($followupKind === 'reminder') {
                 $due = $invite->sent_at->copy()->addDays($settings['reminder_days']);
+            } elseif ($followupKind === 'media_reminder') {
+                $due = $invite->reminder_sent_at->copy()->addDays($settings['media_reminder_days']);
             }
-            $sendingState = $reminder ? 'sending_reminder' : 'sending';
-            DB::transaction(function () use ($store, $invite, $due, $reminder, $sendingState) {
+            $sendingState = match ($followupKind) {
+                'reminder' => 'sending_reminder', 'media_reminder' => 'sending_media_reminder', default => 'sending',
+            };
+            DB::transaction(function () use ($store, $invite, $due, $followupKind, $sendingState) {
                 $fresh = Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereKey($invite->id)->lockForUpdate()->firstOrFail();
-                if ($reminder ? ($fresh->status !== 'sent' || $fresh->reminder_sent_at) : (! in_array($fresh->status, ['verification_required', 'waiting_fulfillment', 'scheduled']) || $fresh->sent_at)) {
+                $followupInvalid = $followupKind === 'reminder'
+                    ? ($fresh->status !== 'sent' || $fresh->reminder_sent_at)
+                    : ($followupKind === 'media_reminder' && ($fresh->status !== 'sent' || ! $fresh->reminder_sent_at || $fresh->media_reminder_sent_at));
+                if ($followupInvalid || (! $followupKind && (! in_array($fresh->status, ['verification_required', 'waiting_fulfillment', 'scheduled']) || $fresh->sent_at))) {
                     return;
                 }
-                $fresh->update(['status' => $reminder ? 'sent' : 'scheduled', 'due_at' => $due, 'error_code' => null]);
+                $fresh->update(['status' => $followupKind ? 'sent' : 'scheduled', 'due_at' => $due, 'error_code' => null]);
                 if ($due->isFuture() || ! app(InvitationDelivery::class)->allowed($store, $fresh)) {
                     return;
                 }
@@ -133,10 +143,17 @@ class InvitationProcessor
             } catch (\Throwable) {
                 $sent = false;
             }
+            $sentAtField = match ($followupKind) {
+                'reminder' => 'reminder_sent_at', 'media_reminder' => 'media_reminder_sent_at', default => 'sent_at',
+            };
+            $heldState = match ($followupKind) {
+                'reminder' => 'reminder_held', 'media_reminder' => 'media_reminder_held', default => 'held',
+            };
             Invitation::whereKey($invite->id)->where('status', $sendingState)->update($sent
-                ? ['status' => 'sent', $reminder ? 'reminder_sent_at' : 'sent_at' => now(), 'due_at' => null, 'error_code' => null]
-                : ['status' => $reminder ? 'reminder_held' : 'held', 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
-            app(ReviewService::class)->audit($store, null, $sent ? ($reminder ? 'invitation.reminder_sent' : 'invitation.sent') : 'invitation.held', null, ['invitation' => $uuid]);
+                ? ['status' => 'sent', $sentAtField => now(), 'due_at' => null, 'error_code' => null]
+                : ['status' => $heldState, 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
+            $action = $followupKind ? 'invitation.'.$followupKind.($sent ? '_sent' : '_held') : 'invitation.'.($sent ? 'sent' : 'held');
+            app(ReviewService::class)->audit($store, null, $action, null, ['invitation' => $uuid]);
         } finally {
             $lock->release();
         }

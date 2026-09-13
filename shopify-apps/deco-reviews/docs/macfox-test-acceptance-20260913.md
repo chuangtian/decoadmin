@@ -136,3 +136,12 @@
 - Submitted one clearly synthetic four-star public-form review from the authorized test browser. The storefront displayed `Thank you. Your review has been received.` and disabled further submission.
 - Live management and a read-only database check show review `8` as `source=organic`, `status=pending`, `verified_source=none`, with its private custom answer visible only in management. Filtering by `店铺公开表单` returns this review alone.
 - The Horizon draft storefront remains at six published reviews / 3.33 average after submission. The new pending organic review and its private form answer are absent from the public widget. The theme remains a draft and was not published.
+
+## Lifecycle email working batch
+
+
+- Added a second, independently timed photo/video reminder after the ordinary request reminder. Initial, request-reminder and media-reminder timestamps and uncertainty states are separate, and completed/cancelled/unsubscribed invitations cannot continue through the sequence.
+- Added product-review thank-you, store-review thank-you and public-reply notification templates, private previews, encrypted recipient storage, store-scoped idempotency, bounded dispatch, audit records and held-on-uncertainty behavior.
+- All new lifecycle-email switches default off. Existing global delivery, exact test-store allow-list and non-production recipient allow-list still gate every external email. This batch sent no live email and performed no Shopify write.
+- Full Deco Reviews backend regression: 58 tests / 386 assertions. Frontend type-check, typography audit, Shopify test-app build and DecoAdmin production frontend build passed. Vite was restarted and became ready on port 5173.
+- Reward discount issuance and reward reminder remain pending; this batch must not be described as the complete seven-message/reward program.

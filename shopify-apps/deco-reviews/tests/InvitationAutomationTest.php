@@ -201,6 +201,41 @@ class InvitationAutomationTest extends TestCase
         }
     }
 
+    public function test_media_reminder_follows_request_reminder_once_and_never_runs_after_completion(): void
+    {
+        $this->saveSettings(['invites_enabled' => true, 'reminders_enabled' => true, 'media_reminders_enabled' => true,
+            'reminder_days' => 7, 'media_reminder_days' => 7]);
+        config(['deco_reviews.automation_stores' => [$this->store->shopify_domain]]);
+        $order = $this->order($this->store, $this->product, 3501);
+        $invite = $this->invitation($order, 'sent', ['sent_at' => now()->subDays(16), 'reminder_sent_at' => now()->subDays(8)]);
+        $client = Mockery::mock(ShopifyClient::class);
+        $client->shouldReceive('order')->once()->andReturn($this->snapshot($order));
+        app()->instance(ShopifyClient::class, $client);
+        $delivery = Mockery::mock(InvitationDelivery::class);
+        $delivery->shouldReceive('allowed')->once()->andReturnTrue();
+        $delivery->shouldReceive('send')->once()->andReturnTrue();
+        app()->instance(InvitationDelivery::class, $delivery);
+
+        app(InvitationProcessor::class)->process($this->organization->id, $this->store->id, $invite->uuid);
+        $this->assertSame('sent', $invite->fresh()->status);
+        $this->assertNotNull($invite->fresh()->media_reminder_sent_at);
+
+        $noClient = Mockery::mock(ShopifyClient::class);
+        $noClient->shouldNotReceive('order');
+        app()->instance(ShopifyClient::class, $noClient);
+        $noDelivery = Mockery::mock(InvitationDelivery::class);
+        $noDelivery->shouldNotReceive('allowed');
+        $noDelivery->shouldNotReceive('send');
+        app()->instance(InvitationDelivery::class, $noDelivery);
+        app(InvitationProcessor::class)->process($this->organization->id, $this->store->id, $invite->uuid);
+
+        $completed = $this->invitation($this->order($this->store, $this->product, 3502), 'completed', [
+            'sent_at' => now()->subDays(16), 'reminder_sent_at' => now()->subDays(8), 'completed_at' => now(),
+        ]);
+        app(InvitationProcessor::class)->process($this->organization->id, $this->store->id, $completed->uuid);
+        $this->assertNull($completed->fresh()->media_reminder_sent_at);
+    }
+
     public function test_uncertain_reminder_result_is_held_and_never_retried(): void
     {
         $this->saveSettings(['invites_enabled' => true, 'reminders_enabled' => true, 'reminder_days' => 7]);
@@ -235,6 +270,7 @@ class InvitationAutomationTest extends TestCase
         Mail::fake();
         $this->saveSettings(['subject' => '<script>Initial</script> {store}', 'email_body' => '<b>Initial body</b>',
             'reminder_subject' => '<script>Reminder</script> {store}', 'reminder_body' => '<img src=x onerror=alert(1)>',
+            'media_reminder_subject' => '<script>Media</script> {store}', 'media_reminder_body' => '<svg onload=alert(1)>',
             'email_button_label' => '<Click>', 'email_accent' => '#123456']);
         $base = "/organizations/{$this->organization->id}/stores/{$this->store->id}/deco-reviews/email-preview";
 
@@ -243,7 +279,7 @@ class InvitationAutomationTest extends TestCase
         $this->organization->users()->attach($unauthorized, ['status' => 'active', 'joined_at' => now()]);
         $this->store->members()->attach($unauthorized, ['status' => 'active', 'joined_at' => now()]);
         $this->actingAs($unauthorized)->get($base.'?kind=initial')->assertForbidden();
-        foreach (['initial' => 'Initial', 'reminder' => 'Reminder'] as $kind => $expected) {
+        foreach (['initial' => 'Initial', 'reminder' => 'Reminder', 'media_reminder' => 'Media'] as $kind => $expected) {
             $response = $this->actingAs($this->user)->get($base.'?kind='.$kind)->assertOk()
                 ->assertHeader('Cache-Control', 'no-store, private')
                 ->assertHeader('Content-Security-Policy');
@@ -255,6 +291,9 @@ class InvitationAutomationTest extends TestCase
             if ($kind === 'reminder') {
                 $this->assertStringContainsString('&lt;img src=x onerror=alert(1)&gt;', $html);
                 $this->assertStringNotContainsString('<img src=x onerror=alert(1)>', $html);
+            } elseif ($kind === 'media_reminder') {
+                $this->assertStringContainsString('&lt;svg onload=alert(1)&gt;', $html);
+                $this->assertStringNotContainsString('<svg onload=alert(1)>', $html);
             }
         }
         Mail::assertNothingSent();

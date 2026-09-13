@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\Store;
 use App\Models\User;
 use DecoReviews\Models\ImportBatch;
+use DecoReviews\Models\EmailDelivery;
 use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Settings;
@@ -60,7 +61,14 @@ class ReviewService
             'page_size' => ['required', Rule::in([6, 12, 24])], 'heading' => 'required|string|max:120',
             'reply_to' => 'nullable|email:rfc|max:254', 'subject' => 'required|string|max:160',
             'email_body' => 'required|string|max:5000', 'marketing_only' => 'required|boolean',
+            'product_thank_you_enabled' => 'required|boolean', 'product_thank_you_subject' => 'required|string|max:160',
+            'product_thank_you_body' => 'required|string|max:5000', 'store_thank_you_enabled' => 'required|boolean',
+            'store_thank_you_subject' => 'required|string|max:160', 'store_thank_you_body' => 'required|string|max:5000',
+            'reply_notification_enabled' => 'required|boolean', 'reply_notification_subject' => 'required|string|max:160',
+            'reply_notification_body' => 'required|string|max:5000',
             'auto_invites_enabled' => 'sometimes|boolean', 'reminders_enabled' => 'sometimes|boolean',
+            'media_reminders_enabled' => 'required|boolean', 'media_reminder_days' => 'required|integer|min:1|max:90',
+            'media_reminder_subject' => 'required|string|max:160', 'media_reminder_body' => 'required|string|max:5000',
             'reminder_subject' => 'sometimes|required|string|max:160', 'reminder_body' => 'sometimes|required|string|max:5000',
             'email_button_label' => 'sometimes|required|string|max:80', 'email_accent' => ['sometimes', 'required', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ])->validate();
@@ -73,6 +81,12 @@ class ReviewService
             $values['auto_invites_since'] = $values['auto_invites_enabled']
                 ? ($previous['auto_invites_enabled'] && $previous['auto_invites_since'] ? $previous['auto_invites_since'] : now()->toIso8601String()) : null;
             Settings::query()->updateOrCreate(['store_id' => $store->id, 'organization_id' => $store->organization_id], ['values' => $values]);
+            foreach (ReviewEmail::TYPES as $type) {
+                if (! $values[$type.'_enabled']) {
+                    EmailDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                        ->where('type', $type)->where('status', 'scheduled')->update(['status' => 'cancelled', 'due_at' => null]);
+                }
+            }
             $this->audit($store, $user, 'settings.updated');
         });
     }
@@ -232,6 +246,9 @@ class ReviewService
                         'type' => str_starts_with($mime, 'video/') ? 'video' : 'image']);
                 }
                 $this->audit($store, $user, 'review.created', $review->id);
+                if ($review->wasRecentlyCreated) {
+                    app(ReviewEmailService::class)->scheduleCreated($store, $review);
+                }
 
                 return $review;
             });
@@ -259,6 +276,15 @@ class ReviewService
                     $values['published_at'] = $data['status'] === 'published' ? ($review->published_at ?? now()) : null;
                 }
                 $review->update($values);
+                if (array_key_exists('reply', $data)) {
+                    if (filled($data['reply'])) {
+                        app(ReviewEmailService::class)->scheduleReply($store, $review);
+                    } else {
+                        EmailDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                            ->where('review_id', $review->id)->where('type', 'reply_notification')->where('status', 'scheduled')
+                            ->update(['status' => 'cancelled', 'due_at' => null]);
+                    }
+                }
                 $this->audit($store, $user, 'review.moderated', $review->id, ['status' => $review->status, 'reply_changed' => array_key_exists('reply', $data)]);
             }
         });
