@@ -118,4 +118,6 @@
 - Re-ran the exact SHA-256-guarded synthetic MP4 through the deployed creation service. Real `ffprobe` accepted it and deduplication returned existing review 7; it did not create another review.
 - External completed-invitation probe returned 200, contained the already-used completion copy and no `<form>` element. Signed URL was not logged.
 - Added management filters for product, media, source, purchase verification, featured, merchant reply, incentivized and inclusive review dates. The same validated filters drive CSV export. Invitation rows now show the store's order number, product and completion time.
-- Combined source after filter work: 51 backend tests / 310 assertions passed; storefront runtime 8 passed; type-check and typography passed. Filter changes are not yet deployed in this record.
+- Combined source after filter work: 51 backend tests / 310 assertions passed; storefront runtime 8 passed; type-check and typography passed.
+- Deployed exact `origin/test` commit `f1e93e8d529433116351c4eb25c8beb77f72cdef`. Backup: `/opt/decoadmin/backups/deco-reviews-form-f1e93e8d529433116351c4eb25c8beb77f72cdef`. Application, database, Redis and Horizon checks passed; the production source hashes remained unchanged.
+- Live Chrome acceptance on Store 1 (`macfox-test-app`) confirmed the combined `有图片或视频` + `邀评邮件` filter retained both selected values after reload, returned only the expected verified invitation review, and included `media=with&source=email` in the current-filter CSV export URL.
