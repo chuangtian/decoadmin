@@ -51,7 +51,7 @@ class ReviewService
     {
         $this->authorize($user, $store, true);
         $values = Validator::make($input, [
-            'enabled' => 'required|boolean', 'auto_publish_days' => 'nullable|integer|min:0|max:90',
+            'enabled' => 'required|boolean', 'organic_collection_enabled' => 'required|boolean', 'auto_publish_days' => 'nullable|integer|min:0|max:90',
             'invites_enabled' => 'required|boolean', 'domestic_delay_days' => 'required|integer|min:0|max:180',
             'international_delay_days' => 'required|integer|min:0|max:180', 'reminder_days' => 'required|integer|min:1|max:90',
             'star_color' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/'], 'corner_style' => ['required', Rule::in(['rounded', 'square'])],
@@ -90,7 +90,7 @@ class ReviewService
         } elseif (($filters['media'] ?? '') === 'without') {
             $query->whereDoesntHave('media');
         }
-        if (in_array($filters['source'] ?? '', ['merchant', 'email', 'import'], true)) {
+        if (in_array($filters['source'] ?? '', ['merchant', 'email', 'import', 'organic'], true)) {
             $query->where('source', $filters['source']);
         }
         if (in_array($filters['verified'] ?? '', ['order', 'none'], true)) {
@@ -154,7 +154,7 @@ class ReviewService
         if (isset($trusted['import_id'])) {
             abort_unless(ImportBatch::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereKey($trusted['import_id'])->exists(), 404);
         }
-        abort_unless(in_array($trusted['source'] ?? 'merchant', ['merchant', 'email', 'import'])
+        abort_unless(in_array($trusted['source'] ?? 'merchant', ['merchant', 'email', 'import', 'organic'])
             && in_array($trusted['verified_source'] ?? 'none', ['none', 'order'])
             && (($trusted['verified_source'] ?? 'none') !== 'order' || (isset($trusted['order_id']) && ($trusted['source'] ?? '') === 'email')), 422);
         Validator::make(['media' => $files], ['media' => 'array|max:5', 'media.*' => 'file|mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/webm|max:25600'])->validate();
@@ -173,14 +173,15 @@ class ReviewService
             return DB::transaction(function () use ($store, $input, $data, $trusted, $user, $files, $fingerprint, &$paths) {
                 // Serialize inserts and import deduplication for this store.
                 Store::query()->whereKey($store->id)->lockForUpdate()->firstOrFail();
-                $answers = ($trusted['source'] ?? '') === 'email'
+                $answers = in_array($trusted['source'] ?? '', ['email', 'organic'], true)
                     ? app(FormService::class)->snapshot($store, $data['kind'], $data['product_id'], $input, $files) : [];
                 if ($existing = $this->scoped($store)->where('fingerprint', $fingerprint)->first()) {
                     return $existing;
                 }
                 $days = $this->settings($store)['auto_publish_days'];
                 // Video originals require explicit moderation; they are never auto-published.
-                if (collect($files)->contains(fn ($file) => str_starts_with($file->getMimeType(), 'video/'))) {
+                if (($trusted['source'] ?? '') === 'organic'
+                    || collect($files)->contains(fn ($file) => str_starts_with($file->getMimeType(), 'video/'))) {
                     $days = null;
                 }
                 $review = Review::query()->create(array_merge($data, [

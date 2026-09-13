@@ -121,3 +121,12 @@
 - Combined source after filter work: 51 backend tests / 310 assertions passed; storefront runtime 8 passed; type-check and typography passed.
 - Deployed exact `origin/test` commit `f1e93e8d529433116351c4eb25c8beb77f72cdef`. Backup: `/opt/decoadmin/backups/deco-reviews-form-f1e93e8d529433116351c4eb25c8beb77f72cdef`. Application, database, Redis and Horizon checks passed; the production source hashes remained unchanged.
 - Live Chrome acceptance on Store 1 (`macfox-test-app`) confirmed the combined `有图片或视频` + `邀评邮件` filter retained both selected values after reload, returned only the expected verified invitation review, and included `media=with&source=email` in the current-filter CSV export URL.
+
+## Branded reminder and public product form increment
+
+- Created Shopify test order `#1008` (`7094332719352`) only in `macfox-test-app`: USD 0.00 after a 100% DEMO discount, paid, fulfilled, no fulfillment notification, internal recipient only, tagged `DECO_REVIEWS_QA`.
+- Executed the separately confirmed Store 1 order incremental sync. The sanitized test connector returned `#1008`, USD 0.00, `paid`, `fulfilled`; local order ID is 4948.
+- Initial invitation `097c91f0-6df5-4ef8-b94f-3dc87a3c3efe` was delivered once. A subject-scoped Gmail check showed the new sender name `macfox-test-app Reviews`; the old `Student Discount` sender remained only on the earlier historical message.
+- Deployed exact `origin/test` commit `61b838cad1c81864b5991eb701d3091ee000e158`. Backup: `/opt/decoadmin/backups/deco-reviews-form-61b838cad1c81864b5991eb701d3091ee000e158`. Health and Horizon checks passed; production source hashes remained unchanged.
+- The guarded reminder run sent exactly once, setting `reminder_sent_at` to `2026-09-13T10:24:35Z`. An immediate second run returned the same timestamp and did not send again. Subject-scoped Gmail search returned exactly one reminder from `macfox-test-app Reviews`.
+- Added a signed App Proxy product-review form behind an explicit store setting and per-block visibility setting. Public submissions require a current-store product, consent and private email; use a honeypot plus hashed store/product/email rate limit; never auto-publish; and are always stored as `organic`, unverified and pending moderation. This increment is implemented and automated-tested but not yet deployed or live-tested at this point in the record.

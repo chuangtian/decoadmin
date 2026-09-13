@@ -14,6 +14,7 @@ use Database\Seeders\PermissionSeeder;
 use DecoReviews\Controllers\StorefrontController;
 use DecoReviews\Models\ImportBatch;
 use DecoReviews\Models\Invitation;
+use DecoReviews\Models\Media;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Settings;
 use DecoReviews\Services\ImportService;
@@ -22,6 +23,7 @@ use DecoReviews\Services\ReviewService;
 use DecoReviews\Services\VideoInspector;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -216,6 +218,66 @@ class ReviewsTest extends TestCase
         $this->assertSame([], $feed['data']);
         $this->assertSame(0, $feed['summary']['count']);
         $this->assertStringNotContainsString('taylor@example.test', json_encode($feed));
+    }
+
+    public function test_signed_proxy_organic_review_is_private_pending_unverified_and_store_scoped(): void
+    {
+        [, , $store] = $this->context('organic');
+        $product = $this->product($store, 'organic-bike');
+        Settings::create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'values' => array_replace(config('deco_reviews.defaults'), [
+                'enabled' => true, 'organic_collection_enabled' => true, 'auto_publish_days' => 0,
+            ]),
+        ]);
+        $request = Request::create('/api/shopify-app/deco-reviews/proxy/reviews', 'POST', [
+            'product_id' => $product->shopify_product_id,
+            'author_name' => 'Organic Buyer',
+            'author_email' => 'organic@example.test',
+            'rating' => 4,
+            'title' => 'Direct product review',
+            'body' => 'Submitted through the public product form.',
+            'form_version' => 'initial',
+            'consent' => '1',
+            'website' => '',
+        ]);
+        $request->attributes->set('deco_reviews_store', $store);
+
+        [, , $foreignStore] = $this->context('organic-foreign');
+        $foreignProduct = $this->product($foreignStore, 'foreign-organic-bike');
+        $foreignRequest = Request::create('/api/shopify-app/deco-reviews/proxy/reviews', 'POST', array_replace($request->all(), [
+            'product_id' => $foreignProduct->shopify_product_id,
+        ]));
+        $foreignRequest->attributes->set('deco_reviews_store', $store);
+        try {
+            app(StorefrontController::class)->organic($foreignRequest);
+            $this->fail('A foreign store product was accepted by the public review form.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('product_id', $error->errors());
+        }
+
+        $response = app(StorefrontController::class)->organic($request);
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(['received' => true], $response->getData(true)['data']);
+        $review = Review::sole();
+        $this->assertSame('pending', $review->status);
+        $this->assertSame('organic', $review->source);
+        $this->assertSame('none', $review->verified_source);
+        $this->assertSame($product->id, $review->product_id);
+        $this->assertSame('organic@example.test', $review->author_email);
+        $this->assertNotSame('organic@example.test', DB::table('deco_reviews')->whereKey($review->id)->value('author_email'));
+        $this->assertSame([$review->uuid], app(ReviewService::class)->filtered($store, ['source' => 'organic'])->pluck('uuid')->all());
+        $feed = app(StorefrontController::class)->data($store, Request::create('/feed', 'GET', ['product_id' => $product->shopify_product_id]));
+        $this->assertSame([], $feed['data']);
+        $this->assertTrue($feed['settings']['organic_collection_enabled']);
+        $this->assertSame('initial', $feed['form']['version']);
+        $this->assertStringNotContainsString('product_ids', json_encode($feed['form']));
+
+        app(StorefrontController::class)->organic($request);
+        app(StorefrontController::class)->organic($request);
+        $this->assertDatabaseCount('deco_reviews', 1);
+        $this->expectStatus(429, fn () => app(StorefrontController::class)->organic($request));
     }
 
     public function test_duplicate_review_create_is_idempotent_per_store(): void
@@ -454,7 +516,7 @@ class ReviewsTest extends TestCase
             $this->assertArrayHasKey('media', $error->errors());
         }
         $this->assertSame(0, Review::count());
-        $this->assertSame(0, \DecoReviews\Models\Media::count());
+        $this->assertSame(0, Media::count());
         $this->assertSame([], Storage::disk('local')->allFiles());
     }
 

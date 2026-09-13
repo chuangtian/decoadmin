@@ -199,6 +199,10 @@
     };
     target.append(button(label(root, "previous", "Previous"), current - 1, current <= 1), element("span", "", `${current} / ${last}`), button(label(root, "next", "Next"), current + 1, current >= last));
   };
+  const renderOrganicForm = (root, payload) => {
+    root.decoReviewsPayload = payload;
+    globalThis.DecoReviewsOrganic?.render(root, payload);
+  };
   const mount = (root) => {
     const form = root.querySelector("[data-dr-form]");
     const hasFeed = Boolean(root.dataset.feedUrl);
@@ -231,6 +235,7 @@
         const heading = root.querySelector("[data-dr-heading]");
         if (heading && payload.settings?.heading) heading.textContent = payload.settings.heading;
         renderSummary(root, payload);
+        renderOrganicForm(root, payload);
         if (list) {
           list.replaceChildren();
           viewer = lightbox(root, currentReviews);
@@ -285,7 +290,7 @@
         }
         form.reset();
         submitted = true;
-        formStatus.textContent = label(root, "thanks", "Thank you. Your review was submitted for moderation.");
+        formStatus.textContent = payload.message || label(root, "thanks", "Thank you. Your review was submitted for moderation.");
         formStatus.setAttribute("tabindex", "-1");
         formStatus.focus();
       } catch (error) {

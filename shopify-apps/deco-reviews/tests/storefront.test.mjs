@@ -18,6 +18,28 @@ class Node {
 }
 const content = node => [node.textContent, ...node.children.map(content)].join(' ');
 const source = fs.readFileSync(new URL('../frontend/storefront.js', import.meta.url), 'utf8');
+const organicSource = fs.readFileSync(new URL('../frontend/organic.js', import.meta.url), 'utf8');
+
+test('organic form is shown only for an enabled same-origin product form', () => {
+  const form = new Node(); form.hidden = true; form.action = '';
+  const root = new Node();
+  root.dataset = { showForm: 'true', mode: 'reviews', productId: '123', formAction: '/apps/deco-reviews/reviews' };
+  root.querySelector = key => key === '[data-dr-organic-form]' ? form : null;
+  const window = {};
+  const document = { createElement: () => new Node(), createTextNode: value => ({ textContent: value }), querySelectorAll: () => [] };
+  vm.runInNewContext(organicSource, { document, window, URL, location: { origin: 'https://shop.example' } });
+  window.DecoReviewsOrganic.render(root, { settings: { organic_collection_enabled: true }, form: {
+    version: 'v1', allow_photos: false, allow_video: false, questions: [],
+  } });
+  assert.equal(form.hidden, false);
+  assert.equal(form.action, 'https://shop.example/apps/deco-reviews/reviews');
+  assert.equal(root.dataset.allowPhotos, 'false');
+  assert.equal(root.dataset.allowVideo, 'false');
+
+  root.dataset.formAction = 'https://attacker.example/reviews';
+  window.DecoReviewsOrganic.render(root, { settings: { organic_collection_enabled: true }, form: { questions: [] } });
+  assert.equal(form.hidden, true);
+});
 
 for (const verification of ['none', 'import', 'manual', 'order', null]) {
   test(`purchase disclosure is truthful for ${verification}`, async () => {

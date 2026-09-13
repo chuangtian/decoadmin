@@ -8,12 +8,22 @@ const destination = resolve(root, "extensions/deco-reviews/assets");
 await mkdir(destination, { recursive: true });
 
 const javascriptOutput = resolve(destination, "storefront.js");
+const organicOutput = resolve(destination, "organic.js");
 const stylesheetOutput = resolve(destination, "storefront.css");
 
 await Promise.all([
   build({
     entryPoints: [resolve(root, "frontend/storefront.js")],
     outfile: javascriptOutput,
+    bundle: true,
+    minify: true,
+    platform: "browser",
+    target: ["es2022"],
+    legalComments: "none",
+  }),
+  build({
+    entryPoints: [resolve(root, "frontend/organic.js")],
+    outfile: organicOutput,
     bundle: true,
     minify: true,
     platform: "browser",
@@ -29,7 +39,9 @@ await Promise.all([
   }),
 ]);
 
-const javascriptBytes = (await stat(javascriptOutput)).size;
-if (javascriptBytes >= 10_000) {
-  throw new Error(`Theme app block JavaScript is ${javascriptBytes} bytes; it must remain below 10000 bytes.`);
+for (const output of [javascriptOutput, organicOutput]) {
+  const javascriptBytes = (await stat(output)).size;
+  if (javascriptBytes >= 10_000) {
+    throw new Error(`Theme app extension JavaScript ${output} is ${javascriptBytes} bytes; each asset must remain below 10000 bytes.`);
+  }
 }

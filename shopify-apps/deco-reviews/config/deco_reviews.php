@@ -19,7 +19,7 @@ return [
     ],
     'id_token_leeway_seconds' => 5,
     'defaults' => [
-        'enabled' => false, 'auto_publish_days' => 14, 'invites_enabled' => false,
+        'enabled' => false, 'organic_collection_enabled' => false, 'auto_publish_days' => 14, 'invites_enabled' => false,
         'auto_invites_enabled' => false, 'auto_invites_since' => null, 'reminders_enabled' => false,
         'reminder_subject' => 'A reminder to share your experience',
         'reminder_body' => 'How was {product}? We would love your honest feedback. All ratings are welcome.',

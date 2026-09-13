@@ -35,6 +35,8 @@ Route::prefix('/organizations/{organization}/stores/{store}/deco-reviews')
 
 Route::get('/api/shopify-app/deco-reviews/proxy/feed', [StorefrontController::class, 'feed'])
     ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:120,1']);
+Route::post('/api/shopify-app/deco-reviews/proxy/reviews', [StorefrontController::class, 'organic'])
+    ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:60,1']);
 Route::get('/api/shopify-app/deco-reviews/media/{media}', [StorefrontController::class, 'media'])->whereUuid('media')->middleware('throttle:240,1')->name('deco-reviews.public-media');
 Route::get('/api/shopify-app/deco-reviews/assets/{asset}', [StorefrontController::class, 'asset']);
 Route::middleware(['web', 'signed', 'throttle:20,1'])->group(function () {
