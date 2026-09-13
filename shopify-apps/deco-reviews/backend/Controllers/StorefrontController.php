@@ -30,10 +30,10 @@ class StorefrontController
         $this->reviews->active($store);
         $settings = $this->reviews->settings($store);
         abort_unless($preview || $settings['enabled'], 404);
-        $values = $request->validate(['product_id' => 'nullable|string|max:80', 'kind' => 'nullable|in:product,store', 'rating' => 'nullable|integer|between:1,5', 'sort' => 'nullable|in:newest,oldest,highest,lowest', 'page' => 'nullable|integer|min:1|max:500']);
+        $values = $request->validate(['product_id' => 'nullable|string|max:80', 'kind' => 'nullable|in:all,product,store', 'rating' => 'nullable|integer|between:1,5', 'sort' => 'nullable|in:newest,oldest,highest,lowest', 'page' => 'nullable|integer|min:1|max:500']);
         $base = $this->reviews->scoped($store)->where('status', 'published');
         $productId = null;
-        if (isset($values['kind'])) {
+        if (isset($values['kind']) && $values['kind'] !== 'all') {
             $base->where('kind', $values['kind']);
         }
         if (! empty($values['product_id'])) {
@@ -83,6 +83,25 @@ class StorefrontController
             'formConfig' => app(FormService::class)->forProduct($store, 'store', null),
             'collectEmail' => true,
         ])->header('Cache-Control', 'private, no-store')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function happyCustomers(Request $request)
+    {
+        $store = $request->attributes->get('deco_reviews_store');
+        abort_unless($store instanceof Store, 401);
+        $this->reviews->active($store);
+        $settings = $this->reviews->settings($store);
+        abort_unless($settings['enabled'] && $settings['happy_customers_page_enabled'], 404);
+
+        return response()->view('deco-reviews::storefront', [
+            'feedUrl' => config('deco_reviews.active.proxy_path').'/feed',
+            'feedKind' => 'all',
+            'submitUrl' => null,
+            'pageTitle' => $settings['heading'],
+            'pageDescription' => 'Verified and customer-submitted reviews published by this store.',
+        ])->header('Cache-Control', 'no-store')
+            ->header('X-Content-Type-Options', 'nosniff')
+            ->header('Referrer-Policy', 'strict-origin-when-cross-origin');
     }
 
     public function organicStore(Request $request)

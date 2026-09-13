@@ -55,7 +55,8 @@ class ReviewService
         $this->authorize($user, $store, true);
         $values = Validator::make($input, [
             'enabled' => 'required|boolean', 'organic_collection_enabled' => 'required|boolean',
-            'store_review_collection_enabled' => 'required|boolean', 'auto_publish_days' => 'nullable|integer|min:0|max:90',
+            'store_review_collection_enabled' => 'required|boolean', 'happy_customers_page_enabled' => 'required|boolean',
+            'auto_publish_days' => 'nullable|integer|min:0|max:90',
             'invites_enabled' => 'required|boolean', 'domestic_delay_days' => 'required|integer|min:0|max:180',
             'international_delay_days' => 'required|integer|min:0|max:180', 'reminder_days' => 'required|integer|min:1|max:90',
             'star_color' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/'], 'corner_style' => ['required', Rule::in(['rounded', 'square'])],

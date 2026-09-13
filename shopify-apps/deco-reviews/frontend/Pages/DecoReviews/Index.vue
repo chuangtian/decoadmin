@@ -23,7 +23,7 @@ type ImportProvider = 'custom' | 'auto' | 'loox' | 'judge_me' | 'yotpo' | 'okend
 type ImportRow = { uuid: string; provider?: ImportProvider; status?: string; imported?: number; skipped?: number; errors?: ImportError[] | null; created_at?: string; undone_at?: string | null; can_undo?: boolean };
 type PageData<T> = { data: T[]; current_page: number; last_page: number; total: number };
 type Settings = {
-    enabled: boolean; organic_collection_enabled: boolean; store_review_collection_enabled: boolean; auto_publish_days: number | null; invites_enabled: boolean; domestic_delay_days: number;
+    enabled: boolean; organic_collection_enabled: boolean; store_review_collection_enabled: boolean; happy_customers_page_enabled: boolean; auto_publish_days: number | null; invites_enabled: boolean; domestic_delay_days: number;
     international_delay_days: number; auto_invites_enabled: boolean; reminders_enabled: boolean; reminder_days: number;
     reminder_subject: string; reminder_body: string; email_button_label: string; email_accent: string; auto_invites_since: string | null;
     media_reminders_enabled: boolean; media_reminder_days: number; media_reminder_subject: string; media_reminder_body: string;
@@ -45,7 +45,7 @@ type FormConfig = {
 };
 
 const props = defineProps<{
-    organization: { id: number; name: string }; store: { id: number; name: string }; canManage: boolean; baseUrl: string; storeReviewUrl: string | null;
+    organization: { id: number; name: string }; store: { id: number; name: string }; canManage: boolean; baseUrl: string; storeReviewUrl: string | null; happyCustomersUrl: string | null;
     tab: Tab; filters: Record<string, string | number | null | undefined>; reviews: PageData<Review>; invitations: PageData<Invitation>;
     stats: { total: number; published: number; pending: number; average: number; media: number; invites_sent: number };
     products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[]; formConfig: FormConfig; emailDeliveries: EmailDelivery[]; rewardHistory: RewardHistory[];
@@ -192,6 +192,15 @@ const copyStoreReviewUrl = async () => {
     try {
         await navigator.clipboard.writeText(props.storeReviewUrl);
         notice.value = '店铺评价链接已复制。';
+    } catch {
+        notice.value = '浏览器未允许自动复制，请手动选择链接复制。';
+    }
+};
+const copyHappyCustomersUrl = async () => {
+    if (!props.happyCustomersUrl) return;
+    try {
+        await navigator.clipboard.writeText(props.happyCustomersUrl);
+        notice.value = '公开评价展示页链接已复制。';
     } catch {
         notice.value = '浏览器未允许自动复制，请手动选择链接复制。';
     }
@@ -368,13 +377,24 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                     <p v-else class="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">当前店铺域名无效，无法生成公开链接。</p>
                     <p class="mt-4 text-[12px] text-slate-500">需同时在“设置”中启用公开评价展示与店铺评价收集；关闭任一开关，链接都会立即停止接收提交。</p>
                 </section>
+                <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 class="text-lg font-semibold text-slate-950">Happy Customers 公开评价页</h2>
+                    <p class="mt-2 text-slate-500">集中展示本店已发布的商品评价和店铺评价；待审核、未发布和敏感管理字段不会出现在页面中。</p>
+                    <div v-if="happyCustomersUrl" class="mt-5 flex flex-col gap-3 sm:flex-row">
+                        <input :value="happyCustomersUrl" readonly aria-label="公开评价展示页链接" class="min-h-11 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3" @focus="($event.target as HTMLInputElement).select()" />
+                        <button type="button" class="rounded-xl border border-slate-300 px-5 py-2.5 font-semibold" @click="copyHappyCustomersUrl">复制链接</button>
+                        <a :href="happyCustomersUrl" target="_blank" rel="noopener" class="rounded-xl bg-violet-700 px-5 py-2.5 text-center font-semibold text-white">打开页面</a>
+                    </div>
+                    <p v-else class="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">当前店铺域名无效，无法生成公开页面链接。</p>
+                    <p class="mt-4 text-[12px] text-slate-500">需要同时启用“公开评价展示”和“Happy Customers 公开评价页”；关闭任一开关后页面立即不可访问。</p>
+                </section>
             </template>
 
             <form v-else-if="tab === 'settings'" class="space-y-5" @submit.prevent="saveSettings">
                 <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div class="flex flex-wrap items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-950">收集与发布</h2><p class="mt-2 text-slate-500">控制评价展示和购买后邀请节奏。</p></div><label class="flex items-center gap-2 font-semibold"><input v-model="settingsForm.enabled" :disabled="!canManage" type="checkbox" />启用公开评价展示</label></div>
                     <div class="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4"><label class="font-medium">自动发布等待天数<input v-model.number="settingsForm.auto_publish_days" :disabled="!canManage" type="number" min="0" placeholder="留空为手动审核" class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">国内订单延迟天数<input v-model.number="settingsForm.domestic_delay_days" :disabled="!canManage" type="number" min="0" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">国际订单延迟天数<input v-model.number="settingsForm.international_delay_days" :disabled="!canManage" type="number" min="0" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label><label class="font-medium">提醒间隔天数<input v-model.number="settingsForm.reminder_days" :disabled="!canManage" type="number" min="1" required class="mt-2 w-full rounded-xl border px-3 py-2.5" /></label></div>
-                    <div class="mt-5 flex flex-wrap gap-5"><label class="flex items-center gap-2"><input v-model="settingsForm.organic_collection_enabled" :disabled="!canManage" type="checkbox" />允许顾客在商品页直接评价</label><label class="flex items-center gap-2"><input v-model="settingsForm.store_review_collection_enabled" :disabled="!canManage" type="checkbox" />启用店铺评价公开链接</label><label class="flex items-center gap-2"><input v-model="settingsForm.invites_enabled" :disabled="!canManage" type="checkbox" />启用邀请排期</label><label class="flex items-center gap-2"><input v-model="settingsForm.auto_invites_enabled" :disabled="!canManage" type="checkbox" />自动识别新订单并建立邀评</label><label class="flex items-center gap-2"><input v-model="settingsForm.reminders_enabled" :disabled="!canManage" type="checkbox" />启用普通提醒</label><label class="flex items-center gap-2"><input v-model="settingsForm.media_reminders_enabled" :disabled="!canManage" type="checkbox" />启用图片/视频提醒</label><label class="flex items-center gap-2"><input v-model="settingsForm.marketing_only" :disabled="!canManage" type="checkbox" />仅邀请允许接收营销邮件的客户</label></div>
+                    <div class="mt-5 flex flex-wrap gap-5"><label class="flex items-center gap-2"><input v-model="settingsForm.organic_collection_enabled" :disabled="!canManage" type="checkbox" />允许顾客在商品页直接评价</label><label class="flex items-center gap-2"><input v-model="settingsForm.store_review_collection_enabled" :disabled="!canManage" type="checkbox" />启用店铺评价公开链接</label><label class="flex items-center gap-2"><input v-model="settingsForm.happy_customers_page_enabled" :disabled="!canManage" type="checkbox" />启用 Happy Customers 公开评价页</label><label class="flex items-center gap-2"><input v-model="settingsForm.invites_enabled" :disabled="!canManage" type="checkbox" />启用邀请排期</label><label class="flex items-center gap-2"><input v-model="settingsForm.auto_invites_enabled" :disabled="!canManage" type="checkbox" />自动识别新订单并建立邀评</label><label class="flex items-center gap-2"><input v-model="settingsForm.reminders_enabled" :disabled="!canManage" type="checkbox" />启用普通提醒</label><label class="flex items-center gap-2"><input v-model="settingsForm.media_reminders_enabled" :disabled="!canManage" type="checkbox" />启用图片/视频提醒</label><label class="flex items-center gap-2"><input v-model="settingsForm.marketing_only" :disabled="!canManage" type="checkbox" />仅邀请允许接收营销邮件的客户</label></div>
                     <p class="mt-3 text-slate-500">公开表单评价始终进入待审核，并明确标记为未验证购买；无论自动发布等待天数如何都不会直接公开。</p>
                     <div class="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900"><p>自动识别只处理开启后进入系统的新订单，不回溯旧订单；普通提醒和图片/视频提醒各最多发送一次，提交评价或退订后立即停止。</p><p v-if="settingsForm.auto_invites_since" class="mt-2 text-[12px] font-semibold">自动识别激活起点：{{ formatDate(settingsForm.auto_invites_since) }}（只读）</p><p v-else class="mt-2 text-[12px]">保存并启用自动识别后，系统会记录不可编辑的激活起点。</p></div>
                 </section>

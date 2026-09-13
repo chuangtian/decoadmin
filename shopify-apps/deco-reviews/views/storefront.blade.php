@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="{{ url('/api/shopify-app/deco-reviews/assets/storefront.css') }}">
     <script src="{{ url('/api/shopify-app/deco-reviews/assets/storefront.js') }}" defer></script>
-    <title>Customer reviews</title>
+    <meta name="description" content="{{ $pageDescription ?? 'Customer reviews' }}">
+    <title>{{ $pageTitle ?? 'Customer reviews' }}</title>
 </head>
 <body>
 @php
@@ -15,10 +16,10 @@
     $mediaAccept = implode(',', array_filter([$allowPhotos ? 'image/*' : null, $allowVideo ? 'video/*' : null]));
     $csrfToken = request()->hasSession() ? csrf_token() : '';
 @endphp
-<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ $csrfToken }}" data-form-preview="{{ ($formPreview ?? false) ? 'true' : 'false' }}" data-allow-photos="{{ $allowPhotos ? 'true' : 'false' }}" data-allow-video="{{ $allowVideo ? 'true' : 'false' }}" data-thanks="{{ $reviewForm['thank_you'] ?? 'Thank you. Your review was submitted for moderation.' }}" data-preview-message="仅预览，没有提交或保存评价" data-required-answer="Please choose at least one answer." data-media-error="Upload up to 5 photos or 1 video.">
+<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-kind="{{ $feedKind ?? 'product' }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ $csrfToken }}" data-form-preview="{{ ($formPreview ?? false) ? 'true' : 'false' }}" data-allow-photos="{{ $allowPhotos ? 'true' : 'false' }}" data-allow-video="{{ $allowVideo ? 'true' : 'false' }}" data-thanks="{{ $reviewForm['thank_you'] ?? 'Thank you. Your review was submitted for moderation.' }}" data-preview-message="仅预览，没有提交或保存评价" data-required-answer="Please choose at least one answer." data-media-error="Upload up to 5 photos or 1 video.">
     @if ($feedUrl)
         <header class="dr-header">
-            <h1 class="dr-heading" data-dr-heading>Customer reviews</h1>
+            <h1 class="dr-heading" data-dr-heading>{{ $pageTitle ?? 'Customer reviews' }}</h1>
             <div class="dr-summary" data-dr-summary></div>
         </header>
         <div class="dr-toolbar">

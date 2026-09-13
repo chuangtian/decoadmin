@@ -60,7 +60,7 @@ The current shared renderer is a foundation only. None of the following should b
 | Reviews Sidebar Widget | `sidebar` | Prototype; launcher/open/close behavior and activation controls pending. |
 | Loox Trust Badge | `trust` | Prototype; store-wide aggregate semantics and placements pending. |
 | Snippets Widget | `snippets` | Prototype; selection/rotation/editor behavior pending. |
-| Happy Customers Page | None | Pending implementation; independent route/template, SEO, pagination, and store/product aggregation required. |
+| Happy Customers Page | Signed App Proxy page | Implemented core page with an independent default-off switch, store/product aggregation, rating/sort filters, pagination and public-field allow-list; custom domain/SEO controls and live storefront acceptance remain pending. |
 | Video Slider Widget | `video` | Improved prototype with bounded controls, keyboard navigation, no autoplay and empty fallback; thumbnail editor and independent theme acceptance pending. |
 | Cards Carousel Widget | `carousel` | Shared prototype only; distinct card editor and carousel behavior pending. |
 | Testimonials Carousel Widget | `carousel`/`snippets` | Shared prototype only; quotation-first semantics and controls pending. |
@@ -100,6 +100,7 @@ The current shared renderer is a foundation only. None of the following should b
 - Local implementation, not released: merchant copy editor, media toggles, non-submitting saved-form preview, single-choice/multiple-choice/rating-scale questions, required/public flags, product/store targeting, immutable encrypted answer snapshots, and public-field filtering. Form version checks protect both concurrent edits and stale buyer submissions. Covered by `tests/FormTest.php`; live-browser acceptance remains pending.
 - Implemented in the current follow-up: an independently gated public store-review link using the signed Shopify App Proxy. It collects encrypted email, creates only unverified pending store reviews, shares configured store/all questions, and stops receiving immediately when either public display or store-review collection is disabled.
 - Implemented in the current follow-up: the authorized streamed CSV export includes each review's immutable custom answers in a bounded `custom_answers_json` cell. Labels, type, value and public/private visibility are retained without leaking email or creating unstable columns across historical form versions.
+- Implemented in the current follow-up: an independently gated Happy Customers App Proxy page aggregates only published product and store reviews, reuses the bounded public feed, and stops serving immediately when disabled.
 - Remaining: multi-language copy management, colors/corners, redirect behavior, QR code, collection targeting and Merchant API representation.
 - Product review groups and bundles, shared-display rules, bundle review collection, bundle-page aggregate behavior, and one-request bundle workflow.
 

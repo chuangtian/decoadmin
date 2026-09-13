@@ -333,6 +333,57 @@ class ReviewsTest extends TestCase
         $this->expectStatus(404, fn () => app(StorefrontController::class)->organicStore($request));
     }
 
+    public function test_happy_customers_page_is_independently_gated_and_aggregates_only_published_store_data(): void
+    {
+        [$user, , $store] = $this->context('happy-customers');
+        $product = $this->product($store, 'happy-bike');
+        Settings::create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'values' => array_replace(config('deco_reviews.defaults'), [
+                'enabled' => true,
+                'happy_customers_page_enabled' => true,
+            ]),
+        ]);
+        $productReview = app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_email' => 'published-product@example.test',
+        ]), [], $user);
+        $productReview->update(['status' => 'published', 'published_at' => now()]);
+        $storeReview = app(ReviewService::class)->create($store, [
+            'kind' => 'store',
+            'author_name' => 'Store Buyer',
+            'author_email' => 'published-store@example.test',
+            'rating' => 4,
+            'title' => 'Helpful store',
+            'body' => 'A published store review.',
+        ], [], $user);
+        $storeReview->update(['status' => 'published', 'published_at' => now()]);
+        app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_name' => 'Pending Buyer',
+            'author_email' => 'pending@example.test',
+            'body' => 'This review must remain private.',
+        ]), [], $user);
+
+        $pageRequest = Request::create('/api/shopify-app/deco-reviews/proxy/happy-customers', 'GET');
+        $pageRequest->attributes->set('deco_reviews_store', $store);
+        $page = app(StorefrontController::class)->happyCustomers($pageRequest);
+        $html = $page->getContent();
+        $this->assertSame('no-store, private', $page->headers->get('Cache-Control'));
+        $this->assertStringContainsString('data-kind="all"', $html);
+        $this->assertStringContainsString('/apps/deco-reviews/feed', $html);
+        $this->assertStringNotContainsString('published-product@example.test', $html);
+
+        $feed = app(StorefrontController::class)->data($store, Request::create('/feed', 'GET', ['kind' => 'all']));
+        $this->assertSame(2, $feed['summary']['count']);
+        $this->assertEqualsCanonicalizing(['product', 'store'], collect($feed['data'])->pluck('kind')->all());
+        $this->assertStringNotContainsString('pending@example.test', json_encode($feed));
+        $this->assertStringNotContainsString('This review must remain private.', json_encode($feed));
+
+        $settings = Settings::where('store_id', $store->id)->firstOrFail();
+        $settings->update(['values' => array_replace($settings->values, ['happy_customers_page_enabled' => false])]);
+        $this->expectStatus(404, fn () => app(StorefrontController::class)->happyCustomers($pageRequest));
+    }
+
     public function test_duplicate_review_create_is_idempotent_per_store(): void
     {
         [$user, , $store] = $this->context();

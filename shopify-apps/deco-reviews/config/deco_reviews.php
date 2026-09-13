@@ -21,6 +21,7 @@ return [
     'id_token_leeway_seconds' => 5,
     'defaults' => [
         'enabled' => false, 'organic_collection_enabled' => false, 'store_review_collection_enabled' => false,
+        'happy_customers_page_enabled' => false,
         'auto_publish_days' => 14, 'invites_enabled' => false,
         'auto_invites_enabled' => false, 'auto_invites_since' => null, 'reminders_enabled' => false,
         'reminder_subject' => 'A reminder to share your experience',

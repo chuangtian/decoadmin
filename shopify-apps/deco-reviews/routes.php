@@ -42,6 +42,8 @@ Route::post('/api/shopify-app/deco-reviews/proxy/reviews', [StorefrontController
     ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:60,1']);
 Route::get('/api/shopify-app/deco-reviews/proxy/store-review', [StorefrontController::class, 'storeReview'])
     ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:120,1']);
+Route::get('/api/shopify-app/deco-reviews/proxy/happy-customers', [StorefrontController::class, 'happyCustomers'])
+    ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:120,1']);
 Route::post('/api/shopify-app/deco-reviews/proxy/store-reviews', [StorefrontController::class, 'organicStore'])
     ->middleware(['shopify.app-proxy:deco_reviews,deco_reviews_store', 'throttle:60,1']);
 Route::get('/api/shopify-app/deco-reviews/media/{media}', [StorefrontController::class, 'media'])->whereUuid('media')->middleware('throttle:240,1')->name('deco-reviews.public-media');
