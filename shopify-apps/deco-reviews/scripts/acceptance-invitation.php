@@ -10,8 +10,8 @@ if (! $app->environment('staging') || config('deco_reviews.environment') !== 'te
 }
 $mode = $argv[1] ?? '';
 $recipient = strtolower($argv[2] ?? '');
-if (! filter_var($recipient, FILTER_VALIDATE_EMAIL) || ! in_array($mode, ['configure', 'run', 'status'], true)) {
-    throw new RuntimeException('Use configure|run|status with the explicitly authorized recipient.');
+if (! filter_var($recipient, FILTER_VALIDATE_EMAIL) || ! in_array($mode, ['configure', 'run', 'reminder', 'status'], true)) {
+    throw new RuntimeException('Use configure|run|reminder|status with the explicitly authorized recipient.');
 }
 $store = \App\Models\Store::where('id', 1)->where('shopify_domain', 'macfox-test-app.myshopify.com')->firstOrFail();
 $reviews = app(\DecoReviews\Services\ReviewService::class);
@@ -32,7 +32,7 @@ $externalId = $argv[3] ?? '';
 if (! ctype_digit($externalId)) { throw new RuntimeException('Exact test Shopify order ID required.'); }
 $order = \App\Models\Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)
     ->where('shopify_order_id', $externalId)->where('email', $recipient)->firstOrFail();
-if ($mode === 'run') {
+if (in_array($mode, ['run', 'reminder'], true)) {
     $remote = app(\DecoReviews\Services\ShopifyClient::class)->query($store,
         'query QATestOrderGuard($id: ID!) { order(id: $id) { test tags email totalPriceSet { shopMoney { amount } } } }', ['id' => 'gid://shopify/Order/'.$externalId]);
     $synthetic = ($remote['order']['test'] ?? null) === true || (in_array('DECO_REVIEWS_QA', $remote['order']['tags'] ?? [], true)
@@ -41,7 +41,19 @@ if ($mode === 'run') {
         throw new RuntimeException('Only the exact synthetic Shopify order and recipient are allowed.');
     }
     config(['deco_reviews.automation_stores' => [$store->shopify_domain], 'deco_reviews.recipient_allowlist' => [$recipient], 'deco_reviews.delivery_enabled' => true]);
-    app(\DecoReviews\Services\InvitationService::class)->discover($store);
+    if ($mode === 'run') {
+        app(\DecoReviews\Services\InvitationService::class)->discover($store);
+    } else {
+        $invite = \DecoReviews\Models\Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+            ->where('order_id', $order->id)->where('email_hash', $reviews->emailHash($store, $recipient))->sole();
+        if ($invite->status !== 'sent' || ! $invite->sent_at || $invite->completed_at) {
+            throw new RuntimeException('Only one sent and incomplete synthetic invitation is allowed.');
+        }
+        if (! $invite->reminder_sent_at) {
+            $invite->forceFill(['sent_at' => now()->subDays($reviews->settings($store)['reminder_days'])->subMinute()])->save();
+            $reviews->audit($store, $user, 'invitation.acceptance_reminder_due', null, ['invitation' => $invite->uuid]);
+        }
+    }
     $invites = \DecoReviews\Models\Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('order_id', $order->id)->get();
     foreach ($invites as $invite) { app(\DecoReviews\Services\InvitationProcessor::class)->process($store->organization_id, $store->id, $invite->uuid); }
 }
