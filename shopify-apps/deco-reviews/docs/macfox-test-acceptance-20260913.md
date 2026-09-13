@@ -111,3 +111,11 @@
 - Added, but not yet deployed in this record, a bounded `ffprobe` video inspector for real MIME/container, one video stream, supported codecs, duration and 4K limits. Videos remain manual-review only. App-owned test image installs ffmpeg; shared Docker/runtime recipes and other apps are unchanged.
 - Reopening a completed signed invite now renders an explicit already-received page without another form. Invitation management now shows the human order number/product and completion timestamp instead of presenting only an internal numeric order ID.
 - Reviewed combined source: 50 backend tests / 308 assertions, 8 storefront runtime tests, type-check, app asset build and typography passed. This does not complete transcoding, malware scanning, full video-browser matrix, reminder inbox E2E or full Loox parity.
+
+## Video safety release and management filters
+
+- Deployed exact `origin/test` commit `3ac2ec18833b75fe8800f5838429b365bd9365ec`. Backup: `/opt/decoadmin/backups/deco-reviews-form-3ac2ec18833b75fe8800f5838429b365bd9365ec`. Health and Horizon passed; no migration, Shopify scope or theme changes; production containers unchanged.
+- Re-ran the exact SHA-256-guarded synthetic MP4 through the deployed creation service. Real `ffprobe` accepted it and deduplication returned existing review 7; it did not create another review.
+- External completed-invitation probe returned 200, contained the already-used completion copy and no `<form>` element. Signed URL was not logged.
+- Added management filters for product, media, source, purchase verification, featured, merchant reply, incentivized and inclusive review dates. The same validated filters drive CSV export. Invitation rows now show the store's order number, product and completion time.
+- Combined source after filter work: 51 backend tests / 310 assertions passed; storefront runtime 8 passed; type-check and typography passed. Filter changes are not yet deployed in this record.

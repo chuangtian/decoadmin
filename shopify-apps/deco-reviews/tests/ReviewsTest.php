@@ -228,6 +228,29 @@ class ReviewsTest extends TestCase
         $this->assertDatabaseCount('deco_reviews', 1);
     }
 
+    public function test_management_filters_cover_media_source_verification_flags_reply_product_and_dates(): void
+    {
+        [$user, , $store] = $this->context();
+        $product = $this->product($store);
+        $featured = app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_name' => 'Filtered Buyer', 'author_email' => 'filtered@example.test', 'body' => 'Filtered media review.',
+        ]), [UploadedFile::fake()->image('filter.png', 20, 20)], $user);
+        $featured->update(['source' => 'email', 'verified_source' => 'order', 'featured' => true,
+            'incentivized' => true, 'reply' => 'Thank you.', 'reviewed_at' => '2026-09-10 12:00:00']);
+        $plain = app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_name' => 'Plain Buyer', 'author_email' => 'plain@example.test', 'body' => 'Plain review.',
+        ]), [], $user);
+        $plain->update(['reviewed_at' => '2026-09-01 12:00:00']);
+
+        $filters = ['product_id' => $product->id, 'media' => 'with', 'source' => 'email', 'verified' => 'order',
+            'featured' => '1', 'incentivized' => '1', 'reply' => 'with', 'date_from' => '2026-09-10', 'date_to' => '2026-09-10'];
+        $this->assertSame([$featured->uuid], app(ReviewService::class)->filtered($store, $filters)->pluck('uuid')->all());
+        $this->assertSame([$plain->uuid], app(ReviewService::class)->filtered($store, [
+            'media' => 'without', 'source' => 'merchant', 'verified' => 'none', 'featured' => '0',
+            'incentivized' => '0', 'reply' => 'without', 'date_to' => '2026-09-09',
+        ])->pluck('uuid')->all());
+    }
+
     public function test_import_reports_stable_error_codes_deduplicates_and_can_be_undone_within_seven_days(): void
     {
         [$user, , $store] = $this->context();

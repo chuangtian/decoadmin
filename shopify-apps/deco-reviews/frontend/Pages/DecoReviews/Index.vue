@@ -49,6 +49,9 @@ const notice = ref('');
 const formEditorDirty = ref(false);
 const query = ref({
     kind: String(props.filters.kind || 'product'), status: String(props.filters.status || ''), rating: String(props.filters.rating || ''),
+    product_id: String(props.filters.product_id || ''), media: String(props.filters.media || ''), source: String(props.filters.source || ''),
+    verified: String(props.filters.verified || ''), featured: String(props.filters.featured ?? ''), incentivized: String(props.filters.incentivized ?? ''),
+    reply: String(props.filters.reply || ''), date_from: String(props.filters.date_from || ''), date_to: String(props.filters.date_to || ''),
     q: String(props.filters.q || ''), sort: String(props.filters.sort || 'newest'),
 });
 const selected = ref<string[]>([]);
@@ -236,6 +239,23 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                         <label><span class="sr-only">状态</span><select v-model="query.status" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5"><option value="">全部状态</option><option value="pending">待审核</option><option value="published">已发布</option><option value="unpublished">未发布</option></select></label>
                         <label><span class="sr-only">评分</span><select v-model="query.rating" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5"><option value="">全部评分</option><option v-for="rating in 5" :key="rating" :value="String(rating)">{{ rating }} 星</option></select></label>
                         <div class="flex gap-2"><select v-model="query.sort" aria-label="排序" class="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5"><option value="newest">最新</option><option value="oldest">最早</option><option value="rating_desc">评分高</option><option value="rating_asc">评分低</option></select><button class="rounded-xl bg-slate-950 px-4 font-semibold text-white">筛选</button></div>
+                        <details class="rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-5">
+                            <summary class="cursor-pointer font-semibold text-slate-700 marker:text-violet-600">更多筛选</summary>
+                            <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <label><span class="text-[12px] font-semibold text-slate-600">商品</span><select v-model="query.product_id" :disabled="query.kind !== 'product'" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部商品</option><option v-for="product in products" :key="product.id" :value="String(product.id)">{{ product.title }}</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">媒体</span><select v-model="query.media" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="with">有图片或视频</option><option value="without">无媒体</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">来源</span><select v-model="query.source" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="email">邀评邮件</option><option value="merchant">手动创建</option><option value="import">导入</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">购买验证</span><select v-model="query.verified" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="order">已验证购买</option><option value="none">未验证</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">精选</span><select v-model="query.featured" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="1">是</option><option value="0">否</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">商家回复</span><select v-model="query.reply" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="with">已回复</option><option value="without">未回复</option></select></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">激励评价</span><select v-model="query.incentivized" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"><option value="">全部</option><option value="1">是</option><option value="0">否</option></select></label>
+                                <span aria-hidden="true"></span>
+                                <label><span class="text-[12px] font-semibold text-slate-600">开始日期</span><input v-model="query.date_from" type="date" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2" /></label>
+                                <label><span class="text-[12px] font-semibold text-slate-600">结束日期</span><input v-model="query.date_to" type="date" :min="query.date_from || undefined" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2" /></label>
+                                <button type="button" class="self-end rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold" @click="Object.assign(query, { product_id: '', media: '', source: '', verified: '', featured: '', incentivized: '', reply: '', date_from: '', date_to: '' })">清除更多筛选</button>
+                                <button class="self-end rounded-lg bg-violet-700 px-4 py-2 font-semibold text-white">应用更多筛选</button>
+                            </div>
+                        </details>
                     </form>
                 </section>
 

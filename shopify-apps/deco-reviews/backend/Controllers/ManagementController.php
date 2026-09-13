@@ -30,7 +30,13 @@ class ManagementController
     public function index(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form', 'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished', 'rating' => 'nullable|integer|between:1,5', 'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
+        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form',
+            'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
+            'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
+            'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import',
+            'verified' => 'nullable|in:order,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
+            'reply' => 'nullable|in:with,without', 'date_from' => 'nullable|date', 'date_to' => 'nullable|date|after_or_equal:date_from',
+            'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
         $settings = $this->reviews->settings($store);
         $rows = $this->reviews->filtered($store, $filters)->with(['product', 'media'])->paginate(15)->withQueryString();
         $rows->through(fn ($review) => $this->reviews->serialize($review, $store, true, $settings));
@@ -136,7 +142,12 @@ class ManagementController
     public function export(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $filters = $request->validate(['kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished', 'rating' => 'nullable|integer|between:1,5', 'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc']);
+        $filters = $request->validate(['kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
+            'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
+            'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import',
+            'verified' => 'nullable|in:order,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
+            'reply' => 'nullable|in:with,without', 'date_from' => 'nullable|date', 'date_to' => 'nullable|date|after_or_equal:date_from',
+            'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc']);
 
         return response()->streamDownload(function () use ($store, $filters) {
             $stream = fopen('php://output', 'w');

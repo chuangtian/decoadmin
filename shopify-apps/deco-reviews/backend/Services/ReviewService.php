@@ -85,6 +85,33 @@ class ReviewService
                 $query->where($key, $filters[$key]);
             }
         }
+        if (($filters['media'] ?? '') === 'with') {
+            $query->whereHas('media');
+        } elseif (($filters['media'] ?? '') === 'without') {
+            $query->whereDoesntHave('media');
+        }
+        if (in_array($filters['source'] ?? '', ['merchant', 'email', 'import'], true)) {
+            $query->where('source', $filters['source']);
+        }
+        if (in_array($filters['verified'] ?? '', ['order', 'none'], true)) {
+            $query->where('verified_source', $filters['verified']);
+        }
+        foreach (['featured', 'incentivized'] as $flag) {
+            if (array_key_exists($flag, $filters) && $filters[$flag] !== '' && $filters[$flag] !== null) {
+                $query->where($flag, filter_var($filters[$flag], FILTER_VALIDATE_BOOLEAN));
+            }
+        }
+        if (($filters['reply'] ?? '') === 'with') {
+            $query->whereNotNull('reply')->where('reply', '!=', '');
+        } elseif (($filters['reply'] ?? '') === 'without') {
+            $query->where(fn ($q) => $q->whereNull('reply')->orWhere('reply', ''));
+        }
+        if (! empty($filters['date_from'])) {
+            $query->whereDate('reviewed_at', '>=', $filters['date_from']);
+        }
+        if (! empty($filters['date_to'])) {
+            $query->whereDate('reviewed_at', '<=', $filters['date_to']);
+        }
         if ($term = trim($filters['q'] ?? '')) {
             $like = '%'.addcslashes($term, '%_\\').'%';
             $query->where(fn ($q) => $q->where('author_name', 'like', $like)->orWhere('title', 'like', $like)->orWhere('body', 'like', $like)
