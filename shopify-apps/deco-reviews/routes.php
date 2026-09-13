@@ -17,6 +17,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/deco-reviews')
         Route::get('/preview', [ManagementController::class, 'preview'])->name('deco-reviews.preview');
         Route::get('/widget-preview', [ManagementController::class, 'widget'])->name('deco-reviews.widget-preview');
         Route::get('/export', [ManagementController::class, 'export'])->middleware('throttle:10,1');
+        Route::get('/imports/{batch}/errors', [ManagementController::class, 'importErrors'])->whereUuid('batch')->middleware('throttle:20,1');
         Route::get('/form-preview', [FormController::class, 'preview'])->name('deco-reviews.form-preview');
         Route::get('/email-preview', [ManagementController::class, 'emailPreview'])->name('deco-reviews.email-preview');
         Route::get('/media/{media}', [ManagementController::class, 'media'])->whereUuid('media')->name('deco-reviews.media');

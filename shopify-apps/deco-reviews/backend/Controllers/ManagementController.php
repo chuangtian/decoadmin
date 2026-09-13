@@ -180,6 +180,26 @@ class ManagementController
         return back()->with('success', '导入已撤销，评价已下架并保留审计记录。');
     }
 
+    public function importErrors(Request $request, Organization $organization, Store $store, string $batch)
+    {
+        $this->authorize($request, $organization, $store);
+        $import = ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)
+            ->where('uuid', $batch)->firstOrFail();
+
+        return response()->streamDownload(function () use ($import) {
+            $stream = fopen('php://output', 'w');
+            fputcsv($stream, ['line', 'error_code'], ',', '"', '');
+            foreach ($import->errors ?? [] as $error) {
+                fputcsv($stream, [(int) ($error['line'] ?? 0), (string) ($error['code'] ?? 'UNKNOWN')], ',', '"', '');
+            }
+            fclose($stream);
+        }, 'deco-reviews-import-errors-'.$import->uuid.'.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     public function export(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);

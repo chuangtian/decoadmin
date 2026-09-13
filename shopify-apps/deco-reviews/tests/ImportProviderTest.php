@@ -140,4 +140,25 @@ class ImportProviderTest extends TestCase
         $this->actingAs($user)->post($url, ['provider' => 'custom', 'file' => $this->csv('custom.csv', $rows)])->assertSessionHasNoErrors();
         $this->assertDatabaseHas('deco_review_imports', ['store_id' => $store->id, 'provider' => 'custom', 'imported' => 1]);
     }
+
+    public function test_scoped_failure_report_contains_only_line_and_stable_error_code(): void
+    {
+        [$user, $organization, $store] = $this->context('report');
+        $batch = app(ImportService::class)->import($store, $user, $this->csv('report.csv', [
+            'product_handle,rating,author_name,body,reviewed_at',
+            'missing-product,5,Private Buyer,Private body,2026-09-01',
+        ]), 'custom');
+        $url = "/organizations/{$organization->id}/stores/{$store->id}/deco-reviews/imports/{$batch->uuid}/errors";
+        $csv = $this->actingAs($user)->get($url)->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->streamedContent();
+        $this->assertStringContainsString("line,error_code\n2,PRODUCT_NOT_FOUND", $csv);
+        $this->assertStringNotContainsString('Private Buyer', $csv);
+        $this->assertStringNotContainsString('Private body', $csv);
+
+        [, $foreignOrganization, $foreignStore] = $this->context('report-foreign');
+        $this->actingAs($user)->get("/organizations/{$foreignOrganization->id}/stores/{$foreignStore->id}/deco-reviews/imports/{$batch->uuid}/errors")
+            ->assertNotFound();
+    }
 }
