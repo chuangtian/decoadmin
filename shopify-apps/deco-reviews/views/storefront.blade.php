@@ -3,9 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link rel="stylesheet" href="/api/shopify-app/deco-reviews/assets/storefront.css">
-    <script src="/api/shopify-app/deco-reviews/assets/storefront.js" defer></script>
+    <link rel="stylesheet" href="{{ url('/api/shopify-app/deco-reviews/assets/storefront.css') }}">
+    <script src="{{ url('/api/shopify-app/deco-reviews/assets/storefront.js') }}" defer></script>
     <title>Customer reviews</title>
 </head>
 <body>
@@ -14,8 +13,9 @@
     $allowPhotos = (bool) ($reviewForm['allow_photos'] ?? false);
     $allowVideo = (bool) ($reviewForm['allow_video'] ?? false);
     $mediaAccept = implode(',', array_filter([$allowPhotos ? 'image/*' : null, $allowVideo ? 'video/*' : null]));
+    $csrfToken = request()->hasSession() ? csrf_token() : '';
 @endphp
-<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ csrf_token() }}" data-form-preview="{{ ($formPreview ?? false) ? 'true' : 'false' }}" data-allow-photos="{{ $allowPhotos ? 'true' : 'false' }}" data-allow-video="{{ $allowVideo ? 'true' : 'false' }}" data-thanks="{{ $reviewForm['thank_you'] ?? 'Thank you. Your review was submitted for moderation.' }}" data-preview-message="仅预览，没有提交或保存评价" data-required-answer="Please choose at least one answer." data-media-error="Upload up to 5 photos or 1 video.">
+<main class="dr-widget" data-deco-reviews data-feed-url="{{ $feedUrl }}" data-mode="{{ $widgetMode ?? 'reviews' }}" data-csrf="{{ $csrfToken }}" data-form-preview="{{ ($formPreview ?? false) ? 'true' : 'false' }}" data-allow-photos="{{ $allowPhotos ? 'true' : 'false' }}" data-allow-video="{{ $allowVideo ? 'true' : 'false' }}" data-thanks="{{ $reviewForm['thank_you'] ?? 'Thank you. Your review was submitted for moderation.' }}" data-preview-message="仅预览，没有提交或保存评价" data-required-answer="Please choose at least one answer." data-media-error="Upload up to 5 photos or 1 video.">
     @if ($feedUrl)
         <header class="dr-header">
             <h1 class="dr-heading" data-dr-heading>Customer reviews</h1>
@@ -43,8 +43,11 @@
         </section>
     @elseif ($submitUrl || ($formPreview ?? false))
         <form class="dr-form" action="{{ $submitUrl ?? '' }}" method="post" enctype="multipart/form-data" data-dr-form>
-            @csrf
+            @if ($csrfToken)
+                @csrf
+            @endif
             <input type="hidden" name="form_version" value="{{ $reviewForm['version'] ?? 'initial' }}">
+            <label class="dr-honeypot" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
             <h2>{{ $reviewForm['heading'] ?? 'Review your purchase' }}</h2>
             @if (!empty($reviewForm['description']))
                 <p>{{ $reviewForm['description'] }}</p>
@@ -54,6 +57,9 @@
             @endif
             <div class="dr-form__grid">
                 <label class="dr-field">{{ $reviewForm['name_label'] ?? 'Name' }}<input class="dr-input" name="author_name" required maxlength="120" autocomplete="name"></label>
+                @if ($collectEmail ?? false)
+                    <label class="dr-field">Email<input class="dr-input" type="email" name="author_email" required maxlength="254" autocomplete="email"></label>
+                @endif
                 <label class="dr-field">Rating<select class="dr-select" name="rating" required><option value="">Choose a rating</option><option value="5">5 stars</option><option value="4">4 stars</option><option value="3">3 stars</option><option value="2">2 stars</option><option value="1">1 star</option></select></label>
                 <label class="dr-field">{{ $reviewForm['title_label'] ?? 'Title' }}<input class="dr-input" name="title" maxlength="200"></label>
             </div>

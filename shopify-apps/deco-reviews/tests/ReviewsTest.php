@@ -280,6 +280,59 @@ class ReviewsTest extends TestCase
         $this->expectStatus(429, fn () => app(StorefrontController::class)->organic($request));
     }
 
+    public function test_public_store_review_link_is_independently_enabled_private_and_pending(): void
+    {
+        [, , $store] = $this->context('organic-store');
+        Settings::create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'values' => array_replace(config('deco_reviews.defaults'), [
+                'enabled' => true,
+                'organic_collection_enabled' => false,
+                'store_review_collection_enabled' => true,
+                'auto_publish_days' => 0,
+            ]),
+        ]);
+
+        $page = Request::create('/api/shopify-app/deco-reviews/proxy/store-review', 'GET');
+        $page->attributes->set('deco_reviews_store', $store);
+        $html = app(StorefrontController::class)->storeReview($page)->getContent();
+        $this->assertStringContainsString('name="author_email"', $html);
+        $this->assertStringContainsString('/apps/deco-reviews/store-reviews', $html);
+        $this->assertStringNotContainsString('name="product_id"', $html);
+
+        $request = Request::create('/api/shopify-app/deco-reviews/proxy/store-reviews', 'POST', [
+            'author_name' => 'Store Reviewer',
+            'author_email' => 'store-reviewer@example.test',
+            'rating' => 4,
+            'title' => 'Helpful store',
+            'body' => 'A synthetic public store review.',
+            'form_version' => 'initial',
+            'consent' => '1',
+            'website' => '',
+        ]);
+        $request->attributes->set('deco_reviews_store', $store);
+        $response = app(StorefrontController::class)->organicStore($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $review = Review::sole();
+        $this->assertSame('store', $review->kind);
+        $this->assertNull($review->product_id);
+        $this->assertSame('pending', $review->status);
+        $this->assertSame('organic', $review->source);
+        $this->assertSame('none', $review->verified_source);
+        $this->assertSame('store-reviewer@example.test', $review->author_email);
+        $this->assertNotSame('store-reviewer@example.test', DB::table('deco_reviews')->whereKey($review->id)->value('author_email'));
+
+        $feed = app(StorefrontController::class)->data($store, Request::create('/feed', 'GET', ['kind' => 'store']));
+        $this->assertSame([], $feed['data']);
+
+        $settings = Settings::where('store_id', $store->id)->firstOrFail();
+        $settings->update(['values' => array_replace($settings->values, ['store_review_collection_enabled' => false])]);
+        $this->expectStatus(404, fn () => app(StorefrontController::class)->storeReview($page));
+        $this->expectStatus(404, fn () => app(StorefrontController::class)->organicStore($request));
+    }
+
     public function test_duplicate_review_create_is_idempotent_per_store(): void
     {
         [$user, , $store] = $this->context();

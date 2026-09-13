@@ -58,6 +58,8 @@ class ManagementController
         return Inertia::render('DecoReviews/Index', [
             'organization' => $organization->only('id', 'name'), 'store' => $store->only('id', 'name'),
             'baseUrl' => route('deco-reviews.index', [$organization, $store]), 'canManage' => $request->user()->hasPermission('products.update', $organization, $store),
+            'storeReviewUrl' => preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', strtolower((string) $store->shopify_domain))
+                ? 'https://'.strtolower($store->shopify_domain).config('deco_reviews.active.proxy_path').'/store-review' : null,
             'tab' => $filters['tab'] ?? 'overview', 'filters' => $filters, 'reviews' => $rows, 'invitations' => $invitations,
             'stats' => ['total' => (int) $summary->total, 'published' => (int) $summary->published, 'pending' => (int) $summary->pending, 'average' => round((float) $summary->average, 2),
                 'media' => $this->reviews->scoped($store)->whereHas('media')->count(), 'invites_sent' => Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->whereNotNull('sent_at')->count()],

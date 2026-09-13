@@ -66,28 +66,56 @@ class StorefrontController
 
     public function organic(Request $request)
     {
+        return $this->organicSubmission($request, false);
+    }
+
+    public function storeReview(Request $request)
+    {
         $store = $request->attributes->get('deco_reviews_store');
         abort_unless($store instanceof Store, 401);
         $this->reviews->active($store);
         $settings = $this->reviews->settings($store);
-        abort_unless($settings['enabled'] && $settings['organic_collection_enabled'], 404);
+        abort_unless($settings['enabled'] && $settings['store_review_collection_enabled'], 404);
+
+        return response()->view('deco-reviews::storefront', [
+            'feedUrl' => null,
+            'submitUrl' => config('deco_reviews.active.proxy_path').'/store-reviews',
+            'formConfig' => app(FormService::class)->forProduct($store, 'store', null),
+            'collectEmail' => true,
+        ])->header('Cache-Control', 'private, no-store')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function organicStore(Request $request)
+    {
+        return $this->organicSubmission($request, true);
+    }
+
+    private function organicSubmission(Request $request, bool $storeReview)
+    {
+        $store = $request->attributes->get('deco_reviews_store');
+        abort_unless($store instanceof Store, 401);
+        $this->reviews->active($store);
+        $settings = $this->reviews->settings($store);
+        $enabled = $storeReview ? $settings['store_review_collection_enabled'] : $settings['organic_collection_enabled'];
+        abort_unless($settings['enabled'] && $enabled, 404);
 
         $values = $request->validate([
-            'product_id' => 'required|string|max:80', 'author_name' => 'required|string|max:120',
+            'product_id' => $storeReview ? 'prohibited' : 'required|string|max:80', 'author_name' => 'required|string|max:120',
             'author_email' => 'required|email:rfc|max:254', 'rating' => 'required|integer|between:1,5',
             'title' => 'nullable|string|max:200', 'body' => 'required|string|max:10000',
             'form_version' => 'required|string|max:36', 'answers' => 'nullable|array|max:10',
             'consent' => 'accepted', 'website' => 'prohibited',
         ]);
-        $productId = $this->productId($store, $values['product_id']);
-        if (! $productId) {
+        $productId = $storeReview ? null : $this->productId($store, $values['product_id']);
+        if (! $storeReview && ! $productId) {
             throw ValidationException::withMessages(['product_id' => 'This product is not available for reviews.']);
         }
-        $rateKey = 'deco-reviews:organic:'.hash('sha256', $store->organization_id.':'.$store->id.':'.$productId.':'.$this->reviews->emailHash($store, $values['author_email']));
+        $kind = $storeReview ? 'store' : 'product';
+        $rateKey = 'deco-reviews:organic:'.hash('sha256', $store->organization_id.':'.$store->id.':'.$kind.':'.($productId ?? 0).':'.$this->reviews->emailHash($store, $values['author_email']));
         abort_unless(RateLimiter::attempt($rateKey, 3, fn () => true, 3600), 429, 'Too many review attempts. Please try again later.');
         $files = $request->file('media', []);
         $files = is_array($files) ? $files : [$files];
-        $review = $this->reviews->create($store, array_merge($values, ['kind' => 'product', 'product_id' => $productId]), $files, null,
+        $review = $this->reviews->create($store, array_merge($values, ['kind' => $kind, 'product_id' => $productId]), $files, null,
             ['source' => 'organic', 'verified_source' => 'none']);
 
         return response()->json(['data' => ['received' => true],
