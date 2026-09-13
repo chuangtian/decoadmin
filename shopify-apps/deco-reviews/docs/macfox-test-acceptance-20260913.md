@@ -139,9 +139,10 @@
 
 ## Lifecycle email working batch
 
-
 - Added a second, independently timed photo/video reminder after the ordinary request reminder. Initial, request-reminder and media-reminder timestamps and uncertainty states are separate, and completed/cancelled/unsubscribed invitations cannot continue through the sequence.
 - Added product-review thank-you, store-review thank-you and public-reply notification templates, private previews, encrypted recipient storage, store-scoped idempotency, bounded dispatch, audit records and held-on-uncertainty behavior.
 - All new lifecycle-email switches default off. Existing global delivery, exact test-store allow-list and non-production recipient allow-list still gate every external email. This batch sent no live email and performed no Shopify write.
 - Full Deco Reviews backend regression: 58 tests / 386 assertions. Frontend type-check, typography audit, Shopify test-app build and DecoAdmin production frontend build passed. Vite was restarted and became ready on port 5173.
 - Reward discount issuance and reward reminder remain pending; this batch must not be described as the complete seven-message/reward program.
+- Deployed exact `origin/test` commit `507afe3ba53d8145ef36afbf334bb965503f7520`. Backup: `/opt/decoadmin/backups/deco-reviews-form-507afe3ba53d8145ef36afbf334bb965503f7520`. Application, database, Redis and Horizon passed; production container inventory was unchanged.
+- Live Chrome verification showed the media-reminder section plus all three lifecycle templates and private preview links. New switches remained off, and the lifecycle history rendered without exposing a recipient address. No message was sent during this verification.
