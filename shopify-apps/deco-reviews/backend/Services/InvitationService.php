@@ -5,8 +5,10 @@ namespace DecoReviews\Services;
 use App\Models\Order;
 use App\Models\Store;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Review;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -20,6 +22,41 @@ class InvitationService
     {
         $this->reviews->authorize($user, $store, true);
         abort_unless($user->hasPermission('orders.view', $store->organization, $store), 403);
+
+        return $this->createForOrder($store, $user, $orderId);
+    }
+
+    /** Bounded cycling over eligible new order snapshots; no changes to core sync. */
+    public function discover(Store $store): int
+    {
+        $this->reviews->active($store);
+        $settings = $this->reviews->settings($store);
+        if (! in_array($store->shopify_domain, config('deco_reviews.automation_stores', []), true)
+            || ! $settings['invites_enabled'] || ! $settings['auto_invites_enabled'] || ! $settings['auto_invites_since']) {
+            return 0;
+        }
+        $key = 'deco-reviews:discover:'.$store->organization_id.':'.$store->id;
+
+        return Cache::lock($key.':lock', 60)->get(function () use ($store, $settings, $key) {
+            $cursor = (int) Cache::get($key, 0);
+            $orders = Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->where('created_at_shopify', '>=', CarbonImmutable::parse($settings['auto_invites_since']))->where('financial_status', 'paid')
+                ->whereNull('cancelled_at')->where('id', '>', $cursor)->orderBy('id')->limit(50)->get(['id']);
+            $created = 0;
+            foreach ($orders as $order) {
+                try {
+                    $created += $this->createForOrder($store, null, $order->id);
+                } catch (ValidationException) { /* Suppressed or not yet synchronized: reconsider on next pass. */
+                }
+            }
+            Cache::put($key, $orders->count() === 50 ? $orders->last()->id : 0, now()->addDay());
+
+            return $created;
+        }) ?? 0;
+    }
+
+    private function createForOrder(Store $store, ?User $user, int $orderId): int
+    {
 
         return DB::transaction(function () use ($store, $user, $orderId) {
             $order = Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereKey($orderId)->lockForUpdate()->firstOrFail();
@@ -48,7 +85,9 @@ class InvitationService
                     $created++;
                 }
             }
-            $this->reviews->audit($store, $user, 'invitations.created', null, ['count' => $created, 'order_id' => $order->id]);
+            if ($created > 0 || $user !== null) {
+                $this->reviews->audit($store, $user, 'invitations.created', null, ['count' => $created, 'order_id' => $order->id]);
+            }
 
             return $created;
         });
@@ -59,7 +98,7 @@ class InvitationService
         $this->reviews->authorize($user, $store, true);
         DB::transaction(function () use ($store, $user, $uuid) {
             $invite = Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('uuid', $uuid)->lockForUpdate()->firstOrFail();
-            if ($invite->status === 'sending') {
+            if (in_array($invite->status, ['sending', 'sending_reminder'])) {
                 throw ValidationException::withMessages(['invitation' => '邮件正在发送，不能保证撤回，请等待发送结果。']);
             }
             if ($invite->status === 'completed') {
@@ -98,7 +137,7 @@ class InvitationService
             if ($invite->status === 'completed') {
                 return $this->reviews->scoped($store)->whereKey($invite->review_id)->firstOrFail();
             }
-            abort_unless(in_array($invite->status, ['sent', 'scheduled']), 409);
+            abort_unless(in_array($invite->status, ['sent', 'scheduled', 'sending_reminder', 'reminder_held']), 409);
             $order = Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereKey($invite->order_id)->firstOrFail();
             if ($order->cancelled_at || in_array($order->financial_status, ['refunded', 'voided']) || $this->suppressed($store, $invite->email_hash)) {
                 abort(410);
@@ -116,7 +155,7 @@ class InvitationService
         [$store, $invite] = $this->resolve($uuid);
         DB::transaction(function () use ($store, $invite) {
             DB::table('deco_review_suppressions')->insertOrIgnore(['organization_id' => $store->organization_id, 'store_id' => $store->id, 'email_hash' => $invite->email_hash, 'created_at' => now(), 'updated_at' => now()]);
-            Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('email_hash', $invite->email_hash)->whereNotIn('status', ['completed', 'cancelled', 'sending'])
+            Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('email_hash', $invite->email_hash)->whereNotIn('status', ['completed', 'cancelled', 'sending', 'sending_reminder'])
                 ->update(['status' => 'unsubscribed', 'due_at' => null]);
             $this->reviews->audit($store, null, 'invitation.unsubscribed');
         });

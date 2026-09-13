@@ -87,6 +87,7 @@ class InvitationProcessorTest extends TestCase
             'cancelledAt' => null, 'displayFinancialStatus' => 'PAID',
             'shippingAddress' => ['countryCodeV2' => 'US'],
             'customer' => ['defaultEmailAddress' => ['emailAddress' => 'safe-buyer@example.test', 'marketingState' => 'SUBSCRIBED']],
+            'lineItems' => ['nodes' => [['currentQuantity' => 1, 'product' => ['id' => 'gid://shopify/Product/7001']]], 'pageInfo' => ['hasNextPage' => false]],
             'fulfillments' => $fulfillments,
         ], $replace);
 
@@ -133,6 +134,22 @@ class InvitationProcessorTest extends TestCase
             $storeId ?? $this->store->id,
             $this->invite->uuid,
         );
+    }
+
+    public function test_partial_product_fulfillment_waits_and_complete_split_delivery_uses_latest_date(): void
+    {
+        $old = now()->subDays(30);
+        $recent = now()->subDays(2);
+        $snapshot = $this->snapshot(fulfillments: [$this->fulfillment($old->toIso8601String())]);
+        $snapshot['order']['lineItems']['nodes'][0]['currentQuantity'] = 2;
+        $this->client($snapshot);
+        $this->delivery(false, null, 0);
+        $this->process();
+        $this->assertSame('waiting_fulfillment', $this->invite->fresh()->status);
+        $snapshot['order']['fulfillments'][] = $this->fulfillment($recent->toIso8601String());
+        $this->client($snapshot);
+        $this->process();
+        $this->assertSame($recent->addDays(14)->toIso8601String(), $this->invite->fresh()->due_at->toIso8601String());
     }
 
     public function test_store_must_be_explicitly_allowlisted_and_invites_must_be_enabled(): void

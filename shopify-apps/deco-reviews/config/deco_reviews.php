@@ -13,6 +13,10 @@ return [
     'id_token_leeway_seconds' => 5,
     'defaults' => [
         'enabled' => false, 'auto_publish_days' => 14, 'invites_enabled' => false,
+        'auto_invites_enabled' => false, 'auto_invites_since' => null, 'reminders_enabled' => false,
+        'reminder_subject' => 'A reminder to share your experience',
+        'reminder_body' => 'How was {product}? We would love your honest feedback. All ratings are welcome.',
+        'email_button_label' => 'Write a review', 'email_accent' => '#7C3AED',
         'domestic_delay_days' => 14, 'international_delay_days' => 21, 'reminder_days' => 7,
         'star_color' => '#EBBF20', 'corner_style' => 'rounded', 'display_name' => 'initials',
         'show_verified' => true, 'show_incentive' => true, 'layout' => 'grid', 'page_size' => 12,

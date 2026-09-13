@@ -18,6 +18,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/deco-reviews')
         Route::get('/widget-preview', [ManagementController::class, 'widget'])->name('deco-reviews.widget-preview');
         Route::get('/export', [ManagementController::class, 'export'])->middleware('throttle:10,1');
         Route::get('/form-preview', [FormController::class, 'preview'])->name('deco-reviews.form-preview');
+        Route::get('/email-preview', [ManagementController::class, 'emailPreview'])->name('deco-reviews.email-preview');
         Route::get('/media/{media}', [ManagementController::class, 'media'])->whereUuid('media')->name('deco-reviews.media');
         Route::middleware(['permission:products.update', 'throttle:30,1'])->group(function () {
             Route::post('/reviews', [ManagementController::class, 'create']);

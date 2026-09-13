@@ -14,7 +14,7 @@ topics = ["app/uninstalled"]
 uri = "https://testadmin.decomkt.com/api/shopify-app/deco-reviews/webhooks"
 
 [access_scopes]
-scopes = "read_products,write_app_proxy"
+scopes = "read_products,read_orders,read_customers,write_app_proxy"
 use_legacy_install_flow = false
 
 [auth]

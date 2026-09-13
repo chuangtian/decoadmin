@@ -10,6 +10,7 @@ use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Media;
 use DecoReviews\Services\FormService;
 use DecoReviews\Services\ImportService;
+use DecoReviews\Services\InvitationEmail;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewService;
 use Illuminate\Http\Request;
@@ -37,6 +38,7 @@ class ManagementController
         $invitations = Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->with('product')->latest('id')->paginate(15)->withQueryString();
         $invitations->through(fn ($invite) => ['uuid' => $invite->uuid, 'order_id' => $invite->order_id, 'product_title' => $invite->product?->title,
             'status' => $invite->status, 'due_at' => $invite->due_at?->toIso8601String(), 'sent_at' => $invite->sent_at?->toIso8601String(),
+            'reminder_sent_at' => $invite->reminder_sent_at?->toIso8601String(),
             'created_at' => $invite->created_at->toIso8601String(), 'error_code' => $invite->error_code]);
 
         return Inertia::render('DecoReviews/Index', [
@@ -51,6 +53,15 @@ class ManagementController
             'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
                 ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
         ]);
+    }
+
+    public function emailPreview(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store);
+        $data = $request->validate(['kind' => 'nullable|in:initial,reminder']);
+
+        return response()->view('deco-reviews::emails.invitation', app(InvitationEmail::class)->content($store, null, $data['kind'] ?? 'initial'))
+            ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
     }
 
     public function create(Request $request, Organization $organization, Store $store)

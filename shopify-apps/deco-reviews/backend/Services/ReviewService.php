@@ -60,8 +60,18 @@ class ReviewService
             'page_size' => ['required', Rule::in([6, 12, 24])], 'heading' => 'required|string|max:120',
             'reply_to' => 'nullable|email:rfc|max:254', 'subject' => 'required|string|max:160',
             'email_body' => 'required|string|max:5000', 'marketing_only' => 'required|boolean',
+            'auto_invites_enabled' => 'sometimes|boolean', 'reminders_enabled' => 'sometimes|boolean',
+            'reminder_subject' => 'sometimes|required|string|max:160', 'reminder_body' => 'sometimes|required|string|max:5000',
+            'email_button_label' => 'sometimes|required|string|max:80', 'email_accent' => ['sometimes', 'required', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ])->validate();
         DB::transaction(function () use ($store, $user, $values) {
+            Store::whereKey($store->id)->lockForUpdate()->firstOrFail();
+            $previous = $this->settings($store);
+            foreach (['auto_invites_enabled', 'reminders_enabled', 'reminder_subject', 'reminder_body', 'email_button_label', 'email_accent'] as $key) {
+                $values[$key] = $values[$key] ?? $previous[$key];
+            }
+            $values['auto_invites_since'] = $values['auto_invites_enabled']
+                ? ($previous['auto_invites_enabled'] && $previous['auto_invites_since'] ? $previous['auto_invites_since'] : now()->toIso8601String()) : null;
             Settings::query()->updateOrCreate(['store_id' => $store->id, 'organization_id' => $store->organization_id], ['values' => $values]);
             $this->audit($store, $user, 'settings.updated');
         });

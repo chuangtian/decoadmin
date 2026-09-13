@@ -16,7 +16,7 @@ class Invitation extends Model
 
     protected function casts(): array
     {
-        return ['email' => 'encrypted', 'due_at' => 'datetime', 'sent_at' => 'datetime', 'expires_at' => 'datetime', 'completed_at' => 'datetime'];
+        return ['email' => 'encrypted', 'due_at' => 'datetime', 'sent_at' => 'datetime', 'reminder_sent_at' => 'datetime', 'expires_at' => 'datetime', 'completed_at' => 'datetime'];
     }
 
     public function product()

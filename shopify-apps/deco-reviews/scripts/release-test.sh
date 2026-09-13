@@ -33,7 +33,7 @@ docker run --rm --entrypoint php -v "$review_source:$review_source" -v /opt/deco
 export APP_ENV_FILE="$review_source/.env.staging"
 review_compose=(docker compose --env-file "$APP_ENV_FILE" -f "$review_source/compose.production.yaml" -p decoadmin-staging)
 # This release adds only its own form migration; do not run unrelated migrations.
-"${review_compose[@]}" run --rm --no-deps -T --interactive=false app php artisan migrate --force --path=shopify-apps/deco-reviews/database/migrations/2026_09_13_030000_add_deco_review_forms.php
+"${review_compose[@]}" run --rm --no-deps -T --interactive=false app php artisan migrate --force --path=shopify-apps/deco-reviews/database/migrations
 "${review_compose[@]}" run --rm --no-deps -T --interactive=false app php artisan config:clear
 "${review_compose[@]}" run --rm --no-deps -T --interactive=false app php artisan optimize
 "${review_compose[@]}" up -d --no-deps app horizon scheduler reverb nginx
