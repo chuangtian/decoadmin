@@ -3,12 +3,14 @@
 namespace DecoReviews\Services;
 
 use App\Models\Store;
+use App\Models\User;
 use DecoReviews\Models\Review;
 use DecoReviews\Models\Reward;
 use DecoReviews\Models\RewardDelivery;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class RewardEmailService
 {
@@ -95,6 +97,44 @@ class RewardEmailService
                 ['reward' => $delivery->reward?->uuid, 'delivery' => $delivery->uuid]);
         } finally {
             $lock->release();
+        }
+    }
+
+    public function reconcileHeld(Store $store, User $user, string $uuid, string $conclusion): void
+    {
+        app(ReviewService::class)->authorize($user, $store, true);
+        if (! in_array($conclusion, ['sent', 'not_sent'], true)) {
+            throw ValidationException::withMessages(['conclusion' => '必须明确选择已发送或未发送。']);
+        }
+
+        $reward = null;
+        $delivery = DB::transaction(function () use ($store, $user, $uuid, $conclusion, &$reward) {
+            Store::where('organization_id', $store->organization_id)->whereKey($store->id)->lockForUpdate()->firstOrFail();
+            $delivery = RewardDelivery::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->where('uuid', $uuid)->lockForUpdate()->first();
+            abort_unless($delivery, 404);
+            if ($delivery->status !== 'held') {
+                throw ValidationException::withMessages(['delivery' => '只有发送结果待复核的奖励邮件可以记录人工结论。']);
+            }
+
+            $reward = Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+                ->whereKey($delivery->reward_id)->lockForUpdate()->first();
+            abort_unless($reward, 404);
+            $delivery->update($conclusion === 'sent'
+                ? ['status' => 'sent', 'sent_at' => now(), 'due_at' => null, 'error_code' => 'MANUALLY_CONFIRMED_SENT']
+                : ['status' => 'failed', 'sent_at' => null, 'due_at' => null, 'error_code' => 'MANUALLY_CONFIRMED_NOT_SENT']);
+            app(ReviewService::class)->audit($store, $user, 'reward.email.reconciled', $reward->review_id, [
+                'reward' => $reward->uuid,
+                'delivery' => $delivery->uuid,
+                'type' => $delivery->type,
+                'conclusion' => $conclusion,
+            ]);
+
+            return $delivery;
+        });
+
+        if ($conclusion === 'sent' && $delivery->type === 'reward_issued' && $reward) {
+            $this->scheduleReminder($store, $reward);
         }
     }
 

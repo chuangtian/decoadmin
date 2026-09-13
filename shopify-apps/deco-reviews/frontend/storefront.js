@@ -210,65 +210,17 @@
     const list = root.querySelector("[data-dr-list]");
     const status = root.querySelector("[data-dr-status]");
     const pagination = root.querySelector("[data-dr-pagination]");
-    const carousel = root.querySelector("[data-dr-carousel-controls]");
-    const carouselStatus = root.querySelector("[data-dr-carousel-status]");
-    const previousItem = root.querySelector("[data-dr-carousel-previous]");
-    const nextItem = root.querySelector("[data-dr-carousel-next]");
-    const on = (node, type, handler) => node?.addEventListener(type, handler);
+    const listeners = [];
+    const on = (node, type, handler) => {
+      node?.addEventListener(type, handler);
+      if (node) listeners.push(() => node.removeEventListener(type, handler));
+    };
     let controller = null;
     let viewer = null;
-    let itemIndex = 0;
     const setStatus = (message) => {
       if (!status) return;
       status.replaceChildren(element("span", "", message));
     };
-    const updateCarousel = () => {
-      const items = list ? [...list.children] : [];
-      const active = root.dataset.mode === "carousel" && items.length > 0;
-      if (carousel) carousel.hidden = !active;
-      if (!active) { list?.removeAttribute("tabindex"); return; }
-      itemIndex = Math.max(0, Math.min(itemIndex, items.length - 1));
-      list.setAttribute("tabindex", "0");
-      items.forEach((item) => item.setAttribute("tabindex", "-1"));
-      previousItem.disabled = itemIndex === 0;
-      nextItem.disabled = itemIndex === items.length - 1;
-      carouselStatus.textContent = label(root, "itemPosition", "Item {current} of {total}").replace("{current}", itemIndex + 1).replace("{total}", items.length);
-    };
-    const moveItem = (step) => {
-      const items = [...list.children];
-      itemIndex = Math.max(0, Math.min(itemIndex + step, items.length - 1));
-      const item = items[itemIndex];
-      item?.scrollIntoView({ behavior: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest", inline: "start" });
-      item?.focus({ preventScroll: true });
-      updateCarousel();
-    };
-    on(previousItem, "click", () => moveItem(-1));
-    on(nextItem, "click", () => moveItem(1));
-    on(list, "keydown", (event) => {
-      if (root.dataset.mode !== "carousel" || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-      event.preventDefault();
-      moveItem(event.key === "ArrowLeft" ? -1 : 1);
-    });
-    const openWidget = root.querySelector("[data-dr-open]");
-    const closeWidget = root.querySelector("[data-dr-close]");
-    const panel = root.querySelector("[data-dr-panel]");
-    const collapsible = ["sidebar", "floating"].includes(root.dataset.mode);
-    const setPanel = (open, restore = false) => {
-      if (!collapsible) return;
-      panel.hidden = !open;
-      openWidget.hidden = open;
-      openWidget.setAttribute("aria-expanded", String(open));
-      root.dataset.open = String(open);
-      if (open) closeWidget.focus();
-      else if (restore) openWidget.focus();
-    };
-    if (collapsible) {
-      closeWidget.hidden = false;
-      setPanel(false);
-      on(openWidget, "click", () => setPanel(true));
-      on(closeWidget, "click", () => setPanel(false, true));
-      on(root, "keydown", (event) => { if (event.key === "Escape" && root.dataset.open === "true") setPanel(false, true); });
-    }
     const load = async () => {
       controller?.abort();
       controller = new AbortController();
@@ -309,19 +261,18 @@
           }
           rendered = list.childElementCount;
         }
-        itemIndex = 0;
-        updateCarousel();
         renderPager(root, payload.meta, state, load);
         root.dataset.state = rendered ? "ready" : "empty";
         setStatus(rendered ? "" : label(root, root.dataset.mode === "gallery" ? "mediaEmpty" : "empty", "No reviews yet."));
+        root.dispatchEvent(new CustomEvent("deco:reviews:render"));
       } catch (error) {
         if (error.name !== "AbortError") {
           viewer?.destroy();
           list?.replaceChildren();
           pagination?.replaceChildren();
-          updateCarousel();
           root.dataset.state = "error";
           setStatus(label(root, "error", "Reviews are unavailable right now."));
+          root.dispatchEvent(new CustomEvent("deco:reviews:render"));
         }
       } finally {
         list?.removeAttribute("aria-busy");
@@ -332,6 +283,7 @@
     mounted.set(root, { destroy: () => {
       controller?.abort();
       viewer?.destroy();
+      listeners.forEach((remove) => remove());
       mounted.delete(root);
     } });
     if (hasFeed) load();
@@ -396,4 +348,121 @@
   const scan = (scope = document) => scope.querySelectorAll("[data-deco-reviews]").forEach(mount);
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => scan(), { once: true }) : scan();
   document.addEventListener("shopify:section:load", (event) => scan(event.target));
+})();
+/* DECO_REVIEWS_WIDGETS */
+(() => {
+  if (globalThis.DecoReviewsWidgetsLoaded) return;
+  globalThis.DecoReviewsWidgetsLoaded = true;
+  const mounted = new WeakMap();
+  const closed = new Set();
+  const reduce = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const mount = (root) => {
+    if (mounted.has(root)) return;
+    const mode = root.dataset.mode;
+    const list = root.querySelector("[data-dr-list]");
+    const controls = root.querySelector("[data-dr-carousel-controls]");
+    const previous = root.querySelector("[data-dr-carousel-previous]");
+    const next = root.querySelector("[data-dr-carousel-next]");
+    const position = root.querySelector("[data-dr-carousel-status]");
+    const galleryStatus = root.querySelector("[data-dr-gallery-status]");
+    const cleanup = [];
+    const on = (node, type, handler) => {
+      node?.addEventListener(type, handler);
+      if (node) cleanup.push(() => node.removeEventListener(type, handler));
+    };
+    let index = 0;
+    let manual = false;
+    let hovered = false;
+    let focused = false;
+    let timer = null;
+    const stop = () => { manual = true; globalThis.clearInterval?.(timer); };
+    const items = () => list ? [...list.children] : [];
+    const text = (count) => (root.dataset.itemPosition || "Item {current} of {total}").replace("{current}", index + 1).replace("{total}", count);
+    const refresh = () => {
+      const nodes = items();
+      index = Math.max(0, Math.min(index, nodes.length - 1));
+      if (mode === "carousel") {
+        controls.hidden = !nodes.length;
+        if (!nodes.length) return list.removeAttribute("tabindex");
+        list.setAttribute("tabindex", "0");
+        nodes.forEach((node) => node.setAttribute("tabindex", "-1"));
+        previous.disabled = index === 0;
+        next.disabled = index === nodes.length - 1;
+        position.textContent = text(nodes.length);
+      } else if (mode === "gallery") {
+        list.setAttribute("role", "listbox");
+        nodes.forEach((node, item) => {
+          node.setAttribute("role", "option");
+          node.setAttribute("tabindex", item === index ? "0" : "-1");
+          node.setAttribute("aria-selected", String(item === index));
+          item === index ? node.setAttribute("aria-current", "true") : node.removeAttribute("aria-current");
+        });
+        if (galleryStatus) {
+          galleryStatus.hidden = !nodes.length;
+          galleryStatus.textContent = nodes.length ? text(nodes.length) : "";
+        }
+      }
+    };
+    const move = (step, user = true, absolute = false) => {
+      const nodes = items();
+      if (!nodes.length) return;
+      if (user) stop();
+      index = absolute ? step : user ? Math.max(0, Math.min(index + step, nodes.length - 1)) : (index + step) % nodes.length;
+      const item = nodes[index];
+      item.scrollIntoView({ behavior: reduce() ? "auto" : "smooth", block: "nearest", inline: "start" });
+      if (user) item.focus({ preventScroll: true });
+      refresh();
+    };
+    if (mode === "carousel") {
+      on(previous, "click", () => move(-1));
+      on(next, "click", () => move(1));
+      on(root, "mouseenter", () => { hovered = true; });
+      on(root, "mouseleave", () => { hovered = false; });
+      on(root, "focusin", () => { focused = true; });
+      on(root, "focusout", (event) => { if (!root.contains(event.relatedTarget)) focused = false; });
+      on(list, "pointerdown", stop);
+      if (root.dataset.autoplay === "true" && !reduce()) timer = globalThis.setInterval?.(() => {
+        if (!manual && !hovered && !focused && !document.hidden && !reduce()) move(1, false);
+      }, Math.max(3, Number(root.dataset.autoplaySeconds) || 5) * 1000);
+    }
+    on(list, "keydown", (event) => {
+      if (!((mode === "carousel" && ["ArrowLeft", "ArrowRight"].includes(event.key)) || (mode === "gallery" && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)))) return;
+      event.preventDefault();
+      if (event.key === "Home") move(0, true, true);
+      else if (event.key === "End") move(items().length - 1, true, true);
+      else move(event.key === "ArrowLeft" ? -1 : 1);
+    });
+    if (mode === "gallery") on(list, "click", (event) => {
+      const item = items().findIndex((node) => node === event.target || node.contains(event.target));
+      if (item >= 0) { index = item; refresh(); }
+    });
+    const open = root.querySelector("[data-dr-open]");
+    const close = root.querySelector("[data-dr-close]");
+    const panel = root.querySelector("[data-dr-panel]");
+    const collapsible = ["sidebar", "floating"].includes(mode);
+    const key = root.dataset.blockId || root.id;
+    const setPanel = (visible, restore = false) => {
+      if (!collapsible) return;
+      panel.hidden = !visible;
+      open.hidden = visible;
+      open.setAttribute("aria-expanded", String(visible));
+      root.dataset.open = String(visible);
+      if (visible) { closed.delete(key); close.focus(); }
+      else { if (restore) { closed.add(key); open.focus(); } }
+    };
+    if (collapsible) {
+      close.hidden = false;
+      setPanel(root.dataset.open === "true" && !closed.has(key));
+      on(open, "click", () => setPanel(true));
+      on(close, "click", () => setPanel(false, true));
+      on(root, "keydown", (event) => { if (event.key === "Escape" && root.dataset.open === "true") setPanel(false, true); });
+    }
+    on(root, "deco:reviews:render", () => { index = 0; refresh(); });
+    refresh();
+    mounted.set(root, { destroy() { globalThis.clearInterval?.(timer); cleanup.forEach((remove) => remove()); mounted.delete(root); } });
+  };
+  const scan = (scope = document) => scope.querySelectorAll("[data-deco-reviews]").forEach(mount);
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => scan(), { once: true }) : scan();
+  document.addEventListener("shopify:section:load", (event) => scan(event.target));
+  document.addEventListener("shopify:section:unload", (event) => event.target.querySelectorAll("[data-deco-reviews]").forEach((root) => mounted.get(root)?.destroy()));
 })();

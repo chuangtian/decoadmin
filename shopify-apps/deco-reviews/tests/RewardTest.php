@@ -209,6 +209,47 @@ class RewardTest extends TestCase
         $this->assertFalse(RewardDelivery::where('reward_id', $reward->id)->where('type', 'reward_reminder')->exists());
     }
 
+    public function test_held_reward_email_reconciliation_is_scoped_explicit_and_never_resends(): void
+    {
+        $this->settings(['reward_reminder_enabled' => true, 'reward_reminder_days' => 5]);
+        $sentReward = $this->issuedReward(['body' => 'Held sent']);
+        $sent = app(RewardEmailService::class)->scheduleIssued($this->store, $sentReward);
+        $sent->update(['status' => 'held', 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
+        $transport = Mockery::mock(RewardEmailDelivery::class);
+        $transport->shouldNotReceive('send');
+        $this->app->instance(RewardEmailDelivery::class, $transport);
+
+        app(RewardEmailService::class)->reconcileHeld($this->store, $this->user, $sent->uuid, 'sent');
+
+        $this->assertSame('sent', $sent->fresh()->status);
+        $this->assertSame('MANUALLY_CONFIRMED_SENT', $sent->fresh()->error_code);
+        $this->assertNotNull($sent->fresh()->sent_at);
+        $this->assertTrue(RewardDelivery::where('reward_id', $sentReward->id)->where('type', 'reward_reminder')->exists());
+
+        $failedReward = $this->issuedReward(['body' => 'Held not sent']);
+        $failed = app(RewardEmailService::class)->scheduleIssued($this->store, $failedReward);
+        $failed->update(['status' => 'held', 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
+        app(RewardEmailService::class)->reconcileHeld($this->store, $this->user, $failed->uuid, 'not_sent');
+        $this->assertSame('failed', $failed->fresh()->status);
+        $this->assertSame('MANUALLY_CONFIRMED_NOT_SENT', $failed->fresh()->error_code);
+        $this->assertFalse(RewardDelivery::where('reward_id', $failedReward->id)->where('type', 'reward_reminder')->exists());
+
+        $base = "/organizations/{$this->organization->id}/stores/{$this->store->id}/deco-reviews";
+        $endpointReward = $this->issuedReward(['body' => 'Held endpoint']);
+        $endpoint = app(RewardEmailService::class)->scheduleIssued($this->store, $endpointReward);
+        $endpoint->update(['status' => 'held', 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
+        $this->actingAs($this->user)->post($base.'/reward-deliveries/'.$endpoint->uuid.'/reconcile', ['conclusion' => 'not_sent'])->assertRedirect();
+        $this->assertSame('failed', $endpoint->fresh()->status);
+
+        $outsider = User::factory()->create(['email_verified_at' => now()]);
+        $blocked = app(RewardEmailService::class)->scheduleIssued($this->store, $this->issuedReward(['body' => 'Held blocked']));
+        $blocked->update(['status' => 'held', 'due_at' => null, 'error_code' => 'DELIVERY_RESULT_REQUIRES_REVIEW']);
+        $this->expectHttpStatus(403, fn () => app(RewardEmailService::class)->reconcileHeld($this->store, $outsider, $blocked->uuid, 'sent'));
+        $this->expectHttpStatus(404, fn () => app(RewardEmailService::class)->reconcileHeld($this->store, $this->user, (string) Str::uuid(), 'sent'));
+        $this->expectException(ValidationException::class);
+        app(RewardEmailService::class)->reconcileHeld($this->store, $this->user, $blocked->uuid, 'unknown');
+    }
+
     public function test_stale_reward_email_cleanup_is_limited_to_allowlisted_stores(): void
     {
         $localReward = $this->issuedReward(['body' => 'Local stale delivery']);

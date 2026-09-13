@@ -26,6 +26,7 @@ Route::prefix('/organizations/{organization}/stores/{store}/deco-reviews')
             Route::patch('/reviews/{review}', [ManagementController::class, 'moderate'])->whereUuid('review');
             Route::put('/settings', [ManagementController::class, 'settings']);
             Route::post('/rewards/{reward}/reconcile', [ManagementController::class, 'reconcileReward'])->whereUuid('reward');
+            Route::post('/reward-deliveries/{delivery}/reconcile', [ManagementController::class, 'reconcileRewardDelivery'])->whereUuid('delivery');
             Route::put('/form', [FormController::class, 'save']);
             Route::post('/invitations', [ManagementController::class, 'invitations']);
             Route::post('/invitations/{invitation}/cancel', [ManagementController::class, 'cancel'])->whereUuid('invitation');

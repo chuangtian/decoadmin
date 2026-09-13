@@ -4,25 +4,29 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 class Node {
-  children = []; dataset = {}; attrs = {}; events = {}; style = { setProperty() {} };
+  children = []; dataset = {}; attrs = {}; events = {}; listeners = {}; style = { setProperty() {} };
   textContent = '';
   append(...nodes) { nodes.forEach(node => { if (node && typeof node === 'object') node.parentNode = this; }); this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   setAttribute(key, value) { this.attrs[key] = value; }
   removeAttribute(key) { delete this.attrs[key]; }
-  addEventListener(key, handler) { this.events[key] = handler; }
-  removeEventListener(key) { delete this.events[key]; }
+  addEventListener(key, handler) { (this.listeners[key] ||= []).push(handler); this.events[key] = (...args) => { const results = this.listeners[key].slice().map(listener => listener(...args)); return results.length === 1 ? results[0] : Promise.all(results); }; }
+  removeEventListener(key, handler) { this.listeners[key] = (this.listeners[key] || []).filter(listener => listener !== handler); }
+  dispatchEvent(event) { event.target ||= this; this.events[event.type]?.(event); }
   remove() { this.parentNode && (this.parentNode.children = this.parentNode.children.filter(node => node !== this)); this.removed = true; }
   scrollIntoView(options) { this.scrolled = options; }
   showModal() { this.open = true; }
   close() { this.open = false; this.events.close?.(); }
+  contains(node) { return node === this || Boolean(node && this.children.some(child => child?.contains?.(node))); }
   get childElementCount() { return this.children.length; }
   querySelector() { return null; }
   querySelectorAll() { return []; }
   focus() { this.focused = true; }
 }
+class CustomEvent { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
 const content = node => [node.textContent, ...node.children.map(content)].join(' ');
 const source = fs.readFileSync(new URL('../frontend/storefront.js', import.meta.url), 'utf8');
+const widgetSource = source.split('/* DECO_REVIEWS_WIDGETS */')[1];
 const organicSource = fs.readFileSync(new URL('../frontend/organic.js', import.meta.url), 'utf8');
 
 test('organic form is shown only for an enabled same-origin product form', () => {
@@ -53,7 +57,7 @@ for (const verification of ['none', 'import', 'manual', 'order', null]) {
     root.querySelector = key => ({ '[data-dr-list]': list, '[data-dr-status]': status })[key] ?? null;
     const document = { readyState: 'complete', documentElement: { lang: 'en' },
       createElement: () => new Node(), querySelectorAll: () => [root], addEventListener() {} };
-    vm.runInNewContext(source, { document, URL, AbortController, Intl, location: { origin: 'https://example.test' },
+    vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, location: { origin: 'https://example.test' },
       fetch: async () => ({ ok: true, json: async () => ({ data: [{ uuid: 'demo', rating: 4,
         body: 'Synthetic review', verified_source: verification, media: [] }] }) }) });
     await new Promise(resolve => setImmediate(resolve));
@@ -70,7 +74,7 @@ test('saved-form preview cannot send a review request', async () => {
   form.querySelector = key => key === '[data-dr-form-status]' ? status : submit;
   let requests = 0;
   const document = { readyState: 'complete', querySelectorAll: () => [root], addEventListener() {} };
-  vm.runInNewContext(source, { document, URL, AbortController, Intl, location: { origin: 'https://example.test' },
+  vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, location: { origin: 'https://example.test' },
     fetch: async () => { requests++; throw Error('Preview must never fetch'); } });
   await form.events.submit({ preventDefault() {} });
   assert.equal(requests, 0);
@@ -86,7 +90,7 @@ for (const succeeds of [true, false]) {
     form.reset = () => { form.wasReset = true; };
     let requests = 0; let resolveRequest;
     const document = { readyState: 'complete', querySelectorAll: () => [root], addEventListener() {} };
-    vm.runInNewContext(source, { document, URL, AbortController, Intl, FormData: class {}, location: { origin: 'https://example.test' },
+    vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, FormData: class {}, location: { origin: 'https://example.test' },
       fetch: () => { requests++; return new Promise(resolve => { resolveRequest = resolve; }); } });
     const event = { preventDefault() {} };
     const first = form.events.submit(event);
@@ -104,28 +108,34 @@ for (const succeeds of [true, false]) {
   });
 }
 
-const runWidget = async ({ mode = 'reviews', data = [], reject = false } = {}) => {
-  const root = new Node(); const list = new Node(); const status = new Node(); const pagination = new Node();
-  const controls = new Node(); const previous = new Node(); const next = new Node(); const position = new Node();
-  const open = new Node(); const close = new Node(); const panel = new Node();
-  root.dataset = { feedUrl: '/feed', mode, itemPosition: 'Item {current} of {total}' };
-  const nodes = { '[data-dr-list]': list, '[data-dr-status]': status, '[data-dr-pagination]': pagination,
-    '[data-dr-carousel-controls]': controls, '[data-dr-carousel-status]': position,
-    '[data-dr-carousel-previous]': previous, '[data-dr-carousel-next]': next,
-    '[data-dr-open]': open, '[data-dr-close]': close, '[data-dr-panel]': panel };
-  root.querySelector = key => nodes[key] ?? null;
+const runWidgets = async (configs) => {
+  const widgets = configs.map(({ mode = 'reviews', data = [], reject = false, reduced = true, autoplay = false, openState = false, blockId = crypto.randomUUID() }) => {
+    const root = new Node(); const list = new Node(); const status = new Node(); const pagination = new Node();
+    const controls = new Node(); const previous = new Node(); const next = new Node(); const position = new Node();
+    const open = new Node(); const close = new Node(); const panel = new Node(); const galleryStatus = new Node();
+    root.dataset = { feedUrl: `/feed/${blockId}`, mode, blockId, open: String(openState), autoplay: String(autoplay), autoplaySeconds: '3', itemPosition: 'Item {current} of {total}' };
+    const nodes = { '[data-dr-list]': list, '[data-dr-status]': status, '[data-dr-pagination]': pagination,
+      '[data-dr-carousel-controls]': controls, '[data-dr-carousel-status]': position, '[data-dr-gallery-status]': galleryStatus,
+      '[data-dr-carousel-previous]': previous, '[data-dr-carousel-next]': next,
+      '[data-dr-open]': open, '[data-dr-close]': close, '[data-dr-panel]': panel };
+    root.querySelector = key => nodes[key] ?? null;
+    return { root, list, status, pagination, controls, previous, next, position, open, close, panel, galleryStatus, data, reject, reduced };
+  });
   const documentEvents = {};
   const document = { readyState: 'complete', documentElement: { lang: 'en' }, createElement: tag => {
     const node = new Node(); node.tag = tag; return node;
-  }, querySelectorAll: () => [root], addEventListener: (key, handler) => { documentEvents[key] = handler; } };
-  vm.runInNewContext(source, { document, URL, AbortController, Intl, location: { origin: 'https://example.test' },
-    matchMedia: () => ({ matches: true }), fetch: async () => {
-      if (reject) throw new Error('offline');
-      return { ok: true, json: async () => ({ data }) };
-    } });
+  }, hidden: false, querySelectorAll: () => widgets.map(widget => widget.root), addEventListener: (key, handler) => { const previous = documentEvents[key]; documentEvents[key] = event => { previous?.(event); handler(event); }; } };
+  const timers = [];
+  vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, location: { origin: 'https://example.test' },
+    matchMedia: () => ({ matches: widgets[0]?.reduced ?? true }),
+    setInterval: (callback, delay) => { const timer = { callback, delay, active: true }; timers.push(timer); return timer; },
+    clearInterval: timer => { if (timer) timer.active = false; },
+    fetch: async url => { const widget = widgets.find(item => String(url).includes(item.root.dataset.blockId)); if (widget.reject) throw new Error('offline'); return { ok: true, json: async () => ({ data: widget.data }) }; } });
   await new Promise(resolve => setImmediate(resolve));
-  return { root, list, status, pagination, controls, previous, next, position, open, close, panel, documentEvents };
+  widgets.forEach(widget => { widget.documentEvents = documentEvents; widget.document = document; widget.timers = timers; });
+  return widgets;
 };
+const runWidget = async (config = {}) => (await runWidgets([config]))[0];
 
 test('carousel controls and arrow keys move focus without reduced-motion animation', async () => {
   const widget = await runWidget({ mode: 'carousel', data: [
@@ -174,4 +184,98 @@ test('feed failure clears stale UI and section teardown removes generated lightb
   assert.match(content(dialog), /media is unavailable/);
   loaded.documentEvents['shopify:section:unload']({ target: { querySelectorAll: () => [loaded.root] } });
   assert.equal(dialog.removed, true);
+});
+
+test('carousel autoplay pauses for interaction, focus, visibility and reduced motion, then stops after manual use', async () => {
+  const reviews = [1, 2, 3].map(number => ({ uuid: String(number), rating: 5, body: `Review ${number}`, media: [] }));
+  const widget = await runWidget({ mode: 'carousel', data: reviews, autoplay: true, reduced: false });
+  const timer = widget.timers[0];
+  assert.equal(timer.delay, 3000);
+  timer.callback();
+  assert.match(widget.position.textContent, /2.*3/);
+  widget.root.events.mouseenter(); timer.callback();
+  assert.match(widget.position.textContent, /2.*3/);
+  widget.root.events.mouseleave(); widget.root.events.focusin(); timer.callback();
+  assert.match(widget.position.textContent, /2.*3/);
+  widget.root.events.focusout({ relatedTarget: null }); timer.callback();
+  assert.match(widget.position.textContent, /3.*3/);
+  widget.document.hidden = true; timer.callback();
+  assert.match(widget.position.textContent, /3.*3/);
+  widget.document.hidden = false; timer.callback();
+  assert.match(widget.position.textContent, /1.*3/);
+  widget.next.events.click();
+  assert.equal(timer.active, false);
+  timer.callback();
+  assert.match(widget.position.textContent, /2.*3/);
+  const reduced = await runWidget({ mode: 'carousel', data: reviews, autoplay: true, reduced: true });
+  assert.equal(reduced.timers.length, 0);
+});
+
+test('gallery thumbnails expose current state and support arrow, Home and End focus navigation', async () => {
+  const widget = await runWidget({ mode: 'gallery', data: [{ uuid: 'gallery', rating: 5, body: 'Gallery', media: [
+    { type: 'image', url: '/one.jpg' }, { type: 'image', url: '/two.jpg' }, { type: 'image', url: '/three.jpg' },
+  ] }] });
+  const thumbnails = widget.list.children;
+  assert.equal(widget.list.attrs.role, 'listbox');
+  assert.equal(thumbnails[0].attrs['aria-current'], 'true');
+  assert.equal(thumbnails[0].attrs['aria-selected'], 'true');
+  let prevented = false;
+  widget.list.events.keydown({ key: 'ArrowRight', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(thumbnails[1].focused, true);
+  assert.equal(thumbnails[1].attrs['aria-selected'], 'true');
+  assert.equal(thumbnails[0].attrs['aria-current'], undefined);
+  assert.match(widget.galleryStatus.textContent, /2.*3/);
+  widget.list.events.keydown({ key: 'End', preventDefault() {} });
+  assert.equal(thumbnails[2].focused, true);
+  widget.list.events.keydown({ key: 'Home', preventDefault() {} });
+  assert.equal(thumbnails[0].focused, true);
+});
+
+test('multiple blocks keep independent controls and section reload does not duplicate listeners', async () => {
+  const reviews = [1, 2].map(number => ({ uuid: String(number), rating: 5, body: `Review ${number}`, media: [] }));
+  const [first, second] = await runWidgets([
+    { mode: 'carousel', data: reviews, autoplay: true, reduced: false, blockId: 'first' },
+    { mode: 'carousel', data: reviews, autoplay: true, reduced: false, blockId: 'second' },
+  ]);
+  first.next.events.click();
+  assert.match(first.position.textContent, /2.*2/);
+  assert.match(second.position.textContent, /1.*2/);
+  first.documentEvents['shopify:section:unload']({ target: { querySelectorAll: () => [first.root] } });
+  assert.equal(first.list.listeners.keydown.length, 0);
+  first.documentEvents['shopify:section:load']({ target: { querySelectorAll: () => [first.root] } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(first.list.listeners.keydown.length, 1);
+  assert.equal(second.list.listeners.keydown.length, 1);
+});
+
+test('repeated widget asset execution is guarded against duplicate listeners', () => {
+  const root = new Node(); const list = new Node(); const controls = new Node(); const previous = new Node(); const next = new Node(); const position = new Node();
+  list.append(new Node());
+  root.dataset = { mode: 'carousel', autoplay: 'false', itemPosition: 'Item {current} of {total}' };
+  root.querySelector = key => ({ '[data-dr-list]': list, '[data-dr-carousel-controls]': controls, '[data-dr-carousel-previous]': previous,
+    '[data-dr-carousel-next]': next, '[data-dr-carousel-status]': position })[key] ?? null;
+  const document = { readyState: 'complete', hidden: false, querySelectorAll: () => [root], addEventListener() {} };
+  const context = vm.createContext({ document, matchMedia: () => ({ matches: false }) });
+  vm.runInContext(widgetSource, context);
+  vm.runInContext(widgetSource, context);
+  assert.equal(list.listeners.keydown.length, 1);
+  assert.equal(previous.listeners.click.length, 1);
+});
+
+test('launcher dismissal persists only in the current page runtime and remains block-scoped', async () => {
+  const [first, second] = await runWidgets([
+    { mode: 'floating', blockId: 'dismissed', openState: true },
+    { mode: 'floating', blockId: 'other', openState: true },
+  ]);
+  assert.equal(first.panel.hidden, false);
+  assert.equal(second.panel.hidden, false);
+  first.close.events.click();
+  first.documentEvents['shopify:section:unload']({ target: { querySelectorAll: () => [first.root] } });
+  first.root.dataset.open = 'true';
+  first.documentEvents['shopify:section:load']({ target: { querySelectorAll: () => [first.root] } });
+  assert.equal(first.panel.hidden, true);
+  assert.equal(second.panel.hidden, false);
+  const newPage = await runWidget({ mode: 'floating', blockId: 'dismissed', openState: true });
+  assert.equal(newPage.panel.hidden, false);
 });

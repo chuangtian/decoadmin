@@ -16,6 +16,7 @@ use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewEmail;
 use DecoReviews\Services\ReviewService;
 use DecoReviews\Services\RewardEmail;
+use DecoReviews\Services\RewardEmailService;
 use DecoReviews\Services\RewardService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -71,7 +72,7 @@ class ManagementController
                     'created_at' => $delivery->created_at->toIso8601String(), 'error_code' => $delivery->error_code,
                 ]),
             'rewardHistory' => app(RewardService::class)->history($store),
-            'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
+            'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'provider', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
                 ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
         ]);
     }
@@ -136,6 +137,15 @@ class ManagementController
         return back()->with('success', '人工核对结论已记录；系统没有重试 Shopify。');
     }
 
+    public function reconcileRewardDelivery(Request $request, Organization $organization, Store $store, string $delivery, RewardEmailService $emails)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['conclusion' => 'required|in:sent,not_sent']);
+        $emails->reconcileHeld($store, $request->user(), $delivery, $values['conclusion']);
+
+        return back()->with('success', '邮件人工核对结论已记录；系统没有重新发送邮件。');
+    }
+
     public function invitations(Request $request, Organization $organization, Store $store, InvitationService $invites)
     {
         $this->authorize($request, $organization, $store, true);
@@ -156,8 +166,8 @@ class ManagementController
     public function import(Request $request, Organization $organization, Store $store, ImportService $imports)
     {
         $this->authorize($request, $organization, $store, true);
-        $request->validate(['file' => 'required|file|max:15360']);
-        $batch = $imports->import($store, $request->user(), $request->file('file'));
+        $values = $request->validate(['file' => 'required|file|max:15360', 'provider' => 'required|in:'.implode(',', ImportService::PROVIDERS)]);
+        $batch = $imports->import($store, $request->user(), $request->file('file'), $values['provider']);
 
         return back()->with('success', "导入 {$batch->imported} 条，跳过 {$batch->skipped} 条；错误行见导入记录。");
     }

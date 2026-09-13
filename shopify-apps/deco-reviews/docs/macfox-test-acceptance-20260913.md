@@ -146,3 +146,11 @@
 - Reward discount issuance and reward reminder remain pending; this batch must not be described as the complete seven-message/reward program.
 - Deployed exact `origin/test` commit `507afe3ba53d8145ef36afbf334bb965503f7520`. Backup: `/opt/decoadmin/backups/deco-reviews-form-507afe3ba53d8145ef36afbf334bb965503f7520`. Application, database, Redis and Horizon passed; production container inventory was unchanged.
 - Live Chrome verification showed the media-reminder section plus all three lifecycle templates and private preview links. New switches remained off, and the lifecycle history rendered without exposing a recipient address. No message was sent during this verification.
+
+## Reward issue and email acceptance
+
+- Shopify test version `deco-reviews-test-9` was released only for **Deco Reviews (Test)**. The installed macfox-test-app token was verified to include `read_discounts` and `write_discounts`; no other app or store was changed.
+- The first one-shot attempt correctly entered `held` without retry when Shopify rejected an invalid runtime enum shape. A read-only lookup confirmed no discount existed, so the request was safe to correct rather than blindly retry.
+- Fixed `context.all` to use Shopify's `ALL` enum and deployed exact `origin/test` commit `922908628e1d7504e9aa181c4e3ac7804926cc15` from a clean export. Backup: `/opt/decoadmin/backups/deco-reviews-form-922908628e1d7504e9aa181c4e3ac7804926cc15`. Application, database, Redis and Horizon passed; production remained unchanged.
+- Under the user's explicit one-shot test authorization, retrying the intact held record created a single one-use test discount, marked reward `473a6bef-a452-4b42-8de9-a4dc38ee27e7` as `issued`, and sent the reward email to the exact internal allow-listed recipient. Read-only Shopify lookup then returned the discount.
+- The runner restored the original settings in `finally`. Reward and delivery master gates remain off; the not-yet-due reminder changed to `cancelled`, so no background test message remains scheduled. No reward code, email address, Shopify ID or token is stored in this document.
