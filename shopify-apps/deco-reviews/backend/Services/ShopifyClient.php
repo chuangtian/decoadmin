@@ -87,7 +87,7 @@ class ShopifyClient
             throw ValidationException::withMessages(['reward' => '固定金额奖励必须使用店铺币种。']);
         }
         $common = ['title' => $title, 'code' => $code, 'startsAt' => now()->toIso8601String(), 'endsAt' => $expiresAt->format(DATE_ATOM),
-            'context' => ['all' => true], 'appliesOncePerCustomer' => true, 'usageLimit' => 1,
+            'context' => ['all' => 'ALL'], 'appliesOncePerCustomer' => true, 'usageLimit' => 1,
             'combinesWith' => ['orderDiscounts' => false, 'productDiscounts' => false, 'shippingDiscounts' => false]];
         if ($kind === 'free_shipping') {
             $data = $this->query($store, file_get_contents(__DIR__.'/../graphql/reward-free-shipping.graphql'), [

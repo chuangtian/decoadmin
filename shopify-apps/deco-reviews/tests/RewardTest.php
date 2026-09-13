@@ -442,7 +442,7 @@ class RewardTest extends TestCase
 
         $this->assertCount(3, $requests);
         $percentage = $requests[0]['variables']['basicCodeDiscount'];
-        $this->assertSame(['all' => true], $percentage['context']);
+        $this->assertSame(['all' => 'ALL'], $percentage['context']);
         $this->assertSame(1, $percentage['usageLimit']);
         $this->assertTrue($percentage['appliesOncePerCustomer']);
         $this->assertSame(0.15, $percentage['customerGets']['value']['percentage']);
