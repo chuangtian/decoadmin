@@ -19,6 +19,7 @@ use DecoReviews\Models\Settings;
 use DecoReviews\Services\ImportService;
 use DecoReviews\Services\InvitationService;
 use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\VideoInspector;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -27,6 +28,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Mockery;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Tests\TestCase;
 
@@ -364,6 +366,11 @@ class ReviewsTest extends TestCase
         [$user, , $store] = $this->context();
         Settings::create(['organization_id' => $store->organization_id, 'store_id' => $store->id, 'values' => array_replace(config('deco_reviews.defaults'), ['auto_publish_days' => 0])]);
         $video = UploadedFile::fake()->create('review.mp4', 20, 'video/mp4');
+        $inspector = Mockery::mock(VideoInspector::class);
+        $inspector->shouldReceive('inspect')->once()->with($video)->andReturn([
+            'mime' => 'video/mp4', 'container' => 'mp4', 'codec' => 'h264', 'duration' => 3.0, 'width' => 320, 'height' => 180,
+        ]);
+        app()->instance(VideoInspector::class, $inspector);
         $review = app(ReviewService::class)->create($store, $this->reviewInput($this->product($store), ['body' => 'Video review.']), [$video], $user);
 
         $this->assertSame('pending', $review->status);

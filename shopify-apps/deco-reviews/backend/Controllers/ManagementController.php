@@ -35,10 +35,12 @@ class ManagementController
         $rows = $this->reviews->filtered($store, $filters)->with(['product', 'media'])->paginate(15)->withQueryString();
         $rows->through(fn ($review) => $this->reviews->serialize($review, $store, true, $settings));
         $summary = $this->reviews->scoped($store)->selectRaw("count(*) total, sum(case when status = 'published' then 1 else 0 end) published, sum(case when status = 'pending' then 1 else 0 end) pending, avg(rating) average")->first();
-        $invitations = Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->with('product')->latest('id')->paginate(15)->withQueryString();
-        $invitations->through(fn ($invite) => ['uuid' => $invite->uuid, 'order_id' => $invite->order_id, 'product_title' => $invite->product?->title,
+        $invitations = Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->with(['product', 'order'])->latest('id')->paginate(15)->withQueryString();
+        $invitations->through(fn ($invite) => ['uuid' => $invite->uuid, 'order_id' => $invite->order_id,
+            'order_number' => $invite->order?->order_number, 'product_title' => $invite->product?->title,
             'status' => $invite->status, 'due_at' => $invite->due_at?->toIso8601String(), 'sent_at' => $invite->sent_at?->toIso8601String(),
             'reminder_sent_at' => $invite->reminder_sent_at?->toIso8601String(),
+            'completed_at' => $invite->completed_at?->toIso8601String(),
             'created_at' => $invite->created_at->toIso8601String(), 'error_code' => $invite->error_code]);
 
         return Inertia::render('DecoReviews/Index', [

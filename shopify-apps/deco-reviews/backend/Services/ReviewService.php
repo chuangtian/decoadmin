@@ -135,6 +135,11 @@ class ReviewService
         if ($videos && count($files) !== 1) {
             throw ValidationException::withMessages(['media' => '最多 5 张图片，或单独 1 个视频。']);
         }
+        foreach ($files as $file) {
+            if (str_starts_with($file->getMimeType(), 'video/')) {
+                app(VideoInspector::class)->inspect($file);
+            }
+        }
         $fingerprint = hash('sha256', json_encode([$data['kind'], $data['product_id'], Str::lower(trim($data['author_email'] ?? $data['author_name'])), $data['rating'], trim($data['body'])]));
         $paths = [];
         try {

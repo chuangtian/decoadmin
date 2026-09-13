@@ -94,3 +94,20 @@
 - After the user restored the intended page, Chrome loaded review 7's private video preview and played the synthetic animation to 0:03/0:03. Screenshot and player time confirmed completion. Initial buffering text cleared after load; do not treat it as a proven playback failure.
 - Publishing this synthetic video is prepared but unsaved, pending separate action-time confirmation. The earlier photo-publication confirmation is not reused for this video.
 - Combined backend regression for range support: 44 tests / 280 assertions passed. The small video's existing full-download playback does not itself prove range support; the new 206/416 regression covers the response behavior.
+
+## Media range test release
+
+- Test backend deployed from clean `origin/test` commit `638bc39c6fe15f88974bf6d2d70315cde3202b6c`. Backup: `/opt/decoadmin/backups/deco-reviews-form-638bc39c6fe15f88974bf6d2d70315cde3202b6c`. No migrations or Shopify scope/extension changes.
+- Health and Horizon passed; runtime media controller hashes match the clean source. Production container IDs unchanged; automated sending remains disabled globally.
+- Unauthenticated external HTTPS probe for the published test image with `Range: bytes=0-9` returns HTTP 206 and exactly 10 bytes. Same probe for pending test video returns 404.
+- Reprocessing the completed test invitation for order 4947 leaves one completed record, original sent/completed timestamps unchanged, reminder timestamp null and no error. It did not reopen the completed invitation.
+- Public video publication/playback still awaits the user-facing action-time confirmation; do not mark it accepted or claim full feature completion.
+
+## Confirmed video publication and next safety increment
+
+- Following the user's separate confirmation, published synthetic review 7. The management list refreshed to `已发布`.
+- Public video widget shows six reviews / 3.33 average and opens the DEMO video. Chrome played the public video to 0:03/0:03 over the deployed range-capable endpoint.
+- Shopify draft-theme playback could not yet be rechecked because Shopify redirected to a Cloudflare human-verification page. The user must complete that challenge; no attempt was made to solve or bypass it.
+- Added, but not yet deployed in this record, a bounded `ffprobe` video inspector for real MIME/container, one video stream, supported codecs, duration and 4K limits. Videos remain manual-review only. App-owned test image installs ffmpeg; shared Docker/runtime recipes and other apps are unchanged.
+- Reopening a completed signed invite now renders an explicit already-received page without another form. Invitation management now shows the human order number/product and completion timestamp instead of presenting only an internal numeric order ID.
+- Reviewed combined source: 50 backend tests / 308 assertions, 8 storefront runtime tests, type-check, app asset build and typography passed. This does not complete transcoding, malware scanning, full video-browser matrix, reminder inbox E2E or full Loox parity.

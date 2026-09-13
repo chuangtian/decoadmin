@@ -10,6 +10,13 @@ return [
     'delivery_enabled' => (bool) env($prefix.'DELIVERY_ENABLED', false),
     'automation_stores' => array_filter(explode(',', (string) env($prefix.'AUTOMATION_STORES', ''))),
     'recipient_allowlist' => array_filter(explode(',', (string) env($prefix.'RECIPIENT_ALLOWLIST', ''))),
+    'video' => [
+        'ffprobe_binary' => env('DECO_REVIEWS_FFPROBE_BINARY', '/usr/bin/ffprobe'),
+        'probe_timeout_seconds' => 10,
+        'max_duration_seconds' => 120,
+        'max_width' => 3840,
+        'max_height' => 2160,
+    ],
     'id_token_leeway_seconds' => 5,
     'defaults' => [
         'enabled' => false, 'auto_publish_days' => 14, 'invites_enabled' => false,

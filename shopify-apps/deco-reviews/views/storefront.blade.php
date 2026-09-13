@@ -33,7 +33,15 @@
         <section class="dr-list" aria-label="Customer reviews" data-dr-list></section>
         <nav class="dr-pagination" aria-label="Review pages" data-dr-pagination></nav>
     @endif
-    @if ($submitUrl || ($formPreview ?? false))
+    @if (($formCompleted ?? false) && $submitUrl)
+        <section class="dr-form" aria-labelledby="dr-completed-heading">
+            <h2 id="dr-completed-heading">{{ $reviewForm['thank_you'] ?? 'Thank you. Your review has been received.' }}</h2>
+            @if (!empty($invitationProduct['title']))
+                <p>{{ $invitationProduct['title'] }}</p>
+            @endif
+            <p>This review link has already been used. No further action is needed.</p>
+        </section>
+    @elseif ($submitUrl || ($formPreview ?? false))
         <form class="dr-form" action="{{ $submitUrl ?? '' }}" method="post" enctype="multipart/form-data" data-dr-form>
             @csrf
             <input type="hidden" name="form_version" value="{{ $reviewForm['version'] ?? 'initial' }}">

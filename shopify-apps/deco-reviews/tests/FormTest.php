@@ -299,6 +299,10 @@ class FormTest extends TestCase
         $review = Review::where('uuid', $response->json('data.uuid'))->firstOrFail();
         $this->assertSame(['Public fit', 'Private note'], array_column($review->form_answers, 'label'));
         $this->assertSame([true, false], array_column($review->form_answers, 'public'));
+        $completedHtml = $this->get($signedUrl)->assertOk()->getContent();
+        $this->assertStringContainsString('Custom thank you.', $completedHtml);
+        $this->assertStringContainsString('This review link has already been used.', $completedHtml);
+        $this->assertStringNotContainsString('<form', $completedHtml);
 
         $updated = $this->save($this->configuration(['version' => $saved['version'], 'thank_you' => 'New response.'], [$public, $private]));
         $this->assertNotSame($saved['version'], $updated['version']);

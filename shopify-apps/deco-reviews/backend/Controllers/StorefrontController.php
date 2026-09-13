@@ -78,7 +78,8 @@ class StorefrontController
         [$store, $invite] = $invites->resolve($invitation);
         abort_unless(in_array($invite->status, ['sent', 'scheduled', 'completed']), 409);
 
-        return response()->view('deco-reviews::storefront', ['feedUrl' => null, 'submitUrl' => $request->fullUrl(), 'invitationProduct' => ['title' => $invite->product?->title],
+        return response()->view('deco-reviews::storefront', ['feedUrl' => null, 'submitUrl' => $request->fullUrl(),
+            'formCompleted' => $invite->status === 'completed', 'invitationProduct' => ['title' => $invite->product?->title],
             'formConfig' => app(FormService::class)->forProduct($store, 'product', $invite->product_id)])
             ->header('Cache-Control', 'private, no-store')->header('Referrer-Policy', 'no-referrer');
     }
