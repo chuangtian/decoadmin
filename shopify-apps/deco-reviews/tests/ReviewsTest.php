@@ -474,17 +474,35 @@ class ReviewsTest extends TestCase
     {
         [$user, $organization, $store] = $this->context();
         $product = $this->product($store);
-        app(ReviewService::class)->create($store, $this->reviewInput($product, [
+        $review = app(ReviewService::class)->create($store, $this->reviewInput($product, [
             'author_name' => '=HYPERLINK("https://invalid.test")',
             'title' => '+SUM(1,1)',
             'body' => '@dangerous formula',
         ]), [], $user);
+        $review->update(['form_answers' => [[
+            'question_id' => (string) Str::uuid(),
+            'label' => 'Riding comfort',
+            'type' => 'single',
+            'value' => '=answer formula',
+            'public' => false,
+        ]]]);
 
-        $response = $this->actingAs($user)->get("/organizations/{$organization->id}/stores/{$store->id}/deco-reviews/export")->assertOk();
+        $response = $this->actingAs($user)->get("/organizations/{$organization->id}/stores/{$store->id}/deco-reviews/export")
+            ->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
         $csv = $response->streamedContent();
         $this->assertStringContainsString("'=HYPERLINK", $csv);
         $this->assertStringContainsString("'+SUM", $csv);
         $this->assertStringContainsString("'@dangerous", $csv);
+        $rows = array_map(fn ($line) => str_getcsv($line, ',', '"', ''), preg_split('/\r?\n/', trim($csv)));
+        $answerColumn = array_search('custom_answers_json', $rows[0], true);
+        $this->assertNotFalse($answerColumn);
+        $answers = json_decode($rows[1][$answerColumn], true, 32, JSON_THROW_ON_ERROR);
+        $this->assertSame([[
+            'label' => 'Riding comfort',
+            'type' => 'single',
+            'value' => '=answer formula',
+            'visibility' => 'private',
+        ]], $answers);
     }
 
     public function test_uploaded_image_is_reencoded_without_original_metadata(): void

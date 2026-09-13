@@ -214,14 +214,32 @@ class ManagementController
 
         return response()->streamDownload(function () use ($store, $filters) {
             $stream = fopen('php://output', 'w');
-            fputcsv($stream, ['product_handle', 'rating', 'author_name', 'body', 'reviewed_at', 'title', 'kind', 'status'], ',', '"', '');
+            fputcsv($stream, ['product_handle', 'rating', 'author_name', 'body', 'reviewed_at', 'title', 'kind', 'status', 'custom_answers_json'], ',', '"', '');
             foreach ($this->reviews->filtered($store, $filters)->with('product')->limit(100000)->lazy(250) as $review) {
-                $row = [$review->product?->handle ?? '', $review->rating, $review->author_name, $review->body, $review->reviewed_at->toIso8601String(), $review->title ?? '', $review->kind, $review->status];
+                $answers = collect($review->form_answers ?? [])->take(10)->filter(fn ($answer) => is_array($answer))->map(function ($answer) {
+                    $value = $answer['value'] ?? '';
+                    $value = is_array($value)
+                        ? array_map(fn ($item) => mb_substr((string) $item, 0, 100), array_slice($value, 0, 20))
+                        : mb_substr((string) $value, 0, 100);
+
+                    return [
+                        'label' => mb_substr((string) ($answer['label'] ?? ''), 0, 160),
+                        'type' => in_array($answer['type'] ?? '', ['single', 'multiple', 'scale'], true) ? $answer['type'] : 'unknown',
+                        'value' => $value,
+                        'visibility' => ($answer['public'] ?? false) === true ? 'public' : 'private',
+                    ];
+                })->values()->all();
+                $answersJson = json_encode($answers, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '[]';
+                $row = [$review->product?->handle ?? '', $review->rating, $review->author_name, $review->body, $review->reviewed_at->toIso8601String(), $review->title ?? '', $review->kind, $review->status, $answersJson];
                 $row = array_map(fn ($value) => preg_match('/^[\s]*[=+@\-]/u', (string) $value) ? "'".$value : $value, $row);
                 fputcsv($stream, $row, ',', '"', '');
             }
             fclose($stream);
-        }, 'deco-reviews.csv', ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'no-store']);
+        }, 'deco-reviews.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function preview(Request $request, Organization $organization, Store $store, StorefrontController $public)
