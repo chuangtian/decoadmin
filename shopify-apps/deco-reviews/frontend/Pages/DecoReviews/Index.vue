@@ -184,7 +184,13 @@ watch([createOpen, editingReview, activeMedia], ([creating, editing, media], pre
 });
 watch(() => props.settings, value => settingsForm.defaults({ ...value }), { deep: true });
 watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) => {
-    query.value = { kind: String(filters.kind || 'product'), status: String(filters.status || ''), rating: String(filters.rating || ''), q: String(filters.q || ''), sort: String(filters.sort || 'newest') };
+    query.value = {
+        kind: String(filters.kind || 'product'), status: String(filters.status || ''), rating: String(filters.rating || ''),
+        product_id: String(filters.product_id || ''), media: String(filters.media || ''), source: String(filters.source || ''),
+        verified: String(filters.verified || ''), featured: String(filters.featured ?? ''), incentivized: String(filters.incentivized ?? ''),
+        reply: String(filters.reply || ''), date_from: String(filters.date_from || ''), date_to: String(filters.date_to || ''),
+        q: String(filters.q || ''), sort: String(filters.sort || 'newest'),
+    };
     selected.value = [];
     bulkForm.clearErrors();
 }, { deep: true });
