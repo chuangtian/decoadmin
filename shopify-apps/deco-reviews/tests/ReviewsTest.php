@@ -417,6 +417,40 @@ class ReviewsTest extends TestCase
         ])->pluck('uuid')->all());
     }
 
+    public function test_manual_verification_is_distinct_reversible_and_cannot_replace_order_verification(): void
+    {
+        [$user, , $store] = $this->context('manual-verification');
+        $product = $this->product($store);
+        $manual = app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_email' => 'manual-verification@example.test',
+        ]), [], $user);
+
+        app(ReviewService::class)->moderate($store, $user, [$manual->uuid], ['manual_verification' => true]);
+        $this->assertSame('manual', $manual->fresh()->verified_source);
+        $this->assertSame([$manual->uuid], app(ReviewService::class)->filtered($store, ['verified' => 'manual'])->pluck('uuid')->all());
+        $this->assertSame('manual', app(ReviewService::class)->serialize($manual->fresh()->load(['product', 'media']), $store)['verified_source']);
+
+        $orderVerified = app(ReviewService::class)->create($store, $this->reviewInput($product, [
+            'author_name' => 'Order Buyer',
+            'author_email' => 'order-verification@example.test',
+            'body' => 'Order-bound review.',
+        ]), [], $user);
+        $orderVerified->update(['verified_source' => 'order']);
+        app(ReviewService::class)->moderate($store, $user, [$orderVerified->uuid], ['manual_verification' => false, 'reply' => 'Safe reply.']);
+        $this->assertSame('order', $orderVerified->fresh()->verified_source);
+        $this->assertSame('Safe reply.', $orderVerified->fresh()->reply);
+        try {
+            app(ReviewService::class)->moderate($store, $user, [$orderVerified->uuid], ['manual_verification' => true]);
+            $this->fail('Order verification was allowed to be overwritten.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('manual_verification', $error->errors());
+        }
+        $this->assertSame('order', $orderVerified->fresh()->verified_source);
+
+        app(ReviewService::class)->moderate($store, $user, [$manual->uuid], ['manual_verification' => false]);
+        $this->assertSame('none', $manual->fresh()->verified_source);
+    }
+
     public function test_import_reports_stable_error_codes_deduplicates_and_can_be_undone_within_seven_days(): void
     {
         [$user, , $store] = $this->context();

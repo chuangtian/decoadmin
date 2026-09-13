@@ -32,7 +32,8 @@
   const disclosure = (root, review) => {
     const row = element("div", "dr-disclosures");
     if (review.verified_source === "order") row.append(element("span", "dr-badge", label(root, "verified", "Verified purchase")));
-    else row.append(element("span", "dr-source", label(root, "unverified", "Source not verified")));
+    else if (review.verified_source === "manual") row.append(element("span", "dr-badge dr-badge--manual", label(root, "manualVerified", "Verified by store")));
+    else row.append(element("span", "dr-source", review.source === "import" ? label(root, "imported", "Imported review") : label(root, "unverified", "Source not verified")));
     if (review.incentivized) row.append(element("span", "dr-badge dr-badge--incentive", label(root, "incentivized", "Incentivized review")));
     return row;
   };

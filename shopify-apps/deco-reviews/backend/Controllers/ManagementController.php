@@ -39,7 +39,7 @@ class ManagementController
             'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
             'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
             'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import,organic',
-            'verified' => 'nullable|in:order,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
+            'verified' => 'nullable|in:order,manual,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
             'reply' => 'nullable|in:with,without', 'date_from' => 'nullable|date', 'date_to' => 'nullable|date|after_or_equal:date_from',
             'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
         $settings = $this->reviews->settings($store);

@@ -60,11 +60,13 @@ for (const verification of ['none', 'import', 'manual', 'order', null]) {
       createElement: () => new Node(), querySelectorAll: () => [root], addEventListener() {} };
     vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, location: { origin: 'https://example.test' },
       fetch: async () => ({ ok: true, json: async () => ({ data: [{ uuid: 'demo', rating: 4,
-        body: 'Synthetic review', verified_source: verification, media: [] }] }) }) });
+        body: 'Synthetic review', source: verification === 'import' ? 'import' : 'organic', verified_source: verification, media: [] }] }) }) });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(list.children.length, 1, status.textContent);
     assert.equal(content(list).includes('Verified purchase'), verification === 'order');
-    assert.equal(content(list).includes('Source not verified'), verification !== 'order');
+    assert.equal(content(list).includes('Verified by store'), verification === 'manual');
+    assert.equal(content(list).includes('Imported review'), verification === 'import');
+    assert.equal(content(list).includes('Source not verified'), verification === 'none' || verification === null);
   });
 }
 

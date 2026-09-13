@@ -143,7 +143,7 @@ class ReviewService
         if (in_array($filters['source'] ?? '', ['merchant', 'email', 'import', 'organic'], true)) {
             $query->where('source', $filters['source']);
         }
-        if (in_array($filters['verified'] ?? '', ['order', 'none'], true)) {
+        if (in_array($filters['verified'] ?? '', ['order', 'manual', 'none'], true)) {
             $query->where('verified_source', $filters['verified']);
         }
         foreach (['featured', 'incentivized'] as $flag) {
@@ -303,13 +303,24 @@ class ReviewService
     {
         $this->authorize($user, $store, true);
         $data = Validator::make($input, ['status' => ['sometimes', Rule::in(['pending', 'published', 'unpublished'])],
-            'reason' => 'required_if:status,unpublished|nullable|string|max:1000', 'featured' => 'sometimes|boolean', 'reply' => 'sometimes|nullable|string|max:5000'])->validate();
+            'reason' => 'required_if:status,unpublished|nullable|string|max:1000', 'featured' => 'sometimes|boolean',
+            'reply' => 'sometimes|nullable|string|max:5000', 'manual_verification' => 'sometimes|boolean'])->validate();
         Validator::make(['ids' => $ids], ['ids' => 'required|array|min:1|max:100', 'ids.*' => 'required|uuid|distinct'])->validate();
         DB::transaction(function () use ($store, $user, $ids, $data) {
             $reviews = $this->scoped($store)->whereIn('uuid', $ids)->lockForUpdate()->get();
             abort_unless($reviews->count() === count($ids), 404);
             foreach ($reviews as $review) {
                 $values = $data;
+                $verificationChanged = false;
+                if (array_key_exists('manual_verification', $data)) {
+                    if ($review->verified_source === 'order' && $data['manual_verification']) {
+                        throw ValidationException::withMessages(['manual_verification' => '订单验证来自已核验订单，不能由人工验证覆盖。']);
+                    }
+                    $values['verified_source'] = $review->verified_source === 'order' ? 'order'
+                        : ($data['manual_verification'] ? 'manual' : ($review->verified_source === 'manual' ? 'none' : $review->verified_source));
+                    $verificationChanged = $values['verified_source'] !== $review->verified_source;
+                    unset($values['manual_verification']);
+                }
                 if (isset($data['status'])) {
                     $values['publish_at'] = null;
                     $values['published_at'] = $data['status'] === 'published' ? ($review->published_at ?? now()) : null;
@@ -329,7 +340,12 @@ class ReviewService
                             ->update(['status' => 'cancelled', 'due_at' => null]);
                     }
                 }
-                $this->audit($store, $user, 'review.moderated', $review->id, ['status' => $review->status, 'reply_changed' => array_key_exists('reply', $data)]);
+                $this->audit($store, $user, 'review.moderated', $review->id, [
+                    'status' => $review->status,
+                    'reply_changed' => array_key_exists('reply', $data),
+                    'verification_changed' => $verificationChanged,
+                    'verified_source' => $review->verified_source,
+                ]);
             }
         });
     }
