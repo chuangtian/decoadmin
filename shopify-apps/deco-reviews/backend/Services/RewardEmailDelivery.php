@@ -17,8 +17,11 @@ class RewardEmailDelivery
         }
         $reward = $delivery->relationLoaded('reward') ? $delivery->reward : null;
         if (! $reward || (int) $reward->organization_id !== (int) $store->organization_id || (int) $reward->store_id !== (int) $store->id
-            || $reward->status !== 'issued' || ! $reward->code) {
+            || ! $reward->code || ! in_array($reward->status, ['issued', 'redeemed'], true)) {
             return 'REWARD_NOT_ISSUED';
+        }
+        if ($reward->status === 'redeemed') {
+            return 'REWARD_ALREADY_REDEEMED';
         }
         if (! $reward->expires_at || $reward->expires_at->isPast()) {
             return 'REWARD_EXPIRED';

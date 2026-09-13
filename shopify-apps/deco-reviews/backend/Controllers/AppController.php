@@ -8,6 +8,7 @@ use DecoReviews\Models\Invitation;
 use DecoReviews\Models\Reward;
 use DecoReviews\Models\RewardDelivery;
 use DecoReviews\Models\Settings;
+use DecoReviews\Services\RewardLifecycleService;
 use DecoReviews\Services\ShopifyClient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,15 +32,16 @@ class AppController
         return response()->json(['data' => ['management_url' => route('deco-reviews.index', [$store->organization_id, $store->id])]]);
     }
 
-    public function webhook(Request $request)
+    public function webhook(Request $request, RewardLifecycleService $lifecycle)
     {
         $secret = (string) config('deco_reviews.active.client_secret');
         abort_unless($secret !== '' && hash_equals(base64_encode(hash_hmac('sha256', $request->getContent(), $secret, true)), (string) $request->header('X-Shopify-Hmac-Sha256')), 401);
-        $store = Store::where('shopify_domain', strtolower((string) $request->header('X-Shopify-Shop-Domain')))->first();
+        $store = Store::with('organization')->where('shopify_domain', strtolower((string) $request->header('X-Shopify-Shop-Domain')))->first();
         if (! $store) {
             return response('', 200);
         }
-        if ($request->header('X-Shopify-Topic') === 'app/uninstalled') {
+        $topic = strtolower((string) $request->header('X-Shopify-Topic'));
+        if ($topic === 'app/uninstalled') {
             DB::transaction(function () use ($store) {
                 Installation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('environment', config('deco_reviews.environment'))->update(['access_token' => null]);
                 Invitation::where('organization_id', $store->organization_id)->where('store_id', $store->id)->whereNotIn('status', ['completed', 'cancelled'])->update(['status' => 'cancelled', 'due_at' => null]);
@@ -52,6 +54,9 @@ class AppController
                     $settings->update(['values' => array_replace($settings->values, ['enabled' => false, 'invites_enabled' => false, 'rewards_enabled' => false])]);
                 }
             });
+        } elseif (in_array($topic, RewardLifecycleService::TOPICS, true)) {
+            $payload = $request->json()->all();
+            $lifecycle->process($store, $topic, is_array($payload) ? $payload : [], $request->header('X-Shopify-Webhook-Id'), $request->getContent());
         }
 
         return response('', 200);

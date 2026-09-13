@@ -10,7 +10,7 @@ automatically_update_urls_on_dev = false
 api_version = "2026-07"
 
 [[webhooks.subscriptions]]
-topics = ["app/uninstalled"]
+topics = ["app/uninstalled", "orders/paid", "orders/cancelled", "refunds/create"]
 uri = "https://testadmin.decomkt.com/api/shopify-app/deco-reviews/webhooks"
 
 [access_scopes]

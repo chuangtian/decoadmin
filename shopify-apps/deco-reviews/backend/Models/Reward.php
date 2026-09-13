@@ -16,7 +16,8 @@ class Reward extends Model
 
     protected function casts(): array
     {
-        return ['code' => 'encrypted', 'value' => 'decimal:2', 'due_at' => 'datetime', 'issued_at' => 'datetime', 'expires_at' => 'datetime'];
+        return ['code' => 'encrypted', 'value' => 'decimal:2', 'due_at' => 'datetime', 'issued_at' => 'datetime', 'redeemed_at' => 'datetime',
+            'refunded_at' => 'datetime', 'cancelled_order_at' => 'datetime', 'expires_at' => 'datetime'];
     }
 
     public function review(): BelongsTo

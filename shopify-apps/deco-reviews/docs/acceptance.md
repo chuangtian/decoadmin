@@ -91,8 +91,9 @@ The current shared renderer is a foundation only. None of the following should b
 
 ### Rewards and discounts
 
-- Implemented locally, not released: separate photo/video switches; percentage, fixed-store-currency, and free-shipping discounts; one non-combinable, one-use code per eligible published order-verified email review; captured expiration; encrypted codes; scoped code-free management history; idempotent scheduling; and a separate fail-closed write gate. Eligibility is rechecked before the Shopify mutation, and uncertain results are held without retry.
-- Remaining: collection scope, subscription/payment rules, existing-code mode, revoke/refund and redemption handling, held-email reconciliation, broader abuse controls, and live test simulation. Held Shopify creation results now require an explicit scoped administrator conclusion and never cause an automatic retry. No real discount write or email delivery was performed for this implementation.
+- Released to test, not production: separate photo/video switches; percentage, fixed-store-currency, and free-shipping discounts; one non-combinable, one-use code per eligible published order-verified email review; captured expiration; encrypted codes; scoped code-free management history; idempotent scheduling; and a separate fail-closed write gate. Eligibility is rechecked before the Shopify mutation, and uncertain results are held without retry.
+- Implemented in the current follow-up: HMAC-verified and replay-idempotent `orders/paid`, `refunds/create`, and `orders/cancelled` processing records reward redemption and later refund/cancellation observations. Matching uses the current store plus the stored code hash; receipts store no raw payload or code. Tracking never issues, reissues, revokes or deletes a discount.
+- Remaining: collection scope, subscription/payment rules, existing-code mode, explicit revoke/reissue policy, broader abuse controls, and live webhook delivery verification. Held Shopify and reward-email results require an explicit scoped administrator conclusion and never cause an automatic retry.
 
 ### Review form, custom questions, groups, and bundles
 
@@ -214,7 +215,7 @@ The following are not accepted until independently provided and verified:
 
 ## Reward increment validation (2026-09-13 to 2026-09-14)
 
-- Latest combined Deco Reviews automated suite: 80 tests, 544 assertions passed.
+- Latest combined Deco Reviews automated suite: 85 tests, 584 assertions passed.
 - Storefront JavaScript suite: 18 tests passed; every generated JavaScript asset remains below the 10 KB extension limit.
 - Full DecoAdmin Laravel suite completed successfully after the reward changes.
 - Vue type-check, interface typography audit, Shopify test configuration validation, Shopify App build, and production frontend build passed.

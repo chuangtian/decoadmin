@@ -176,44 +176,53 @@ class RewardService
     {
         app(ReviewService::class)->active($store);
 
-        return Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+        $rewards = Reward::where('organization_id', $store->organization_id)->where('store_id', $store->id)
             ->select(['id', 'uuid', 'review_id', 'media_kind', 'discount_kind', 'value', 'currency', 'status', 'due_at',
-                'issued_at', 'expires_at', 'created_at', 'error_code'])
+                'issued_at', 'redeemed_order_id', 'redeemed_at', 'refunded_at', 'cancelled_order_at', 'expires_at', 'created_at', 'error_code'])
             ->with(['deliveries' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
                 ->select(['id', 'reward_id', 'type', 'status', 'due_at', 'sent_at', 'error_code']),
                 'review' => fn ($query) => $query->where('organization_id', $store->organization_id)->where('store_id', $store->id)
                     ->select(['id', 'product_id', 'title'])->with(['product' => fn ($product) => $product
                     ->where('organization_id', $store->organization_id)->where('store_id', $store->id)->select(['id', 'title'])])])
-            ->latest('id')->limit(30)->get()->map(function (Reward $reward) {
-                $initial = $reward->deliveries->firstWhere('type', 'reward_issued');
-                $reminder = $reward->deliveries->firstWhere('type', 'reward_reminder');
+            ->latest('id')->limit(30)->get();
+        $orderNumbers = Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)
+            ->whereIn('shopify_order_id', $rewards->pluck('redeemed_order_id')->filter()->unique())
+            ->pluck('order_number', 'shopify_order_id');
 
-                return [
-                    'uuid' => $reward->uuid,
-                    'media_kind' => $reward->media_kind,
-                    'discount_kind' => $reward->discount_kind,
-                    'value' => $reward->value,
-                    'currency' => $reward->currency,
-                    'status' => $reward->status,
-                    'review_title' => $reward->review?->title,
-                    'product_title' => $reward->review?->product?->title,
-                    'due_at' => $reward->due_at?->toIso8601String(),
-                    'issued_at' => $reward->issued_at?->toIso8601String(),
-                    'expires_at' => $reward->expires_at?->toIso8601String(),
-                    'created_at' => $reward->created_at->toIso8601String(),
-                    'error_code' => $reward->error_code,
-                    'email_status' => $initial?->status,
-                    'email_delivery_uuid' => $initial?->uuid,
-                    'email_due_at' => $initial?->due_at?->toIso8601String(),
-                    'email_sent_at' => $initial?->sent_at?->toIso8601String(),
-                    'email_error_code' => $initial?->error_code,
-                    'reminder_status' => $reminder?->status,
-                    'reminder_delivery_uuid' => $reminder?->uuid,
-                    'reminder_due_at' => $reminder?->due_at?->toIso8601String(),
-                    'reminder_sent_at' => $reminder?->sent_at?->toIso8601String(),
-                    'reminder_error_code' => $reminder?->error_code,
-                ];
-            })->all();
+        return $rewards->map(function (Reward $reward) use ($orderNumbers) {
+            $initial = $reward->deliveries->firstWhere('type', 'reward_issued');
+            $reminder = $reward->deliveries->firstWhere('type', 'reward_reminder');
+
+            return [
+                'uuid' => $reward->uuid,
+                'media_kind' => $reward->media_kind,
+                'discount_kind' => $reward->discount_kind,
+                'value' => $reward->value,
+                'currency' => $reward->currency,
+                'status' => $reward->status,
+                'review_title' => $reward->review?->title,
+                'product_title' => $reward->review?->product?->title,
+                'due_at' => $reward->due_at?->toIso8601String(),
+                'issued_at' => $reward->issued_at?->toIso8601String(),
+                'redeemed_at' => $reward->redeemed_at?->toIso8601String(),
+                'redemption_order_number' => $reward->redeemed_order_id ? $orderNumbers->get($reward->redeemed_order_id) : null,
+                'refunded_at' => $reward->refunded_at?->toIso8601String(),
+                'cancelled_order_at' => $reward->cancelled_order_at?->toIso8601String(),
+                'expires_at' => $reward->expires_at?->toIso8601String(),
+                'created_at' => $reward->created_at->toIso8601String(),
+                'error_code' => $reward->error_code,
+                'email_status' => $initial?->status,
+                'email_delivery_uuid' => $initial?->uuid,
+                'email_due_at' => $initial?->due_at?->toIso8601String(),
+                'email_sent_at' => $initial?->sent_at?->toIso8601String(),
+                'email_error_code' => $initial?->error_code,
+                'reminder_status' => $reminder?->status,
+                'reminder_delivery_uuid' => $reminder?->uuid,
+                'reminder_due_at' => $reminder?->due_at?->toIso8601String(),
+                'reminder_sent_at' => $reminder?->sent_at?->toIso8601String(),
+                'reminder_error_code' => $reminder?->error_code,
+            ];
+        })->all();
     }
 
     private function eligibleMediaKind(Store $store, ?Review $review, array $settings): ?string
