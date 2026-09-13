@@ -9,6 +9,7 @@ class Node {
   append(...nodes) { nodes.forEach(node => { if (node && typeof node === 'object') node.parentNode = this; }); this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   setAttribute(key, value) { this.attrs[key] = value; }
+  getAttribute(key) { return this.attrs[key]; }
   removeAttribute(key) { delete this.attrs[key]; }
   addEventListener(key, handler) { (this.listeners[key] ||= []).push(handler); this.events[key] = (...args) => { const results = this.listeners[key].slice().map(listener => listener(...args)); return results.length === 1 ? results[0] : Promise.all(results); }; }
   removeEventListener(key, handler) { this.listeners[key] = (this.listeners[key] || []).filter(listener => listener !== handler); }
@@ -219,6 +220,7 @@ test('gallery thumbnails expose current state and support arrow, Home and End fo
   assert.equal(widget.list.attrs.role, 'listbox');
   assert.equal(thumbnails[0].attrs['aria-current'], 'true');
   assert.equal(thumbnails[0].attrs['aria-selected'], 'true');
+  assert.equal(thumbnails[0].attrs.role, 'option');
   let prevented = false;
   widget.list.events.keydown({ key: 'ArrowRight', preventDefault() { prevented = true; } });
   assert.equal(prevented, true);
@@ -230,6 +232,39 @@ test('gallery thumbnails expose current state and support arrow, Home and End fo
   assert.equal(thumbnails[2].focused, true);
   widget.list.events.keydown({ key: 'Home', preventDefault() {} });
   assert.equal(thumbnails[0].focused, true);
+  const dialog = widget.root.children.find(node => node.tag === 'dialog');
+  thumbnails[1].events.click();
+  assert.notEqual(dialog.open, true);
+  widget.list.events.click({ target: thumbnails[1] });
+  thumbnails[1].events.click();
+  assert.equal(dialog.open, true);
+});
+
+test('video slider excludes photo-only reviews and exposes bounded controls and keyboard navigation', async () => {
+  const widget = await runWidget({ mode: 'video', data: [
+    { uuid: 'photo', rating: 5, body: 'Photo only', media: [{ type: 'image', url: '/photo.jpg' }] },
+    { uuid: 'video-one', rating: 5, body: 'First video', media: [{ type: 'video', url: '/one.mp4' }] },
+    { uuid: 'video-two', rating: 4, body: 'Second video', media: [{ type: 'video', url: '/two.mp4' }] },
+  ] });
+  assert.equal(widget.list.children.length, 2);
+  assert.equal(widget.list.attrs.role, 'region');
+  assert.equal(widget.list.attrs['aria-roledescription'], 'carousel');
+  assert.equal(widget.controls.hidden, false);
+  assert.equal(widget.previous.disabled, true);
+  widget.list.events.keydown({ key: 'ArrowRight', preventDefault() {} });
+  assert.equal(widget.list.children[1].focused, true);
+  assert.equal(widget.next.disabled, true);
+  assert.equal(widget.timers.length, 0);
+});
+
+test('video slider reports an empty state when no playable video review exists', async () => {
+  const widget = await runWidget({ mode: 'video', data: [
+    { uuid: 'photo', rating: 5, body: 'Photo only', media: [{ type: 'image', url: '/photo.jpg' }] },
+  ] });
+  assert.equal(widget.list.children.length, 0);
+  assert.equal(widget.root.dataset.state, 'empty');
+  assert.equal(widget.controls.hidden, true);
+  assert.match(content(widget.status), /No reviews yet/);
 });
 
 test('multiple blocks keep independent controls and section reload does not duplicate listeners', async () => {

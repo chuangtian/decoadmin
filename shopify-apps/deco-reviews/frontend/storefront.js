@@ -252,7 +252,9 @@
           viewer = lightbox(root, reviews);
           if (root.dataset.mode === "gallery") {
             reviews.forEach((review) => (Array.isArray(review.media) ? review.media : []).forEach((media, index) => {
-              const button = mediaButton(root, media, review, index, (mediaIndex, trigger) => viewer.open(review.uuid, mediaIndex, trigger));
+              const button = mediaButton(root, media, review, index, (mediaIndex, trigger) => {
+                if (trigger.getAttribute("aria-current") === "true") viewer.open(review.uuid, mediaIndex, trigger);
+              });
               if (button) { button.className += " dr-media--gallery"; list.append(button); }
             }));
           } else {
@@ -381,10 +383,12 @@
     const refresh = () => {
       const nodes = items();
       index = Math.max(0, Math.min(index, nodes.length - 1));
-      if (mode === "carousel") {
+      if (["carousel", "video"].includes(mode)) {
         controls.hidden = !nodes.length;
         if (!nodes.length) return list.removeAttribute("tabindex");
         list.setAttribute("tabindex", "0");
+        list.setAttribute("role", "region");
+        list.setAttribute("aria-roledescription", "carousel");
         nodes.forEach((node) => node.setAttribute("tabindex", "-1"));
         previous.disabled = index === 0;
         next.disabled = index === nodes.length - 1;
@@ -413,7 +417,7 @@
       if (user) item.focus({ preventScroll: true });
       refresh();
     };
-    if (mode === "carousel") {
+    if (["carousel", "video"].includes(mode)) {
       on(previous, "click", () => move(-1));
       on(next, "click", () => move(1));
       on(root, "mouseenter", () => { hovered = true; });
@@ -421,12 +425,12 @@
       on(root, "focusin", () => { focused = true; });
       on(root, "focusout", (event) => { if (!root.contains(event.relatedTarget)) focused = false; });
       on(list, "pointerdown", stop);
-      if (root.dataset.autoplay === "true" && !reduce()) timer = globalThis.setInterval?.(() => {
+      if (mode === "carousel" && root.dataset.autoplay === "true" && !reduce()) timer = globalThis.setInterval?.(() => {
         if (!manual && !hovered && !focused && !document.hidden && !reduce()) move(1, false);
       }, Math.max(3, Number(root.dataset.autoplaySeconds) || 5) * 1000);
     }
     on(list, "keydown", (event) => {
-      if (!((mode === "carousel" && ["ArrowLeft", "ArrowRight"].includes(event.key)) || (mode === "gallery" && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)))) return;
+      if (!((["carousel", "video"].includes(mode) && ["ArrowLeft", "ArrowRight"].includes(event.key)) || (mode === "gallery" && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)))) return;
       event.preventDefault();
       if (event.key === "Home") move(0, true, true);
       else if (event.key === "End") move(items().length - 1, true, true);
