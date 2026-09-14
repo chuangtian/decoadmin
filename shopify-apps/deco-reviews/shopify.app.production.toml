@@ -1,11 +1,26 @@
-# Production is not authorized or registered. This file cannot be deployed as-is.
-client_id = ""
+client_id = "3c6bbf940f2d4e6e54490cf5d3d2e2c6"
 name = "Deco Reviews"
 application_url = "https://admin.decomkt.com/shopify-app/deco-reviews"
 embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
 [webhooks]
 api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled", "orders/paid", "orders/cancelled", "refunds/create"]
+uri = "https://admin.decomkt.com/api/shopify-app/deco-reviews/webhooks"
+
 [access_scopes]
-scopes = "read_products,write_app_proxy"
+scopes = "read_products,read_orders,read_customers,write_app_proxy,read_discounts,write_discounts"
+use_legacy_install_flow = false
+
 [auth]
 redirect_urls = ["https://admin.decomkt.com/shopify-app/deco-reviews"]
+
+[app_proxy]
+url = "https://admin.decomkt.com/api/shopify-app/deco-reviews/proxy"
+subpath = "deco-reviews"
+prefix = "apps"
