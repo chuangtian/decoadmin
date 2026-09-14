@@ -70,7 +70,7 @@ const visibleMenu = computed<MenuItem[]>(() => menu
         };
     })
     .filter((item) => item.route
-        ? Boolean(item.permission && page.props.auth.permissions.includes(item.permission))
+        ? Boolean(item.alwaysVisible || (item.permission && page.props.auth.permissions.includes(item.permission)))
         : Boolean(item.children?.length)));
 const groupHasActiveRoute = (group: MenuItem) => group.children?.some((child) => child.route && (page.url === child.route || page.url.startsWith(`${child.route}/`))) ?? false;
 const toggleGroup = (name: string) => {

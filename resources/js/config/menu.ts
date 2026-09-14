@@ -11,6 +11,7 @@ export interface MenuItem {
     dynamicChildren?: 'applications';
     comingSoon?: boolean;
     hidden?: boolean;
+    alwaysVisible?: boolean;
     requiresStore?: boolean;
     requiresInstalledApp?: 'referral';
 }
@@ -21,7 +22,7 @@ export const menu: MenuItem[] = [
         route: '/profile',
         icon: 'users',
         section: '个人',
-        permission: 'organization.view',
+        alwaysVisible: true,
     },
     {
         name: '需求和报销',

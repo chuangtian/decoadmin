@@ -8,7 +8,9 @@ use App\Http\Resources\PermissionResource;
 use App\Http\Resources\RoleResource;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Services\Authorization\PersonalPermissionService;
 use App\Support\CurrentOrganization;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,7 +25,8 @@ class RoleController extends Controller
     {
         $this->authorize('viewAny', Role::class);
         $roles = $this->currentOrganization->require()->roles()
-            ->withCount('permissions')
+            ->withCount(['permissions' => fn ($query) => $query
+                ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS)])
             ->orderByDesc('is_system')
             ->orderBy('name')
             ->get();
@@ -34,7 +37,7 @@ class RoleController extends Controller
 
         return Inertia::render('Roles/Index', [
             'roles' => RoleResource::collection($roles),
-            'permissions' => PermissionResource::collection(Permission::query()->orderBy('group')->orderBy('slug')->get()),
+            'permissions' => PermissionResource::collection($this->configurablePermissionsQuery()->orderBy('group')->orderBy('slug')->get()),
         ]);
     }
 
@@ -48,17 +51,17 @@ class RoleController extends Controller
             'description' => $validated['description'] ?? null,
             'is_system' => false,
         ]);
-        $role->permissions()->sync($validated['permission_ids'] ?? []);
+        $this->syncConfigurablePermissions($role, $validated['permission_ids'] ?? []);
 
         return $request->expectsJson()
-            ? (new RoleResource($role->load('permissions')))->response()->setStatusCode(201)
+            ? (new RoleResource($this->loadConfigurablePermissions($role)))->response()->setStatusCode(201)
             : to_route('roles.show', $role)->with('success', '角色创建成功。');
     }
 
     public function show(Request $request, Role $role): Response|JsonResponse
     {
         $this->authorize('view', $role);
-        $role->load('permissions');
+        $this->loadConfigurablePermissions($role);
 
         if ($request->expectsJson()) {
             return (new RoleResource($role))->response();
@@ -66,7 +69,7 @@ class RoleController extends Controller
 
         return Inertia::render('Roles/Show', [
             'role' => new RoleResource($role),
-            'permissions' => PermissionResource::collection(Permission::query()->orderBy('group')->orderBy('slug')->get()),
+            'permissions' => PermissionResource::collection($this->configurablePermissionsQuery()->orderBy('group')->orderBy('slug')->get()),
             'canDelete' => ! $role->is_system && $request->user()->can('delete', $role),
         ]);
     }
@@ -81,11 +84,11 @@ class RoleController extends Controller
             'description' => $validated['description'] ?? null,
         ]);
         if (array_key_exists('permission_ids', $validated)) {
-            $role->permissions()->sync($validated['permission_ids']);
+            $this->syncConfigurablePermissions($role, $validated['permission_ids']);
         }
 
         return $request->expectsJson()
-            ? (new RoleResource($role->load('permissions')))->response()
+            ? (new RoleResource($this->loadConfigurablePermissions($role)))->response()
             : back()->with('success', '角色更新成功。');
     }
 
@@ -103,10 +106,37 @@ class RoleController extends Controller
     public function updatePermissions(UpdateRolePermissionsRequest $request, Role $role): RedirectResponse|JsonResponse
     {
         $this->authorize('update', $role);
-        $role->permissions()->sync($request->validated('permission_ids'));
+        $this->syncConfigurablePermissions($role, $request->validated('permission_ids'));
 
         return $request->expectsJson()
-            ? (new RoleResource($role->load('permissions')))->response()
+            ? (new RoleResource($this->loadConfigurablePermissions($role)))->response()
             : back()->with('success', '权限更新成功。');
+    }
+
+    private function configurablePermissionsQuery(): Builder
+    {
+        return Permission::query()
+            ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS);
+    }
+
+    /** @param list<int> $permissionIds */
+    private function syncConfigurablePermissions(Role $role, array $permissionIds): void
+    {
+        $configurableIds = $this->configurablePermissionsQuery()
+            ->whereKey($permissionIds)
+            ->pluck('id');
+        $baselineIds = Permission::query()
+            ->whereIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS)
+            ->pluck('id');
+
+        $role->permissions()->sync($configurableIds->merge($baselineIds)->unique()->all());
+    }
+
+    private function loadConfigurablePermissions(Role $role): Role
+    {
+        return $role->load([
+            'permissions' => fn ($query) => $query
+                ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS),
+        ]);
     }
 }
