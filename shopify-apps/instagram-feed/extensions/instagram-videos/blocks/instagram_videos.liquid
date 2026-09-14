@@ -5,27 +5,32 @@
   assign feed = app.metafields.instagram_videos.feed.value
   assign galleries = feed.galleries
 
-  # Block settings are static at build time, so the gallery dropdown can only
-  # offer slot numbers. A slot maps to the gallery order shown in the app, and
-  # the design-mode hint below resolves every slot to its current name.
-  assign slot = block.settings.gallery_slot | plus: 0
-  if slot < 1
-    assign slot = 1
-  endif
+  # Merchants type the gallery name they chose in the app. Block settings are
+  # static JSON at build time, so a dropdown listing this shop's own gallery
+  # names is not possible here; the design-mode hint below prints the names so
+  # they can be copied. Matching ignores case and surrounding spaces, and still
+  # accepts the raw handle for anyone who already filled that in.
+  assign wanted = block.settings.gallery | strip | downcase
 
   # feed.items is the legacy field, equivalent to the first gallery.
   assign items = feed.items
   assign gallery_missing = false
 
-  if galleries.size > 0
-    assign slot_index = slot | minus: 1
-    assign matched = galleries[slot_index]
-    if matched
-      assign items = matched.items
-    else
+  if wanted != blank
+    assign matched = false
+    for gallery in galleries
+      unless matched
+        assign candidate = gallery.name | strip | downcase
+        if candidate == wanted or gallery.handle == wanted
+          assign items = gallery.items
+          assign matched = true
+        endif
+      endunless
+    endfor
+    unless matched
       assign items = ''
       assign gallery_missing = true
-    endif
+    endunless
   endif
 
   if block.settings.media_filter == 'videos' and items != blank
@@ -50,12 +55,14 @@
     <div class="igv igv--empty">
       <p class="igv__empty-text">
         {%- if gallery_missing -%}
-          Gallery {{ slot }} does not exist.
+          No gallery is named &ldquo;{{ block.settings.gallery | strip | escape }}&rdquo;.
           {% if galleries.size > 0 %}
             Available galleries:
             {% for gallery in galleries %}
-              {{ forloop.index }}. {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
+              {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
             {% endfor %}
+          {% else %}
+            This shop has no galleries yet.
           {% endif %}
         {%- else -%}
           Nothing to show yet. Open the Instagram Content app in your Shopify admin,
@@ -80,16 +87,16 @@
     "
   >
     {%- comment -%}
-      The dropdown can only offer slot numbers, so the editor preview spells out
-      which gallery each slot currently points to. Visitors never see this.
+      The setting is a plain text field, so the editor preview prints the exact
+      names the merchant can copy into it. Visitors never see this.
     {%- endcomment -%}
     {%- if request.design_mode and galleries.size > 0 -%}
       <p class="igv__hint">
-        Galleries:
+        Galleries you can enter:
         {% for gallery in galleries %}
-          {{ forloop.index }}. {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
+          {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
         {% endfor %}
-        — showing Gallery {{ slot }}.
+        {%- if wanted == blank %} — empty, so the first one is showing.{% endif -%}
       </p>
     {%- endif -%}
 
@@ -321,23 +328,10 @@
   "javascript": "instagram-videos.js",
   "settings": [
     {
-      "type": "select",
-      "id": "gallery_slot",
+      "type": "text",
+      "id": "gallery",
       "label": "Gallery",
-      "info": "Slots follow the gallery order in the Instagram Content app. The block preview lists the name behind each slot.",
-      "options": [
-        { "value": "1", "label": "Gallery 1" },
-        { "value": "2", "label": "Gallery 2" },
-        { "value": "3", "label": "Gallery 3" },
-        { "value": "4", "label": "Gallery 4" },
-        { "value": "5", "label": "Gallery 5" },
-        { "value": "6", "label": "Gallery 6" },
-        { "value": "7", "label": "Gallery 7" },
-        { "value": "8", "label": "Gallery 8" },
-        { "value": "9", "label": "Gallery 9" },
-        { "value": "10", "label": "Gallery 10" }
-      ],
-      "default": "1"
+      "info": "Enter the gallery name you chose in the Instagram Content app. Leave it empty to show the first gallery. The block preview lists the names you can copy."
     },
     {
       "type": "text",

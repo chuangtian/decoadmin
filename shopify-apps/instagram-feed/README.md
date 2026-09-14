@@ -36,13 +36,22 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
   提示文案、弹窗按钮、JS 生成的文案，连注释都是英文 —— 它渲染在商家店面和主题编辑器
   里。改动后跑一次 CJK 扫描确认（见下方「校验」）。
 
-  区块设置 `Gallery` 是下拉框，按序号选 `feed.galleries` 的第 N 个组（1–10）。schema 是
-  构建期静态的，没法列出商家自己的组名，所以主题编辑器预览里会印出「序号 → 组名」
-  对照。**注意删组会让后面的序号平移。**
+  **展示组的选择方式正在从文本框迁移到主题编辑器里的选择器**（`metaobject` 设置类型，
+  app 自建 `$app:instagram_gallery` definition，每个展示组一条条目，见
+  `InstagramGalleryDirectory` 与 docs 里的「展示组怎么指定」）。当前扩展里仍是文本框填
+  组名，后端已就绪。**别再改回序号 select** —— 试过，商家看不出序号对应哪个组，删组还
+  会让序号平移。
 
-  **布局只有轮播一种**，宽度始终撑满容器（`layout` / `full_width` / `max_width` / `gap`
-  四个设置已删除）。渲染的是**封面图**而不是 `<video>`：视频文件不转存（Instagram 对部分
-  Reels 不返回 `media_url`）。
+  **上线顺序不可颠倒**（`shopify app deploy` 把配置与扩展一起发，所以要分两次）：
+  部署后端 → deploy 发布 scope 变更（扩展仍是文本框版）→ 商家打开应用批准
+  `write_metaobjects` → `php artisan instagram-feed:sync-gallery-directory` 建 definition
+  并补齐历史组 → 确认无误后才发布带 `metaobject` 设置的扩展。抢跑会让主题编辑器把那个
+  设置直接显示成错误：definition 必须已存在于店铺且 `access.storefront = PUBLIC_READ`。
+
+  **布局只有轮播一种**（`layout` / `full_width` / `max_width` / `gap` 四个设置已删除）。
+  容器尺寸写死在 CSS 里：桌面 `width: 90%` + `max-width: 1400px`，移动端 `width: 100%`；
+  上下内边距 30px 通用，左右 15px 只在移动端加（桌面 90% 居中本来就有留白）。渲染的是
+  **封面图**而不是 `<video>`：视频文件不转存（Instagram 对部分 Reels 不返回 `media_url`）。
 
   `When a post is clicked` 二选一：**Open the post in a popup**（嵌 Instagram 官方 embed，
   视频直接播，访客不离开店铺）或 **Go to the post on Instagram**（新标签打开原帖）。两种
@@ -58,7 +67,10 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
   卡片上的点击热区 `.igv__play` 铺满整张卡，主题的 `button:hover` 会把整张卡染成主题色，
   所以它和箭头、圆点的各个状态都用 `!important` 钉死了背景色。别拿掉。
 
-  `assets/instagram-videos.js` 有 **10KB 硬限额**（当前 9932 字节），超了发布直接失败。
+  `assets/instagram-videos.js` 当前 9932 字节。[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)
+  里 JS 的 10KB 是 **Suggested** 且按压缩后算，真正 Enforced 的是全部文件 10MB、block 数
+  30、Liquid 跨文件 100KB。不过这个扩展曾在 12105 字节时发布失败过，原因没查清，所以
+  仍按 10000 字节未压缩当自律线，加代码前先量一下。
 
 ## 环境
 
