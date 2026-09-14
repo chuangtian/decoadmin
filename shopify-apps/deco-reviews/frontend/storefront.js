@@ -300,6 +300,15 @@
 (() => {
   const mounted = new WeakSet();
   const label = (root, key, fallback) => root.dataset[key] || fallback;
+  const sameOriginRedirect = (value) => {
+    if (!value || !String(value).trim()) return "";
+    try {
+      const url = new URL(value, location.origin);
+      return url.origin === location.origin && ["http:", "https:"].includes(url.protocol) ? url.href : "";
+    } catch {
+      return "";
+    }
+  };
   const mount = (root) => {
     const form = root.querySelector("[data-dr-form]");
     if (!form || mounted.has(form)) return;
@@ -339,6 +348,8 @@
         formStatus.textContent = payload.message || label(root, "thanks", "Thank you. Your review was submitted for moderation.");
         formStatus.setAttribute("tabindex", "-1");
         formStatus.focus();
+        const redirect = sameOriginRedirect(root.querySelector("[data-dr-success-redirect]")?.dataset.url);
+        if (redirect) location.assign(redirect);
       } catch (error) {
         formStatus.textContent = error.message || label(root, "error", "Something went wrong.");
       } finally {

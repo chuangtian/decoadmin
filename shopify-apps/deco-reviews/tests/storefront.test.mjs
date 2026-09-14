@@ -32,7 +32,7 @@ const organicSource = fs.readFileSync(new URL('../frontend/organic.js', import.m
 const liquidSource = fs.readFileSync(new URL('../extensions/deco-reviews/blocks/deco_reviews.liquid', import.meta.url), 'utf8');
 
 test('theme block exposes isolated branding controls and complete supported locales', () => {
-  for (const setting of ['layout', 'corner_style', 'accent_color', 'accent_text_color', 'surface_color', 'text_color']) {
+  for (const setting of ['layout', 'corner_style', 'accent_color', 'accent_text_color', 'surface_color', 'text_color', 'success_redirect_url']) {
     assert.match(liquidSource, new RegExp(`"id":"${setting}"`));
     assert.match(liquidSource, new RegExp(`block\\.settings\\.${setting}`));
   }
@@ -128,6 +128,25 @@ for (const succeeds of [true, false]) {
     assert.equal(requests, succeeds ? 1 : 2);
     if (!succeeds) resolveRequest({ ok: false, json: async () => ({}) });
     await retry;
+  });
+}
+
+for (const [redirectUrl, shouldRedirect] of [['/pages/review-thanks', true], ['https://attacker.example/thanks', false]]) {
+  test(`buyer form ${shouldRedirect ? 'uses' : 'rejects'} configured ${shouldRedirect ? 'same-origin' : 'cross-origin'} redirect`, async () => {
+    const root = new Node(); const form = new Node(); const status = new Node(); const submit = new Node(); const marker = new Node();
+    marker.dataset.url = redirectUrl;
+    root.querySelector = key => key === '[data-dr-form]' ? form : key === '[data-dr-success-redirect]' ? marker : null;
+    form.querySelector = key => key === '[data-dr-form-status]' ? status : submit;
+    form.querySelectorAll = () => [];
+    form.elements = { namedItem: () => ({ files: [] }) };
+    form.reset = () => {};
+    let redirected = '';
+    const location = { origin: 'https://shop.example', assign: value => { redirected = value; } };
+    const document = { readyState: 'complete', querySelectorAll: () => [root], addEventListener() {} };
+    vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, FormData: class {}, location,
+      fetch: async () => ({ ok: true, json: async () => ({ message: 'Review submitted' }) }) });
+    await form.events.submit({ preventDefault() {} });
+    assert.equal(redirected, shouldRedirect ? 'https://shop.example/pages/review-thanks' : '');
   });
 }
 
