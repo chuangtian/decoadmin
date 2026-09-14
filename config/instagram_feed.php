@@ -41,8 +41,20 @@ return [
     'environments' => $environments,
 
     // Shopify App 安装时必须授予的权限。read_x 可被 write_x 覆盖。
+    //
+    // write_metaobjects 刻意不在这里，尽管 shopify.app.*.toml 里声明了它：
+    // assertRequiredScopes() 在每次建立内嵌会话（bootstrap）时都会跑，加进来会让尚未
+    // 重新授权的店铺连应用都打不开。metaobject 只影响主题编辑器的展示组选择器，
+    // 缺了应该优雅降级（同步失败只提示），不该阻断同步、转存、前台展示这些核心功能。
     'required_scopes' => [
         'read_products',
+    ],
+
+    // 向 Shopify 索取但缺了也能工作的权限。只作为文档与校验依据存在：
+    // shopify.app.*.toml 的 scopes 必须等于 required_scopes + optional_scopes，
+    // 这条由 shopify-apps/instagram-feed/scripts/validate-project.mjs 把关。
+    'optional_scopes' => [
+        'write_metaobjects',
     ],
 
     'id_token_leeway_seconds' => 5,
@@ -56,6 +68,22 @@ return [
         // Shopify 单个 metafield 值上限 64KB，这里留足余量。
         'max_items_per_gallery' => 50,
         'max_caption_length' => 300,
+    ],
+
+    // 主题编辑器里的展示组选择器。
+    //
+    // 区块设置的 schema 是构建期静态 JSON，一个 App 版本服务所有店铺，没法把某个店铺
+    // 的组名列成 select 的 options。metaobject 是官方唯一支持「按店铺动态取选项」的
+    // 设置类型：App 用 $app: 前缀建自己独占的 definition，每个展示组一条条目，区块里
+    // 声明 metaobject 设置就能得到显示组名的选择器。见 InstagramGalleryDirectory。
+    'metaobject' => [
+        // 不要自己拼 app id：$app: 由 Shopify 解析成 app--<app-id>--instagram_gallery。
+        'type' => 'instagram_gallery',
+        'name' => 'Instagram gallery',
+        // 选择器按 displayNameKey 显示条目，所以它必须指向组名。
+        'name_field' => 'gallery_name',
+        // 刻意不叫 handle：metaobject 在 Liquid 里已有内置的 system.handle。
+        'handle_field' => 'gallery_handle',
     ],
 
     // OAuth state 有效期。Meta 回调没有 DecoAdmin 会话，靠签名 state 还原店铺。

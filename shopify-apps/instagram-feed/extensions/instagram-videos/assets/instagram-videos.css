@@ -1,11 +1,18 @@
 /* Instagram content app block. English-only: this ships to merchant storefronts. */
 
+/*
+ * Container size is fixed in CSS, not exposed as block settings: the width and
+ * max-width settings were removed on purpose. box-sizing above keeps the
+ * padding inside the declared width.
+ */
 .igv {
   --igv-arrow-size: 40px;
   --igv-gap: 12px;
   box-sizing: border-box;
-  width: 100%;
+  width: 90%;
+  max-width: 1400px;
   margin: 0 auto;
+  padding: 30px 0;
   color: var(--igv-text, currentColor);
 }
 
@@ -345,6 +352,12 @@
 }
 
 @media screen and (max-width: 749px) {
+  /* Full width on mobile; the side gutters become padding instead of margin. */
+  .igv {
+    width: 100%;
+    padding: 30px 15px;
+  }
+
   .igv__item {
     flex-basis: calc(
       (100% - (var(--igv-columns-mobile, 2) - 1) * var(--igv-gap)) /
