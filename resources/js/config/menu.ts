@@ -66,6 +66,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
             { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
+            { name: 'Deco Reviews 评价管理', route: '/deco-reviews', icon: 'apps', permission: 'apps.view' },
         ],
     },
     {

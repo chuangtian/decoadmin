@@ -1,0 +1,289 @@
+<?php
+
+namespace DecoReviews\Controllers;
+
+use App\Models\Organization;
+use App\Models\Product;
+use App\Models\Store;
+use DecoReviews\Models\EmailDelivery;
+use DecoReviews\Models\ImportBatch;
+use DecoReviews\Models\Invitation;
+use DecoReviews\Models\Media;
+use DecoReviews\Services\FormService;
+use DecoReviews\Services\ImportService;
+use DecoReviews\Services\InvitationEmail;
+use DecoReviews\Services\InvitationService;
+use DecoReviews\Services\ProductGroupService;
+use DecoReviews\Services\ReviewEmail;
+use DecoReviews\Services\ReviewService;
+use DecoReviews\Services\RewardEmail;
+use DecoReviews\Services\RewardEmailService;
+use DecoReviews\Services\RewardService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Inertia\Inertia;
+
+class ManagementController
+{
+    public function __construct(private ReviewService $reviews) {}
+
+    private function authorize(Request $request, Organization $organization, Store $store, bool $write = false): void
+    {
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        $this->reviews->authorize($request->user(), $store, $write);
+    }
+
+    public function index(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store);
+        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form,groups',
+            'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
+            'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
+            'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import,organic',
+            'verified' => 'nullable|in:order,manual,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
+            'reply' => 'nullable|in:with,without', 'date_from' => 'nullable|date', 'date_to' => 'nullable|date|after_or_equal:date_from',
+            'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc', 'page' => 'nullable|integer|min:1|max:500']);
+        $settings = $this->reviews->settings($store);
+        $rows = $this->reviews->filtered($store, $filters)->with(['product', 'media'])->paginate(15)->withQueryString();
+        $rows->through(fn ($review) => $this->reviews->serialize($review, $store, true, $settings));
+        $summary = $this->reviews->scoped($store)->selectRaw("count(*) total, sum(case when status = 'published' then 1 else 0 end) published, sum(case when status = 'pending' then 1 else 0 end) pending, avg(rating) average")->first();
+        $invitations = Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->with(['product', 'order'])->latest('id')->paginate(15)->withQueryString();
+        $invitations->through(fn ($invite) => ['uuid' => $invite->uuid, 'order_id' => $invite->order_id,
+            'order_number' => $invite->order?->order_number, 'product_title' => $invite->product?->title,
+            'status' => $invite->status, 'due_at' => $invite->due_at?->toIso8601String(), 'sent_at' => $invite->sent_at?->toIso8601String(),
+            'reminder_sent_at' => $invite->reminder_sent_at?->toIso8601String(),
+            'media_reminder_sent_at' => $invite->media_reminder_sent_at?->toIso8601String(),
+            'completed_at' => $invite->completed_at?->toIso8601String(),
+            'created_at' => $invite->created_at->toIso8601String(), 'error_code' => $invite->error_code]);
+
+        return Inertia::render('DecoReviews/Index', [
+            'organization' => $organization->only('id', 'name'), 'store' => $store->only('id', 'name'),
+            'baseUrl' => route('deco-reviews.index', [$organization, $store]), 'canManage' => $request->user()->hasPermission('products.update', $organization, $store),
+            'storeReviewUrl' => preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', strtolower((string) $store->shopify_domain))
+                ? 'https://'.strtolower($store->shopify_domain).config('deco_reviews.active.proxy_path').'/store-review' : null,
+            'happyCustomersUrl' => preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/', strtolower((string) $store->shopify_domain))
+                ? 'https://'.strtolower($store->shopify_domain).config('deco_reviews.active.proxy_path').'/happy-customers' : null,
+            'tab' => $filters['tab'] ?? 'overview', 'filters' => $filters, 'reviews' => $rows, 'invitations' => $invitations,
+            'stats' => ['total' => (int) $summary->total, 'published' => (int) $summary->published, 'pending' => (int) $summary->pending, 'average' => round((float) $summary->average, 2),
+                'media' => $this->reviews->scoped($store)->whereHas('media')->count(), 'invites_sent' => Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->whereNotNull('sent_at')->count()],
+            'products' => Product::where('organization_id', $organization->id)->where('store_id', $store->id)->orderBy('title')->limit(500)->get(['id', 'title']),
+            'groups' => app(ProductGroupService::class)->listing($store),
+            'settings' => $settings,
+            'formConfig' => app(FormService::class)->configuration($store),
+            'emailDeliveries' => EmailDelivery::where('organization_id', $organization->id)->where('store_id', $store->id)
+                ->with('review.product')->latest('id')->limit(30)->get()->map(fn ($delivery) => [
+                    'uuid' => $delivery->uuid, 'type' => $delivery->type, 'status' => $delivery->status,
+                    'review_title' => $delivery->review?->title, 'product_title' => $delivery->review?->product?->title,
+                    'due_at' => $delivery->due_at?->toIso8601String(), 'sent_at' => $delivery->sent_at?->toIso8601String(),
+                    'created_at' => $delivery->created_at->toIso8601String(), 'error_code' => $delivery->error_code,
+                ]),
+            'rewardHistory' => app(RewardService::class)->history($store),
+            'imports' => ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)->latest()->limit(30)->get(['uuid', 'provider', 'status', 'imported', 'skipped', 'errors', 'created_at', 'undone_at'])
+                ->map(fn ($batch) => array_merge($batch->toArray(), ['can_undo' => ! $batch->undone_at && $batch->created_at->gte(now()->subDays(7))])),
+        ]);
+    }
+
+    public function emailPreview(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store);
+        $data = $request->validate(['kind' => 'nullable|in:initial,reminder,media_reminder,product_thank_you,store_thank_you,reply_notification,reward_issued,reward_reminder']);
+        $kind = $data['kind'] ?? 'initial';
+        if (in_array($kind, RewardEmail::TYPES, true)) {
+            return response()->view('deco-reviews::emails.reward', app(RewardEmail::class)->content($store, null, $kind))
+                ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        }
+        if (in_array($kind, ReviewEmail::TYPES, true)) {
+            return response()->view('deco-reviews::emails.review-message', app(ReviewEmail::class)->content($store, null, $kind))
+                ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        }
+
+        return response()->view('deco-reviews::emails.invitation', app(InvitationEmail::class)->content($store, null, $kind))
+            ->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+    }
+
+    public function create(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $this->reviews->create($store, $request->all(), $request->file('media', []), $request->user());
+
+        return back()->with('success', '评价已保存，按照发布规则处理。');
+    }
+
+    public function moderate(Request $request, Organization $organization, Store $store, string $review)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $this->reviews->moderate($store, $request->user(), [$review], $request->all());
+
+        return back()->with('success', '评价已更新。');
+    }
+
+    public function bulk(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['ids' => 'required|array|min:1|max:100']);
+        $this->reviews->moderate($store, $request->user(), $values['ids'], $request->only('status', 'reason'));
+
+        return back()->with('success', '所选评价已更新。');
+    }
+
+    public function settings(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $this->reviews->saveSettings($store, $request->user(), $request->all());
+
+        return back()->with('success', '设置已保存，仅影响后续新评价。');
+    }
+
+    public function createGroup(Request $request, Organization $organization, Store $store, ProductGroupService $groups)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $groups->create($store, $request->user(), $request->all());
+
+        return back()->with('success', '商品评价共享组已创建。');
+    }
+
+    public function updateGroup(Request $request, Organization $organization, Store $store, string $group, ProductGroupService $groups)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $groups->update($store, $request->user(), $group, $request->all());
+
+        return back()->with('success', '商品评价共享组已更新。');
+    }
+
+    public function reconcileReward(Request $request, Organization $organization, Store $store, string $reward, RewardService $rewards)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['conclusion' => 'required|in:created,not_created']);
+        $rewards->reconcileHeld($store, $request->user(), $reward, $values['conclusion']);
+
+        return back()->with('success', '人工核对结论已记录；系统没有重试 Shopify。');
+    }
+
+    public function reconcileRewardDelivery(Request $request, Organization $organization, Store $store, string $delivery, RewardEmailService $emails)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['conclusion' => 'required|in:sent,not_sent']);
+        $emails->reconcileHeld($store, $request->user(), $delivery, $values['conclusion']);
+
+        return back()->with('success', '邮件人工核对结论已记录；系统没有重新发送邮件。');
+    }
+
+    public function invitations(Request $request, Organization $organization, Store $store, InvitationService $invites)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['order_id' => 'required|integer|min:1']);
+        $count = $invites->schedule($store, $request->user(), $values['order_id']);
+
+        return back()->with('success', "已建立 {$count} 条邀评记录；验证履约与发送条件后才会发信。");
+    }
+
+    public function cancel(Request $request, Organization $organization, Store $store, string $invitation, InvitationService $invites)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $invites->cancel($store, $request->user(), $invitation);
+
+        return back()->with('success', '邀评已取消。');
+    }
+
+    public function import(Request $request, Organization $organization, Store $store, ImportService $imports)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $values = $request->validate(['file' => 'required|file|max:15360', 'provider' => 'required|in:'.implode(',', ImportService::PROVIDERS)]);
+        $batch = $imports->import($store, $request->user(), $request->file('file'), $values['provider']);
+
+        return back()->with('success', "导入 {$batch->imported} 条，跳过 {$batch->skipped} 条；错误行见导入记录。");
+    }
+
+    public function undo(Request $request, Organization $organization, Store $store, string $batch, ImportService $imports)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $imports->undo($store, $request->user(), $batch);
+
+        return back()->with('success', '导入已撤销，评价已下架并保留审计记录。');
+    }
+
+    public function importErrors(Request $request, Organization $organization, Store $store, string $batch)
+    {
+        $this->authorize($request, $organization, $store);
+        $import = ImportBatch::where('organization_id', $organization->id)->where('store_id', $store->id)
+            ->where('uuid', $batch)->firstOrFail();
+
+        return response()->streamDownload(function () use ($import) {
+            $stream = fopen('php://output', 'w');
+            fputcsv($stream, ['line', 'error_code'], ',', '"', '');
+            foreach ($import->errors ?? [] as $error) {
+                fputcsv($stream, [(int) ($error['line'] ?? 0), (string) ($error['code'] ?? 'UNKNOWN')], ',', '"', '');
+            }
+            fclose($stream);
+        }, 'deco-reviews-import-errors-'.$import->uuid.'.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function export(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store);
+        $filters = $request->validate(['kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
+            'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
+            'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import,organic',
+            'verified' => 'nullable|in:order,none', 'featured' => 'nullable|boolean', 'incentivized' => 'nullable|boolean',
+            'reply' => 'nullable|in:with,without', 'date_from' => 'nullable|date', 'date_to' => 'nullable|date|after_or_equal:date_from',
+            'q' => 'nullable|string|max:120', 'sort' => 'nullable|in:newest,oldest,rating_desc,rating_asc']);
+
+        return response()->streamDownload(function () use ($store, $filters) {
+            $stream = fopen('php://output', 'w');
+            fputcsv($stream, ['product_handle', 'rating', 'author_name', 'body', 'reviewed_at', 'title', 'kind', 'status', 'custom_answers_json'], ',', '"', '');
+            foreach ($this->reviews->filtered($store, $filters)->with('product')->limit(100000)->lazy(250) as $review) {
+                $answers = collect($review->form_answers ?? [])->take(10)->filter(fn ($answer) => is_array($answer))->map(function ($answer) {
+                    $value = $answer['value'] ?? '';
+                    $value = is_array($value)
+                        ? array_map(fn ($item) => mb_substr((string) $item, 0, 100), array_slice($value, 0, 20))
+                        : mb_substr((string) $value, 0, 100);
+
+                    return [
+                        'label' => mb_substr((string) ($answer['label'] ?? ''), 0, 160),
+                        'type' => in_array($answer['type'] ?? '', ['single', 'multiple', 'scale'], true) ? $answer['type'] : 'unknown',
+                        'value' => $value,
+                        'visibility' => ($answer['public'] ?? false) === true ? 'public' : 'private',
+                    ];
+                })->values()->all();
+                $answersJson = json_encode($answers, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '[]';
+                $row = [$review->product?->handle ?? '', $review->rating, $review->author_name, $review->body, $review->reviewed_at->toIso8601String(), $review->title ?? '', $review->kind, $review->status, $answersJson];
+                $row = array_map(fn ($value) => preg_match('/^[\s]*[=+@\-]/u', (string) $value) ? "'".$value : $value, $row);
+                fputcsv($stream, $row, ',', '"', '');
+            }
+            fclose($stream);
+        }, 'deco-reviews.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function preview(Request $request, Organization $organization, Store $store, StorefrontController $public)
+    {
+        $this->authorize($request, $organization, $store);
+
+        return response()->json($public->data($store, $request, true))->header('Cache-Control', 'no-store');
+    }
+
+    public function widget(Request $request, Organization $organization, Store $store)
+    {
+        $this->authorize($request, $organization, $store);
+        $values = $request->validate(['mode' => 'nullable|in:reviews,stars,carousel,trust,snippets,gallery,video,sidebar,floating']);
+
+        return response()->view('deco-reviews::storefront', ['feedUrl' => route('deco-reviews.preview', [$organization, $store]), 'submitUrl' => null, 'invitationProduct' => null, 'widgetMode' => $values['mode'] ?? 'reviews']);
+    }
+
+    public function media(Request $request, Organization $organization, Store $store, string $media)
+    {
+        $this->authorize($request, $organization, $store);
+        $asset = Media::where('organization_id', $organization->id)->where('store_id', $store->id)->where('uuid', $media)->firstOrFail();
+
+        abort_unless(Storage::disk('local')->exists($asset->path), 404);
+
+        return response()->file(Storage::disk('local')->path($asset->path), ['Content-Type' => $asset->mime, 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store']);
+    }
+}

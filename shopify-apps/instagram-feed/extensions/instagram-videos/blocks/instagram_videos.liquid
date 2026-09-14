@@ -1,23 +1,39 @@
 {%- liquid
-  # 前台数据来自 DecoAdmin 写入的 app-data metafield，不依赖 DecoAdmin 在线。
+  # Storefront data comes from the app-data metafield DecoAdmin writes, so the
+  # block keeps rendering even when DecoAdmin is offline.
+  # This whole extension is English-only: it ships to merchant storefronts.
   assign feed = app.metafields.instagram_videos.feed.value
+  assign galleries = feed.galleries
 
-  # 优先按商家填写的展示组标识取内容；未填或找不到时回退到第一个组。
-  # feed.items 是旧版兼容字段，等价于第一个组的内容。
-  assign gallery_handle = block.settings.gallery_handle | strip
+  # Merchants type the gallery name they chose in the app. Block settings are
+  # static JSON at build time, so a dropdown listing this shop's own gallery
+  # names is not possible here; the design-mode hint below prints the names so
+  # they can be copied. Matching ignores case and surrounding spaces, and still
+  # accepts the raw handle for anyone who already filled that in.
+  assign wanted = block.settings.gallery | strip | downcase
+
+  # feed.items is the legacy field, equivalent to the first gallery.
   assign items = feed.items
   assign gallery_missing = false
 
-  if gallery_handle != blank
-    assign matched = feed.galleries | where: 'handle', gallery_handle | first
-    if matched
-      assign items = matched.items
-    else
+  if wanted != blank
+    assign matched = false
+    for gallery in galleries
+      unless matched
+        assign candidate = gallery.name | strip | downcase
+        if candidate == wanted or gallery.handle == wanted
+          assign items = gallery.items
+          assign matched = true
+        endif
+      endunless
+    endfor
+    unless matched
+      assign items = ''
       assign gallery_missing = true
-    endif
+    endunless
   endif
 
-  if block.settings.media_filter == 'videos'
+  if block.settings.media_filter == 'videos' and items != blank
     assign items = items | where: 'media_type', 'VIDEO'
   endif
 
@@ -34,20 +50,23 @@
 -%}
 
 {%- if items == blank -%}
-  {%- comment -%} 只在主题编辑器里提示，店面访客看不到空占位。 {%- endcomment -%}
+  {%- comment -%} Only warn inside the theme editor; visitors never see a placeholder. {%- endcomment -%}
   {%- if request.design_mode -%}
     <div class="igv igv--empty">
       <p class="igv__empty-text">
         {%- if gallery_missing -%}
-          找不到标识为「{{ gallery_handle | escape }}」的展示组。请在「Instagram 内容」应用里复制正确的组标识。
-          {%- if feed.galleries.size > 0 -%}
-            当前可用：
-            {%- for gallery in feed.galleries -%}
-              {{ gallery.name | escape }}（{{ gallery.handle }}）{% unless forloop.last %}、{% endunless %}
-            {%- endfor -%}
-          {%- endif -%}
+          No gallery is named &ldquo;{{ block.settings.gallery | strip | escape }}&rdquo;.
+          {% if galleries.size > 0 %}
+            Available galleries:
+            {% for gallery in galleries %}
+              {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
+            {% endfor %}
+          {% else %}
+            This shop has no galleries yet.
+          {% endif %}
         {%- else -%}
-          还没有可展示的内容。请在 Shopify 后台打开「Instagram 内容」应用，连接账号、同步内容，再把内容加入展示组。
+          Nothing to show yet. Open the Instagram Content app in your Shopify admin,
+          connect an account, sync media, then add posts to a gallery.
         {%- endif -%}
       </p>
     </div>
@@ -57,31 +76,27 @@
     class="igv"
     id="igv-{{ block.id }}"
     data-igv
-    data-layout="{{ block.settings.layout }}"
     data-click-action="{{ block.settings.click_action }}"
     style="
       --igv-columns: {{ block.settings.columns_desktop }};
       --igv-columns-mobile: {{ block.settings.columns_mobile }};
-      --igv-gap: {{ block.settings.gap }}px;
       --igv-radius: {{ block.settings.corner_radius }}px;
       --igv-ratio: {{ ratio }};
-      --igv-max-width: {% if block.settings.full_width %}100%{% else %}{{ block.settings.max_width }}px{% endif %};
       --igv-text: {{ block.settings.text_color }};
       --igv-accent: {{ block.settings.accent_color }};
     "
   >
     {%- comment -%}
-      主题编辑器里把可选的展示组列出来。区块设置的 schema 是构建期静态的，
-      没法把商家的展示组做成下拉选项，所以在预览里直接给出清单加标识，
-      商家照着填「展示组标识」即可，不用回应用里查。店面访客看不到这段。
+      The setting is a plain text field, so the editor preview prints the exact
+      names the merchant can copy into it. Visitors never see this.
     {%- endcomment -%}
-    {%- if request.design_mode and feed.galleries.size > 0 -%}
+    {%- if request.design_mode and galleries.size > 0 -%}
       <p class="igv__hint">
-        可选展示组：
-        {%- for gallery in feed.galleries -%}
-          {{ gallery.name | escape }}（{{ gallery.handle }}）{% unless forloop.last %}、{% endunless %}
-        {%- endfor -%}
-        {%- if gallery_handle == blank %} — 当前未指定，展示第一个组。{% endif -%}
+        Galleries you can enter:
+        {% for gallery in galleries %}
+          {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
+        {% endfor %}
+        {%- if wanted == blank %} — empty, so the first one is showing.{% endif -%}
       </p>
     {%- endif -%}
 
@@ -115,28 +130,31 @@
     {%- endif -%}
 
     <div class="igv__viewport">
-      {%- if block.settings.layout == 'carousel' -%}
-        <button
-          class="igv__arrow igv__arrow--prev"
-          type="button"
-          data-igv-prev
-          aria-label="上一条内容"
-          hidden
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      {%- endif -%}
+      {%- comment -%}
+        Starts disabled because the track starts at scroll position 0. JS only
+        toggles the disabled state, so the server-rendered state must match.
+      {%- endcomment -%}
+      <button
+        class="igv__arrow igv__arrow--prev"
+        type="button"
+        data-igv-prev
+        aria-label="Previous posts"
+        disabled
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
 
       <ul class="igv__list" data-igv-list role="list">
         {%- for item in items limit: block.settings.items_to_show -%}
           <li class="igv__item" data-igv-item data-index="{{ forloop.index0 }}">
             <div class="igv__media">
               {%- comment -%}
-                只展示封面图。视频文件不再转存 —— Instagram 对部分 Reels（用了平台授权
-                音乐或关闭了下载）不返回视频地址，靠重试永远拿不到。播放交给点击后弹窗里的
-                Instagram 官方 embed，内容完整、也不涉及版权问题。
+                Cover images only. Video files are not mirrored: Instagram withholds
+                the video URL for Reels that use licensed audio or have downloads
+                turned off, and retrying never returns one. Playback happens inside
+                the popup through Instagram's own embed, which is always complete.
               {%- endcomment -%}
               {%- if item.poster_url != blank -%}
                 <img
@@ -150,17 +168,17 @@
               {%- endif -%}
 
               {%- comment -%}
-                点击行为由商家在区块设置里二选一：
-                modal = 按钮，由 JS 打开弹窗嵌 Instagram 官方内容；
-                link  = 直接外链到原帖，在新标签打开。
-                两种都在服务端渲染成对应元素，不靠 JS 兜底，禁用 JS 也能用。
+                Click behaviour is an explicit merchant choice:
+                modal = a button JS wires to the popup with Instagram's embed;
+                link  = a plain external link to the original post.
+                Both are rendered server-side, so neither depends on JS.
               {%- endcomment -%}
               {%- if block.settings.click_action == 'modal' -%}
                 <button
                   class="igv__play"
                   type="button"
                   data-igv-open="{{ forloop.index0 }}"
-                  aria-label="查看这条 Instagram 帖子{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
+                  aria-label="Open this Instagram post{% if item.caption != blank %}: {{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
                 >
                   <span class="igv__play-icon" aria-hidden="true">
                     {%- if item.media_type == 'VIDEO' -%}
@@ -180,7 +198,7 @@
                   href="{{ item.permalink }}"
                   target="_blank"
                   rel="noopener nofollow"
-                  aria-label="在 Instagram 查看这条帖子{% if item.caption != blank %}：{{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
+                  aria-label="View on Instagram{% if item.caption != blank %}: {{ item.caption | strip_newlines | truncate: 60 | escape }}{% endif %}"
                 >
                   <span class="igv__play-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false">
@@ -193,7 +211,7 @@
 
             {%- if block.settings.show_posted_at and item.posted_at != blank -%}
               <p class="igv__date">
-                <time datetime="{{ item.posted_at }}">{{ item.posted_at | date: '%Y-%m-%d' }}</time>
+                <time datetime="{{ item.posted_at }}">{{ item.posted_at | date: '%b %-d, %Y' }}</time>
               </p>
             {%- endif -%}
 
@@ -218,25 +236,24 @@
         {%- endfor -%}
       </ul>
 
-      {%- if block.settings.layout == 'carousel' -%}
-        <button
-          class="igv__arrow igv__arrow--next"
-          type="button"
-          data-igv-next
-          aria-label="下一条内容"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
+      <button
+        class="igv__arrow igv__arrow--next"
+        type="button"
+        data-igv-next
+        aria-label="Next posts"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
 
-        {%- comment -%}
-          圆点指示器。桌面端按列数一屏能看好几条，圆点意义不大所以 CSS 里隐藏；
-          移动端一屏一条，圆点是唯一的位置反馈。按钮由 JS 按实际页数生成 ——
-          页数取决于容器宽度与列数，服务端算不出来。
-        {%- endcomment -%}
-        <div class="igv__dots" data-igv-dots role="group" aria-label="轮播位置"></div>
-      {%- endif -%}
+      {%- comment -%}
+        Page indicator. Desktop shows several posts per view so the dots carry
+        little information and CSS hides them; on mobile they are the only
+        position feedback. JS builds the buttons because the page count depends
+        on container width and column count, which the server cannot know.
+      {%- endcomment -%}
+      <div class="igv__dots" data-igv-dots role="group" aria-label="Carousel position"></div>
     </div>
 
     {%- if block.settings.click_action == 'modal' -%}
@@ -245,10 +262,8 @@
         {%- for item in items limit: block.settings.items_to_show -%}
           {
             "embed_url": {{ item.embed_url | default: '' | json }},
-            "poster_url": {{ item.poster_url | default: '' | json }},
             "caption": {{ item.caption | default: '' | json }},
             "permalink": {{ item.permalink | default: '' | json }},
-            "media_type": {{ item.media_type | default: '' | json }},
             "posted_at": {{ item.posted_at | default: '' | json }},
             "products": [
               {%- for product in item.products -%}
@@ -265,22 +280,27 @@
       <script type="application/json" data-igv-json>{{ feed_json }}</script>
 
       {%- comment -%}
-        弹窗骨架放在模板里而不是拼在 JS 字符串里：标记归模板管，也让 app block 的
-        JS 体积留在 Shopify 的 10KB 限额内。JS 负责克隆一份挂到 body 上 ——
-        必须挂 body，否则主题里任何带 transform 的祖先都会让 position: fixed 失效。
+        The popup skeleton lives here instead of inside a JS string: markup stays
+        in the template, and the app block JS stays under Shopify's 10KB limit.
+        JS clones it onto document.body — it has to be body, otherwise any
+        ancestor with a transform breaks position: fixed.
+
+        Layout is media on the left, post details on the right. The left frame
+        uses Instagram's uncaptioned embed so the caption is not duplicated, and
+        nothing inside the popup scrolls: long captions are clamped instead.
       {%- endcomment -%}
       <template data-igv-lightbox-template>
-        <div class="igv-lightbox" hidden role="dialog" aria-modal="true" aria-label="Instagram 帖子">
+        <div class="igv-lightbox" hidden role="dialog" aria-modal="true" aria-label="Instagram post">
+          <button class="igv-lightbox__button igv-lightbox__close" type="button" data-igv-close aria-label="Close">&times;</button>
+          <button class="igv-lightbox__button igv-lightbox__prev" type="button" data-igv-lb-prev aria-label="Previous post">&#8249;</button>
+          <button class="igv-lightbox__button igv-lightbox__next" type="button" data-igv-lb-next aria-label="Next post">&#8250;</button>
           <div class="igv-lightbox__dialog">
-            <button class="igv-lightbox__button igv-lightbox__close" type="button" data-igv-close aria-label="关闭">&times;</button>
-            <button class="igv-lightbox__button igv-lightbox__prev" type="button" data-igv-lb-prev aria-label="上一条">&#8249;</button>
-            <button class="igv-lightbox__button igv-lightbox__next" type="button" data-igv-lb-next aria-label="下一条">&#8250;</button>
             <div class="igv-lightbox__frame">
-              <p class="igv-lightbox__loading" data-igv-loading>正在从 Instagram 加载帖子…</p>
+              <span class="igv-lightbox__spinner" data-igv-loading role="status" aria-label="Loading"></span>
               <iframe
                 class="igv-lightbox__embed"
                 data-igv-embed
-                title="Instagram 帖子"
+                title="Instagram post"
                 frameborder="0"
                 scrolling="no"
                 allowtransparency="true"
@@ -289,6 +309,7 @@
               ></iframe>
             </div>
             <div class="igv-lightbox__meta">
+              <p class="igv-lightbox__date" data-igv-date></p>
               <p class="igv-lightbox__caption" data-igv-caption></p>
               <div class="igv-lightbox__links" data-igv-links></div>
             </div>
@@ -301,47 +322,37 @@
 
 {% schema %}
 {
-  "name": "Instagram 内容",
+  "name": "Instagram content",
   "target": "section",
   "stylesheet": "instagram-videos.css",
   "javascript": "instagram-videos.js",
   "settings": [
     {
       "type": "text",
-      "id": "gallery_handle",
-      "label": "展示组标识",
-      "info": "留空即展示第一个组。要指定其它组时，从右侧预览里「可选展示组」的清单中复制标识填入；也可以在「Instagram 内容」应用里点“复制标识”。"
+      "id": "gallery",
+      "label": "Gallery",
+      "info": "Enter the gallery name you chose in the Instagram Content app. Leave it empty to show the first gallery. The block preview lists the names you can copy."
     },
     {
       "type": "text",
       "id": "heading",
-      "label": "标题",
+      "label": "Heading",
       "default": "Instagram"
     },
     {
       "type": "select",
-      "id": "layout",
-      "label": "展现方式",
-      "options": [
-        { "value": "carousel", "label": "轮播（横向滑动）" },
-        { "value": "grid", "label": "网格" }
-      ],
-      "default": "carousel"
-    },
-    {
-      "type": "select",
       "id": "media_filter",
-      "label": "展示内容",
+      "label": "Posts to include",
       "options": [
-        { "value": "videos", "label": "只展示视频帖（Reels）" },
-        { "value": "all", "label": "全部内容" }
+        { "value": "videos", "label": "Video posts only (Reels)" },
+        { "value": "all", "label": "All posts" }
       ],
       "default": "videos"
     },
     {
       "type": "range",
       "id": "items_to_show",
-      "label": "展示数量",
+      "label": "Number of posts",
       "min": 2,
       "max": 24,
       "step": 1,
@@ -350,23 +361,23 @@
     {
       "type": "select",
       "id": "aspect_ratio",
-      "label": "画面比例",
+      "label": "Aspect ratio",
       "options": [
-        { "value": "portrait", "label": "竖屏 9:16（Reels）" },
-        { "value": "four_five", "label": "4:5" },
-        { "value": "square", "label": "正方形 1:1" },
-        { "value": "landscape", "label": "横屏 16:9" }
+        { "value": "portrait", "label": "Portrait 9:16 (Reels)" },
+        { "value": "four_five", "label": "Portrait 4:5" },
+        { "value": "square", "label": "Square 1:1" },
+        { "value": "landscape", "label": "Landscape 16:9" }
       ],
       "default": "portrait"
     },
     {
       "type": "header",
-      "content": "排版"
+      "content": "Layout"
     },
     {
       "type": "range",
       "id": "columns_desktop",
-      "label": "桌面端每屏数量",
+      "label": "Posts per view on desktop",
       "min": 2,
       "max": 6,
       "step": 1,
@@ -375,7 +386,7 @@
     {
       "type": "range",
       "id": "columns_mobile",
-      "label": "移动端每屏数量",
+      "label": "Posts per view on mobile",
       "min": 1,
       "max": 3,
       "step": 1,
@@ -383,18 +394,8 @@
     },
     {
       "type": "range",
-      "id": "gap",
-      "label": "间距",
-      "min": 0,
-      "max": 40,
-      "step": 2,
-      "unit": "px",
-      "default": 12
-    },
-    {
-      "type": "range",
       "id": "corner_radius",
-      "label": "圆角",
+      "label": "Corner radius",
       "min": 0,
       "max": 32,
       "step": 2,
@@ -402,74 +403,58 @@
       "default": 12
     },
     {
-      "type": "checkbox",
-      "id": "full_width",
-      "label": "撑满容器宽度",
-      "default": true
-    },
-    {
-      "type": "range",
-      "id": "max_width",
-      "label": "最大宽度（未撑满时生效）",
-      "min": 600,
-      "max": 1600,
-      "step": 50,
-      "unit": "px",
-      "default": 1200
-    },
-    {
       "type": "header",
-      "content": "行为"
+      "content": "Behavior"
     },
     {
       "type": "select",
       "id": "click_action",
-      "label": "点击封面时",
+      "label": "When a post is clicked",
       "options": [
-        { "value": "modal", "label": "在弹窗里打开帖子" },
-        { "value": "link", "label": "跳转到 Instagram 帖子" }
+        { "value": "modal", "label": "Open the post in a popup" },
+        { "value": "link", "label": "Go to the post on Instagram" }
       ],
-      "info": "弹窗里嵌入 Instagram 官方内容，视频可直接播放，访客不离开店铺。跳转则在新标签打开原帖。",
+      "info": "The popup embeds Instagram's own post, so videos play without the visitor leaving your store. The link option opens the original post in a new tab.",
       "default": "modal"
     },
     {
       "type": "checkbox",
       "id": "show_posted_at",
-      "label": "显示发布日期",
+      "label": "Show post date",
       "default": false
     },
     {
       "type": "checkbox",
       "id": "show_caption",
-      "label": "显示文案",
+      "label": "Show caption",
       "default": false
     },
     {
       "type": "checkbox",
       "id": "show_account",
-      "label": "显示账号信息",
+      "label": "Show account",
       "default": true
     },
     {
       "type": "checkbox",
       "id": "show_products",
-      "label": "显示关联商品",
+      "label": "Show linked products",
       "default": true
     },
     {
       "type": "header",
-      "content": "颜色"
+      "content": "Colors"
     },
     {
       "type": "color",
       "id": "text_color",
-      "label": "文字颜色",
+      "label": "Text",
       "default": "#1a1a1a"
     },
     {
       "type": "color",
       "id": "accent_color",
-      "label": "按钮/强调色",
+      "label": "Accent",
       "default": "#1a1a1a"
     }
   ]

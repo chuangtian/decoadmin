@@ -29,8 +29,13 @@ api_version = "2026-07"
   uri = "https://admin.decomkt.com/api/shopify-app/instagram-feed/webhooks"
 
 # 前台数据走 app-data metafield，不需要 App Proxy；商品标题与 handle 实时查 Admin API。
+#
+# write_metaobjects 用于主题编辑器里的展示组选择器：区块设置的 schema 是构建期静态的，
+# 没法列出某个店铺自己的组名，metaobject 是官方唯一支持「按店铺动态取选项」的设置类型。
+# App 用 $app: 前缀建自己独占的 definition，每个展示组写一条条目。
+# 加这个 scope 意味着商家必须重新授权，见 README 的部署顺序。
 [access_scopes]
-scopes = "read_products"
+scopes = "read_products,write_metaobjects"
 
 # 托管安装下后端没有授权码回调，但 Shopify CLI 的 schema 仍要求声明 [auth]。
 # 与 deco-personalization 一致，指向 App Home 入口本身。

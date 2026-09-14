@@ -356,9 +356,60 @@ POST /api/shopify-app/instagram-feed/webhooks
 - 发布前校验序列化后不超过 Shopify 单个 metafield 64KB 上限，超限返回 `FEED_PAYLOAD_TOO_LARGE`；
 - 写入后回读校验 `key`，不一致返回 `FEED_PUBLISH_FAILED`。
 
-Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取，商家在区块设置 `gallery_handle` 里填写展示组标识来指定展示哪一组；留空或找不到时回退到第一个组，并只在主题编辑器里提示。
+Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取。
 
-前台渲染：网格/轮播里每个条目就是一张封面图（`<img>`，没有 `<video>`）。`show_posted_at` 控制是否在封面下方显示发布日期。
+### 展示组怎么指定
+
+**目标形态是主题编辑器里的一个选择器，直接列出商家自己的组名，不用打字。** 唯一能做到这件事的是 Shopify 的 `metaobject` 设置类型。
+
+区块设置的 schema 是构建期静态 JSON，一个 app 版本服务所有店铺，所以 `select` 的 options 里放不进某个店铺的组名（[动态数据源不支持 select/radio](https://stackoverflow.com/questions/75565836/how-to-use-shopify-metafields-in-the-theme-app-block-dynamic-source-settings)）。走过两条弯路，都记在这里免得再来一遍：
+
+- **序号 select（`Gallery 1`–`Gallery 10`）**：商家在设置面板里根本看不出 6 号是哪个组，选到越界的号只渲染空白，比手填更难用，删组还会让后面所有序号平移。
+- **文本框填组名**：能用，但每加一个区块都要回应用里核对名字再手打一遍。
+
+[官方 input settings 文档](https://shopify.dev/docs/storefronts/themes/architecture/settings/input-settings)明确支持 app 在 app block 里用自己的 app-owned metaobject definition 配 `metaobject` 设置，给出的范式就是「建 definition → app 写条目 → 区块用 metaobject 设置 → Liquid 读选中值」。
+
+实现落在 `InstagramGalleryDirectory`：
+
+| 项 | 值 | 为什么 |
+| --- | --- | --- |
+| definition type | `$app:instagram_gallery` | `$app:` 由 Shopify 解析成 `app--<app-id>--instagram_gallery`，本 App 独占，商家改不了结构。**不要自己拼 app id** |
+| `displayNameKey` | `gallery_name` | 选择器按它显示条目。指错就等于让商家看随机 handle，回到手抄标识那个老问题 |
+| 字段 | `gallery_name`、`gallery_handle` | 匹配用字段刻意不叫 `handle`：metaobject 在 Liquid 里本身就有内置的 `system.handle`，同名容易读错 |
+| `access.storefront` | `PUBLIC_READ` | 少了它主题渲染时读不到条目 |
+| capabilities | 不启用 `publishable` | 启用会引入 DRAFT/ACTIVE 状态，条目还得额外发布一次 |
+| 条目 handle | 展示组的 `handle` | 店铺内已唯一，主题里能直接反查回同一个组，不用再存映射 |
+
+**两个前提缺一不可，否则主题编辑器把那个设置直接显示成错误**：definition 已存在于店铺上，且对 storefront 可读。社区里那些「app-owned metaobject 在 Liquid 里读不到」的案例大概率就是漏了后者。
+
+由此得出**不可颠倒的上线顺序**（`shopify app deploy` 会把配置与扩展一起发，所以必须分两次）：
+
+1. 部署后端（含 `InstagramGalleryDirectory` 与新 scope 声明）；
+2. `shopify app deploy` 发布 scope 变更，此时扩展仍是文本框版本；
+3. 商家打开一次应用，批准新增的 `write_metaobjects`；
+4. `php artisan instagram-feed:sync-gallery-directory` 建 definition、补齐历史展示组，并确认 `access.storefront` 已是 `PUBLIC_READ`；
+5. 这一步通过之后，才发布带 `metaobject` 设置的扩展。
+
+**`write_metaobjects` 只进 `optional_scopes`，绝不能进 `required_scopes`。** `assertRequiredScopes()` 是在 `ShopifyInstagramFeedAppService::bootstrap()` 里跑的，而 bootstrap 每次建立内嵌会话都会走 —— 放进 `required_scopes` 会让尚未重新授权的店铺连应用都打不开。选择器只是主题编辑器里的便利，缺权限时正确行为是选项不更新，而不是让同步、转存、前台展示全部停摆。`shopify.app.*.toml` 的 `scopes` 必须等于两个列表的并集，这条由 `validate-project.mjs` 的 `expectedScopes` 把关（注意它是硬编码字符串，改 config 时要手动同步）。
+
+同步时机：只有**增删改展示组**会改变选项集合，所以 `write()` 的 `syncDirectory` 只在 `storeGallery` / `updateGallery` / `destroyGallery` 与手动同步按钮上打开；往组里加/移内容不碰 Shopify。`sync()` 是全量对齐而非增量 —— 条目可能被人在 Shopify 后台手工删掉，也可能因上次中途失败而残留，每次按当前展示组重建一遍比维护增量状态可靠。失败一律不抛（`syncQuietly`），因为主动作已经生效，不能让商家以为组没改成。
+
+`galleries` 的顺序由 `InstagramFeedPublisher` 按 `position, created_at` 保证稳定。顶层 `items` 仍是旧版兼容字段，等价于第一个组，`galleries` 为空时兜底。
+
+前台渲染：**只有轮播一种布局**（`layout` / `full_width` / `max_width` / `gap` 四个设置已删除）。每个条目就是一张封面图（`<img>`，没有 `<video>`）。`show_posted_at` 控制是否在封面下方显示发布日期。
+
+容器尺寸写死在 CSS 里，不再作为区块设置暴露：
+
+| 断点 | width | max-width | padding |
+| --- | --- | --- | --- |
+| 桌面 | 90% | 1400px | 上下 30px，左右 0 |
+| ≤749px | 100% | — | 上下 30px，左右 15px |
+
+上下 30px 两端通用；左右内边距只在移动端出现 —— 桌面是 90% 宽度居中，两侧本来就有留白，再加左右 padding 会双重缩进。`.igv` 上的 `box-sizing: border-box` 保证 padding 算在声明宽度以内，所以移动端 `100%` 不会溢出。条目宽度的 `calc` 以 `.igv__list` 的内容区为基准，padding 变化后列宽自动跟着对。间距固定 12px，由 CSS 变量 `--igv-gap` 提供。
+
+桌面端箭头用 `translate(-40%, -50%)` 会伸出轨道边缘约 16px，落在 `.igv` 的左右 padding 之外。90% 宽度居中留出的空白足够容纳，不会被视口裁掉；如果外层主题 section 加了 `overflow: hidden`，箭头才会被切。
+
+**整个扩展是全英文的**（schema 的 name/label/info/options、`aria-label`、空态与 hint 文案、弹窗按钮、JS 里生成的文案，连注释也是英文）：它渲染在商家店面和主题编辑器里，出现中文就是 bug。弹窗里的日期用 `toLocaleDateString("en-US", …)` 锁定英文月份，不跟随访客语言。
 
 **点击行为**由区块设置 `click_action` 二选一，两种都在服务端渲染成对应元素，禁用 JS 也能用：
 
@@ -369,12 +420,27 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 
 选 `modal` 时才会输出那段 `data-igv-json`（弹窗要用的数据），选 `link` 时连 JSON 都不渲染。JS 侧靠根元素的 `data-click-action` 判断是否接管点击。**关闭弹窗必须清掉 iframe 的 `src`** —— 不清的话 Instagram 会在后台继续播，有声音的 Reels 尤其明显。
 
+**弹窗排版**：桌面端左右两栏 —— 左边是 embed 的 iframe，右边是发布日期、文案、商品与「View on Instagram」。移动端（≤749px）改成上下叠。三个控制按钮（关闭 / 上一条 / 下一条）挂在遮罩 `.igv-lightbox` 上而不是 `.igv-lightbox__dialog` 上，`dialog` 宽到 `min(980px, 100%)` 时按钮才不会被挤出屏幕。
+
+弹窗里**任何一层都不出现滚动条**，为此做了两件事：
+
+- **左栏 iframe 用 `{permalink}/embed/`（无 `captioned`）**。JS 把后端存的 `embed_url` 里的 `/embed/captioned` 换成 `/embed/`：文案已经在右栏了，captioned 版会在框里重复一遍，而且它把文案排在媒体下方，整体高度直接翻倍。已验证两个端点都返回 200；
+- **高度由 embed 自己报**。iframe 跨域读不到内容高度，Instagram 会 `postMessage` 一个 `{type:"MEASURE",details:{height}}`，JS 监听后写成 `.igv-lightbox__frame` 的行内 `height`。**校验 `event.origin === "https://www.instagram.com"` 用全等而不是 `indexOf`**，否则 `evil-instagram.com.attacker.test` 也能匹配上。消息没来时退回 CSS 里的 `min(78vh, 620px)`，`max-height` 会兜住超高的情况（`scrolling="no"` 下是裁切，不是滚动）。
+
+右栏文案用 `-webkit-line-clamp` 截断（桌面 14 行、移动 3 行）而不是 `overflow-y: auto`——旧版那个 `max-height: 4.5em; overflow-y: auto` 的文案框就是滚动条的来源。加载态是纯 CSS 转圈（`.igv-lightbox__spinner` + `@keyframes igv-spin`），没有文字，也就没有需要翻译的字符串。
+
+**主题按钮样式会污染卡片**：`.igv__play` 是 `position: absolute; inset: 0` 的全卡覆盖元素，主题里一条 `button:hover { background: <主题色> }` 就能让整张卡变色（macfox 主题色是黄的，表现就是 hover 全黄）。修法是把 `.igv .igv__play` 的 `:hover` / `:focus` / `:focus-visible` / `:active` 全部钉死成 `background: transparent !important`（连 `border` / `box-shadow` / `color` / `text-decoration` / `transform` 一起钉）。`.igv__arrow`（要保持白底）与 `.igv__dot`（要保持 `currentcolor`）同理，各有一组同样的防御规则。这里的 `!important` 是有意为之：主题的按钮样式本身经常带 `!important`，光靠提高选择器权重赌不赢。
+
 **轮播控件**分两套布局：
 
 - 桌面端：箭头绝对定位、竖直居中压在轨道左右边缘，圆点指示器 CSS 隐藏（一屏能看好几条，圆点没有信息量）；
 - 移动端（≤749px）：`.igv__viewport` 变成 `flex-wrap`，轨道单独占一行，箭头改 `position: static` 用 `order` 排到轨道下方靠左，圆点跟在箭头后面。用 `order` 而不是改 DOM 顺序，桌面端才能继续复用同一组按钮。
 
-箭头到边界是 `disabled` 而不是 `hidden`：隐藏会让另一侧按钮的位置发生跳动。圆点按「屏」生成而不是按条目 —— 列数由 CSS 变量控制，条目数和可翻页数不是一回事，所以页数只能在浏览器里按 `scrollWidth / clientWidth` 算，服务端渲染不出来。图片是懒加载的，`window.load` 后会重算一次页数。
+箭头到边界是 `disabled` 而不是 `hidden`：隐藏会让另一侧按钮的位置发生跳动。**liquid 里 prev 按钮的初始态也必须是 `disabled`**（轨道从 `scrollLeft = 0` 开始）—— 服务端渲染成 `hidden` 而 JS 只切 `disabled` 的话，`hidden` 永远没人清，左箭头会一直不显示。
+
+圆点按「屏」生成而不是按条目 —— 列数由 CSS 变量控制，条目数和可翻页数不是一回事，所以页数只能在浏览器里按 `scrollWidth / clientWidth` 算，服务端渲染不出来。图片是懒加载的，`window.load` 后会重算一次页数。
+
+`instagram-videos.js` 当前 9932 字节。[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)里 JS 的 10KB 标的是 **Suggested**，而且按压缩后算；真正 Enforced 的是全部文件 10MB、block 数 30、locale 文件数 100 与单个 15KB、**Liquid 跨所有文件 100KB**。但这个扩展确实在 12105 字节时发布失败过一次，原因没查清（不排除是当时另有校验问题），所以仍把 10000 字节未压缩当自律线，改完重新量：`(Get-Item …\instagram-videos.js).Length`。这也是注释写英文的附带好处：一个中文字符 3 字节，注释里的中文曾经占掉一千多字节。
 
 ## 同步与转存
 

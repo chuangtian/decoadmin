@@ -8,5 +8,6 @@ return [
     AppServiceProvider::class,
     HorizonServiceProvider::class,
     CommunityReviewsProvider::class,
+    \DecoReviews\ReviewsProvider::class,
     \DecoMarketing\MarketingProvider::class,
 ];
