@@ -220,6 +220,49 @@
                   </span>
                 </a>
               {%- endif -%}
+
+              {%- comment -%}
+                Linked product sits inside the cover, pinned to its bottom edge.
+
+                Only the first product is shown: the card is narrow and the popup
+                already lists all of them. Image, title, price and the struck-out
+                compare-at price all come from all_products at render time, so the
+                price is live and follows the shop's currency format.
+
+                It has to out-stack .igv__play (which covers the whole cover), or
+                the trigger would swallow the click and the product link would be
+                unreachable.
+              {%- endcomment -%}
+              {%- if block.settings.show_products and item.products.size > 0 -%}
+                {%- assign linked = item.products | first -%}
+                {%- assign sp = all_products[linked.handle] -%}
+                {%- if sp -%}
+                  <a class="igv__product" href="{{ sp.url }}">
+                    {%- if sp.featured_image -%}
+                      <img
+                        class="igv__product-image"
+                        src="{{ sp.featured_image | image_url: width: 120 }}"
+                        alt=""
+                        width="40"
+                        height="40"
+                        loading="lazy"
+                      >
+                    {%- endif -%}
+                    <span class="igv__product-body">
+                      <span class="igv__product-title">{{ sp.title | escape }}</span>
+                      <span class="igv__product-prices">
+                        <span class="igv__product-price">
+                          {%- if sp.price_varies %}From {% endif -%}
+                          {{ sp.price | money }}
+                        </span>
+                        {%- if sp.compare_at_price > sp.price -%}
+                          <s class="igv__product-compare">{{ sp.compare_at_price | money }}</s>
+                        {%- endif -%}
+                      </span>
+                    </span>
+                  </a>
+                {%- endif -%}
+              {%- endif -%}
             </div>
 
             {%- if block.settings.show_posted_at and item.posted_at != blank -%}
@@ -232,19 +275,6 @@
               <p class="igv__caption">{{ item.caption | strip_newlines | truncate: 90 | escape }}</p>
             {%- endif -%}
 
-            {%- if block.settings.show_products and item.products.size > 0 -%}
-              <div class="igv__products">
-                {%- for product in item.products limit: 3 -%}
-                  {%- assign shop_product = all_products[product.handle] -%}
-                  <a
-                    class="igv__product"
-                    href="{% if shop_product %}{{ shop_product.url }}{% else %}/products/{{ product.handle }}{% endif %}"
-                  >
-                    {{ product.title | default: product.handle | escape }}
-                  </a>
-                {%- endfor -%}
-              </div>
-            {%- endif -%}
           </li>
         {%- endfor -%}
       </ul>
@@ -330,9 +360,12 @@
         ancestor with a transform breaks position: fixed.
 
         Layout is the full Instagram post on the left, linked products on the
-        right. The embed renders the post complete with its own header, media and
-        caption, so this side deliberately shows nothing but products — repeating
-        the caption next to it is what looked duplicated before.
+        right. The embed renders the post complete with its own header, media,
+        caption and its own link back to Instagram, so this side carries nothing
+        but products — anything else here is either duplicated or redundant.
+
+        The whole right column is hidden when a post has no linked products, so
+        the popup collapses to just the post instead of leaving an empty gutter.
 
         scrolling is intentionally not set to "no": the embed reports its height
         and JS applies it, so there is normally nothing to scroll. Only when a
@@ -357,10 +390,9 @@
                 referrerpolicy="strict-origin-when-cross-origin"
               ></iframe>
             </div>
-            <div class="igv-lightbox__meta">
-              <p class="igv-lightbox__meta-title" data-igv-products-title hidden>Shop this post</p>
+            <div class="igv-lightbox__meta" data-igv-meta hidden>
+              <p class="igv-lightbox__meta-title">Shop this post</p>
               <div class="igv-lightbox__products" data-igv-products></div>
-              <div class="igv-lightbox__links" data-igv-links></div>
             </div>
           </div>
         </div>

@@ -454,6 +454,8 @@ Version couldn't be created.
 
 现在的做法是：frame 高度完全由 MEASURE 决定，**改由遮罩 `.igv-lightbox` 用 `overflow-y: auto` 承担超高的情况**。`.igv-lightbox__frame` 同样不能加 `overflow: hidden`，圆角由 `.igv-lightbox__embed` 自己的 `border-radius` 负责。
 
+遮罩的滚动条是隐藏的（`scrollbar-width: none` + `-ms-overflow-style: none` + `::-webkit-scrollbar { display: none }`），滚动能力保留 —— 与 `.igv__list` 隐藏轨道滚动条用的是同一套写法。
+
 遮罩用 `align-items: flex-start` 配 `.igv-lightbox__dialog { margin: auto }`，**不用 `align-items: center`**：居中一个溢出容器的 flex item 会让顶部那段溢出无法滚到，等于从另一头把帖子裁了。`margin: auto` 在内容不超高时照样居中。
 
 弹窗面板是**浅色**的：`.igv-lightbox__dialog` 自己白底圆角，两栏都在里面，文字 `#1a1a1a`，商品卡片 `#f4f4f5`。两栏 `align-items: flex-start` 顶部对齐，右栏不再相对左边那张长图垂直居中。
@@ -462,7 +464,18 @@ Version couldn't be created.
 
 加载态是纯 CSS 转圈（`.igv-lightbox__spinner` + `@keyframes igv-spin`），没有文字，也就没有需要翻译的字符串。
 
-**关联商品卡片**（`.igv-lightbox__product`）：商品图 + 标题（两行截断）+ 价格，`compare_at_price` 高于现价时额外显示一枚 `Save …` 徽章。
+**关联商品出现在两个地方，数据同源、样式不同：**
+
+| 位置 | 类名 | 内容 | 条数 |
+| --- | --- | --- | --- |
+| 轮播封面底部（叠在图上） | `.igv__product` | 商品图 + 标题（单行截断）+ 价格 + 划线原价 | 只显示第一个 |
+| 弹窗右栏 | `.igv-lightbox__product` | 商品图 + 标题（两行截断）+ 价格 + `Save …` 徽章 | 全部 |
+
+封面上只显示第一个商品：卡片本来就窄，而弹窗里已经能看全。**`.igv__product` 的 `z-index` 必须压过 `.igv__play`** —— 后者是铺满整张封面的点击热区，不压过它商品链接就永远点不到。也因此 `.igv__play` 的图标挪到了封面右上角，那个位置原先正是它占着的。
+
+两处都是 `<a>`，所以和 `.igv__play` 一样需要 `!important` 钉死背景与文字色，否则主题的链接 hover 规则会把卡片刷成主题色。它们与 `.igv__play` 是兄弟节点而非嵌套，没有嵌套 `<a>` 的问题。
+
+弹窗右栏**整列在帖子没有关联商品时隐藏**（`.igv-lightbox__meta[hidden]`），弹窗收成单栏，而不是留一条空白。右栏也**不再有自建的 View on Instagram 按钮** —— embed 自己就带了回 Instagram 的链接，再加一个是冗余。
 
 数据**在 liquid 渲染时从 `all_products[handle]` 实时取**，不走 metafield：
 
