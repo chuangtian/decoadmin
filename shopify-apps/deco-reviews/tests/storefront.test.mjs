@@ -29,6 +29,26 @@ const content = node => [node.textContent, ...node.children.map(content)].join('
 const source = fs.readFileSync(new URL('../frontend/storefront.js', import.meta.url), 'utf8');
 const widgetSource = source.split('/* DECO_REVIEWS_WIDGETS */')[1];
 const organicSource = fs.readFileSync(new URL('../frontend/organic.js', import.meta.url), 'utf8');
+const liquidSource = fs.readFileSync(new URL('../extensions/deco-reviews/blocks/deco_reviews.liquid', import.meta.url), 'utf8');
+
+test('theme block exposes isolated branding controls and complete supported locales', () => {
+  for (const setting of ['layout', 'corner_style', 'accent_color', 'accent_text_color', 'surface_color', 'text_color', 'success_redirect_url']) {
+    assert.match(liquidSource, new RegExp(`"id":"${setting}"`));
+    assert.match(liquidSource, new RegExp(`block\\.settings\\.${setting}`));
+  }
+
+  const localeRoot = new URL('../extensions/deco-reviews/locales/', import.meta.url);
+  const english = JSON.parse(fs.readFileSync(new URL('en.default.json', localeRoot), 'utf8')).deco_reviews;
+  const englishSchema = JSON.parse(fs.readFileSync(new URL('en.default.schema.json', localeRoot), 'utf8'));
+  for (const locale of ['de', 'es', 'fr', 'zh-CN']) {
+    const messages = JSON.parse(fs.readFileSync(new URL(`${locale}.json`, localeRoot), 'utf8')).deco_reviews;
+    const schema = JSON.parse(fs.readFileSync(new URL(`${locale}.schema.json`, localeRoot), 'utf8'));
+    assert.deepEqual(Object.keys(messages).sort(), Object.keys(english).sort(), `${locale} storefront messages must be complete`);
+    assert.deepEqual(Object.keys(schema.settings).sort(), Object.keys(englishSchema.settings).sort(), `${locale} setting labels must be complete`);
+    assert.deepEqual(Object.keys(schema.layouts).sort(), Object.keys(englishSchema.layouts).sort(), `${locale} layouts must be complete`);
+    assert.deepEqual(Object.keys(schema.corners).sort(), Object.keys(englishSchema.corners).sort(), `${locale} corners must be complete`);
+  }
+});
 
 test('organic form is shown only for an enabled same-origin product form', () => {
   const form = new Node(); form.hidden = true; form.action = '';
@@ -108,6 +128,25 @@ for (const succeeds of [true, false]) {
     assert.equal(requests, succeeds ? 1 : 2);
     if (!succeeds) resolveRequest({ ok: false, json: async () => ({}) });
     await retry;
+  });
+}
+
+for (const [redirectUrl, shouldRedirect] of [['/pages/review-thanks', true], ['https://attacker.example/thanks', false]]) {
+  test(`buyer form ${shouldRedirect ? 'uses' : 'rejects'} configured ${shouldRedirect ? 'same-origin' : 'cross-origin'} redirect`, async () => {
+    const root = new Node(); const form = new Node(); const status = new Node(); const submit = new Node(); const marker = new Node();
+    marker.dataset.url = redirectUrl;
+    root.querySelector = key => key === '[data-dr-form]' ? form : key === '[data-dr-success-redirect]' ? marker : null;
+    form.querySelector = key => key === '[data-dr-form-status]' ? status : submit;
+    form.querySelectorAll = () => [];
+    form.elements = { namedItem: () => ({ files: [] }) };
+    form.reset = () => {};
+    let redirected = '';
+    const location = { origin: 'https://shop.example', assign: value => { redirected = value; } };
+    const document = { readyState: 'complete', querySelectorAll: () => [root], addEventListener() {} };
+    vm.runInNewContext(source, { document, CustomEvent, URL, AbortController, Intl, FormData: class {}, location,
+      fetch: async () => ({ ok: true, json: async () => ({ message: 'Review submitted' }) }) });
+    await form.events.submit({ preventDefault() {} });
+    assert.equal(redirected, shouldRedirect ? 'https://shop.example/pages/review-thanks' : '');
   });
 }
 

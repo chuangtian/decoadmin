@@ -5,14 +5,35 @@
   assign feed = app.metafields.instagram_videos.feed.value
   assign galleries = feed.galleries
 
-  # Merchants type the gallery name they chose in the app. Block settings are
-  # static JSON at build time, so a dropdown listing this shop's own gallery
-  # names is not possible here; the design-mode hint below prints the names so
-  # they can be copied. Matching ignores case and surrounding spaces, and still
-  # accepts the raw handle for anyone who already filled that in.
-  assign wanted = block.settings.gallery | strip | downcase
+  # The gallery is picked from a dropdown in the theme editor, not typed.
+  #
+  # Block settings are static JSON at build time, so a plain select cannot list
+  # this shop's own gallery names. metaobject is the one setting type that reads
+  # its options per shop: the app owns a $app:instagram_gallery definition and
+  # writes one entry per gallery (see InstagramGalleryDirectory on the backend),
+  # and the picker labels each entry with the gallery name.
+  #
+  # The entry carries the gallery handle in a field, and its own system.handle is
+  # the same value, so either one maps straight back to a gallery in the payload.
+  # The field is read first because it is the explicit contract; system.handle is
+  # only the fallback.
+  #
+  # Note on the schema below: metaobject_type has to be the fully resolved
+  # "app--<app-id>--instagram_gallery". The "$app:" shorthand works in Liquid and
+  # in the Admin API but the schema validator rejects it outright
+  # ("metaobject_type is invalid"), so the app id is hardcoded there. If this app
+  # is ever split into separate test and production Shopify apps, that id changes
+  # and must be updated — validate-project.mjs guards it.
+  assign picked = block.settings.gallery_ref
+  assign wanted = ''
+  if picked != blank
+    assign wanted = picked.gallery_handle.value
+    if wanted == blank
+      assign wanted = picked.system.handle
+    endif
+  endif
 
-  # feed.items is the legacy field, equivalent to the first gallery.
+  # Nothing picked falls back to the first gallery, which is what feed.items is.
   assign items = feed.items
   assign gallery_missing = false
 
@@ -20,13 +41,14 @@
     assign matched = false
     for gallery in galleries
       unless matched
-        assign candidate = gallery.name | strip | downcase
-        if candidate == wanted or gallery.handle == wanted
+        if gallery.handle == wanted
           assign items = gallery.items
           assign matched = true
         endif
       endunless
     endfor
+    # The entry exists but the payload has no such gallery: it was deleted after
+    # the block was configured, and the next backend sync will drop the entry.
     unless matched
       assign items = ''
       assign gallery_missing = true
@@ -55,15 +77,8 @@
     <div class="igv igv--empty">
       <p class="igv__empty-text">
         {%- if gallery_missing -%}
-          No gallery is named &ldquo;{{ block.settings.gallery | strip | escape }}&rdquo;.
-          {% if galleries.size > 0 %}
-            Available galleries:
-            {% for gallery in galleries %}
-              {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
-            {% endfor %}
-          {% else %}
-            This shop has no galleries yet.
-          {% endif %}
+          The selected gallery no longer exists. Pick another one in the Gallery
+          setting, or create it again in the Instagram Content app.
         {%- else -%}
           Nothing to show yet. Open the Instagram Content app in your Shopify admin,
           connect an account, sync media, then add posts to a gallery.
@@ -87,16 +102,14 @@
     "
   >
     {%- comment -%}
-      The setting is a plain text field, so the editor preview prints the exact
-      names the merchant can copy into it. Visitors never see this.
+      The picker makes the gallery obvious, so the only thing still worth saying
+      is which one is showing when nothing has been picked. Visitors never see it.
     {%- endcomment -%}
-    {%- if request.design_mode and galleries.size > 0 -%}
+    {%- if request.design_mode and wanted == blank and galleries.size > 1 -%}
       <p class="igv__hint">
-        Galleries you can enter:
-        {% for gallery in galleries %}
-          {{ gallery.name | escape }}{% unless forloop.last %} ·{% endunless %}
-        {% endfor %}
-        {%- if wanted == blank %} — empty, so the first one is showing.{% endif -%}
+        No gallery picked, so the first one is showing:
+        {{ galleries.first.name | escape }}. Use the Gallery setting to choose
+        another.
       </p>
     {%- endif -%}
 
@@ -207,6 +220,49 @@
                   </span>
                 </a>
               {%- endif -%}
+
+              {%- comment -%}
+                Linked product sits inside the cover, pinned to its bottom edge.
+
+                Only the first product is shown: the card is narrow and the popup
+                already lists all of them. Image, title, price and the struck-out
+                compare-at price all come from all_products at render time, so the
+                price is live and follows the shop's currency format.
+
+                It has to out-stack .igv__play (which covers the whole cover), or
+                the trigger would swallow the click and the product link would be
+                unreachable.
+              {%- endcomment -%}
+              {%- if block.settings.show_products and item.products.size > 0 -%}
+                {%- assign linked = item.products | first -%}
+                {%- assign sp = all_products[linked.handle] -%}
+                {%- if sp -%}
+                  <a class="igv__product" href="{{ sp.url }}">
+                    {%- if sp.featured_image -%}
+                      <img
+                        class="igv__product-image"
+                        src="{{ sp.featured_image | image_url: width: 120 }}"
+                        alt=""
+                        width="40"
+                        height="40"
+                        loading="lazy"
+                      >
+                    {%- endif -%}
+                    <span class="igv__product-body">
+                      <span class="igv__product-title">{{ sp.title | escape }}</span>
+                      <span class="igv__product-prices">
+                        <span class="igv__product-price">
+                          {%- if sp.price_varies %}From {% endif -%}
+                          {{ sp.price | money }}
+                        </span>
+                        {%- if sp.compare_at_price > sp.price -%}
+                          <s class="igv__product-compare">{{ sp.compare_at_price | money }}</s>
+                        {%- endif -%}
+                      </span>
+                    </span>
+                  </a>
+                {%- endif -%}
+              {%- endif -%}
             </div>
 
             {%- if block.settings.show_posted_at and item.posted_at != blank -%}
@@ -219,19 +275,6 @@
               <p class="igv__caption">{{ item.caption | strip_newlines | truncate: 90 | escape }}</p>
             {%- endif -%}
 
-            {%- if block.settings.show_products and item.products.size > 0 -%}
-              <div class="igv__products">
-                {%- for product in item.products limit: 3 -%}
-                  {%- assign shop_product = all_products[product.handle] -%}
-                  <a
-                    class="igv__product"
-                    href="{% if shop_product %}{{ shop_product.url }}{% else %}/products/{{ product.handle }}{% endif %}"
-                  >
-                    {{ product.title | default: product.handle | escape }}
-                  </a>
-                {%- endfor -%}
-              </div>
-            {%- endif -%}
           </li>
         {%- endfor -%}
       </ul>
@@ -260,18 +303,49 @@
       {%- capture feed_json -%}
         [
         {%- for item in items limit: block.settings.items_to_show -%}
+          {%- comment -%}
+            Caption and posted date are not in this payload on purpose: the embed
+            in the popup already renders both, and sending them again is what
+            produced the duplicated text.
+
+            Product image and price come from all_products at render time rather
+            than from the metafield. Prices change and the metafield is a
+            snapshot, so a stored price would go stale; money also has to follow
+            the shop's own currency format.
+          {%- endcomment -%}
           {
             "embed_url": {{ item.embed_url | default: '' | json }},
-            "caption": {{ item.caption | default: '' | json }},
             "permalink": {{ item.permalink | default: '' | json }},
-            "posted_at": {{ item.posted_at | default: '' | json }},
             "products": [
               {%- for product in item.products -%}
-                {
-                  "title": {{ product.title | default: product.handle | json }},
-                  "url": {{ product.handle | prepend: '/products/' | json }}
-                }{%- unless forloop.last -%},{%- endunless -%}
+                {%- assign sp = all_products[product.handle] -%}
+                {%- if sp -%}
+                  {%- if sp.price_varies -%}
+                    {%- capture price_label -%}From {{ sp.price_min | money }}{%- endcapture -%}
+                  {%- else -%}
+                    {%- capture price_label -%}{{ sp.price | money }}{%- endcapture -%}
+                  {%- endif -%}
+                  {%- assign save_label = '' -%}
+                  {%- if sp.compare_at_price > sp.price -%}
+                    {%- assign saved = sp.compare_at_price | minus: sp.price -%}
+                    {%- capture save_label -%}Save {{ saved | money }}{%- endcapture -%}
+                  {%- endif -%}
+                  {
+                    "title": {{ sp.title | json }},
+                    "url": {{ sp.url | json }},
+                    "image": {{ sp.featured_image | image_url: width: 200 | json }},
+                    "price": {{ price_label | json }},
+                    "save": {{ save_label | json }}
+                  },
+                {%- endif -%}
               {%- endfor -%}
+              {%- comment -%}
+                Trailing null keeps the array valid JSON no matter how many
+                products were skipped: forloop.last cannot be trusted here
+                because a deleted product emits nothing at all. The renderer
+                already skips entries without a url.
+              {%- endcomment -%}
+              null
             ]
           }{%- unless forloop.last -%},{%- endunless -%}
         {%- endfor -%}
@@ -285,9 +359,18 @@
         JS clones it onto document.body — it has to be body, otherwise any
         ancestor with a transform breaks position: fixed.
 
-        Layout is media on the left, post details on the right. The left frame
-        uses Instagram's uncaptioned embed so the caption is not duplicated, and
-        nothing inside the popup scrolls: long captions are clamped instead.
+        Layout is the full Instagram post on the left, linked products on the
+        right. The embed renders the post complete with its own header, media,
+        caption and its own link back to Instagram, so this side carries nothing
+        but products — anything else here is either duplicated or redundant.
+
+        The whole right column is hidden when a post has no linked products, so
+        the popup collapses to just the post instead of leaving an empty gutter.
+
+        scrolling is intentionally not set to "no": the embed reports its height
+        and JS applies it, so there is normally nothing to scroll. Only when a
+        post is taller than the viewport cap does the frame get its own
+        scrollbar, which beats silently cutting the post off.
       {%- endcomment -%}
       <template data-igv-lightbox-template>
         <div class="igv-lightbox" hidden role="dialog" aria-modal="true" aria-label="Instagram post">
@@ -302,16 +385,14 @@
                 data-igv-embed
                 title="Instagram post"
                 frameborder="0"
-                scrolling="no"
                 allowtransparency="true"
                 allow="encrypted-media; picture-in-picture"
                 referrerpolicy="strict-origin-when-cross-origin"
               ></iframe>
             </div>
-            <div class="igv-lightbox__meta">
-              <p class="igv-lightbox__date" data-igv-date></p>
-              <p class="igv-lightbox__caption" data-igv-caption></p>
-              <div class="igv-lightbox__links" data-igv-links></div>
+            <div class="igv-lightbox__meta" data-igv-meta hidden>
+              <p class="igv-lightbox__meta-title">Shop this post</p>
+              <div class="igv-lightbox__products" data-igv-products></div>
             </div>
           </div>
         </div>
@@ -328,10 +409,11 @@
   "javascript": "instagram-videos.js",
   "settings": [
     {
-      "type": "text",
-      "id": "gallery",
+      "type": "metaobject",
+      "id": "gallery_ref",
       "label": "Gallery",
-      "info": "Enter the gallery name you chose in the Instagram Content app. Leave it empty to show the first gallery. The block preview lists the names you can copy."
+      "metaobject_type": "app--412885549057--instagram_gallery",
+      "info": "Pick a gallery you created in the Instagram Content app. Leave it empty to show the first one."
     },
     {
       "type": "text",

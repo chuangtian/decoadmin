@@ -36,17 +36,22 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
   提示文案、弹窗按钮、JS 生成的文案，连注释都是英文 —— 它渲染在商家店面和主题编辑器
   里。改动后跑一次 CJK 扫描确认（见下方「校验」）。
 
-  **展示组的选择方式正在从文本框迁移到主题编辑器里的选择器**（`metaobject` 设置类型，
-  app 自建 `$app:instagram_gallery` definition，每个展示组一条条目，见
-  `InstagramGalleryDirectory` 与 docs 里的「展示组怎么指定」）。当前扩展里仍是文本框填
-  组名，后端已就绪。**别再改回序号 select** —— 试过，商家看不出序号对应哪个组，删组还
-  会让序号平移。
+  区块设置 `Gallery` 是**主题编辑器里的选择器**，直接列出商家自己起的组名，不用打字。
+  实现是 `metaobject` 设置类型：app 自建 `$app:instagram_gallery` definition，每个展示组
+  一条条目（`InstagramGalleryDirectory`，详见 docs 的「展示组怎么指定」）。留空取第一个
+  组。**别改回序号 select 或文本框** —— 两条弯路都走过，原因记在 docs 里。
 
-  **上线顺序不可颠倒**（`shopify app deploy` 把配置与扩展一起发，所以要分两次）：
-  部署后端 → deploy 发布 scope 变更（扩展仍是文本框版）→ 商家打开应用批准
-  `write_metaobjects` → `php artisan instagram-feed:sync-gallery-directory` 建 definition
-  并补齐历史组 → 确认无误后才发布带 `metaobject` 设置的扩展。抢跑会让主题编辑器把那个
-  设置直接显示成错误：definition 必须已存在于店铺且 `access.storefront = PUBLIC_READ`。
+  两个容易踩的点：
+
+  - schema 里的 `metaobject_type` 必须写完整的 `app--412885549057--instagram_gallery`。
+    `$app:` 简写在 Liquid 和 Admin API 里能用，但区块 schema 的服务端校验会拒掉
+    （`metaobject_type is invalid`）。中间那串是 **app id**，不是 `client_id`。
+    拆分测试/生产 App 时它会变，`validate-project.mjs` 有闸门拦这件事。
+  - definition 必须已存在于店铺且 `access.storefront = PUBLIC_READ`，否则主题编辑器把
+    这个设置显示成错误。所以**上线顺序不可颠倒**（`deploy` 把配置与扩展一起发，要分两
+    次）：部署后端 → deploy 发布 scope 变更 →
+    `php artisan instagram-feed:sync-gallery-directory` 建 definition 并补齐历史组 →
+    查证 definition 状态 → 才发布带 `metaobject` 设置的扩展。
 
   **布局只有轮播一种**（`layout` / `full_width` / `max_width` / `gap` 四个设置已删除）。
   容器尺寸写死在 CSS 里：桌面 `width: 90%` + `max-width: 1400px`，移动端 `width: 100%`；
@@ -57,9 +62,31 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
   视频直接播，访客不离开店铺）或 **Go to the post on Instagram**（新标签打开原帖）。两种
   都在服务端渲染成对应元素，禁用 JS 也能用。
 
-  弹窗桌面端左右两栏（左 embed、右日期/文案/商品/外链），移动端上下叠，任何一层都不出
-  滚动条：iframe 高度由 Instagram 的 `postMessage` 报回来，文案用 `line-clamp` 截断，加载
-  态是纯 CSS 转圈。
+  弹窗是**浅色面板**，桌面端左右两栏顶部对齐：**左边是完整的 Instagram 帖子**
+  （`/embed/captioned`），**右边只有关联商品卡片和外链**。右栏不放文案和日期 —— embed
+  自己就渲染了，两边都放就是重复。移动端上下叠。加载态是纯 CSS 转圈。
+
+  三个必须保留的细节：
+
+  - embed URL **必须带 `?locale=en_US`**，否则它跟随访客浏览器语言，中文浏览器下会渲染
+    出自己的中文界面（「查看个人主页」等）。那段是 Instagram 渲染的，我们改不了 DOM。
+  - **不要给 `.igv-lightbox__frame` 加 `max-height` 或 `overflow: hidden`。** Instagram 的
+    embed 不滚动自己的 body，它报出高度后假定宿主把 iframe 撑到那么高，所以设上限不会换
+    来内部滚动条，只会静默切掉下半篇帖子。超高交给遮罩的 `overflow-y: auto`。
+  - 遮罩用 `align-items: flex-start` + dialog `margin: auto`，**不要改成
+    `align-items: center`**：居中一个溢出的 flex item 会让顶部那段滚不到。控制按钮是
+    `position: fixed`，否则长帖子上关闭按钮会滚出视野。
+
+  关联商品出现在两处：**轮播封面底部**叠一张卡片（`.igv__product`，商品图 + 标题 + 价格
+  + 划线原价，只显示第一个），**弹窗右栏**列出全部（`.igv-lightbox__product`）。右栏在没有
+  关联商品时整列隐藏，弹窗收成单栏。
+
+  `.igv__product` 的 `z-index` **必须压过 `.igv__play`** —— 后者是铺满封面的点击热区，不压
+  过它商品链接就点不到。`.igv__play` 的图标也因此挪到了封面右上角。两处商品卡片都是
+  `<a>`，和 `.igv__play` 一样要用 `!important` 钉死配色，否则主题的链接 hover 会刷成主题色。
+
+  图片与价格**在 liquid 渲染时从 `all_products` 实时取**，不进 metafield：价格会变而
+  metafield 是快照，货币格式也只有 `| money` 才拿得准。
 
   轮播控件：桌面端箭头竖直居中压在轨道两侧；移动端箭头移到轨道下方靠左，并显示圆点
   指示器。箭头到头是变暗禁用而不是消失。
@@ -67,10 +94,10 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
   卡片上的点击热区 `.igv__play` 铺满整张卡，主题的 `button:hover` 会把整张卡染成主题色，
   所以它和箭头、圆点的各个状态都用 `!important` 钉死了背景色。别拿掉。
 
-  `assets/instagram-videos.js` 当前 9932 字节。[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)
-  里 JS 的 10KB 是 **Suggested** 且按压缩后算，真正 Enforced 的是全部文件 10MB、block 数
-  30、Liquid 跨文件 100KB。不过这个扩展曾在 12105 字节时发布失败过，原因没查清，所以
-  仍按 10000 字节未压缩当自律线，加代码前先量一下。
+  `assets/instagram-videos.js` 有 **10000 字节（未压缩）**硬线，当前 9996，**余量只剩 4**。
+  这条线来自 `deploy` 时跑的 theme check 规则 `AssetSizeAppBlockJavaScript`，是 error 级别
+  但**不阻塞发布**（超了照样发出去，只留一条红色告警）。加代码前先量，超了优先压注释
+  密度、把长解释挪进 docs，不要删掉「为什么」。
 
 ## 环境
 

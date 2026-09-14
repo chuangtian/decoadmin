@@ -102,7 +102,9 @@ The current shared renderer is a foundation only. None of the following should b
 - Implemented in the current follow-up: the authorized streamed CSV export includes each review's immutable custom answers in a bounded `custom_answers_json` cell. Labels, type, value and public/private visibility are retained without leaking email or creating unstable columns across historical form versions.
 - Implemented in the current follow-up: an independently gated Happy Customers App Proxy page aggregates only published product and store reviews, reuses the bounded public feed, and stops serving immediately when disabled.
 - Implemented in the current follow-up: tenant-scoped product review groups let two to one hundred products share only their published review feed and aggregate score. A product can belong to one retained group, each review keeps its original product, disabling a group restores individual feeds, and collection, invitations, rewards and moderation remain bound to the original product.
-- Remaining: multi-language copy management, colors/corners, redirect behavior, QR code, collection targeting and Merchant API representation.
+- Implemented in the current follow-up: theme-editor branding for grid/list/mosaic layout, three corner styles, star/button/surface/text colors, plus complete built-in storefront and editor labels for English, Simplified Chinese, German, French and Spanish.
+- Implemented in the current follow-up: an optional theme-configured after-submit page; the browser accepts only same-origin HTTP(S) navigation and otherwise keeps the accessible success message in place.
+- Remaining: merchant-managed per-locale custom copy, QR code, collection targeting and Merchant API representation.
 - Remaining for bundles: bundle review collection, bundle-page aggregate behavior, one-request multi-product bundle workflow, and Shopify bundle identity reconciliation.
 
 ### AI and content reuse
