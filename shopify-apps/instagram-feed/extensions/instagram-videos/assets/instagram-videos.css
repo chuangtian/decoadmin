@@ -1,9 +1,10 @@
-/* Instagram 视频 app block */
+/* Instagram content app block. English-only: this ships to merchant storefronts. */
 
 .igv {
   --igv-arrow-size: 40px;
+  --igv-gap: 12px;
   box-sizing: border-box;
-  max-width: var(--igv-max-width, 100%);
+  width: 100%;
   margin: 0 auto;
   color: var(--igv-text, currentColor);
 }
@@ -27,7 +28,7 @@
   opacity: 0.75;
 }
 
-/* 只在主题编辑器里出现的可选展示组提示，店面访客看不到。 */
+/* Theme-editor-only hint that maps gallery slots to names. */
 .igv__hint {
   margin: 0 0 12px;
   padding: 8px 12px;
@@ -38,7 +39,7 @@
   opacity: 0.7;
 }
 
-/* ---------- 头部 ---------- */
+/* ---------- Header ---------- */
 
 .igv__header {
   display: flex;
@@ -75,47 +76,38 @@
   object-fit: cover;
 }
 
-/* ---------- 列表 ---------- */
+/* ---------- Carousel track ---------- */
 
 .igv__viewport {
   position: relative;
 }
 
 .igv__list {
-  display: grid;
-  grid-template-columns: repeat(var(--igv-columns, 4), minmax(0, 1fr));
-  gap: var(--igv-gap, 12px);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.igv[data-layout="carousel"] .igv__list {
   display: flex;
+  gap: var(--igv-gap);
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scroll-behavior: smooth;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 4px;
 }
 
-.igv[data-layout="carousel"] .igv__list::-webkit-scrollbar {
+.igv__list::-webkit-scrollbar {
   display: none;
 }
 
-.igv[data-layout="carousel"] .igv__item {
+.igv__item {
   flex: 0 0
     calc(
-      (100% - (var(--igv-columns, 4) - 1) * var(--igv-gap, 12px)) /
+      (100% - (var(--igv-columns, 4) - 1) * var(--igv-gap)) /
         var(--igv-columns, 4)
     );
-  scroll-snap-align: start;
-}
-
-.igv__item {
   margin: 0;
   min-width: 0;
+  scroll-snap-align: start;
 }
 
 .igv__media {
@@ -133,7 +125,7 @@
   object-fit: cover;
 }
 
-/* ---------- 打开帖子按钮 ---------- */
+/* ---------- Post trigger ---------- */
 
 .igv__play {
   position: absolute;
@@ -142,10 +134,27 @@
   align-items: flex-end;
   justify-content: flex-end;
   padding: 10px;
-  border: 0;
-  background: transparent;
   cursor: pointer;
   appearance: none;
+}
+
+/*
+ * The trigger covers the entire card, so any theme rule that paints buttons or
+ * links on hover floods the whole card with the theme accent colour. Every state
+ * is pinned to transparent, and !important is deliberate: theme button styles
+ * routinely ship with !important of their own.
+ */
+.igv .igv__play,
+.igv .igv__play:hover,
+.igv .igv__play:focus,
+.igv .igv__play:focus-visible,
+.igv .igv__play:active {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  text-decoration: none !important;
+  transform: none !important;
 }
 
 .igv__play-icon {
@@ -178,7 +187,7 @@
   outline-offset: 2px;
 }
 
-/* ---------- 日期、文案与商品 ---------- */
+/* ---------- Date, caption, products ---------- */
 
 .igv__date {
   margin: 8px 0 0;
@@ -230,11 +239,13 @@
   color: #fff;
 }
 
-/* ---------- 轮播箭头 ---------- */
+/* ---------- Carousel arrows ---------- */
 
 /*
- * 桌面端箭头竖直居中压在轨道两侧边缘；移动端在下面的断点里改成 static，
- * 跟圆点一起排到轨道下方（一屏只有一条时，箭头压在图上会挡住内容）。
+ * Desktop keeps the arrows vertically centred over the track edges. The mobile
+ * breakpoint below turns them static so they sit under the track next to the
+ * dots — with one post per view an overlaid arrow would cover the content.
+ * Colours are forced for the same reason as .igv__play above.
  */
 .igv__arrow {
   position: absolute;
@@ -247,20 +258,27 @@
   width: var(--igv-arrow-size);
   height: var(--igv-arrow-size);
   transform: translateY(-50%);
-  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.94);
-  color: #1a1a1a;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
   transition: opacity 0.15s ease;
 }
 
+.igv .igv__arrow,
+.igv .igv__arrow:hover,
+.igv .igv__arrow:focus,
+.igv .igv__arrow:focus-visible,
+.igv .igv__arrow:active {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #1a1a1a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
 /*
- * 到边界是禁用而不是隐藏：隐藏会让另一侧箭头的位置发生跳动，
- * 而且商家从截图上看不出「这里本来有个按钮」。
+ * Disabled rather than hidden at the ends: hiding makes the opposite arrow jump
+ * to a new position, and merchants cannot tell a button was ever there.
  */
-.igv__arrow:disabled {
+.igv .igv__arrow:disabled {
   opacity: 0.35;
   cursor: default;
   box-shadow: none;
@@ -286,28 +304,35 @@
   outline-offset: 2px;
 }
 
-/* ---------- 圆点指示器 ---------- */
+/* ---------- Page dots ---------- */
 
-/* 桌面端一屏能看好几条，圆点没有信息量；只在移动端出现。 */
+/* Desktop shows several posts per view, so dots add no information there. */
 .igv__dots {
   display: none;
   align-items: center;
   gap: 6px;
 }
 
+.igv .igv__dot,
+.igv .igv__dot:hover,
+.igv .igv__dot:focus,
+.igv .igv__dot:active {
+  border: 0 !important;
+  background: currentcolor !important;
+  box-shadow: none !important;
+}
+
 .igv__dot {
   width: 8px;
   height: 8px;
   padding: 0;
-  border: 0;
   border-radius: 999px;
-  background: currentcolor;
   opacity: 0.25;
   cursor: pointer;
   transition: width 0.2s ease, opacity 0.2s ease;
 }
 
-/* 当前页拉长成胶囊，比只靠深浅区分更容易看清。 */
+/* The current page stretches into a pill: easier to read than opacity alone. */
 .igv__dot[aria-current="true"] {
   width: 22px;
   opacity: 0.85;
@@ -320,48 +345,45 @@
 }
 
 @media screen and (max-width: 749px) {
-  .igv__list {
-    grid-template-columns: repeat(var(--igv-columns-mobile, 2), minmax(0, 1fr));
-  }
-
-  .igv[data-layout="carousel"] .igv__item {
+  .igv__item {
     flex-basis: calc(
-      (100% - (var(--igv-columns-mobile, 2) - 1) * var(--igv-gap, 12px)) /
+      (100% - (var(--igv-columns-mobile, 2) - 1) * var(--igv-gap)) /
         var(--igv-columns-mobile, 2)
     );
   }
 
   /*
-   * 控件下移：轨道单独占一行，箭头与圆点排在它下面并靠左。
-   * 用 order 而不是改 DOM 顺序，桌面端的绝对定位才能继续复用同一组按钮。
+   * Controls move below the track and align left. Using order instead of a
+   * different DOM order keeps the desktop absolute positioning on the same
+   * buttons.
    */
-  .igv[data-layout="carousel"] .igv__viewport {
+  .igv__viewport {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
   }
 
-  .igv[data-layout="carousel"] .igv__list {
+  .igv__list {
     order: 0;
     flex: 0 0 100%;
     margin-bottom: 4px;
   }
 
-  .igv[data-layout="carousel"] .igv__arrow {
+  .igv__arrow {
     position: static;
     order: 1;
     transform: none;
   }
 
-  .igv[data-layout="carousel"] .igv__dots {
+  .igv__dots {
     display: flex;
     order: 2;
     margin-left: 8px;
   }
 }
 
-/* ---------- 放大播放 ---------- */
+/* ---------- Post popup ---------- */
 
 .igv-lightbox {
   position: fixed;
@@ -378,25 +400,27 @@
   display: none;
 }
 
+/* Media on the left, post details on the right. Nothing here scrolls. */
 .igv-lightbox__dialog {
-  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  max-width: min(560px, 100%);
+  gap: 20px;
   width: 100%;
+  max-width: min(980px, 100%);
+  max-height: 86vh;
 }
 
 /*
- * Instagram embed 的 iframe 是跨域的，读不到内部高度，所以用固定宽高比的容器。
- * 4/5 覆盖 Reels 与图文贴的常见比例；内容更长时由 iframe 自己滚动。
+ * Instagram's embed is cross-origin so its height cannot be read directly. The
+ * embed posts its measured height to us and JS writes it here as an inline
+ * height; this value is only the fallback before that message arrives.
  */
 .igv-lightbox__frame {
   position: relative;
-  width: 100%;
-  aspect-ratio: 4 / 5;
-  max-height: 78vh;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: min(78vh, 620px);
+  max-height: 82vh;
   overflow: hidden;
   border-radius: 12px;
   background: #fff;
@@ -409,36 +433,66 @@
   border: 0;
 }
 
-.igv-lightbox__embed[hidden] {
+/* Hidden when a post has no embeddable URL, so no empty white panel is left. */
+.igv-lightbox__frame[hidden] {
   display: none;
 }
 
-.igv-lightbox__loading {
+.igv-lightbox__spinner {
   position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  font-size: 14px;
-  color: #616161;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  border-top-color: #8a8a8a;
+  border-radius: 50%;
+  animation: igv-spin 0.8s linear infinite;
 }
 
-.igv-lightbox__loading[hidden] {
+.igv-lightbox__spinner[hidden] {
   display: none;
+}
+
+@keyframes igv-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .igv-lightbox__meta {
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 0 0 300px;
+  min-width: 0;
   color: #fff;
 }
 
+.igv-lightbox__date {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.igv-lightbox__date[hidden],
+.igv-lightbox__caption[hidden] {
+  display: none;
+}
+
+/* Clamped, never scrolled: the popup must not grow a scrollbar of its own. */
 .igv-lightbox__caption {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 14px;
-  line-height: 1.45;
-  max-height: 4.5em;
-  overflow-y: auto;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 14;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
 }
 
 .igv-lightbox__links {
@@ -460,8 +514,10 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
+/* Controls sit on the overlay, not the dialog, so they stay on screen. */
 .igv-lightbox__button {
   position: absolute;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -480,54 +536,82 @@
   background: rgba(255, 255, 255, 0.28);
 }
 
+.igv-lightbox__button[hidden] {
+  display: none;
+}
+
 .igv-lightbox__close {
-  top: -52px;
-  right: 0;
+  top: 12px;
+  right: 12px;
 }
 
 .igv-lightbox__prev {
   top: 50%;
-  left: -56px;
+  left: 12px;
   transform: translateY(-50%);
 }
 
 .igv-lightbox__next {
   top: 50%;
-  right: -56px;
+  right: 12px;
   transform: translateY(-50%);
 }
 
 @media screen and (max-width: 749px) {
   .igv-lightbox {
-    padding: 16px;
+    padding: 56px 16px 16px;
   }
 
-  .igv-lightbox__close {
-    top: 0;
-    right: 0;
+  /* Stacked: media on top, details below. Both are capped so nothing scrolls. */
+  .igv-lightbox__dialog {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    max-height: 100%;
+  }
+
+  .igv-lightbox__frame {
+    flex: 0 1 auto;
+    max-height: 58vh;
+  }
+
+  .igv-lightbox__meta {
+    flex: 0 0 auto;
+    gap: 8px;
+  }
+
+  .igv-lightbox__caption {
+    -webkit-line-clamp: 3;
+  }
+
+  .igv-lightbox__prev,
+  .igv-lightbox__next {
+    top: 12px;
+    transform: none;
   }
 
   .igv-lightbox__prev {
-    left: 4px;
-    top: auto;
-    bottom: -4px;
-    transform: none;
+    left: 12px;
   }
 
   .igv-lightbox__next {
-    right: 4px;
-    top: auto;
-    bottom: -4px;
-    transform: none;
+    left: 60px;
+    right: auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .igv[data-layout="carousel"] .igv__list {
+  .igv__list {
     scroll-behavior: auto;
   }
 
-  .igv__play-icon {
+  .igv__play-icon,
+  .igv__dot,
+  .igv__arrow {
     transition: none;
+  }
+
+  .igv-lightbox__spinner {
+    animation-duration: 2.4s;
   }
 }

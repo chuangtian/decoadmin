@@ -30,18 +30,35 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
 `validate-project.mjs` 会拦住这种改动。
 
 - `extensions/instagram-videos`：Theme App Extension。从
-  `app.metafields.instagram_videos.feed` 读取内容并服务端渲染，商家在区块设置里
-  填写展示组标识来指定展示哪一组。
+  `app.metafields.instagram_videos.feed` 读取内容并服务端渲染。
 
-  渲染的是**封面图网格/轮播**，不是 `<video>`：视频文件不转存（Instagram 对部分 Reels
-  不返回 `media_url`）。
+  **这个扩展里不许出现中文。** schema 的 name/label/info/options、`aria-label`、空态与
+  提示文案、弹窗按钮、JS 生成的文案，连注释都是英文 —— 它渲染在商家店面和主题编辑器
+  里。改动后跑一次 CJK 扫描确认（见下方「校验」）。
 
-  区块设置里「点击封面时」二选一：**在弹窗里打开帖子**（嵌 Instagram 官方 embed，视频
-  直接播，访客不离开店铺）或**跳转到 Instagram 帖子**（新标签打开原帖）。两种都在服务端
-  渲染成对应元素，禁用 JS 也能用。
+  区块设置 `Gallery` 是下拉框，按序号选 `feed.galleries` 的第 N 个组（1–10）。schema 是
+  构建期静态的，没法列出商家自己的组名，所以主题编辑器预览里会印出「序号 → 组名」
+  对照。**注意删组会让后面的序号平移。**
+
+  **布局只有轮播一种**，宽度始终撑满容器（`layout` / `full_width` / `max_width` / `gap`
+  四个设置已删除）。渲染的是**封面图**而不是 `<video>`：视频文件不转存（Instagram 对部分
+  Reels 不返回 `media_url`）。
+
+  `When a post is clicked` 二选一：**Open the post in a popup**（嵌 Instagram 官方 embed，
+  视频直接播，访客不离开店铺）或 **Go to the post on Instagram**（新标签打开原帖）。两种
+  都在服务端渲染成对应元素，禁用 JS 也能用。
+
+  弹窗桌面端左右两栏（左 embed、右日期/文案/商品/外链），移动端上下叠，任何一层都不出
+  滚动条：iframe 高度由 Instagram 的 `postMessage` 报回来，文案用 `line-clamp` 截断，加载
+  态是纯 CSS 转圈。
 
   轮播控件：桌面端箭头竖直居中压在轨道两侧；移动端箭头移到轨道下方靠左，并显示圆点
   指示器。箭头到头是变暗禁用而不是消失。
+
+  卡片上的点击热区 `.igv__play` 铺满整张卡，主题的 `button:hover` 会把整张卡染成主题色，
+  所以它和箭头、圆点的各个状态都用 `!important` 钉死了背景色。别拿掉。
+
+  `assets/instagram-videos.js` 有 **10KB 硬限额**（当前 9932 字节），超了发布直接失败。
 
 ## 环境
 
@@ -86,6 +103,26 @@ npm run check:config:production
 npm run build:test
 npm run build:production
 ```
+
+改过 `extensions/instagram-videos` 之后必跑的三条（PowerShell）：
+
+```powershell
+$ext = "extensions/instagram-videos"
+
+# 1. JS 语法 + 10KB 限额（必须 < 10000）
+node --check "$ext/assets/instagram-videos.js"
+(Get-Item "$ext/assets/instagram-videos.js").Length
+
+# 2. 扩展里不许有中文，一条都不行
+Get-ChildItem -Recurse -File $ext -Include *.js,*.css,*.liquid |
+  ForEach-Object { Select-String -Path $_.FullName -Pattern '[\u4e00-\u9fff]' }
+
+# 3. schema 必须是合法 JSON（liquid 里语法错了 CLI 才报，很难定位）
+node -e "const m=require('fs').readFileSync('$ext/blocks/instagram_videos.liquid','utf8').match(/\{%\s*schema\s*%\}([\s\S]*?)\{%\s*endschema\s*%\}/);JSON.parse(m[1])"
+```
+
+第 2 条会命中 `.shopify/deploy-bundle/` 里的旧构建缓存，那是上次 deploy 的产物、下次 deploy
+会重建，不用管；只要 `assets/` 与 `blocks/` 干净就行。
 
 CLI 登录（已有会话时可非交互复用）：
 
