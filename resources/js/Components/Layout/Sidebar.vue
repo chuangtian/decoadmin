@@ -46,6 +46,7 @@ const dedupeByRoute = (items: MenuItem[]) => {
 
 const visibleMenu = computed<MenuItem[]>(() => menu
     .filter((item) => !item.hidden)
+    .filter((item) => !item.requiresStore || Boolean(page.props.currentStore))
     .filter((item) => !item.requiresInstalledApp || page.props.applicationAvailability[item.requiresInstalledApp])
     .map((item) => {
         const isApplications = item.dynamicChildren === 'applications';
@@ -54,6 +55,7 @@ const visibleMenu = computed<MenuItem[]>(() => menu
             : item.children;
         const resolved = children
             ?.filter((child) => Boolean(child.permission && page.props.auth.permissions.includes(child.permission)))
+            .filter((child) => !child.requiresStore || Boolean(page.props.currentStore))
             .map((child) => ({ ...child, route: contextualRoute(child.route) }))
             // 还没选店铺时店铺级路由补不出完整路径，先隐藏，避免点进去 404。
             .filter((child) => !(child.route && isStoreScopedRoute(child.route)));
