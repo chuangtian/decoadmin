@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -123,6 +124,7 @@ class PersonalRequestController extends Controller
         abort_unless($user, 401);
         $canViewAll = $this->hasRole($user, $organization, ['super-admin'])
             && $this->permissions->allows($user, $organization, 'expense_requests.view_all');
+        $canChooseApplicant = $this->canChooseExpenseRequestApplicant($user, $organization);
         $filters = $request->validate(['status' => ['nullable', 'string', 'max:30'], 'page' => ['nullable', 'integer', 'min:1']]);
         $query = PersonalRequest::query()->where('organization_id', $organization->id)->where('kind', 'expense_request')
             ->when(! $canViewAll, fn (Builder $query) => $query->where('submitter_id', $user->id))
@@ -135,7 +137,25 @@ class PersonalRequestController extends Controller
             'canCreate' => $this->permissions->allows($user, $organization, 'expense_requests.create'),
             'today' => now()->toDateString(),
             'filters' => ['status' => $filters['status'] ?? ''],
-            'options' => ['categories' => self::EXPENSE_CATEGORIES],
+            'options' => [
+                'categories' => self::EXPENSE_CATEGORIES,
+                'canChooseApplicant' => $canChooseApplicant,
+                'currentApplicantId' => (int) $user->id,
+                'applicants' => $canChooseApplicant
+                    ? $organization->users()
+                        ->wherePivot('status', 'active')
+                        ->where('users.status', 'active')
+                        ->orderBy('users.name')
+                        ->get(['users.id', 'users.name'])
+                        ->map(fn (User $applicant): array => [
+                            'id' => (int) $applicant->id,
+                            'name' => $applicant->name,
+                            'job_title' => $applicant->pivot?->job_title,
+                        ])
+                        ->values()
+                        ->all()
+                    : [],
+            ],
             'requests' => [...$query->toArray(), 'data' => collect($query->items())->map(fn (PersonalRequest $item) => $this->serialize($item, $user, false))->all()],
         ]);
     }
@@ -218,7 +238,9 @@ class PersonalRequestController extends Controller
         $organization = $context->require();
         $user = $request->user();
         abort_unless($user, 401);
+        $canChooseApplicant = $this->canChooseExpenseRequestApplicant($user, $organization);
         $validated = $request->validate([
+            'applicant_id' => ['nullable', 'integer', Rule::prohibitedIf(! $canChooseApplicant)],
             'title' => ['required', 'string', 'max:180', 'regex:/\S/u'],
             'category' => ['required', Rule::in(self::EXPENSE_CATEGORIES)],
             'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999999.99'],
@@ -237,6 +259,22 @@ class PersonalRequestController extends Controller
         ]);
         $images = $validated['images'] ?? [];
         unset($validated['images']);
+        $applicantId = $validated['applicant_id'] ?? null;
+        unset($validated['applicant_id']);
+        $applicant = $user;
+        if ($canChooseApplicant && $applicantId !== null) {
+            $applicant = $organization->users()
+                ->wherePivot('status', 'active')
+                ->where('users.status', 'active')
+                ->whereKey((int) $applicantId)
+                ->first();
+
+            if (! $applicant) {
+                throw ValidationException::withMessages([
+                    'applicant_id' => '请选择当前组织内的在职申请人。',
+                ]);
+            }
+        }
         $approvalRequired = (bool) ($validated['approval_required'] ?? true);
         $item = $this->createWithAttachments($organization, $user, [
             ...$validated,
@@ -245,11 +283,11 @@ class PersonalRequestController extends Controller
             'approval_required' => $approvalRequired,
             'payment_status' => $approvalRequired ? null : 'pending',
             'reviewed_at' => $approvalRequired ? null : now(),
-        ], $images);
+        ], $images, $applicant);
         $this->audit($item, $user, $approvalRequired ? 'expense_request_created' : 'expense_request_created_without_approval');
 
         if ($approvalRequired) {
-            $this->notifyApprovers($organization, $user, $item, '新的费用申请待审批');
+            $this->notifyApprovers($organization, $user, $item, '新的费用申请待审批', $applicant);
         } else {
             $item->progressLogs()->create([
                 'user_id' => $user->id,
@@ -259,9 +297,11 @@ class PersonalRequestController extends Controller
             $this->notifyFinancePaymentRequired($organization, $user, $item);
         }
 
+        $applicantNotice = $applicant->is($user) ? '' : "已为 {$applicant->name} ";
+
         return back()->with('success', $approvalRequired
-            ? "费用申请 {$item->reference_no} 已提交审批。"
-            : "费用申请 {$item->reference_no} 已免审批并提交财务付款。");
+            ? "{$applicantNotice}创建费用申请 {$item->reference_no}，并提交审批。"
+            : "{$applicantNotice}创建费用申请 {$item->reference_no}，已免审批并提交财务付款。");
     }
 
     public function cancelExpenseRequestRenewal(
@@ -464,12 +504,18 @@ class PersonalRequestController extends Controller
         ]);
     }
 
-    private function createWithAttachments(Organization $organization, User $user, array $attributes, array $images): PersonalRequest
-    {
+    private function createWithAttachments(
+        Organization $organization,
+        User $user,
+        array $attributes,
+        array $images,
+        ?User $submitter = null,
+    ): PersonalRequest {
+        $submitter ??= $user;
         $paths = [];
         try {
-            return DB::transaction(function () use ($attributes, $images, $organization, &$paths, $user): PersonalRequest {
-                $item = PersonalRequest::query()->create(['organization_id' => $organization->id, 'submitter_id' => $user->id, ...$attributes]);
+            return DB::transaction(function () use ($attributes, $images, $organization, &$paths, $submitter, $user): PersonalRequest {
+                $item = PersonalRequest::query()->create(['organization_id' => $organization->id, 'submitter_id' => $submitter->id, ...$attributes]);
                 foreach ($images as $index => $image) {
                     $path = $image->storeAs("personal-requests/{$organization->id}/{$item->uuid}", Str::uuid().'.'.($image->guessExtension() ?: 'img'), 'local');
                     abort_unless(is_string($path), 500, '附件保存失败。');
@@ -528,15 +574,30 @@ class PersonalRequestController extends Controller
         return $user->isSuperAdmin() || $user->roles()->where('user_roles.organization_id', $organization->id)->whereIn('roles.slug', $slugs)->exists();
     }
 
-    private function notifyApprovers(Organization $organization, User $user, PersonalRequest $item, string $title): void
+    private function canChooseExpenseRequestApplicant(User $user, Organization $organization): bool
     {
+        return $this->hasRole($user, $organization, ['super-admin'])
+            && $this->permissions->allows($user, $organization, 'expense_requests.manage');
+    }
+
+    private function notifyApprovers(
+        Organization $organization,
+        User $user,
+        PersonalRequest $item,
+        string $title,
+        ?User $submitter = null,
+    ): void {
+        $submitter ??= $user;
+        $submittedBy = $submitter->is($user)
+            ? $user->name
+            : "{$user->name} 代 {$submitter->name}";
         $this->notifications->notify(
             $organization,
             $this->notifications->usersWithPermission($organization, 'request_approvals.manage', ['super-admin']),
             $user,
             "{$item->kind}.submitted",
             $title,
-            "{$user->name} 提交了 {$item->reference_no}：{$item->title}",
+            "{$submittedBy} 提交了 {$item->reference_no}：{$item->title}",
             route('request-approvals.index', [], false),
             $item,
             "personal-request:{$item->uuid}:submitted",
@@ -683,6 +744,6 @@ class PersonalRequestController extends Controller
 
     private function audit(PersonalRequest $item, User $user, string $action): void
     {
-        AuditLog::query()->create(['organization_id' => $item->organization_id, 'store_id' => null, 'user_id' => $user->id, 'action' => $action, 'subject_type' => PersonalRequest::class, 'subject_id' => $item->id, 'metadata' => ['scope' => 'personal', 'reference_no' => $item->reference_no]]);
+        AuditLog::query()->create(['organization_id' => $item->organization_id, 'store_id' => null, 'user_id' => $user->id, 'action' => $action, 'subject_type' => PersonalRequest::class, 'subject_id' => $item->id, 'metadata' => ['scope' => 'personal', 'reference_no' => $item->reference_no, 'submitter_id' => (int) $item->submitter_id, 'submitted_on_behalf' => (int) $item->submitter_id !== (int) $user->id]]);
     }
 }
