@@ -10,6 +10,17 @@ class PersonalPermissionService
 {
     private const GROUPS = ['design_requests', 'technical_requests', 'request_approvals', 'expense_requests', 'expense_claims'];
 
+    public const BASELINE_PERMISSIONS = [
+        'design_requests.view',
+        'design_requests.create',
+        'technical_requests.view',
+        'technical_requests.create',
+        'expense_requests.view',
+        'expense_requests.create',
+        'expense_claims.view',
+        'expense_claims.create',
+    ];
+
     /** @return list<string> */
     public function personalPermissions(User $user, Organization $organization): array
     {
@@ -24,12 +35,15 @@ class PersonalPermissionService
                 ->all();
         }
 
-        return $user->roles()
+        $rolePermissions = $user->roles()
             ->where('user_roles.organization_id', $organization->getKey())
             ->with(['permissions' => fn ($query) => $query->whereIn('group', self::GROUPS)])
             ->get()
             ->flatMap->permissions
-            ->pluck('slug')
+            ->pluck('slug');
+
+        return collect(self::BASELINE_PERMISSIONS)
+            ->merge($rolePermissions)
             ->unique()
             ->values()
             ->all();
