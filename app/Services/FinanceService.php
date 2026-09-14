@@ -561,7 +561,13 @@ class FinanceService
 
     private function nextRenewalDate(CarbonImmutable $paidOn, string $billingCycle): CarbonImmutable
     {
-        return $billingCycle === 'monthly' ? $paidOn->addMonthNoOverflow() : $paidOn->addYearNoOverflow();
+        return match ($billingCycle) {
+            'monthly' => $paidOn->addMonthNoOverflow(),
+            'bimonthly' => $paidOn->addMonthsNoOverflow(2),
+            'quarterly' => $paidOn->addMonthsNoOverflow(3),
+            'annual' => $paidOn->addYearNoOverflow(),
+            default => throw new \InvalidArgumentException("Unsupported billing cycle: {$billingCycle}"),
+        };
     }
 
     private function audit(Organization $organization, ?User $actor, string $action, object $subject, array $values): void

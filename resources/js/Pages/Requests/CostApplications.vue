@@ -72,6 +72,14 @@ const statusLabels: Record<string, string> = {
     approved: "已通过",
     rejected: "已驳回",
 };
+const billingCycleLabels: Record<string, string> = {
+    monthly: "月付",
+    bimonthly: "双月付",
+    quarterly: "季付",
+    annual: "年付",
+};
+const billingCycleLabel = (cycle: string | null): string =>
+    cycle ? (billingCycleLabels[cycle] ?? cycle) : "未填写";
 const requestStatusLabel = (row: Row): string => {
     if (row.renewal_status === "cancelled") {
         return "已取消续费";
@@ -382,11 +390,7 @@ function submitCancelRenewal(): void {
                                                     : "手动续费"
                                             }}
                                             ·
-                                            {{
-                                                row.billing_cycle === "monthly"
-                                                    ? "月付"
-                                                    : "年付"
-                                            }}
+                                            {{ billingCycleLabel(row.billing_cycle) }}
                                         </p>
                                         <p
                                             v-if="
@@ -401,11 +405,7 @@ function submitCancelRenewal(): void {
                                                     : "手动续费"
                                             }}
                                             ·
-                                            {{
-                                                row.billing_cycle === "monthly"
-                                                    ? "月付"
-                                                    : "年付"
-                                            }}
+                                            {{ billingCycleLabel(row.billing_cycle) }}
                                         </p>
                                         <p
                                             v-if="
@@ -665,6 +665,8 @@ function submitCancelRenewal(): void {
                                     class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
                                 >
                                     <option value="monthly">月付</option>
+                                    <option value="bimonthly">双月付</option>
+                                    <option value="quarterly">季付</option>
                                     <option value="annual">年付</option>
                                 </select></label
                             >
