@@ -65,6 +65,7 @@ class PersonalPermissionBaselineTest extends TestCase
         $this->seed(RoleSeeder::class);
         $session = ['current_organization_id' => $organization->id];
         $managePermission = Permission::query()->where('slug', 'design_requests.manage')->firstOrFail();
+        $technicalManagePermission = Permission::query()->where('slug', 'technical_requests.manage')->firstOrFail();
 
         $this->actingAs($admin)->withSession($session)
             ->get(route('roles.index'))
@@ -97,12 +98,13 @@ class PersonalPermissionBaselineTest extends TestCase
                 ->where('role.data.permissions', fn (Collection $permissions) => $permissions->pluck('slug')->all() === ['design_requests.manage'])
                 ->where('permissions.data', fn (Collection $permissions) => ! $permissions->pluck('slug')->contains('design_requests.view')));
 
-        $this->put(route('roles.permissions.update', $role), ['permission_ids' => []])
+        $this->put(route('roles.permissions.update', $role), ['permission_ids' => [$technicalManagePermission->id]])
             ->assertRedirect()->assertSessionHasNoErrors();
 
         $role->refresh();
         $assignedSlugs = $role->permissions()->pluck('slug');
         $this->assertFalse($assignedSlugs->contains('design_requests.manage'));
+        $this->assertTrue($assignedSlugs->contains('technical_requests.manage'));
         $this->assertTrue(collect(PersonalPermissionService::BASELINE_PERMISSIONS)
             ->every(fn (string $permission) => $assignedSlugs->contains($permission)));
     }

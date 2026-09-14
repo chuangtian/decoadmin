@@ -25,7 +25,8 @@ class RoleController extends Controller
     {
         $this->authorize('viewAny', Role::class);
         $roles = $this->currentOrganization->require()->roles()
-            ->withCount(['permissions' => fn (Builder $query) => $this->configurablePermissionsQuery($query)])
+            ->withCount(['permissions' => fn ($query) => $query
+                ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS)])
             ->orderByDesc('is_system')
             ->orderBy('name')
             ->get();
@@ -112,9 +113,9 @@ class RoleController extends Controller
             : back()->with('success', '权限更新成功。');
     }
 
-    private function configurablePermissionsQuery(?Builder $query = null): Builder
+    private function configurablePermissionsQuery(): Builder
     {
-        return ($query ?? Permission::query())
+        return Permission::query()
             ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS);
     }
 
@@ -134,7 +135,8 @@ class RoleController extends Controller
     private function loadConfigurablePermissions(Role $role): Role
     {
         return $role->load([
-            'permissions' => fn (Builder $query) => $this->configurablePermissionsQuery($query),
+            'permissions' => fn ($query) => $query
+                ->whereNotIn('slug', PersonalPermissionService::BASELINE_PERMISSIONS),
         ]);
     }
 }
