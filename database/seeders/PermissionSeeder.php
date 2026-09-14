@@ -19,6 +19,11 @@ class PermissionSeeder extends Seeder
         'discounts' => '折扣管理',
         'affiliate' => '推荐与联盟',
         'design_requests' => '设计需求',
+        'technical_requests' => '技术需求',
+        'request_approvals' => '需求审批',
+        'expense_requests' => '费用申请',
+        'expense_claims' => '发票报销',
+        'marketing' => '营销自动化',
     ];
 
     /** @var array<string, string> */
@@ -152,6 +157,22 @@ class PermissionSeeder extends Seeder
         'design_requests.create',
         'design_requests.view_all',
         'design_requests.manage',
+        'technical_requests.view',
+        'technical_requests.create',
+        'technical_requests.view_all',
+        'technical_requests.manage',
+        'request_approvals.view',
+        'request_approvals.manage',
+        'expense_requests.view',
+        'expense_requests.create',
+        'expense_requests.view_all',
+        'expense_requests.manage',
+        'expense_claims.view',
+        'expense_claims.create',
+        'expense_claims.view_all',
+        'expense_claims.manage',
+        'marketing.view',
+        'marketing.manage',
     ];
 
     public function run(): void

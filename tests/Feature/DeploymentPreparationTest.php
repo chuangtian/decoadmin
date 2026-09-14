@@ -34,6 +34,24 @@ class DeploymentPreparationTest extends TestCase
         $this->assertStringNotContainsString('storage:link --force', $entrypoint);
     }
 
+    public function test_setup_refreshes_package_discovery_before_using_persistent_bootstrap_cache(): void
+    {
+        $entrypoint = file_get_contents(base_path('docker/php/entrypoint.sh'));
+
+        $configRemoval = strpos($entrypoint, 'rm -f bootstrap/cache/config.php');
+        $configClear = strpos($entrypoint, 'php artisan config:clear --no-interaction');
+        $packageDiscovery = strpos($entrypoint, 'php artisan package:discover --ansi --no-interaction');
+        $optimization = strpos($entrypoint, 'php artisan optimize --no-interaction');
+
+        $this->assertNotFalse($configRemoval);
+        $this->assertNotFalse($configClear);
+        $this->assertNotFalse($packageDiscovery);
+        $this->assertNotFalse($optimization);
+        $this->assertLessThan($configClear, $configRemoval);
+        $this->assertLessThan($packageDiscovery, $configClear);
+        $this->assertLessThan($optimization, $packageDiscovery);
+    }
+
     public function test_nginx_compresses_responses_and_caches_versioned_build_assets(): void
     {
         $config = file_get_contents(base_path('docker/nginx/default.conf'));

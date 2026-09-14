@@ -7,6 +7,7 @@ use App\Http\Middleware\InstalledApplicationMiddleware;
 use App\Http\Middleware\NormalizeShopifyAppProxyResponse;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
+use App\Http\Middleware\PersonalPermissionMiddleware;
 use App\Http\Middleware\ResolveCurrentStore;
 use App\Http\Middleware\ShopifyEmbeddedFrameHeaders;
 use App\Http\Middleware\StoreAccessMiddleware;
@@ -27,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
+        channels: __DIR__.'/../routes/channels.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -60,6 +62,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'app.installed' => InstalledApplicationMiddleware::class,
             'organization.access' => OrganizationAccessMiddleware::class,
             'permission' => PermissionMiddleware::class,
+            'personal.permission' => PersonalPermissionMiddleware::class,
             'store.context' => ResolveCurrentStore::class,
             'store.access' => StoreAccessMiddleware::class,
             'shopify.app-proxy' => VerifyShopifyAppProxy::class,

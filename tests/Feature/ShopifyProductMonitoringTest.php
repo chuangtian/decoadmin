@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BusinessNotification;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ShopifyConnection;
@@ -130,7 +131,7 @@ class ShopifyProductMonitoringTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_feishu_uses_matching_store_settings_and_can_be_disabled(): void
+    public function test_product_alert_sends_in_app_and_feishu_once_and_respects_scope(): void
     {
         [$store, $product, $actor] = $this->context();
         $this->mock(ShopifyProductMonitorReader::class)->shouldReceive('read')->andReturn($this->snapshot(), $this->snapshot(0));
@@ -142,10 +143,22 @@ class ShopifyProductMonitoringTest extends TestCase
             'feishu_enabled' => true, 'feishu_webhook_url' => 'https://open.feishu.cn/open-apis/bot/v2/hook/test', 'notify_product_monitor' => true]);
         Http::fake(['https://open.feishu.cn/*' => Http::response(['code' => 0])]);
         $alert = StoreAlert::sole();
+
+        $viewer = User::factory()->create(['email_verified_at' => now()]);
+        $store->organization->users()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+        $store->members()->attach($viewer, ['status' => 'active', 'joined_at' => now()]);
+
         app(StoreAlertNotificationService::class)->deliver($alert);
         app(StoreAlertNotificationService::class)->deliver($alert->fresh());
-        Http::assertSentCount(1);
         $this->assertSame('sent', $alert->fresh()->delivery_status);
+        $this->assertEqualsCanonicalizing(['in_app', 'feishu'], $alert->fresh()->context['notification_channels']);
+        $notification = BusinessNotification::query()->where('subject_type', StoreAlert::class)->where('subject_id', $alert->id)->sole();
+        $this->assertSame($actor->id, $notification->user_id);
+        $this->assertSame($store->organization_id, $notification->organization_id);
+        $this->assertFalse(BusinessNotification::query()->where('user_id', $viewer->id)->exists());
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://open.feishu.cn/open-apis/bot/v2/hook/test'
+            && str_contains((string) data_get($request->data(), 'content.text'), '店铺：Test'));
     }
 
     public function test_reader_paginates_variants_and_locations_and_only_issues_queries(): void

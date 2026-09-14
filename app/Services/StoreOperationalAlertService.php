@@ -10,6 +10,8 @@ use App\Models\StoreSyncState;
 use App\Models\SyncJob;
 use App\Models\WebhookEvent;
 use App\Services\Advertising\AdvertisingChannelSyncService;
+use App\Services\MetaAds\MetaAdsSyncService;
+use App\Support\SafeDiagnosticMessage;
 use App\Support\StoreDateTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -114,6 +116,7 @@ class StoreOperationalAlertService
             ->get()
             ->sum(function (SyncJob $job) use ($store): int {
                 $advertising = str_starts_with($job->type, 'advertising_channel:');
+                $metaAds = $job->type === MetaAdsSyncService::SYNC_TYPE;
                 $channel = $advertising ? substr($job->type, strlen('advertising_channel:')) : null;
                 $failure = (array) data_get($job->payload, 'failure', []);
                 if ($channel === 'criteo' && ($failure['transient'] ?? false)
@@ -132,8 +135,8 @@ class StoreOperationalAlertService
                     'sync',
                     SyncJob::class,
                     $job->id,
-                    $advertising ? 'advertising_channel_sync_failed' : ($job->error_code ?: 'shopify_sync_failed'),
-                    $advertising ? $label.' 广告数据同步失败' : 'Shopify 数据同步失败',
+                    $advertising ? 'advertising_channel_sync_failed' : ($job->error_code ?: ($metaAds ? 'meta_ads_sync_failed' : 'shopify_sync_failed')),
+                    $advertising ? $label.' 广告数据同步失败' : ($metaAds ? 'Meta Ads 数据同步失败' : 'Shopify 数据同步失败'),
                     $message,
                     'error',
                     [
@@ -163,13 +166,16 @@ class StoreOperationalAlertService
                 $job = $state->lastJob;
 
                 if ($state->status === 'running' && $job?->started_at?->lt(now()->subMinutes($stalledAfter))) {
+                    $title = $state->sync_type === MetaAdsSyncService::SYNC_TYPE
+                        ? 'Meta Ads 同步任务长时间无进展'
+                        : 'Shopify 同步任务长时间无进展';
                     $created += (int) $this->record(
                         $store,
                         'sync',
                         SyncJob::class,
                         $job->id,
                         'sync_stalled',
-                        'Shopify 同步任务长时间无进展',
+                        $title,
                         "{$state->sync_type} 同步已运行超过 {$stalledAfter} 分钟。",
                         'critical',
                         [
@@ -183,13 +189,16 @@ class StoreOperationalAlertService
 
                 if (! str_starts_with($state->sync_type, 'advertising_channel:')
                     && $state->consecutive_failures >= max(1, (int) config('shopify.scheduled_sync.max_attempts', 3))) {
+                    $title = $state->sync_type === MetaAdsSyncService::SYNC_TYPE
+                        ? 'Meta Ads 同步连续失败'
+                        : 'Shopify 同步连续失败';
                     $created += (int) $this->record(
                         $store,
                         'sync',
                         StoreSyncState::class,
                         $state->id,
                         'sync_max_attempts_reached',
-                        'Shopify 同步连续失败',
+                        $title,
                         "{$state->sync_type} 同步已连续失败 {$state->consecutive_failures} 次。",
                         'critical',
                         [
@@ -228,12 +237,6 @@ class StoreOperationalAlertService
 
     private function sanitize(string $message): string
     {
-        $sanitized = preg_replace([
-            '/\b(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\b\s*[:=]\s*[^\s,;]+/i',
-            '/\bBearer\s+[^\s,;]+/i',
-            '/\bshp(?:at|ss|ca|ua)_[A-Za-z0-9]+\b/i',
-        ], '[redacted]', $message) ?: '发生未知异常。';
-
-        return Str::limit($sanitized, 2000);
+        return SafeDiagnosticMessage::sanitize($message);
     }
 }

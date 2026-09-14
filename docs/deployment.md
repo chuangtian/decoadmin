@@ -189,7 +189,19 @@ SHOPIFY_SYNC_STALLED_AFTER_MINUTES=45
 
 ## Release procedure
 
-### Source of truth and reproducibility
+### Production updates: test → main → server
+
+用户于 2026-09-09 确认：**正式服更新必须先把 `test` 的修改合并到 `main`，再从合并后的 `main` 更新正式服务器。** `origin/test` 用于测试发布，`origin/main` 用于正式发布。以下是发布流程记录，本身不代表已获准执行本次发布。
+
+1. **核对发布范围与现状。** 获取最新 `origin/test`、`origin/main`，比较分支差异，并核对正式服当前提交、镜像和运行源码。若存在正式服独有的未提交修改，先备份并整理进 Git，处理其与待发布改动的关系，避免覆盖现有功能。
+2. **将 test 合并到 main。** 在干净、隔离的工作目录中，以最新 `origin/main` 为基线合并确认要发布的 `test` 提交，处理冲突，完成相应测试、类型检查和构建。将合并结果推送到 `main`；如仓库要求 PR，则通过 PR 完成合并。若远程分支并发更新，先重新合并并验证，不强制覆盖其他人的提交。
+3. **准备生产发布。** 确认合并已在远程 `main`，服务器获取 `origin/main`，记录完整提交 SHA，并从该提交的干净源码导出构建。正式服目录为 `/opt/decoadmin/production`，网址为 `https://admin.decomkt.com`；操作前确认实际 Compose 项目、配置文件和服务。只使用正式环境自身的密钥、数据库、存储与 Shopify App 配置。
+4. **备份、迁移与更新服务。** 备份生产数据库和配置，记录旧镜像及回滚方法，检查迁移和代码的兼容性。构建带有来源提交记录的镜像，按发布需要执行迁移和缓存更新，并一致地更新应用、Web 与相关队列/定时任务服务。不能把测试服目录、测试配置或额外未提交文件直接覆盖到正式服。
+5. **验收并记录。** 检查健康接口、登录、关键业务页面、队列和定时任务，确认发布后的源码与选定 `main` 提交一致。记录提交 SHA、镜像、迁移与验收结果；异常时按已准备的方案回滚，并先评估数据库结构兼容性，不盲目回退迁移。
+
+### Test releases
+
+#### Source of truth and reproducibility
 
 Use `origin/test` for test releases. The server repository is `/opt/decoadmin/repository`; `/opt/decoadmin/staging` may be an exported deployment directory without `.git`.
 

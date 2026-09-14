@@ -24,6 +24,10 @@ class SystemStatusService
         'shopify-webhook' => 'Webhook 处理',
         'shopify-sync' => 'Shopify 数据同步',
         'shopify-analytics' => 'Shopify 分析刷新',
+        'meta-ads-poll' => 'Meta Ads 报表轮询',
+        'meta-ads' => 'Meta Ads 数据同步',
+        'advertising-sync' => '广告渠道同步',
+        'analytics-sync' => '自然流量分析同步',
         'default' => '默认任务',
         'notifications' => '通知任务',
     ];
@@ -69,11 +73,15 @@ class SystemStatusService
         $incidents = $this->incidentSummary($user, $organization, $checkedAt);
         $serviceStates = collect($services)->pluck('status');
         $queueStates = collect($queues)->pluck('status');
+        $hasIncidents = collect($incidents)->contains(
+            fn (array $incident): bool => is_int($incident['count'] ?? null) && $incident['count'] > 0,
+        );
 
         $overallStatus = $serviceStates->contains('unavailable')
             ? 'degraded'
             : ($serviceStates->contains(fn (string $status): bool => in_array($status, ['warning', 'unknown'], true))
                 || $queueStates->contains(fn (string $status): bool => in_array($status, ['warning', 'unknown'], true))
+                || $hasIncidents
                 ? 'warning'
                 : 'healthy');
 

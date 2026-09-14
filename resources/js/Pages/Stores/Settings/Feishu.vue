@@ -55,14 +55,14 @@ const toggleFeishu = (event: Event) => {
             <header>
                 <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">当前店铺 · {{ store.name }}</p>
                 <h1 class="mt-2 text-2xl font-semibold text-slate-950">飞书设置</h1>
-                <p class="mt-2 text-sm text-slate-500">机器人通知按店铺独立配置；飞书开放平台应用由所有店铺共享。</p>
+                <p class="mt-2 text-sm text-slate-500">飞书开放平台应用由所有店铺共享；重点折扣和重点产品告警按店铺机器人配置发送。</p>
             </header>
 
             <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <header class="border-b border-slate-100 px-5 py-5 sm:px-7">
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-violet-700">店铺独立消息通道</p>
                     <h2 class="mt-1 text-xl font-semibold text-slate-950">飞书机器人</h2>
-                    <p class="mt-2 text-sm leading-6 text-slate-500">将当前店铺的异常发送到指定飞书群，配置只作用于当前店铺。</p>
+                    <p class="mt-2 text-sm leading-6 text-slate-500">机器人配置按店铺保存。重点折扣和重点产品告警会发送到飞书群；系统、连接和同步错误仅站内通知超级管理员和技术人员。</p>
                 </header>
 
                 <form class="p-5 sm:p-7" @submit.prevent="save">

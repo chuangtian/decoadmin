@@ -7,6 +7,7 @@ use App\Models\Permission;
 use App\Models\Store;
 use App\Services\AppCenter\ApplicationCenterNavigationService;
 use App\Services\AppCenter\ApplicationInstallationAccessService;
+use App\Services\Authorization\PersonalPermissionService;
 use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Database\Eloquent\Builder;
@@ -53,6 +54,14 @@ class HandleInertiaRequests extends Middleware
                     ->unique()
                     ->values()
                     ->all();
+
+            if ($organization) {
+                $permissions = collect($permissions)
+                    ->merge(app(PersonalPermissionService::class)->personalPermissions($user, $organization))
+                    ->unique()
+                    ->values()
+                    ->all();
+            }
 
             $organizations = $user->isSuperAdmin()
                 ? Organization::query()
@@ -110,6 +119,11 @@ class HandleInertiaRequests extends Middleware
                 'name' => $organization->name,
                 'code' => $organization->code,
             ] : null,
+            'realtime' => [
+                'enabled' => config('broadcasting.default') === 'reverb'
+                    && filled(config('broadcasting.connections.reverb.key')),
+                'key' => (string) config('broadcasting.connections.reverb.key', ''),
+            ],
             'currentStore' => $store ? [
                 'id' => $store->id,
                 'name' => $store->name,

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ $subject }}</title></head>
+<body style="margin:0;background:#f4f5f8;color:#172033;font-family:Arial,sans-serif;font-size:16px;line-height:1.6">
+<table role="presentation" style="width:100%;border-collapse:collapse"><tr><td style="padding:32px 16px">
+<table role="presentation" style="width:100%;max-width:600px;margin:auto;background:#fff;border-radius:16px;border:1px solid #e2e8f0"><tr><td style="padding:32px">
+@if ($preview)<p style="font-size:14px;color:#92400e">DEMO PREVIEW — no email will be sent from this preview.</p>@endif
+<p style="font-size:18px;font-weight:bold;color:{{ $accent }}">{{ $storeName }}</p>
+<h1 style="font-size:24px;line-height:1.35;margin:24px 0">{{ $subject }}</h1>
+<p style="font-weight:bold">{{ $productName }}</p>
+<div style="white-space:pre-line">{{ $body }}</div>
+@if ($reply)<blockquote style="margin:24px 0;padding:16px;border-left:4px solid {{ $accent }};background:#f8fafc">{{ $reply }}</blockquote>@endif
+</td></tr></table></td></tr></table></body></html>

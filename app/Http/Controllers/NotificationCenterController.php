@@ -21,10 +21,7 @@ class NotificationCenterController extends Controller
             'store' => ['id' => $store->id, 'name' => $store->name],
             'notifications' => $notifications->paginate($store, $request->only(['status', 'type'])),
             'filters' => $request->only(['status', 'type']),
-            'channels' => [
-                'mail' => (bool) $store->notificationSetting?->mail_enabled,
-                'feishu' => (bool) $store->notificationSetting?->feishu_enabled,
-            ],
+            'channels' => ['in_app' => true],
         ]);
     }
 

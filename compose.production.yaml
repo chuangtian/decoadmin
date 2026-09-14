@@ -62,6 +62,9 @@ services:
       app:
         condition: service_healthy
         restart: true
+      reverb:
+        condition: service_started
+        restart: true
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
       interval: 15s
@@ -112,6 +115,10 @@ services:
   scheduler:
     <<: *app
     command: ["php", "artisan", "schedule:work", "--verbose", "--no-interaction"]
+
+  reverb:
+    <<: *app
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
 
   pulse:
     <<: *app

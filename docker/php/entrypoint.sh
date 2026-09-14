@@ -26,6 +26,13 @@ if [ "${1:-}" = "/usr/local/bin/setup-app" ]; then
     if [ ! -e public/storage ] && [ ! -L public/storage ]; then
         php artisan storage:link --no-interaction
     fi
+    # bootstrap/cache is a persistent deployment volume. Remove the prior
+    # release's configuration before Artisan boots, then rebuild package data.
+    # An Artisan-only clear is too late when a newly installed provider cannot
+    # boot against the cached configuration from the previous release.
+    rm -f bootstrap/cache/config.php
+    php artisan config:clear --no-interaction
+    php artisan package:discover --ansi --no-interaction
     php artisan migrate --force --no-interaction
 
     if [ "${APP_ENV:-}" = "staging" ] || [ "${APP_ENV:-}" = "production" ]; then

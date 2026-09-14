@@ -17,6 +17,7 @@ use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BrandProfileController;
 use App\Http\Controllers\BusinessInsightsController;
+use App\Http\Controllers\BusinessNotificationController;
 use App\Http\Controllers\CampaignPlanningAssetController;
 use App\Http\Controllers\CampaignThemeController;
 use App\Http\Controllers\CodexApiTokenController;
@@ -50,6 +51,7 @@ use App\Http\Controllers\PersonalizationCheckoutExtensionController;
 use App\Http\Controllers\PersonalizationController;
 use App\Http\Controllers\PersonalizationEventController;
 use App\Http\Controllers\PersonalizationStrategyWorkflowController;
+use App\Http\Controllers\PersonalRequestController;
 use App\Http\Controllers\ProductMonitorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicPersonalizationController;
@@ -418,14 +420,58 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('context.store.update');
 });
 
+Route::middleware(['auth', 'verified', 'organization.access'])->group(function (): void {
+    Route::get('/business-notifications', [BusinessNotificationController::class, 'index'])
+        ->middleware('throttle:120,1')->name('business-notifications.index');
+    Route::patch('/business-notifications/read-all', [BusinessNotificationController::class, 'readAll'])
+        ->middleware('throttle:60,1')->name('business-notifications.read-all');
+    Route::patch('/business-notifications/{businessNotification}/read', [BusinessNotificationController::class, 'read'])
+        ->middleware('throttle:120,1')->name('business-notifications.read');
+    Route::get('/store-alerts/{storeAlert}/open', [StoreAlertController::class, 'open'])
+        ->middleware('throttle:120,1')->name('store-alerts.open');
+
+    Route::get('/design-requests', [DesignRequestController::class, 'index'])
+        ->middleware('personal.permission:design_requests.view')->name('design-requests.index');
+    Route::post('/design-requests', [DesignRequestController::class, 'store'])
+        ->middleware(['personal.permission:design_requests.create', 'throttle:30,1'])->name('design-requests.store');
+    Route::get('/design-requests/{designRequest}/attachments/{attachment}', [DesignRequestController::class, 'attachment'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:120,1'])->name('design-requests.attachments.show');
+    Route::post('/design-requests/{designRequest}/accept', [DesignRequestController::class, 'accept'])
+        ->middleware(['personal.permission:design_requests.manage', 'throttle:30,1'])->name('design-requests.accept');
+    Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
+        ->middleware(['personal.permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
+    Route::put('/design-requests/{designRequest}/review', [DesignRequestController::class, 'review'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:30,1'])->name('design-requests.review');
+    Route::put('/design-requests/{designRequest}/review', [DesignRequestController::class, 'review'])
+        ->middleware(['personal.permission:design_requests.view', 'throttle:30,1'])->name('design-requests.review');
+    Route::get('/technical-requests', [PersonalRequestController::class, 'technicalIndex'])
+        ->middleware('personal.permission:technical_requests.view')->name('technical-requests.index');
+    Route::post('/technical-requests', [PersonalRequestController::class, 'storeTechnical'])
+        ->middleware(['personal.permission:technical_requests.create', 'throttle:30,1'])->name('technical-requests.store');
+    Route::post('/technical-requests/{personalRequest}/accept', [PersonalRequestController::class, 'acceptTechnical'])
+        ->middleware(['personal.permission:technical_requests.manage', 'throttle:30,1'])->name('technical-requests.accept');
+    Route::put('/technical-requests/{personalRequest}/progress', [PersonalRequestController::class, 'progressTechnical'])
+        ->middleware(['personal.permission:technical_requests.manage', 'throttle:60,1'])->name('technical-requests.progress');
+    Route::get('/request-approvals', [PersonalRequestController::class, 'approvalIndex'])
+        ->middleware('personal.permission:request_approvals.view')->name('request-approvals.index');
+    Route::put('/request-approvals/{personalRequest}', [PersonalRequestController::class, 'review'])
+        ->middleware(['personal.permission:request_approvals.manage', 'throttle:60,1'])->name('request-approvals.review');
+    Route::get('/expense-claims', [PersonalRequestController::class, 'expenseIndex'])
+        ->middleware('personal.permission:expense_claims.view')->name('expense-claims.index');
+    Route::post('/expense-claims', [PersonalRequestController::class, 'storeExpense'])
+        ->middleware(['personal.permission:expense_claims.create', 'throttle:30,1'])->name('expense-claims.store');
+    Route::get('/expense-requests', [PersonalRequestController::class, 'expenseRequestIndex'])
+        ->middleware('personal.permission:expense_requests.view')->name('expense-requests.index');
+    Route::post('/expense-requests', [PersonalRequestController::class, 'storeExpenseRequest'])
+        ->middleware(['personal.permission:expense_requests.create', 'throttle:30,1'])->name('expense-requests.store');
+    Route::put('/expense-requests/{personalRequest}/cancel-renewal', [PersonalRequestController::class, 'cancelExpenseRequestRenewal'])
+        ->middleware(['personal.permission:expense_requests.view', 'throttle:30,1'])->name('expense-requests.cancel-renewal');
+    Route::get('/personal-requests/{personalRequest}/attachments/{attachment}', [PersonalRequestController::class, 'attachment'])
+        ->middleware('throttle:120,1')->name('personal-requests.attachments.show');
+});
+
 Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
-    Route::get('/design-requests', [DesignRequestController::class, 'index'])
-        ->middleware('permission:design_requests.view')->name('design-requests.index');
-    Route::post('/design-requests', [DesignRequestController::class, 'store'])
-        ->middleware(['permission:design_requests.create', 'throttle:30,1'])->name('design-requests.store');
-    Route::put('/design-requests/{designRequest}', [DesignRequestController::class, 'update'])
-        ->middleware(['permission:design_requests.manage', 'throttle:60,1'])->name('design-requests.update');
     Route::get('/brand-profile/{section?}', BrandProfileController::class)
         ->where('section', 'overview|login-emails|seo-accounts|plugins|business-licenses')
         ->middleware('permission:store.view')
@@ -719,9 +765,18 @@ Route::middleware(['auth', 'verified', 'organization.access', 'store.context'])-
     Route::post('/notifications/{storeAlert}/resend', [NotificationCenterController::class, 'resend'])->middleware('permission:alerts.manage')->name('notifications.resend');
 
     Route::get('/finance', [FinanceController::class, 'index'])->middleware('permission:finance.view')->name('finance.index');
+    Route::get('/finance/reimbursements', [FinanceController::class, 'reimbursements'])->middleware('permission:finance.view')->name('finance.reimbursements');
+    Route::post('/finance/reimbursements/{personalRequest}/payment', [FinanceController::class, 'recordExpenseReimbursement'])
+        ->middleware(['permission:finance.manage', 'throttle:60,1'])->name('finance.reimbursements.payment');
+    Route::get('/finance/renewals', [FinanceController::class, 'renewals'])->middleware('permission:finance.view')->name('finance.renewals');
+    Route::get('/finance/renewal-history', [FinanceController::class, 'renewalHistory'])->middleware('permission:finance.view')->name('finance.renewal-history');
+    Route::get('/finance/expense-requests/{personalRequest}/password', [FinanceController::class, 'revealExpenseRequestPassword'])
+        ->middleware(['permission:finance.manage', 'throttle:30,1'])->name('finance.expense-requests.password');
     Route::post('/finance/categories', [FinanceController::class, 'storeCategory'])->middleware('permission:finance.manage')->name('finance.categories.store');
     Route::post('/finance/entries', [FinanceController::class, 'storeEntry'])->middleware('permission:finance.manage')->name('finance.entries.store');
     Route::delete('/finance/entries/{financeEntry}', [FinanceController::class, 'destroyEntry'])->middleware('permission:finance.manage')->name('finance.entries.destroy');
+    Route::post('/finance/expense-requests/{personalRequest}/payment', [FinanceController::class, 'recordExpenseRequestPayment'])
+        ->middleware(['permission:finance.manage', 'throttle:60,1'])->name('finance.expense-requests.payment');
 
     Route::get('/store-settings/status', StoreStatusController::class)->middleware('permission:store.view')->name('store-settings.status');
     Route::get('/store-settings/mail', [StoreNotificationSettingsController::class, 'mail'])->middleware('permission:store.view')->name('store-settings.mail');

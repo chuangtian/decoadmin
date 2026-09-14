@@ -6,15 +6,16 @@ use App\Models\ShopifyProductMonitor;
 use App\Models\StoreAlert;
 use App\Models\StoreNotificationSetting;
 use App\Models\SyncJob;
+use App\Support\SafeDiagnosticMessage;
+use App\Support\StoreAlertPresentation;
 use App\Support\StoreDateTime;
-use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
 
 class StoreAlertNotificationService
 {
-    public function __construct(private MailManager $mail) {}
+    public function __construct(private BusinessNotificationService $notifications) {}
 
     public function deliver(StoreAlert $alert): void
     {
@@ -33,30 +34,46 @@ class StoreAlertNotificationService
 
             return;
         }
-        $alert->loadMissing('store.notificationSetting');
+        $alert->loadMissing(['store.organization', 'store.notificationSetting']);
         $settings = $alert->store->notificationSetting;
         $alert->increment('delivery_attempts');
         $alert->forceFill(['last_delivery_at' => now()])->save();
-        if (! $settings || ! $this->enabledForType($settings, $alert->type)) {
+        if ($settings && ! $this->enabledForType($settings, $alert->type)) {
             $alert->update(['delivery_status' => 'skipped', 'delivery_error' => null]);
 
             return;
         }
+
+        $organization = $alert->store->organization;
+        $recipientIds = $this->notifications->usersWithPermission(
+            $organization,
+            'alerts.view',
+            ['developer', 'super-admin'],
+            $alert->store,
+        );
         $context = $alert->context ?? [];
         $statuses = data_get($context, 'notification_channel_statuses', []);
-        $channels = collect($statuses)->filter(fn (string $status): bool => $status === 'sent')->keys()->all();
+        $statuses = is_array($statuses) ? $statuses : [];
+        $channels = collect($statuses)->filter(fn ($status): bool => $status === 'sent')->keys()->all();
         $errors = [];
-        if ($settings->mail_enabled && $settings->mail_recipients !== [] && ($statuses['mail'] ?? null) !== 'sent') {
-            try {
-                $this->sendMail($settings, $alert);
-                $channels[] = 'mail';
-                $statuses['mail'] = 'sent';
-            } catch (Throwable $exception) {
-                $errors[] = 'mail: '.$this->safeError($exception);
-                $statuses['mail'] = 'failed';
-            }
+
+        if ($recipientIds !== [] && ($statuses['in_app'] ?? null) !== 'sent') {
+            $this->notifications->notify(
+                $organization,
+                $recipientIds,
+                null,
+                'store_alert',
+                $alert->store->name.' · '.StoreAlertPresentation::title($alert),
+                $this->notificationMessage($alert),
+                route('store-alerts.open', $alert, false),
+                $alert,
+                "store-alert:{$alert->id}:attempt:{$alert->delivery_attempts}",
+            );
+            $channels[] = 'in_app';
+            $statuses['in_app'] = 'sent';
         }
-        if ($settings->feishu_enabled && filled($settings->feishu_webhook_url) && ($statuses['feishu'] ?? null) !== 'sent') {
+
+        if ($this->shouldSendFeishu($settings, $alert) && ($statuses['feishu'] ?? null) !== 'sent') {
             try {
                 $this->sendFeishu($settings, $alert);
                 $channels[] = 'feishu';
@@ -66,11 +83,14 @@ class StoreAlertNotificationService
                 $statuses['feishu'] = 'failed';
             }
         }
+
+        $channels = array_values(array_unique($channels));
+
         $alert->update([
             'delivery_status' => $errors === [] ? ($channels === [] ? 'skipped' : 'sent') : 'failed',
             'delivery_error' => $errors === [] ? null : implode('; ', $errors),
             'notified_at' => $channels === [] ? null : now(),
-            'context' => [...$context, 'notification_channels' => array_values(array_unique($channels)), 'notification_channel_statuses' => $statuses],
+            'context' => [...$context, 'notification_channels' => $channels, 'notification_channel_statuses' => $statuses],
         ]);
 
         if ($errors !== []) {
@@ -78,17 +98,17 @@ class StoreAlertNotificationService
         }
     }
 
-    private function sendMail(StoreNotificationSetting $settings, StoreAlert $alert): void
+    private function shouldSendFeishu(?StoreNotificationSetting $settings, StoreAlert $alert): bool
     {
-        $mailer = $this->mail->build(['transport' => 'smtp', 'scheme' => $settings->mail_encryption === 'ssl' ? 'smtps' : null, 'host' => $settings->mail_host, 'port' => $settings->mail_port, 'username' => $settings->mail_username ?: null, 'password' => $settings->mail_password ?: null, 'timeout' => 10]);
-        $mailer->raw($this->plainText($alert), function ($message) use ($settings, $alert): void {
-            $message->to($settings->mail_recipients)->from($settings->mail_from_address, $settings->mail_from_name ?: $alert->store->name)->subject("[{$alert->store->name}] {$alert->title}");
-        });
+        return $settings !== null
+            && in_array($alert->type, ['discount', 'product'], true)
+            && $settings->feishu_enabled
+            && filled($settings->feishu_webhook_url);
     }
 
     private function sendFeishu(StoreNotificationSetting $settings, StoreAlert $alert): void
     {
-        $payload = ['msg_type' => 'text', 'content' => ['text' => $this->plainText($alert)]];
+        $payload = ['msg_type' => 'text', 'content' => ['text' => $this->feishuMessage($alert)]];
         if (filled($settings->feishu_secret)) {
             $timestamp = (string) now()->timestamp;
             $payload['timestamp'] = $timestamp;
@@ -100,9 +120,30 @@ class StoreAlertNotificationService
         }
     }
 
-    private function plainText(StoreAlert $alert): string
+    private function feishuMessage(StoreAlert $alert): string
     {
-        return implode("\n", ['DecoAdmin 店铺异常告警', "店铺：{$alert->store->name}", "类型：{$alert->type}", "级别：{$alert->severity}", "标题：{$alert->title}", "说明：{$alert->message}", '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store)]);
+        return implode("\n", [
+            'DecoAdmin 店铺异常告警',
+            "店铺：{$alert->store->name}",
+            "类型：{$alert->type}",
+            "级别：{$alert->severity}",
+            '标题：'.StoreAlertPresentation::title($alert),
+            '说明：'.SafeDiagnosticMessage::sanitize($alert->message),
+            '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store),
+        ]);
+    }
+
+    private function notificationMessage(StoreAlert $alert): string
+    {
+        $message = SafeDiagnosticMessage::sanitize($alert->message);
+        $severity = match ($alert->severity) {
+            'critical' => '严重',
+            'error' => '错误',
+            'warning' => '警告',
+            default => $alert->severity,
+        };
+
+        return implode("\n", ["{$severity} · {$message}", '店铺时间：'.StoreDateTime::format($alert->occurred_at, $alert->store)]);
     }
 
     private function enabledForType(StoreNotificationSetting $settings, string $type): bool

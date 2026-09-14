@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\StoreAlert;
 use App\Services\StoreAlertQueryService;
 use App\Services\StoreOperationalAlertService;
+use App\Support\CurrentOrganization;
 use App\Support\CurrentStore;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,24 @@ use Inertia\Response;
 
 class StoreAlertController extends Controller
 {
+    public function open(Request $request, StoreAlert $storeAlert, CurrentOrganization $currentOrganization): RedirectResponse
+    {
+        $organization = $currentOrganization->require();
+        $user = $request->user();
+        $storeAlert->loadMissing('store');
+
+        abort_unless(
+            $user
+            && (int) $storeAlert->organization_id === (int) $organization->id
+            && $user->hasPermission('alerts.view', $organization, $storeAlert->store),
+            404,
+        );
+
+        $request->session()->put('current_store_id', $storeAlert->store_id);
+
+        return redirect()->route('alerts.index');
+    }
+
     public function index(Request $request, CurrentStore $currentStore, StoreAlertQueryService $alerts): Response
     {
         $filters = $request->validate([

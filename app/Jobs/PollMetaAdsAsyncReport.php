@@ -20,7 +20,9 @@ class PollMetaAdsAsyncReport implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 3600;
 
-    public int $tries = 100;
+    // The service owns the real time/poll limits. Keep the queue retry budget
+    // slightly larger so Laravel does not kill a healthy poller first.
+    public int $tries = 150;
 
     public function __construct(public readonly int $shardId)
     {

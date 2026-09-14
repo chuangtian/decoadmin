@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ContextDropdown from './ContextDropdown.vue';
+import BusinessNotificationBell from './BusinessNotificationBell.vue';
 import UsTimeClock from './UsTimeClock.vue';
 
 const emit = defineEmits<{ menu: [] }>();
@@ -13,6 +14,7 @@ const emit = defineEmits<{ menu: [] }>();
             </button>
             <div class="ml-auto flex min-w-0 items-center gap-4">
                 <UsTimeClock class="hidden md:block" />
+                <BusinessNotificationBell />
                 <ContextDropdown />
             </div>
         </div>

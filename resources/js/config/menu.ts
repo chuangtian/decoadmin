@@ -16,13 +16,30 @@ export interface MenuItem {
 
 export const menu: MenuItem[] = [
     {
+        name: '我的资料',
+        route: '/profile',
+        icon: 'users',
+        section: '个人',
+        permission: 'organization.view',
+    },
+    {
+        name: '需求和报销',
+        icon: 'design-request',
+        children: [
+            { name: '设计需求', route: '/design-requests', icon: 'design-request', permission: 'design_requests.view' },
+            { name: '技术需求', route: '/technical-requests', icon: 'system', permission: 'technical_requests.view' },
+            { name: '费用申请', route: '/expense-requests', icon: 'finance', permission: 'expense_requests.view' },
+            { name: '需求审批', route: '/request-approvals', icon: 'audit', permission: 'request_approvals.view' },
+            { name: '发票报销', route: '/expense-claims', icon: 'finance', permission: 'expense_claims.view' },
+        ],
+    },
+    {
         name: '工作台',
         icon: 'dashboard',
         section: '店铺运营',
         children: [
             { name: '概览', route: '/dashboard', icon: 'dashboard', permission: 'organization.view' },
             { name: '活动主题', route: '/campaign-themes', icon: 'campaign', permission: 'reports.view' },
-            { name: '设计需求', route: '/design-requests', icon: 'design-request', permission: 'design_requests.view' },
         ],
     },
     {
@@ -49,6 +66,7 @@ export const menu: MenuItem[] = [
         children: [
             { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
             { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
+            { name: 'Deco Reviews 评价管理', route: '/deco-reviews', icon: 'apps', permission: 'apps.view' },
         ],
     },
     {
@@ -159,9 +177,13 @@ export const menu: MenuItem[] = [
     },
     {
         name: '公司财务',
-        route: '/finance',
         icon: 'finance',
-        permission: 'finance.view',
+        children: [
+            { name: '财务', route: '/finance', icon: 'finance', permission: 'finance.view' },
+            { name: '报销', route: '/finance/reimbursements', icon: 'finance', permission: 'finance.view' },
+            { name: '续费', route: '/finance/renewals', icon: 'finance', permission: 'finance.view' },
+            { name: '续费历史记录', route: '/finance/renewal-history', icon: 'audit', permission: 'finance.view' },
+        ],
     },
     {
         name: '协作管理',

@@ -7,6 +7,8 @@ use App\Models\AuditLog;
 use App\Models\Store;
 use App\Models\StoreAlert;
 use App\Models\User;
+use App\Support\SafeDiagnosticMessage;
+use App\Support\StoreAlertPresentation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
@@ -21,8 +23,8 @@ class NotificationCenterService
             ->when(filled($filters['type'] ?? null), fn (Builder $query) => $query->where('type', $filters['type']))
             ->latest('occurred_at')->paginate(20)->withQueryString()->through(fn (StoreAlert $alert): array => [
                 'id' => $alert->id, 'uuid' => $alert->uuid, 'type' => $alert->type, 'severity' => $alert->severity,
-                'code' => $alert->code, 'title' => $alert->title, 'message' => $alert->message,
-                'delivery_status' => $alert->delivery_status, 'delivery_error' => $alert->delivery_error,
+                'code' => $alert->code, 'title' => StoreAlertPresentation::title($alert), 'message' => SafeDiagnosticMessage::sanitize($alert->message),
+                'delivery_status' => $alert->delivery_status, 'delivery_error' => filled($alert->delivery_error) ? SafeDiagnosticMessage::sanitize($alert->delivery_error, '通知发送失败。', 500) : null,
                 'delivery_attempts' => $alert->delivery_attempts, 'channels' => data_get($alert->context, 'notification_channels', []),
                 'occurred_at' => $alert->occurred_at?->toIso8601String(), 'notified_at' => $alert->notified_at?->toIso8601String(),
                 'last_delivery_at' => $alert->last_delivery_at?->toIso8601String(),
