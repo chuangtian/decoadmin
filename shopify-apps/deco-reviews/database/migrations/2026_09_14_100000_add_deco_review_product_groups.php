@@ -37,6 +37,21 @@ return new class extends Migration
                 $table->index(['organization_id', 'store_id', 'group_id'], 'dr_group_products_scope_idx');
             });
         }
+
+        // A previous interrupted MySQL migration may have committed the tables
+        // before Laravel recorded the migration. Resume safely and restore any
+        // index that was not reached before the interruption.
+        if (! Schema::hasIndex('deco_review_groups', ['organization_id', 'store_id', 'active'])) {
+            Schema::table('deco_review_groups', function (Blueprint $table) {
+                $table->index(['organization_id', 'store_id', 'active'], 'dr_groups_scope_active_idx');
+            });
+        }
+
+        if (! Schema::hasIndex('deco_review_group_products', ['organization_id', 'store_id', 'group_id'])) {
+            Schema::table('deco_review_group_products', function (Blueprint $table) {
+                $table->index(['organization_id', 'store_id', 'group_id'], 'dr_group_products_scope_idx');
+            });
+        }
     }
 
     public function down(): void
