@@ -11,7 +11,14 @@ import { fileURLToPath } from 'node:url';
  */
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const expectedScopes = 'read_products';
+// 必须与三份 shopify.app.*.toml 逐字一致，也必须等于 config/instagram_feed.php 里
+// required_scopes 与 optional_scopes 的并集（顺序同 toml）。
+//
+// write_metaobjects 只出现在 optional_scopes：它支撑主题编辑器里的展示组选择器
+// （app 自有的 metaobject definition + 条目）。放进 required_scopes 会让
+// assertRequiredScopes() 在每次建立内嵌会话时拒绝尚未重新授权的店铺，等于整个应用
+// 打不开；缺这个权限时正确的行为是选择器不更新，而不是同步与前台展示全部停摆。
+const expectedScopes = 'read_products,write_metaobjects';
 
 // 生产与测试是同一个 Shopify App（同一个 client_id）。一个 App 只有一份
 // application_url 与一组 webhook 地址，所以两套配置永远只能有一套生效：

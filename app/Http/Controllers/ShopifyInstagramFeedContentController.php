@@ -11,6 +11,7 @@ use App\Services\InstagramFeed\InstagramFeedEmbeddedSession;
 use App\Services\InstagramFeed\InstagramFeedPresenter;
 use App\Services\InstagramFeed\InstagramFeedPublisher;
 use App\Services\InstagramFeed\InstagramFeedStoreCredentials;
+use App\Services\InstagramFeed\InstagramGalleryDirectory;
 use App\Services\InstagramFeed\InstagramGalleryService;
 use App\Services\InstagramFeed\InstagramSyncService;
 use Illuminate\Http\JsonResponse;
@@ -45,6 +46,7 @@ class ShopifyInstagramFeedContentController extends Controller
         private InstagramSyncService $sync,
         private InstagramGalleryService $galleries,
         private InstagramFeedPublisher $publisher,
+        private InstagramGalleryDirectory $directory,
         private InstagramFeedStoreCredentials $credentials,
     ) {}
 
@@ -159,11 +161,13 @@ class ShopifyInstagramFeedContentController extends Controller
     /** 手动触发一次前台同步。展示组编排完成后不需要它，这里留给"前台没更新"时自助恢复。 */
     public function syncStorefrontNow(Request $request): JsonResponse
     {
+        // 这个按钮是「前台没跟上」时的自助恢复入口，所以顺带把主题编辑器的展示组
+        // 选项也重建一遍 —— 商家首次重新授权后补齐历史展示组也靠它。
         return $this->write($request, function (Store $store): string {
             $result = $this->publisher->publish($store, null);
 
             return "已把 {$result['galleries']} 个展示组、共 {$result['items']} 条内容同步到店铺前台。";
-        });
+        }, syncDirectory: true);
     }
 
     public function sync(Request $request): JsonResponse
@@ -275,6 +279,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $request,
             fn (Store $store): string => '已创建展示组「'.$this->galleries->create($store, $values['name'], null)->name.'」。',
             syncStorefront: true,
+            syncDirectory: true,
         );
     }
 
@@ -289,7 +294,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->rename($store, $gallery, $values['name'], null);
 
             return '已更新展示组名称。';
-        }, syncStorefront: true);
+        }, syncStorefront: true, syncDirectory: true);
     }
 
     public function destroyGallery(Request $request, InstagramGallery $gallery): JsonResponse
@@ -299,7 +304,7 @@ class ShopifyInstagramFeedContentController extends Controller
             $this->galleries->delete($store, $gallery, null);
 
             return '已删除展示组。';
-        }, syncStorefront: true);
+        }, syncStorefront: true, syncDirectory: true);
     }
 
     public function addGalleryItems(Request $request, InstagramGallery $gallery): JsonResponse
@@ -372,8 +377,12 @@ class ShopifyInstagramFeedContentController extends Controller
      *
      * @param  callable(Store): string  $action
      */
-    private function write(Request $request, callable $action, bool $syncStorefront = false): JsonResponse
-    {
+    private function write(
+        Request $request,
+        callable $action,
+        bool $syncStorefront = false,
+        bool $syncDirectory = false,
+    ): JsonResponse {
         try {
             $store = $this->session->store($request);
             $message = $action($store);
@@ -381,6 +390,12 @@ class ShopifyInstagramFeedContentController extends Controller
             // 前台数据没有"发布"按钮：凡是会改变前台展示的动作，完成后立刻同步一次。
             if ($syncStorefront) {
                 $message .= $this->syncStorefront($store);
+            }
+
+            // 主题编辑器里的展示组选择器读的是 metaobject 条目，只有增删改组会改变
+            // 那份选项，加/移组内内容不会，所以不在每个写操作上都打 Shopify。
+            if ($syncDirectory) {
+                $message .= $this->directory->syncQuietly($store);
             }
 
             return response()->json(['data' => ['message' => $message]]);

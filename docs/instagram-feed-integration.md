@@ -358,11 +358,56 @@ POST /api/shopify-app/instagram-feed/webhooks
 
 Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取。
 
-**展示组用下拉框 `gallery_slot` 选（1–10），按序号取 `feed.galleries` 的第 N 个组**，不再手填标识。区块设置的 schema 是构建期静态 JSON、一个 app 版本服务所有店铺，所以选项只能是序号，没法列出商家自己的组名（[Shopify 的动态数据源不支持 select/radio](https://stackoverflow.com/questions/75565836/how-to-use-shopify-metafields-in-the-theme-app-block-dynamic-source-settings)）。为此主题编辑器预览里保留 `.igv__hint`，把「序号 → 组名」对照直接印出来，商家不用回应用里查。**代价：在应用里删掉一个组会让它后面所有组的序号平移**，已选中的区块会跟着换内容。序号越界时只在主题编辑器里提示，店面渲染空。
+### 展示组怎么指定
 
-`galleries` 的顺序由 `InstagramFeedPublisher` 按 `position, created_at` 保证稳定，序号才有意义。顶层 `items` 仍是旧版兼容字段，等价于第一个组，`galleries` 为空时兜底。
+**目标形态是主题编辑器里的一个选择器，直接列出商家自己的组名，不用打字。** 唯一能做到这件事的是 Shopify 的 `metaobject` 设置类型。
 
-前台渲染：**只有轮播一种布局**（`layout` / `full_width` / `max_width` / `gap` 四个设置已删除，宽度始终撑满容器，间距固定 12px 由 CSS 变量 `--igv-gap` 提供）。每个条目就是一张封面图（`<img>`，没有 `<video>`）。`show_posted_at` 控制是否在封面下方显示发布日期。
+区块设置的 schema 是构建期静态 JSON，一个 app 版本服务所有店铺，所以 `select` 的 options 里放不进某个店铺的组名（[动态数据源不支持 select/radio](https://stackoverflow.com/questions/75565836/how-to-use-shopify-metafields-in-the-theme-app-block-dynamic-source-settings)）。走过两条弯路，都记在这里免得再来一遍：
+
+- **序号 select（`Gallery 1`–`Gallery 10`）**：商家在设置面板里根本看不出 6 号是哪个组，选到越界的号只渲染空白，比手填更难用，删组还会让后面所有序号平移。
+- **文本框填组名**：能用，但每加一个区块都要回应用里核对名字再手打一遍。
+
+[官方 input settings 文档](https://shopify.dev/docs/storefronts/themes/architecture/settings/input-settings)明确支持 app 在 app block 里用自己的 app-owned metaobject definition 配 `metaobject` 设置，给出的范式就是「建 definition → app 写条目 → 区块用 metaobject 设置 → Liquid 读选中值」。
+
+实现落在 `InstagramGalleryDirectory`：
+
+| 项 | 值 | 为什么 |
+| --- | --- | --- |
+| definition type | `$app:instagram_gallery` | `$app:` 由 Shopify 解析成 `app--<app-id>--instagram_gallery`，本 App 独占，商家改不了结构。**不要自己拼 app id** |
+| `displayNameKey` | `gallery_name` | 选择器按它显示条目。指错就等于让商家看随机 handle，回到手抄标识那个老问题 |
+| 字段 | `gallery_name`、`gallery_handle` | 匹配用字段刻意不叫 `handle`：metaobject 在 Liquid 里本身就有内置的 `system.handle`，同名容易读错 |
+| `access.storefront` | `PUBLIC_READ` | 少了它主题渲染时读不到条目 |
+| capabilities | 不启用 `publishable` | 启用会引入 DRAFT/ACTIVE 状态，条目还得额外发布一次 |
+| 条目 handle | 展示组的 `handle` | 店铺内已唯一，主题里能直接反查回同一个组，不用再存映射 |
+
+**两个前提缺一不可，否则主题编辑器把那个设置直接显示成错误**：definition 已存在于店铺上，且对 storefront 可读。社区里那些「app-owned metaobject 在 Liquid 里读不到」的案例大概率就是漏了后者。
+
+由此得出**不可颠倒的上线顺序**（`shopify app deploy` 会把配置与扩展一起发，所以必须分两次）：
+
+1. 部署后端（含 `InstagramGalleryDirectory` 与新 scope 声明）；
+2. `shopify app deploy` 发布 scope 变更，此时扩展仍是文本框版本；
+3. 商家打开一次应用，批准新增的 `write_metaobjects`；
+4. `php artisan instagram-feed:sync-gallery-directory` 建 definition、补齐历史展示组，并确认 `access.storefront` 已是 `PUBLIC_READ`；
+5. 这一步通过之后，才发布带 `metaobject` 设置的扩展。
+
+**`write_metaobjects` 只进 `optional_scopes`，绝不能进 `required_scopes`。** `assertRequiredScopes()` 是在 `ShopifyInstagramFeedAppService::bootstrap()` 里跑的，而 bootstrap 每次建立内嵌会话都会走 —— 放进 `required_scopes` 会让尚未重新授权的店铺连应用都打不开。选择器只是主题编辑器里的便利，缺权限时正确行为是选项不更新，而不是让同步、转存、前台展示全部停摆。`shopify.app.*.toml` 的 `scopes` 必须等于两个列表的并集，这条由 `validate-project.mjs` 的 `expectedScopes` 把关（注意它是硬编码字符串，改 config 时要手动同步）。
+
+同步时机：只有**增删改展示组**会改变选项集合，所以 `write()` 的 `syncDirectory` 只在 `storeGallery` / `updateGallery` / `destroyGallery` 与手动同步按钮上打开；往组里加/移内容不碰 Shopify。`sync()` 是全量对齐而非增量 —— 条目可能被人在 Shopify 后台手工删掉，也可能因上次中途失败而残留，每次按当前展示组重建一遍比维护增量状态可靠。失败一律不抛（`syncQuietly`），因为主动作已经生效，不能让商家以为组没改成。
+
+`galleries` 的顺序由 `InstagramFeedPublisher` 按 `position, created_at` 保证稳定。顶层 `items` 仍是旧版兼容字段，等价于第一个组，`galleries` 为空时兜底。
+
+前台渲染：**只有轮播一种布局**（`layout` / `full_width` / `max_width` / `gap` 四个设置已删除）。每个条目就是一张封面图（`<img>`，没有 `<video>`）。`show_posted_at` 控制是否在封面下方显示发布日期。
+
+容器尺寸写死在 CSS 里，不再作为区块设置暴露：
+
+| 断点 | width | max-width | padding |
+| --- | --- | --- | --- |
+| 桌面 | 90% | 1400px | 上下 30px，左右 0 |
+| ≤749px | 100% | — | 上下 30px，左右 15px |
+
+上下 30px 两端通用；左右内边距只在移动端出现 —— 桌面是 90% 宽度居中，两侧本来就有留白，再加左右 padding 会双重缩进。`.igv` 上的 `box-sizing: border-box` 保证 padding 算在声明宽度以内，所以移动端 `100%` 不会溢出。条目宽度的 `calc` 以 `.igv__list` 的内容区为基准，padding 变化后列宽自动跟着对。间距固定 12px，由 CSS 变量 `--igv-gap` 提供。
+
+桌面端箭头用 `translate(-40%, -50%)` 会伸出轨道边缘约 16px，落在 `.igv` 的左右 padding 之外。90% 宽度居中留出的空白足够容纳，不会被视口裁掉；如果外层主题 section 加了 `overflow: hidden`，箭头才会被切。
 
 **整个扩展是全英文的**（schema 的 name/label/info/options、`aria-label`、空态与 hint 文案、弹窗按钮、JS 里生成的文案，连注释也是英文）：它渲染在商家店面和主题编辑器里，出现中文就是 bug。弹窗里的日期用 `toLocaleDateString("en-US", …)` 锁定英文月份，不跟随访客语言。
 
@@ -395,7 +440,7 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 
 圆点按「屏」生成而不是按条目 —— 列数由 CSS 变量控制，条目数和可翻页数不是一回事，所以页数只能在浏览器里按 `scrollWidth / clientWidth` 算，服务端渲染不出来。图片是懒加载的，`window.load` 后会重算一次页数。
 
-`instagram-videos.js` 受 Shopify app block 的 **10KB 硬限额**约束（超了直接发布失败），当前 9932 字节。改完必须重新量：`(Get-Item …\instagram-videos.js).Length`。这也是注释写英文、分节线短的原因之一：一个中文字符 3 字节，注释里的中文曾经占掉一千多字节的余量。
+`instagram-videos.js` 当前 9932 字节。[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)里 JS 的 10KB 标的是 **Suggested**，而且按压缩后算；真正 Enforced 的是全部文件 10MB、block 数 30、locale 文件数 100 与单个 15KB、**Liquid 跨所有文件 100KB**。但这个扩展确实在 12105 字节时发布失败过一次，原因没查清（不排除是当时另有校验问题），所以仍把 10000 字节未压缩当自律线，改完重新量：`(Get-Item …\instagram-videos.js).Length`。这也是注释写英文的附带好处：一个中文字符 3 字节，注释里的中文曾经占掉一千多字节。
 
 ## 同步与转存
 
