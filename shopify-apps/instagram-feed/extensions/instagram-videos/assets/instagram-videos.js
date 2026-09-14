@@ -1,16 +1,16 @@
 /*
- * Instagram 内容 app block：轮播/网格 + 点击弹窗看原帖。
+ * Instagram content app block: carousel + popup with the original post.
  *
- * 只展示转存到 R2 的封面图，不自己播视频 —— Instagram 对部分 Reels（用了平台授权
- * 音乐、或关闭了「允许下载」）不返回视频文件地址。点击封面弹窗里嵌 Instagram 官方
- * embed：视频与轮播由 Instagram 自己渲染，不涉及版权，也不需要令牌。
- *
- * 弹窗骨架由 liquid 的 <template> 提供，这里只克隆。注意本文件受 Shopify app block
- * 的 10KB 限额约束，加代码前先看体积。
+ * Covers only. Instagram withholds the video file URL for Reels with licensed
+ * audio or downloads turned off, so the popup embeds Instagram's own player.
+ * Skeleton comes from the liquid <template>; this file just clones it.
+ * Shopify caps this file at 10KB - measure before adding code. English only.
  */
 (function () {
   "use strict";
 
+  var IG_ORIGIN = "https://www.instagram.com";
+  var DATE_OPTS = { year: "numeric", month: "short", day: "numeric" };
   var box = null;
   var state = { items: [], index: 0, opener: null };
 
@@ -30,11 +30,9 @@
     return scope.querySelector("[data-igv-" + name + "]");
   }
 
-  /* ----------------------- 轮播 ----------------------- */
+  /* --- Carousel --- */
 
   function setupCarousel(root) {
-    if (root.dataset.layout !== "carousel") return;
-
     var list = pick(root, "list");
     if (!list) return;
 
@@ -43,7 +41,7 @@
     var dotsBox = pick(root, "dots");
     var pageCount = 0;
 
-    // 一次翻一条（含间距）而不是一整屏：桌面端一屏 4 条时整屏翻会跳过太多。
+    // One post per click (gap included): a full-page jump skips too much.
     function stepSize() {
       var item = list.querySelector(".igv__item");
       if (!item) return list.clientWidth;
@@ -52,7 +50,7 @@
       return item.getBoundingClientRect().width + gap;
     }
 
-    // 圆点按「屏」算而不是按条目：列数由 CSS 变量控制，条目数不等于可翻页数。
+    // Dots count pages, not posts: columns come from a CSS variable.
     function pages() {
       if (list.clientWidth <= 0) return 1;
       return Math.max(1, Math.ceil(list.scrollWidth / list.clientWidth));
@@ -79,8 +77,8 @@
         var dot = document.createElement("button");
         dot.type = "button";
         dot.className = "igv__dot";
-        // 用 aria-current 而不是 role="tab"：tab 角色要求配套 tabpanel，这里没有。
-        dot.setAttribute("aria-label", "第 " + (i + 1) + " 屏");
+        // aria-current, not role="tab": a tab role needs a matching tabpanel.
+        dot.setAttribute("aria-label", "Page " + (i + 1));
         dot.dataset.page = String(i);
         dot.addEventListener("click", onDotClick);
         dotsBox.appendChild(dot);
@@ -92,7 +90,7 @@
       var current = activePage();
       var dots = dotsBox.children;
       for (var i = 0; i < dots.length; i++) {
-        // 不 disable 当前项：那会把它移出 Tab 序列。点当前页只是滚回原位。
+        // Never disable the current dot: that removes it from the tab order.
         if (i === current) dots[i].setAttribute("aria-current", "true");
         else dots[i].removeAttribute("aria-current");
       }
@@ -100,13 +98,13 @@
 
     var update = throttle(function () {
       var max = list.scrollWidth - list.clientWidth - 2;
-      // 到边界用禁用而非隐藏：隐藏会让另一侧按钮的位置跳动。
+      // Disabled, not hidden: hiding makes the opposite arrow jump.
       if (prev) prev.disabled = list.scrollLeft <= 2;
       if (next) next.disabled = list.scrollLeft >= max;
       syncDots();
     });
 
-    // 视口变化会改变一屏条数，页数跟着变，圆点必须重建。
+    // A viewport change alters posts per view, so the dots must be rebuilt.
     var rebuild = throttle(function () {
       if (pages() !== pageCount) buildDots();
       update();
@@ -125,14 +123,14 @@
 
     list.addEventListener("scroll", update);
     window.addEventListener("resize", rebuild);
-    // 图片懒加载，载入后 scrollWidth 才是最终值。
+    // Images are lazy loaded; scrollWidth is only final once they are in.
     window.addEventListener("load", rebuild);
 
     buildDots();
     update();
   }
 
-  /* --------------------- 帖子弹窗 --------------------- */
+  /* --- Post popup --- */
 
   function mount(root) {
     if (box) return box;
@@ -146,6 +144,7 @@
       root: node,
       frame: pick(node, "embed"),
       loading: pick(node, "loading"),
+      date: pick(node, "date"),
       caption: pick(node, "caption"),
       links: pick(node, "links"),
       prev: pick(node, "lb-prev"),
@@ -172,6 +171,22 @@
       if (event.key === "ArrowRight") show(state.index + 1);
     });
 
+    // The embed is cross-origin: its height can only come from the message it
+    // posts to us. Without it the frame keeps a guessed height and clips.
+    window.addEventListener("message", function (event) {
+      if (event.origin !== IG_ORIGIN || box.root.hidden) return;
+      var data = event.data;
+      if (typeof data === "string") {
+        try {
+          data = JSON.parse(data);
+        } catch (error) {
+          return;
+        }
+      }
+      var height = data && data.details && data.details.height;
+      if (height > 0) box.frame.parentNode.style.height = height + "px";
+    });
+
     return box;
   }
 
@@ -195,16 +210,24 @@
     state.index = ((index % total) + total) % total;
     var item = items[state.index];
 
-    if (item.embed_url) {
+    // Uncaptioned embed on purpose: the caption lives in the right column, and
+    // the captioned variant would repeat it inside the frame.
+    var src = (item.embed_url || "").replace("/embed/captioned", "/embed/");
+    var frameBox = box.frame.parentNode;
+    frameBox.style.height = "";
+    frameBox.hidden = !src;
+    if (src) {
       box.loading.hidden = false;
-      box.frame.hidden = false;
-      box.frame.src = item.embed_url;
+      box.frame.src = src;
     } else {
-      // 没有可嵌地址时只留下面的外链，不留一个空白 iframe。
-      box.frame.hidden = true;
       box.frame.removeAttribute("src");
-      box.loading.hidden = true;
     }
+
+    var posted = item.posted_at ? new Date(item.posted_at) : null;
+    var dated = posted && !isNaN(posted.getTime());
+    // Locale pinned to en-US so the popup never picks up a translated month.
+    box.date.textContent = dated ? posted.toLocaleDateString("en-US", DATE_OPTS) : "";
+    box.date.hidden = !dated;
 
     box.caption.textContent = item.caption || "";
     box.caption.hidden = !item.caption;
@@ -212,11 +235,11 @@
     box.links.textContent = "";
     (item.products || []).forEach(function (product) {
       if (product && product.url) {
-        box.links.appendChild(link(product.url, product.title || "查看商品"));
+        box.links.appendChild(link(product.url, product.title || "View product"));
       }
     });
     if (item.permalink) {
-      box.links.appendChild(link(item.permalink, "在 Instagram 查看", true));
+      box.links.appendChild(link(item.permalink, "View on Instagram", true));
     }
 
     box.prev.hidden = total < 2;
@@ -226,7 +249,8 @@
   function close() {
     if (!box || box.root.hidden) return;
 
-    // 必须清 src：留着的话 Instagram 的 iframe 会继续在后台跑（有声视频尤其明显）。
+    // Clearing src matters: otherwise Instagram's iframe keeps running in the
+    // background, which is obvious with a video that has audio.
     box.frame.removeAttribute("src");
     box.root.hidden = true;
     document.documentElement.style.overflow = "";
@@ -236,7 +260,7 @@
   }
 
   function setupLightbox(root) {
-    // 商家选了「跳转到 Instagram 帖子」时，封面已是服务端渲染的 <a>，这里不接管。
+    // In link mode the cover is already a server-rendered <a>; JS stays out.
     if (root.dataset.clickAction !== "modal") return;
 
     var script = pick(root, "json");
@@ -264,7 +288,7 @@
     });
   }
 
-  /* ---------------------- 初始化 ---------------------- */
+  /* --- Bootstrap --- */
 
   function init(root) {
     if (!root || root.dataset.igvReady === "true") return;
@@ -286,7 +310,7 @@
     initAll();
   }
 
-  // 主题编辑器里增删/移动区块后重新初始化
+  // Re-init after blocks are added, moved or selected in the theme editor.
   document.addEventListener("shopify:section:load", function (event) {
     initAll(event.target);
   });
