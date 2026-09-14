@@ -35,6 +35,11 @@ type Row = {
     payment_reference: string | null;
     attachments: Array<{ uuid: string; name: string; url: string }>;
 };
+type Applicant = {
+    id: number;
+    name: string;
+    job_title: string | null;
+};
 type Page = {
     data: Row[];
     total: number;
@@ -44,7 +49,12 @@ const props = defineProps<{
     scope: "mine" | "all";
     canCreate: boolean;
     filters: { status: string };
-    options: { categories: string[] };
+    options: {
+        categories: string[];
+        canChooseApplicant?: boolean;
+        currentApplicantId?: number;
+        applicants?: Applicant[];
+    };
     today: string;
     requests: Page;
 }>();
@@ -102,8 +112,26 @@ const form = useForm({
     software_payment_method: "",
     renewal_mode: "manual",
     billing_cycle: "annual",
+    applicant_id: "",
     images: [] as File[],
 });
+const applicantOptions = computed(() => props.options.applicants ?? []);
+const currentApplicantId = computed(() =>
+    String(props.options.currentApplicantId ?? "")
+);
+const canChooseApplicant = computed(() => props.options.canChooseApplicant === true);
+
+function formatApplicantOption(applicant: Applicant): string {
+    return `${applicant.name}${applicant.job_title ? `（${applicant.job_title}）` : ""}`;
+}
+
+function syncApplicantDefaults(): void {
+    if (!canChooseApplicant.value) {
+        form.applicant_id = "";
+        return;
+    }
+    form.applicant_id = currentApplicantId.value;
+}
 
 const cancelRow = ref<Row | null>(null);
 const cancelForm = useForm({
@@ -122,6 +150,9 @@ function selectFiles(event: Event): void {
     form.images = files.value;
 }
 function submit(): void {
+    if (canChooseApplicant.value && !form.applicant_id) {
+        syncApplicantDefaults();
+    }
     form.post("/expense-requests", {
         forceFormData: true,
         onSuccess: () => {
@@ -133,8 +164,13 @@ function submit(): void {
             form.approval_required = true;
             form.renewal_mode = "manual";
             form.billing_cycle = "annual";
+            form.applicant_id = canChooseApplicant.value ? currentApplicantId.value : "";
         },
     });
+}
+function openCreateDialog(): void {
+    syncApplicantDefaults();
+    createOpen.value = true;
 }
 
 function isAfterOrEqual(dateA: string, dateB: string): boolean {
@@ -212,7 +248,7 @@ function submitCancelRenewal(): void {
                 <button
                     v-if="canCreate"
                     class="h-11 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white hover:bg-orange-700"
-                    @click="createOpen = true"
+                    @click="openCreateDialog"
                 >
                     + 发起费用申请
                 </button>
@@ -494,6 +530,23 @@ function submitCancelRenewal(): void {
                     </div>
                     <div class="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
                     <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                        <label
+                            v-if="canChooseApplicant"
+                            class="text-sm font-semibold text-slate-700 sm:col-span-2"
+                            >申请人<select
+                                v-model="form.applicant_id"
+                                required
+                                class="mt-2 h-11 w-full rounded-xl border-slate-200"
+                            >
+                            <option
+                                v-for="applicant in applicantOptions"
+                                :key="applicant.id"
+                                :value="String(applicant.id)"
+                            >
+                                {{ formatApplicantOption(applicant) }}
+                            </option>
+                            </select></label
+                        >
                         <label
                             class="text-sm font-semibold text-slate-700 sm:col-span-2"
                             >申请事项<input

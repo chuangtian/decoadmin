@@ -477,6 +477,73 @@ class PersonalRequestWorkflowTest extends TestCase
             ->assertStatus(409);
     }
 
+    public function test_super_admin_can_create_a_cost_application_for_an_active_organization_member(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-14 10:00:00');
+        [$organization, $store] = $this->context();
+        $employee = $this->user($organization, $store, 'operator', '历史申请员工');
+        $superAdmin = $this->user($organization, $store, 'super-admin', '代填管理员');
+        $outsider = User::factory()->create(['name' => '其他组织成员', 'status' => 'active']);
+
+        $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
+            ->get(route('expense-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('options.canChooseApplicant', false)
+                ->where('options.currentApplicantId', $employee->id)
+                ->has('options.applicants', 0));
+
+        $this->actingAs($superAdmin)->withSession($this->contextSession($organization, $store))
+            ->get(route('expense-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('options.canChooseApplicant', true)
+                ->where('options.currentApplicantId', $superAdmin->id)
+                ->has('options.applicants', 2)
+                ->where('options.applicants.0.name', '代填管理员')
+                ->where('options.applicants.1.name', '历史申请员工'));
+
+        $payload = [
+            'applicant_id' => $employee->id,
+            'title' => '补录历史费用申请',
+            'category' => 'other',
+            'amount' => '320.00',
+            'currency' => 'CNY',
+            'desired_date' => '2026-09-20',
+            'description' => '管理员根据已有申请资料代为补录。',
+            'approval_required' => true,
+        ];
+
+        $this->post(route('expense-requests.store'), $payload)
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $item = PersonalRequest::query()->sole();
+        $this->assertSame($employee->id, $item->submitter_id);
+        $audit = AuditLog::query()->where('subject_id', $item->id)->where('action', 'expense_request_created')->sole();
+        $this->assertSame($superAdmin->id, $audit->user_id);
+        $this->assertSame($employee->id, $audit->metadata['submitter_id']);
+        $this->assertTrue($audit->metadata['submitted_on_behalf']);
+
+        $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
+            ->get(route('expense-requests.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('scope', 'mine')
+                ->where('requests.total', 1)
+                ->where('requests.data.0.submitter', '历史申请员工'));
+
+        $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
+            ->post(route('expense-requests.store'), [...$payload, 'applicant_id' => $superAdmin->id])
+            ->assertSessionHasErrors('applicant_id');
+        $this->assertSame(1, PersonalRequest::query()->count());
+
+        $this->actingAs($superAdmin)->withSession($this->contextSession($organization, $store))
+            ->post(route('expense-requests.store'), [...$payload, 'applicant_id' => $outsider->id])
+            ->assertSessionHasErrors('applicant_id');
+        $this->assertSame(1, PersonalRequest::query()->count());
+    }
+
     public function test_finance_renewals_are_sorted_by_payment_priority_and_nearest_relevant_date(): void
     {
         CarbonImmutable::setTestNow('2026-09-11 10:00:00');
