@@ -1,16 +1,13 @@
 /*
  * Instagram content app block: carousel + popup with the original post.
- *
- * Covers only. Instagram withholds the video file URL for Reels with licensed
- * audio or downloads turned off, so the popup embeds Instagram's own player.
- * Skeleton comes from the liquid <template>; this file just clones it.
- * Shopify caps this file at 10KB - measure before adding code. English only.
+ * Covers only; the popup embeds Instagram's own player (Instagram withholds
+ * some Reel video URLs). Skeleton lives in the liquid <template>.
+ * Keep under 10000 B (theme check AssetSizeAppBlockJavaScript). English only.
  */
 (function () {
   "use strict";
 
   var IG_ORIGIN = "https://www.instagram.com";
-  var DATE_OPTS = { year: "numeric", month: "short", day: "numeric" };
   var box = null;
   var state = { items: [], index: 0, opener: null };
 
@@ -28,6 +25,14 @@
 
   function pick(scope, name) {
     return scope.querySelector("[data-igv-" + name + "]");
+  }
+
+  // textContent, never innerHTML: shop data must not inject markup.
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    node.className = cls;
+    if (text) node.textContent = text;
+    return node;
   }
 
   /* --- Carousel --- */
@@ -74,9 +79,8 @@
       if (pageCount < 2) return;
 
       for (var i = 0; i < pageCount; i++) {
-        var dot = document.createElement("button");
+        var dot = el("button", "igv__dot");
         dot.type = "button";
-        dot.className = "igv__dot";
         // aria-current, not role="tab": a tab role needs a matching tabpanel.
         dot.setAttribute("aria-label", "Page " + (i + 1));
         dot.dataset.page = String(i);
@@ -110,16 +114,14 @@
       update();
     });
 
-    if (prev) {
-      prev.addEventListener("click", function () {
-        list.scrollBy({ left: -stepSize(), behavior: "smooth" });
+    function arrow(button, sign) {
+      if (!button) return;
+      button.addEventListener("click", function () {
+        list.scrollBy({ left: sign * stepSize(), behavior: "smooth" });
       });
     }
-    if (next) {
-      next.addEventListener("click", function () {
-        list.scrollBy({ left: stepSize(), behavior: "smooth" });
-      });
-    }
+    arrow(prev, -1);
+    arrow(next, 1);
 
     list.addEventListener("scroll", update);
     window.addEventListener("resize", rebuild);
@@ -144,23 +146,17 @@
       root: node,
       frame: pick(node, "embed"),
       loading: pick(node, "loading"),
-      date: pick(node, "date"),
-      caption: pick(node, "caption"),
+      products: pick(node, "products"),
+      shopLabel: pick(node, "products-title"),
       links: pick(node, "links"),
       prev: pick(node, "lb-prev"),
       next: pick(node, "lb-next"),
     };
 
     pick(node, "close").addEventListener("click", close);
-    box.prev.addEventListener("click", function () {
-      show(state.index - 1);
-    });
-    box.next.addEventListener("click", function () {
-      show(state.index + 1);
-    });
-    box.frame.addEventListener("load", function () {
-      box.loading.hidden = true;
-    });
+    box.prev.addEventListener("click", function () { show(state.index - 1); });
+    box.next.addEventListener("click", function () { show(state.index + 1); });
+    box.frame.addEventListener("load", function () { box.loading.hidden = true; });
     node.addEventListener("click", function (event) {
       if (event.target === node) close();
     });
@@ -171,17 +167,12 @@
       if (event.key === "ArrowRight") show(state.index + 1);
     });
 
-    // The embed is cross-origin: its height can only come from the message it
-    // posts to us. Without it the frame keeps a guessed height and clips.
+    // Cross-origin: the embed's height can only come from its own message.
     window.addEventListener("message", function (event) {
       if (event.origin !== IG_ORIGIN || box.root.hidden) return;
       var data = event.data;
       if (typeof data === "string") {
-        try {
-          data = JSON.parse(data);
-        } catch (error) {
-          return;
-        }
+        try { data = JSON.parse(data); } catch (e) { return; }
       }
       var height = data && data.details && data.details.height;
       if (height > 0) box.frame.parentNode.style.height = height + "px";
@@ -190,16 +181,35 @@
     return box;
   }
 
-  function link(href, text, external) {
-    var node = document.createElement("a");
-    node.className = "igv-lightbox__link";
+  function link(href, text) {
+    var node = el("a", "igv-lightbox__link", text);
     node.href = href;
-    node.textContent = text;
-    if (external) {
-      node.target = "_blank";
-      node.rel = "noopener nofollow";
-    }
+    node.target = "_blank";
+    node.rel = "noopener nofollow";
     return node;
+  }
+
+  // Prices arrive pre-formatted from Liquid's money filter, never stored.
+  function productCard(product) {
+    var p = "igv-lightbox__product";
+    var card = el("a", p);
+    card.href = product.url;
+
+    if (product.image) {
+      var image = el("img", p + "-image");
+      image.src = product.image;
+      image.alt = "";
+      image.loading = "lazy";
+      card.appendChild(image);
+    }
+
+    var body = el("span", p + "-body");
+    if (product.save) body.appendChild(el("span", p + "-badge", product.save));
+    body.appendChild(el("span", p + "-title", product.title || ""));
+    if (product.price) body.appendChild(el("span", p + "-price", product.price));
+
+    card.appendChild(body);
+    return card;
   }
 
   function show(index) {
@@ -210,9 +220,9 @@
     state.index = ((index % total) + total) % total;
     var item = items[state.index];
 
-    // Uncaptioned embed on purpose: the caption lives in the right column, and
-    // the captioned variant would repeat it inside the frame.
-    var src = (item.embed_url || "").replace("/embed/captioned", "/embed/");
+    // locale is pinned: without it the embed follows the visitor's browser
+    // language and renders its own chrome translated.
+    var src = item.embed_url ? item.embed_url + "?locale=en_US" : "";
     var frameBox = box.frame.parentNode;
     frameBox.style.height = "";
     frameBox.hidden = !src;
@@ -223,23 +233,19 @@
       box.frame.removeAttribute("src");
     }
 
-    var posted = item.posted_at ? new Date(item.posted_at) : null;
-    var dated = posted && !isNaN(posted.getTime());
-    // Locale pinned to en-US so the popup never picks up a translated month.
-    box.date.textContent = dated ? posted.toLocaleDateString("en-US", DATE_OPTS) : "";
-    box.date.hidden = !dated;
-
-    box.caption.textContent = item.caption || "";
-    box.caption.hidden = !item.caption;
+    // Products only: caption and date belong to the embed, not to both sides.
+    var products = (item.products || []).filter(function (product) {
+      return product && product.url;
+    });
+    box.products.textContent = "";
+    products.forEach(function (product) {
+      box.products.appendChild(productCard(product));
+    });
+    box.shopLabel.hidden = !products.length;
 
     box.links.textContent = "";
-    (item.products || []).forEach(function (product) {
-      if (product && product.url) {
-        box.links.appendChild(link(product.url, product.title || "View product"));
-      }
-    });
     if (item.permalink) {
-      box.links.appendChild(link(item.permalink, "View on Instagram", true));
+      box.links.appendChild(link(item.permalink, "View on Instagram"));
     }
 
     box.prev.hidden = total < 2;
@@ -249,8 +255,7 @@
   function close() {
     if (!box || box.root.hidden) return;
 
-    // Clearing src matters: otherwise Instagram's iframe keeps running in the
-    // background, which is obvious with a video that has audio.
+    // Must clear src, or the iframe keeps playing in the background.
     box.frame.removeAttribute("src");
     box.root.hidden = true;
     document.documentElement.style.overflow = "";
@@ -267,11 +272,7 @@
     if (!script) return;
 
     var items;
-    try {
-      items = JSON.parse(script.textContent);
-    } catch (error) {
-      return;
-    }
+    try { items = JSON.parse(script.textContent); } catch (e) { return; }
     if (!Array.isArray(items) || !items.length) return;
     if (!mount(root)) return;
 
@@ -303,18 +304,13 @@
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      initAll();
-    });
+    document.addEventListener("DOMContentLoaded", function () { initAll(); });
   } else {
     initAll();
   }
 
   // Re-init after blocks are added, moved or selected in the theme editor.
-  document.addEventListener("shopify:section:load", function (event) {
-    initAll(event.target);
-  });
-  document.addEventListener("shopify:block:select", function (event) {
-    initAll(event.target);
+  ["shopify:section:load", "shopify:block:select"].forEach(function (name) {
+    document.addEventListener(name, function (event) { initAll(event.target); });
   });
 })();

@@ -380,15 +380,29 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 | capabilities | 不启用 `publishable` | 启用会引入 DRAFT/ACTIVE 状态，条目还得额外发布一次 |
 | 条目 handle | 展示组的 `handle` | 店铺内已唯一，主题里能直接反查回同一个组，不用再存映射 |
 
-**两个前提缺一不可，否则主题编辑器把那个设置直接显示成错误**：definition 已存在于店铺上，且对 storefront 可读。社区里那些「app-owned metaobject 在 Liquid 里读不到」的案例大概率就是漏了后者。
+**区块 schema 里的 `metaobject_type` 必须写完整解析后的类型，不能用 `$app:` 简写。** `$app:instagram_gallery` 在 Liquid 与 Admin API 里都能用，但区块 schema 的服务端校验直接拒掉它：
+
+```
+Version couldn't be created.
+  • bundle: [blocks/instagram_videos.liquid] Invalid tag 'schema':
+    settings: with id="gallery_ref" metaobject_type is invalid
+```
+
+所以那里硬编码成 `app--412885549057--instagram_gallery`（中间是 Shopify 分配的 **app id**，不是 `client_id`）。这是[社区反复提到的痛点](https://community.shopify.dev/t/issue-with-dynamic-app-id-in-theme-app-block-schema-settings/12010)，目前没有官方的动态写法。
+
+硬编码就有过期风险：现在测试与生产共用同一个 Shopify App，一旦按 README 的「让测试与生产真正并行」拆成两个 App，app id 会变，选择器就会在主题编辑器里变成错误状态。`validate-project.mjs` 为此加了一条闸门，同时校验类型名与 `config('instagram_feed.metaobject.type')` 同源。
+
+**另外两个前提缺一不可，否则主题编辑器同样把那个设置显示成错误**：definition 已存在于店铺上，且对 storefront 可读。社区里那些「app-owned metaobject 在 Liquid 里读不到」的案例大概率就是漏了后者。
 
 由此得出**不可颠倒的上线顺序**（`shopify app deploy` 会把配置与扩展一起发，所以必须分两次）：
 
 1. 部署后端（含 `InstagramGalleryDirectory` 与新 scope 声明）；
-2. `shopify app deploy` 发布 scope 变更，此时扩展仍是文本框版本；
-3. 商家打开一次应用，批准新增的 `write_metaobjects`；
-4. `php artisan instagram-feed:sync-gallery-directory` 建 definition、补齐历史展示组，并确认 `access.storefront` 已是 `PUBLIC_READ`；
+2. `shopify app deploy` 发布 scope 变更，此时扩展仍是旧版本设置；
+3. `php artisan instagram-feed:sync-gallery-directory` 建 definition、补齐历史展示组；
+4. 用 GraphQL 查证 `metaobjectDefinitionByType`：`access.storefront` 是 `PUBLIC_READ`、`displayNameKey` 指向组名字段、条目 handle 与库里的展示组一一对应；
 5. 这一步通过之后，才发布带 `metaobject` 设置的扩展。
+
+第 3 步实测时**不需要等商家手动重新授权**：Shopify 托管安装在 scope 变更发布后就把新权限给了 offline token，同步直接成功。`instagram_feed_installations.granted_scopes` 里仍是旧快照，那只是上一次 `bootstrap()` 的记录，下次打开应用才刷新 —— **别用它判断权限是否到位**，要看实际 API 调用结果。
 
 **`write_metaobjects` 只进 `optional_scopes`，绝不能进 `required_scopes`。** `assertRequiredScopes()` 是在 `ShopifyInstagramFeedAppService::bootstrap()` 里跑的，而 bootstrap 每次建立内嵌会话都会走 —— 放进 `required_scopes` 会让尚未重新授权的店铺连应用都打不开。选择器只是主题编辑器里的便利，缺权限时正确行为是选项不更新，而不是让同步、转存、前台展示全部停摆。`shopify.app.*.toml` 的 `scopes` 必须等于两个列表的并集，这条由 `validate-project.mjs` 的 `expectedScopes` 把关（注意它是硬编码字符串，改 config 时要手动同步）。
 
@@ -420,14 +434,45 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 
 选 `modal` 时才会输出那段 `data-igv-json`（弹窗要用的数据），选 `link` 时连 JSON 都不渲染。JS 侧靠根元素的 `data-click-action` 判断是否接管点击。**关闭弹窗必须清掉 iframe 的 `src`** —— 不清的话 Instagram 会在后台继续播，有声音的 Reels 尤其明显。
 
-**弹窗排版**：桌面端左右两栏 —— 左边是 embed 的 iframe，右边是发布日期、文案、商品与「View on Instagram」。移动端（≤749px）改成上下叠。三个控制按钮（关闭 / 上一条 / 下一条）挂在遮罩 `.igv-lightbox` 上而不是 `.igv-lightbox__dialog` 上，`dialog` 宽到 `min(980px, 100%)` 时按钮才不会被挤出屏幕。
+**弹窗排版**：桌面端左右两栏 —— **左边是完整的 Instagram 帖子**（`{permalink}/embed/captioned`，含头像、用户名、媒体、文案），**右边只有关联商品和「View on Instagram」**。移动端（≤749px）改成上下叠。三个控制按钮（关闭 / 上一条 / 下一条）挂在遮罩 `.igv-lightbox` 上而不是 `.igv-lightbox__dialog` 上，`dialog` 宽到 `min(1040px, 100%)` 时按钮才不会被挤出屏幕。
 
-弹窗里**任何一层都不出现滚动条**，为此做了两件事：
+右栏刻意不放文案和发布日期：**embed 自己已经渲染了这两样，两边都放就是重复**。曾经试过左栏用无文案的 `/embed/`、右栏放我们自己的文案，实测 `/embed/` 同样会渲染文案，结果两边各显示一份，而且左栏还被裁掉半句。
 
-- **左栏 iframe 用 `{permalink}/embed/`（无 `captioned`）**。JS 把后端存的 `embed_url` 里的 `/embed/captioned` 换成 `/embed/`：文案已经在右栏了，captioned 版会在框里重复一遍，而且它把文案排在媒体下方，整体高度直接翻倍。已验证两个端点都返回 200；
-- **高度由 embed 自己报**。iframe 跨域读不到内容高度，Instagram 会 `postMessage` 一个 `{type:"MEASURE",details:{height}}`，JS 监听后写成 `.igv-lightbox__frame` 的行内 `height`。**校验 `event.origin === "https://www.instagram.com"` 用全等而不是 `indexOf`**，否则 `evil-instagram.com.attacker.test` 也能匹配上。消息没来时退回 CSS 里的 `min(78vh, 620px)`，`max-height` 会兜住超高的情况（`scrolling="no"` 下是裁切，不是滚动）。
+**embed 必须带 `?locale=en_US`。** 不加时它跟随访客浏览器的 `Accept-Language`，中文浏览器下会渲染出自己的中文界面（「查看个人主页」「粉丝」「已验证」）。实测：
 
-右栏文案用 `-webkit-line-clamp` 截断（桌面 14 行、移动 3 行）而不是 `overflow-y: auto`——旧版那个 `max-height: 4.5em; overflow-y: auto` 的文案框就是滚动条的来源。加载态是纯 CSS 转圈（`.igv-lightbox__spinner` + `@keyframes igv-spin`），没有文字，也就没有需要翻译的字符串。
+| 请求 | HTML 里的中文字符数 |
+| --- | --- |
+| `Accept-Language: zh-CN`，无参数 | 39（`已验证粉丝查看个人主页…`） |
+| `Accept-Language: zh-CN` + `?locale=en_US` | 0 |
+| `Accept-Language: en-US`，无参数 | 0 |
+
+这是唯一能控制 embed 语言的手段 —— 那段界面是 Instagram 渲染的，我们改不了 DOM。
+
+**高度由 embed 自己报，而且不能给它设上限。** iframe 跨域读不到内容高度，Instagram 会 `postMessage` 一个 `{type:"MEASURE",details:{height}}`，JS 监听后写成 `.igv-lightbox__frame` 的行内 `height`。**校验 `event.origin === "https://www.instagram.com"` 用全等而不是 `indexOf`**，否则 `evil-instagram.com.attacker.test` 也能匹配上。消息没来时退回 CSS 里的 `height: 700px`。
+
+**`.igv-lightbox__frame` 上任何 `max-height` 都等于裁掉帖子。** Instagram 的 embed 不滚动自己的 body —— 它报出高度，然后假定宿主会把 iframe 撑到那个高度。所以截断 iframe 高度不会换来内部滚动条，只会静默切掉下半篇。之前 `max-height: 92vh` 就是内容被裁的原因，去掉 `scrolling="no"` 也救不回来。
+
+现在的做法是：frame 高度完全由 MEASURE 决定，**改由遮罩 `.igv-lightbox` 用 `overflow-y: auto` 承担超高的情况**。`.igv-lightbox__frame` 同样不能加 `overflow: hidden`，圆角由 `.igv-lightbox__embed` 自己的 `border-radius` 负责。
+
+遮罩用 `align-items: flex-start` 配 `.igv-lightbox__dialog { margin: auto }`，**不用 `align-items: center`**：居中一个溢出容器的 flex item 会让顶部那段溢出无法滚到，等于从另一头把帖子裁了。`margin: auto` 在内容不超高时照样居中。
+
+弹窗面板是**浅色**的：`.igv-lightbox__dialog` 自己白底圆角，两栏都在里面，文字 `#1a1a1a`，商品卡片 `#f4f4f5`。两栏 `align-items: flex-start` 顶部对齐，右栏不再相对左边那张长图垂直居中。
+
+三个控制按钮改成 `position: fixed`（原来是 `absolute`）：遮罩现在会滚动，绝对定位的关闭按钮在长帖子上会滚出视野。它们用深色底加白色字形，因为窄视口下白色面板几乎顶到边缘、正好垫在按钮下面，纯白按钮会看不见。
+
+加载态是纯 CSS 转圈（`.igv-lightbox__spinner` + `@keyframes igv-spin`），没有文字，也就没有需要翻译的字符串。
+
+**关联商品卡片**（`.igv-lightbox__product`）：商品图 + 标题（两行截断）+ 价格，`compare_at_price` 高于现价时额外显示一枚 `Save …` 徽章。
+
+数据**在 liquid 渲染时从 `all_products[handle]` 实时取**，不走 metafield：
+
+- 价格会变，而 metafield 是快照，存进去迟早过期；
+- 货币格式必须跟随店铺设置，`| money` 只有在 liquid 里才拿得到；
+- 多变体价格不同时用 `price_varies` 判断并输出 `From …`。
+
+JSON 里给的是**已经格式化好的字符串**，JS 直接显示，不做货币计算。商品被删除时 `all_products` 取不到，该条直接不输出；数组末尾固定补一个 `null` 保证 JSON 合法 —— 这里不能靠 `forloop.last` 决定逗号，因为被跳过的商品什么都不输出，最后一个商品若正好被删就会生成 `[{…}null]` 这种非法结构。渲染侧本来就会跳过没有 `url` 的条目。
+
+卡片用 DOM API 逐个 `createElement` + `textContent` 构建，不拼 HTML 字符串：标题来自店铺数据，拼字符串等于给自己开一个注入口子。
 
 **主题按钮样式会污染卡片**：`.igv__play` 是 `position: absolute; inset: 0` 的全卡覆盖元素，主题里一条 `button:hover { background: <主题色> }` 就能让整张卡变色（macfox 主题色是黄的，表现就是 hover 全黄）。修法是把 `.igv .igv__play` 的 `:hover` / `:focus` / `:focus-visible` / `:active` 全部钉死成 `background: transparent !important`（连 `border` / `box-shadow` / `color` / `text-decoration` / `transform` 一起钉）。`.igv__arrow`（要保持白底）与 `.igv__dot`（要保持 `currentcolor`）同理，各有一组同样的防御规则。这里的 `!important` 是有意为之：主题的按钮样式本身经常带 `!important`，光靠提高选择器权重赌不赢。
 
@@ -440,7 +485,16 @@ Theme App Extension 通过 `app.metafields.instagram_videos.feed.value` 读取�
 
 圆点按「屏」生成而不是按条目 —— 列数由 CSS 变量控制，条目数和可翻页数不是一回事，所以页数只能在浏览器里按 `scrollWidth / clientWidth` 算，服务端渲染不出来。图片是懒加载的，`window.load` 后会重算一次页数。
 
-`instagram-videos.js` 当前 9932 字节。[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)里 JS 的 10KB 标的是 **Suggested**，而且按压缩后算；真正 Enforced 的是全部文件 10MB、block 数 30、locale 文件数 100 与单个 15KB、**Liquid 跨所有文件 100KB**。但这个扩展确实在 12105 字节时发布失败过一次，原因没查清（不排除是当时另有校验问题），所以仍把 10000 字节未压缩当自律线，改完重新量：`(Get-Item …\instagram-videos.js).Length`。这也是注释写英文的附带好处：一个中文字符 3 字节，注释里的中文曾经占掉一千多字节。
+`instagram-videos.js` 有一条 **10000 字节（未压缩）**的硬线，当前 9996，余量 4。这条线的确切来源已经查清：不是[官方限额表](https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration)里那个标着 Suggested 的 10KB，而是 `shopify app deploy` 跑的 theme check 规则：
+
+```
+[error]: AssetSizeAppBlockJavaScript
+The file size for 'instagram-videos.js' (10265 B) exceeds the configured threshold (10000 B)
+```
+
+它是 **error 级别但不阻塞发布** —— 10265 字节那次照样发布成功了，只是留下一条红色告警。既然是官方 error，就当硬线对待。改完必须重新量：`(Get-Item …\instagram-videos.js).Length`。
+
+注释写英文也是为了这条线：一个中文字符 3 字节，注释里的中文曾经占掉一千多字节的余量。空间实在不够时优先压注释密度而不是删掉「为什么」，必要时把长解释挪到本文档。
 
 ## 同步与转存
 

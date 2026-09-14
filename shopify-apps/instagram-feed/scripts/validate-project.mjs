@@ -20,6 +20,12 @@ const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 // 打不开；缺这个权限时正确的行为是选择器不更新，而不是同步与前台展示全部停摆。
 const expectedScopes = 'read_products,write_metaobjects';
 
+// 展示组选择器用的 app 自有 metaobject 类型。
+// metaobjectTypeName 必须与 config/instagram_feed.php 的 metaobject.type 一致；
+// 前面那串数字是这个 Shopify App 的 app id（不是 client_id），由 Shopify 分配。
+const metaobjectTypeName = 'instagram_gallery';
+const expectedMetaobjectType = `app--412885549057--${metaobjectTypeName}`;
+
 // 生产与测试是同一个 Shopify App（同一个 client_id）。一个 App 只有一份
 // application_url 与一组 webhook 地址，所以两套配置永远只能有一套生效：
 // 发布测试配置＝生产入口停用，反之亦然。改动某套环境的 origin 时，
@@ -185,6 +191,30 @@ check(
   !existsSync(join(projectRoot, 'shopify.app.local.toml')),
   'shopify.app.local.toml was removed on purpose: the Cloudflare tunnel environment is no longer maintained',
 );
+
+// 展示组选择器的 metaobject_type 必须是完整解析后的类型。
+//
+// Liquid 与 Admin API 都认 "$app:instagram_gallery" 这个简写，但区块 schema 的服务端
+// 校验直接拒掉它（Version couldn't be created / metaobject_type is invalid），所以那里
+// 只能硬编码 app id。硬编码就有过期风险：现在测试与生产共用一个 Shopify App，一旦按
+// README 的「让测试与生产真正并行」拆成两个 App，app id 会变，选择器会在主题编辑器里
+// 变成错误状态。这条闸门就是为了在那一步把人拦住。
+const galleryBlock = join(projectRoot, 'extensions/instagram-videos/blocks/instagram_videos.liquid');
+if (existsSync(galleryBlock)) {
+  const blockContents = readFileSync(galleryBlock, 'utf8');
+  const metaobjectType = /"metaobject_type"\s*:\s*"(.*)"/.exec(blockContents)?.[1] ?? '';
+  check(
+    metaobjectType === expectedMetaobjectType,
+    `instagram_videos.liquid metaobject_type must be "${expectedMetaobjectType}" (found "${metaobjectType}"). `
+      + 'The "$app:" shorthand is rejected by the block schema validator, so the app id is hardcoded and must be '
+      + 'updated if this app is split into separate test and production Shopify apps.',
+  );
+  // 后端用 config('instagram_feed.metaobject.type') 拼 $app: 前缀，两边的类型名必须同源。
+  check(
+    metaobjectType.endsWith(`--${metaobjectTypeName}`),
+    `instagram_videos.liquid metaobject_type must end with the type name declared in config/instagram_feed.php ("${metaobjectTypeName}")`,
+  );
+}
 
 for (const path of forbiddenPaths) {
   check(!existsSync(join(projectRoot, path)), `Backend leftover found and must not return to this project: ${path}`);

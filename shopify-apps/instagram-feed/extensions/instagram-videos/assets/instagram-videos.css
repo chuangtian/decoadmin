@@ -398,29 +398,46 @@
 
 /* ---------- Post popup ---------- */
 
+/*
+ * The overlay scrolls, the post does not get cut.
+ *
+ * Instagram's embed does not scroll its own body: it reports a height and
+ * expects the host to grow the iframe to match. So capping the frame height
+ * silently crops the post. The cap is gone; when a post is taller than the
+ * viewport the overlay scrolls instead.
+ *
+ * align-items is flex-start with margin:auto on the dialog rather than
+ * align-items:center — centering a flex item that overflows its container makes
+ * the top overflow unreachable, which would crop the post from the other end.
+ */
 .igv-lightbox {
   position: fixed;
   inset: 0;
   z-index: 2147483000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.88);
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.7);
 }
 
 .igv-lightbox[hidden] {
   display: none;
 }
 
-/* Media on the left, post details on the right. Nothing here scrolls. */
+/* Light panel holding both columns; the post on the left, products on the right. */
 .igv-lightbox__dialog {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 20px;
   width: 100%;
-  max-width: min(980px, 100%);
-  max-height: 86vh;
+  max-width: min(1040px, 100%);
+  margin: auto;
+  padding: 16px;
+  border-radius: 16px;
+  background: #fff;
+  color: #1a1a1a;
 }
 
 /*
@@ -428,22 +445,31 @@
  * embed posts its measured height to us and JS writes it here as an inline
  * height; this value is only the fallback before that message arrives.
  */
+/*
+ * No max-height on purpose: JS writes the height the embed reports, and any cap
+ * here would crop the post. The value below is only the fallback shown before
+ * that message arrives.
+ */
 .igv-lightbox__frame {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
-  height: min(78vh, 620px);
-  max-height: 82vh;
-  overflow: hidden;
+  height: 700px;
   border-radius: 12px;
   background: #fff;
 }
 
+/*
+ * Radius sits on the iframe itself, not on a clipping parent: the frame has to
+ * stay unclipped so the embed can show its own scrollbar when a post is taller
+ * than the viewport cap.
+ */
 .igv-lightbox__embed {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+  border-radius: 12px;
 }
 
 /* Hidden when a post has no embeddable URL, so no empty white panel is left. */
@@ -474,38 +500,97 @@
   }
 }
 
+/* Top aligned with the post, not vertically centred against it. */
 .igv-lightbox__meta {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 0 0 300px;
+  flex: 0 0 320px;
   min-width: 0;
-  color: #fff;
+  color: inherit;
 }
 
-.igv-lightbox__date {
+/*
+ * Right column shows linked products only. The caption and the posted date are
+ * rendered by the embed on the left, so repeating them here is what looked
+ * duplicated.
+ */
+.igv-lightbox__meta-title {
   margin: 0;
   font-size: 12px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
-.igv-lightbox__date[hidden],
-.igv-lightbox__caption[hidden] {
+.igv-lightbox__meta-title[hidden] {
   display: none;
 }
 
-/* Clamped, never scrolled: the popup must not grow a scrollbar of its own. */
-.igv-lightbox__caption {
-  margin: 0;
+.igv-lightbox__products {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.igv-lightbox__product {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 14px;
+  background: #f4f4f5;
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.igv-lightbox__product:hover {
+  background: #e8e8ea;
+}
+
+.igv-lightbox__product-image {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #e8e8ea;
+}
+
+.igv-lightbox__product-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Only rendered when compare_at_price is above the current price. */
+.igv-lightbox__product-badge {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #ffd400;
+  color: #1a1a1a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.igv-lightbox__product-title {
   font-size: 14px;
-  line-height: 1.55;
+  font-weight: 600;
+  line-height: 1.35;
   display: -webkit-box;
-  -webkit-line-clamp: 14;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  white-space: pre-line;
+}
+
+.igv-lightbox__product-price {
+  font-size: 14px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
 }
 
 .igv-lightbox__links {
@@ -516,20 +601,27 @@
 
 .igv-lightbox__link {
   padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 999px;
   font-size: 13px;
   text-decoration: none;
-  color: #fff;
+  color: inherit;
 }
 
 .igv-lightbox__link:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.06);
 }
 
-/* Controls sit on the overlay, not the dialog, so they stay on screen. */
+/*
+ * Fixed, not absolute: the overlay scrolls now, and an absolute close button
+ * would scroll out of reach on a tall post.
+ *
+ * Dark fill with a light glyph so the controls stay legible over both the dark
+ * overlay and the light panel — on a narrow viewport the panel reaches almost to
+ * the edge and sits underneath them.
+ */
 .igv-lightbox__button {
-  position: absolute;
+  position: fixed;
   z-index: 1;
   display: flex;
   align-items: center;
@@ -538,7 +630,7 @@
   height: 40px;
   border: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
   font-size: 20px;
   line-height: 1;
@@ -546,7 +638,7 @@
 }
 
 .igv-lightbox__button:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.78);
 }
 
 .igv-lightbox__button[hidden] {
@@ -575,17 +667,17 @@
     padding: 56px 16px 16px;
   }
 
-  /* Stacked: media on top, details below. Both are capped so nothing scrolls. */
+  /* Stacked: post on top, products below. The overlay scrolls if it has to. */
   .igv-lightbox__dialog {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-    max-height: 100%;
+    padding: 12px;
   }
 
   .igv-lightbox__frame {
-    flex: 0 1 auto;
-    max-height: 58vh;
+    flex: 0 0 auto;
+    height: 560px;
   }
 
   .igv-lightbox__meta {
@@ -593,8 +685,10 @@
     gap: 8px;
   }
 
-  .igv-lightbox__caption {
-    -webkit-line-clamp: 3;
+  /* One product per row still, but tighter so the embed keeps the height. */
+  .igv-lightbox__product-image {
+    width: 52px;
+    height: 52px;
   }
 
   .igv-lightbox__prev,
