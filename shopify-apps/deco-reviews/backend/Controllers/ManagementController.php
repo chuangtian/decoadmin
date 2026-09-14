@@ -13,6 +13,7 @@ use DecoReviews\Services\FormService;
 use DecoReviews\Services\ImportService;
 use DecoReviews\Services\InvitationEmail;
 use DecoReviews\Services\InvitationService;
+use DecoReviews\Services\ProductGroupService;
 use DecoReviews\Services\ReviewEmail;
 use DecoReviews\Services\ReviewService;
 use DecoReviews\Services\RewardEmail;
@@ -35,7 +36,7 @@ class ManagementController
     public function index(Request $request, Organization $organization, Store $store)
     {
         $this->authorize($request, $organization, $store);
-        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form',
+        $filters = $request->validate(['tab' => 'nullable|in:overview,reviews,invitations,settings,imports,widgets,form,groups',
             'kind' => 'nullable|in:product,store', 'status' => 'nullable|in:published,pending,unpublished',
             'rating' => 'nullable|integer|between:1,5', 'product_id' => 'nullable|integer|min:1',
             'media' => 'nullable|in:with,without', 'source' => 'nullable|in:merchant,email,import,organic',
@@ -66,6 +67,7 @@ class ManagementController
             'stats' => ['total' => (int) $summary->total, 'published' => (int) $summary->published, 'pending' => (int) $summary->pending, 'average' => round((float) $summary->average, 2),
                 'media' => $this->reviews->scoped($store)->whereHas('media')->count(), 'invites_sent' => Invitation::where('organization_id', $organization->id)->where('store_id', $store->id)->whereNotNull('sent_at')->count()],
             'products' => Product::where('organization_id', $organization->id)->where('store_id', $store->id)->orderBy('title')->limit(500)->get(['id', 'title']),
+            'groups' => app(ProductGroupService::class)->listing($store),
             'settings' => $settings,
             'formConfig' => app(FormService::class)->configuration($store),
             'emailDeliveries' => EmailDelivery::where('organization_id', $organization->id)->where('store_id', $store->id)
@@ -130,6 +132,22 @@ class ManagementController
         $this->reviews->saveSettings($store, $request->user(), $request->all());
 
         return back()->with('success', '设置已保存，仅影响后续新评价。');
+    }
+
+    public function createGroup(Request $request, Organization $organization, Store $store, ProductGroupService $groups)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $groups->create($store, $request->user(), $request->all());
+
+        return back()->with('success', '商品评价共享组已创建。');
+    }
+
+    public function updateGroup(Request $request, Organization $organization, Store $store, string $group, ProductGroupService $groups)
+    {
+        $this->authorize($request, $organization, $store, true);
+        $groups->update($store, $request->user(), $group, $request->all());
+
+        return back()->with('success', '商品评价共享组已更新。');
     }
 
     public function reconcileReward(Request $request, Organization $organization, Store $store, string $reward, RewardService $rewards)

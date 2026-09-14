@@ -7,6 +7,7 @@ use App\Models\Store;
 use DecoReviews\Models\Media;
 use DecoReviews\Services\FormService;
 use DecoReviews\Services\InvitationService;
+use DecoReviews\Services\ProductGroupService;
 use DecoReviews\Services\ReviewService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -38,7 +39,7 @@ class StorefrontController
         }
         if (! empty($values['product_id'])) {
             $productId = $this->productId($store, $values['product_id']);
-            $base->where('product_id', $productId ?? 0);
+            $base->whereIn('product_id', $productId ? app(ProductGroupService::class)->sharedProductIds($store, $productId) : [0]);
         }
         $distribution = (clone $base)->selectRaw('rating, count(*) as total')->groupBy('rating')->pluck('total', 'rating');
         $count = (int) $distribution->sum();

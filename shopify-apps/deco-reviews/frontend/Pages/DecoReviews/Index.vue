@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppLayout from '../../../../../resources/js/Layouts/AppLayout.vue';
 import ReviewFormEditor from '../../Components/ReviewFormEditor.vue';
 
-type Tab = 'overview' | 'reviews' | 'invitations' | 'form' | 'settings' | 'imports' | 'widgets';
+type Tab = 'overview' | 'reviews' | 'invitations' | 'form' | 'groups' | 'settings' | 'imports' | 'widgets';
 type ReviewStatus = 'pending' | 'published' | 'unpublished';
 type ReviewKind = 'product' | 'store';
 type Media = { uuid: string; type: string; url: string };
@@ -21,6 +21,7 @@ type RewardHistory = { uuid: string; media_kind: 'photo' | 'video'; discount_kin
 type ImportError = { line: number; code: string };
 type ImportProvider = 'custom' | 'auto' | 'loox' | 'judge_me' | 'yotpo' | 'okendo' | 'shopify_product_reviews';
 type ImportRow = { uuid: string; provider?: ImportProvider; status?: string; imported?: number; skipped?: number; errors?: ImportError[] | null; created_at?: string; undone_at?: string | null; can_undo?: boolean };
+type ReviewGroup = { uuid: string; name: string; active: boolean; product_ids: number[]; products: Array<{ id: number; title: string }> };
 type PageData<T> = { data: T[]; current_page: number; last_page: number; total: number };
 type Settings = {
     enabled: boolean; organic_collection_enabled: boolean; store_review_collection_enabled: boolean; happy_customers_page_enabled: boolean; auto_publish_days: number | null; invites_enabled: boolean; domestic_delay_days: number;
@@ -48,11 +49,11 @@ const props = defineProps<{
     organization: { id: number; name: string }; store: { id: number; name: string }; canManage: boolean; baseUrl: string; storeReviewUrl: string | null; happyCustomersUrl: string | null;
     tab: Tab; filters: Record<string, string | number | null | undefined>; reviews: PageData<Review>; invitations: PageData<Invitation>;
     stats: { total: number; published: number; pending: number; average: number; media: number; invites_sent: number };
-    products: Array<{ id: number; title: string }>; settings: Settings; imports: ImportRow[]; formConfig: FormConfig; emailDeliveries: EmailDelivery[]; rewardHistory: RewardHistory[];
+    products: Array<{ id: number; title: string }>; groups: ReviewGroup[]; settings: Settings; imports: ImportRow[]; formConfig: FormConfig; emailDeliveries: EmailDelivery[]; rewardHistory: RewardHistory[];
 }>();
 
 const tabs: Array<{ key: Tab; label: string }> = [
-    { key: 'overview', label: '概览' }, { key: 'reviews', label: '评价' }, { key: 'invitations', label: '邀请' }, { key: 'form', label: '表单' },
+    { key: 'overview', label: '概览' }, { key: 'reviews', label: '评价' }, { key: 'invitations', label: '邀请' }, { key: 'form', label: '表单' }, { key: 'groups', label: '商品组' },
     { key: 'settings', label: '设置' }, { key: 'imports', label: '导入' }, { key: 'widgets', label: '组件' },
 ];
 const page = usePage<{ flash?: { success?: string; error?: string }; errors?: Record<string, string> }>();
@@ -81,6 +82,9 @@ const createForm = useForm({
 });
 const inviteForm = useForm({ order_id: null as number | null });
 const importForm = useForm({ provider: 'custom' as ImportProvider, file: null as File | null });
+const groupForm = useForm({ name: '', active: true, product_ids: [] as number[] });
+const editingGroup = ref<ReviewGroup | null>(null);
+const groupEditForm = useForm({ name: '', active: true, product_ids: [] as number[] });
 const settingsForm = useForm<Settings>({ ...props.settings });
 const widgetModes = [
     { key: 'reviews', name: '评价墙', description: '完整评价列表与筛选。', visual: 'grid grid-cols-2 gap-2' },
@@ -190,6 +194,24 @@ const submitImport = () => importForm.post(`${props.baseUrl}/imports`, {
     forceFormData: true, preserveScroll: true, onSuccess: () => { importForm.reset(); notice.value = 'CSV 已提交，重复评价会被安全跳过。'; },
 });
 const undoImport = (row: ImportRow) => router.post(`${props.baseUrl}/imports/${row.uuid}/undo`, {}, { preserveScroll: true, onSuccess: () => { notice.value = '本次导入已撤销。'; }, onError: () => { notice.value = ''; } });
+const createGroup = () => groupForm.post(`${props.baseUrl}/groups`, {
+    preserveScroll: true,
+    onSuccess: () => { groupForm.reset(); groupForm.active = true; notice.value = '商品评价共享组已创建。'; },
+});
+const editGroup = (group: ReviewGroup) => {
+    editingGroup.value = group;
+    groupEditForm.name = group.name;
+    groupEditForm.active = group.active;
+    groupEditForm.product_ids = [...group.product_ids];
+    groupEditForm.clearErrors();
+};
+const saveGroup = () => {
+    if (!editingGroup.value) return;
+    groupEditForm.patch(`${props.baseUrl}/groups/${editingGroup.value.uuid}`, {
+        preserveScroll: true,
+        onSuccess: () => { editingGroup.value = null; notice.value = '商品评价共享组已更新。'; },
+    });
+};
 const copyStoreReviewUrl = async () => {
     if (!props.storeReviewUrl) return;
     try {
@@ -391,6 +413,37 @@ watch(() => [props.filters, props.reviews.current_page] as const, ([filters]) =>
                     <p v-else class="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">当前店铺域名无效，无法生成公开页面链接。</p>
                     <p class="mt-4 text-[12px] text-slate-500">需要同时启用“公开评价展示”和“Happy Customers 公开评价页”；关闭任一开关后页面立即不可访问。</p>
                 </section>
+            </template>
+
+            <template v-else-if="tab === 'groups'">
+                <section class="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-blue-950">
+                    <h2 class="font-semibold">商品评价共享规则</h2>
+                    <p class="mt-2">同一共享组中的商品会合并展示已发布评价和平均评分，但每条评价仍保留真实的原商品名称。提交评价、邀评、奖励和审核仍绑定原商品，不会合并订单或修改 Shopify 商品。</p>
+                    <p class="mt-2 text-[12px]">一个商品只能属于一个组；停用组后立即恢复每个商品的独立评价。停用组仍保留成员，需先从旧组移除才能加入其他组。</p>
+                </section>
+                <section class="grid gap-5 lg:grid-cols-3">
+                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="createGroup">
+                        <h2 class="text-lg font-semibold text-slate-950">新建共享组</h2>
+                        <label class="mt-5 block font-medium">组名称<input v-model="groupForm.name" :disabled="!canManage" maxlength="120" required class="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5" placeholder="例如：M16 配色系列" /></label>
+                        <fieldset class="mt-5"><legend class="font-medium">选择至少 2 个商品</legend><div class="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3"><label v-for="product in products" :key="product.id" class="flex items-start gap-2 rounded-lg p-2 hover:bg-slate-50"><input v-model="groupForm.product_ids" :disabled="!canManage" type="checkbox" :value="product.id" class="mt-1" /><span>{{ product.title }}</span></label><p v-if="!products.length" class="text-slate-500">当前店铺还没有可选择的商品。</p></div></fieldset>
+                        <div v-if="Object.keys(groupForm.errors).length" role="alert" class="mt-4 rounded-xl bg-red-50 p-4 text-red-700"><p v-for="(error, field) in groupForm.errors" :key="field">{{ error }}</p></div>
+                        <button :disabled="!canManage || groupForm.processing || !groupForm.name.trim() || groupForm.product_ids.length < 2" class="mt-5 w-full rounded-xl bg-violet-700 px-5 py-3 font-semibold text-white disabled:opacity-50">{{ groupForm.processing ? '创建中…' : '创建共享组' }}</button>
+                    </form>
+                    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
+                        <div class="border-b border-slate-200 px-5 py-4"><h2 class="text-lg font-semibold text-slate-950">已有共享组</h2></div>
+                        <div v-if="!groups.length" class="px-6 py-16 text-center text-slate-500">还没有商品评价共享组。</div>
+                        <article v-for="group in groups" :key="group.uuid" class="border-b border-slate-100 px-5 py-4 last:border-0">
+                            <div class="flex flex-wrap items-start justify-between gap-3"><div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold text-slate-950">{{ group.name }}</h3><span class="rounded-full px-2.5 py-1 text-[12px] font-semibold" :class="group.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ group.active ? '共享中' : '已停用' }}</span></div><p class="mt-2 text-slate-500">{{ group.products.length }} 个商品</p><div class="mt-2 flex flex-wrap gap-2"><span v-for="product in group.products" :key="product.id" class="rounded-lg bg-slate-100 px-2.5 py-1 text-[12px] text-slate-700">{{ product.title }}</span></div></div><button v-if="canManage" type="button" class="font-semibold text-violet-700" @click="editGroup(group)">编辑</button></div>
+                        </article>
+                    </section>
+                </section>
+                <form v-if="editingGroup" class="rounded-2xl border border-violet-200 bg-white p-6 shadow-sm" @submit.prevent="saveGroup">
+                    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-lg font-semibold text-slate-950">编辑 {{ editingGroup.name }}</h2><p class="mt-1 text-slate-500">停用不会删除评价或商品，只停止共享展示。</p></div><button type="button" class="font-semibold text-slate-600" @click="editingGroup = null">取消编辑</button></div>
+                    <div class="mt-5 grid gap-5 md:grid-cols-2"><label class="font-medium">组名称<input v-model="groupEditForm.name" maxlength="120" required class="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5" /></label><label class="flex items-center gap-2 self-end rounded-xl border border-slate-200 p-3 font-medium"><input v-model="groupEditForm.active" type="checkbox" />启用共享展示</label></div>
+                    <fieldset class="mt-5"><legend class="font-medium">组内商品（至少 2 个）</legend><div class="mt-2 grid max-h-72 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-3 sm:grid-cols-2"><label v-for="product in products" :key="product.id" class="flex items-start gap-2 rounded-lg p-2 hover:bg-slate-50"><input v-model="groupEditForm.product_ids" type="checkbox" :value="product.id" class="mt-1" /><span>{{ product.title }}</span></label></div></fieldset>
+                    <div v-if="Object.keys(groupEditForm.errors).length" role="alert" class="mt-4 rounded-xl bg-red-50 p-4 text-red-700"><p v-for="(error, field) in groupEditForm.errors" :key="field">{{ error }}</p></div>
+                    <div class="mt-5 flex justify-end"><button :disabled="groupEditForm.processing || !groupEditForm.name.trim() || groupEditForm.product_ids.length < 2" class="rounded-xl bg-violet-700 px-6 py-3 font-semibold text-white disabled:opacity-50">{{ groupEditForm.processing ? '保存中…' : '保存共享组' }}</button></div>
+                </form>
             </template>
 
             <form v-else-if="tab === 'settings'" class="space-y-5" @submit.prevent="saveSettings">
