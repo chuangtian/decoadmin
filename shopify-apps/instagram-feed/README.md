@@ -77,8 +77,16 @@ App Home 这个坑位，商家从后台导航打开看到的就是扩展而不�
     `align-items: center`**：居中一个溢出的 flex item 会让顶部那段滚不到。控制按钮是
     `position: fixed`，否则长帖子上关闭按钮会滚出视野。
 
-  商品卡片的图片与价格**在 liquid 渲染时从 `all_products` 实时取**，不进 metafield：价格
-  会变而 metafield 是快照，货币格式也只有 `| money` 才拿得准。
+  关联商品出现在两处：**轮播封面底部**叠一张卡片（`.igv__product`，商品图 + 标题 + 价格
+  + 划线原价，只显示第一个），**弹窗右栏**列出全部（`.igv-lightbox__product`）。右栏在没有
+  关联商品时整列隐藏，弹窗收成单栏。
+
+  `.igv__product` 的 `z-index` **必须压过 `.igv__play`** —— 后者是铺满封面的点击热区，不压
+  过它商品链接就点不到。`.igv__play` 的图标也因此挪到了封面右上角。两处商品卡片都是
+  `<a>`，和 `.igv__play` 一样要用 `!important` 钉死配色，否则主题的链接 hover 会刷成主题色。
+
+  图片与价格**在 liquid 渲染时从 `all_products` 实时取**，不进 metafield：价格会变而
+  metafield 是快照，货币格式也只有 `| money` 才拿得准。
 
   轮播控件：桌面端箭头竖直居中压在轨道两侧；移动端箭头移到轨道下方靠左，并显示圆点
   指示器。箭头到头是变暗禁用而不是消失。

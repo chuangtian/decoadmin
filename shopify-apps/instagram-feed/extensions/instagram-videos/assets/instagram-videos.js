@@ -147,8 +147,7 @@
       frame: pick(node, "embed"),
       loading: pick(node, "loading"),
       products: pick(node, "products"),
-      shopLabel: pick(node, "products-title"),
-      links: pick(node, "links"),
+      meta: pick(node, "meta"),
       prev: pick(node, "lb-prev"),
       next: pick(node, "lb-next"),
     };
@@ -179,14 +178,6 @@
     });
 
     return box;
-  }
-
-  function link(href, text) {
-    var node = el("a", "igv-lightbox__link", text);
-    node.href = href;
-    node.target = "_blank";
-    node.rel = "noopener nofollow";
-    return node;
   }
 
   // Prices arrive pre-formatted from Liquid's money filter, never stored.
@@ -233,7 +224,9 @@
       box.frame.removeAttribute("src");
     }
 
-    // Products only: caption and date belong to the embed, not to both sides.
+    // Products only. The embed already carries the caption, the date and its own
+    // link back to Instagram; the column hides entirely when there is nothing to
+    // show so the popup collapses to just the post.
     var products = (item.products || []).filter(function (product) {
       return product && product.url;
     });
@@ -241,12 +234,7 @@
     products.forEach(function (product) {
       box.products.appendChild(productCard(product));
     });
-    box.shopLabel.hidden = !products.length;
-
-    box.links.textContent = "";
-    if (item.permalink) {
-      box.links.appendChild(link(item.permalink, "View on Instagram"));
-    }
+    box.meta.hidden = !products.length;
 
     box.prev.hidden = total < 2;
     box.next.hidden = total < 2;
