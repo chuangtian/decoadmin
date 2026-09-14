@@ -2,6 +2,7 @@
 
 namespace App\Services\Feishu;
 
+use App\Events\AdvertisingChannelSyncStatusChanged;
 use App\Models\FeishuBitableTable;
 use App\Models\PaidAdvertisingGoalBoard;
 use App\Models\PaidAdvertisingGoalField;
@@ -18,6 +19,8 @@ use Throwable;
 
 class PaidAdvertisingGoalSyncService
 {
+    private const GOOGLE_SALES_TARGET_NAME = '销售目标';
+
     private const OVERALL_SOURCE_KEY = 'overall';
 
     private const META_WEEKLY_SOURCE_SUFFIX = ':meta-weekly';
@@ -134,6 +137,176 @@ class PaidAdvertisingGoalSyncService
             }, 'paid_advertising_goal_boards.id', 'id');
 
         return $summary;
+    }
+
+    /**
+     * Refresh only the two Feishu sources rendered on the Google Ads page:
+     * the configured Google weekly table and the sales-target table.
+     *
+     * @return array{
+     *     sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int,
+     *     archived_tables: int, archived_fields: int, archived_records: int, failed: int,
+     *     failures: list<array{organization_id: int, store_id: int, board_id: int|null, error: string}>
+     * }
+     */
+    public function syncGoogleAdsSources(?int $storeId = null): array
+    {
+        $summary = [
+            'sources' => 0,
+            'fields' => 0,
+            'inserted' => 0,
+            'updated' => 0,
+            'deleted' => 0,
+            'skipped' => 0,
+            'archived_tables' => 0,
+            'archived_fields' => 0,
+            'archived_records' => 0,
+            'failed' => 0,
+            'failures' => [],
+        ];
+
+        Store::query()
+            ->where('status', 'active')
+            ->when($storeId !== null, fn (Builder $query): Builder => $query->whereKey($storeId))
+            ->whereHas('businessCredentials', fn (Builder $query): Builder => $query
+                ->where('provider', 'feishu_data_links')
+                ->whereIn('credential_key', [
+                    'advertising_google_weekly_app_token',
+                    'advertising_goals_app_token',
+                ]))
+            ->orderBy('id')
+            ->chunkById(50, function ($stores) use (&$summary): void {
+                foreach ($stores as $store) {
+                    $failed = false;
+                    $credentials = $store->businessCredentials()
+                        ->where('provider', 'feishu_data_links')
+                        ->pluck('credential_key');
+
+                    if ($credentials->contains('advertising_google_weekly_app_token')) {
+                        $summary['sources']++;
+                        try {
+                            $values = $this->dataLinks->valuesForSync($store, 'advertising_google_weekly');
+                            $result = $this->archiveSync->syncTableById(
+                                $store,
+                                'paid-ad-goals:google-weekly',
+                                (string) ($values['advertising_google_weekly_app_token'] ?? ''),
+                                (string) ($values['advertising_google_weekly_table_id'] ?? ''),
+                                ($values['advertising_google_weekly_view_id'] ?? '') ?: null,
+                            );
+                            $summary['archived_tables']++;
+                            $summary['archived_fields'] += $result['fields'];
+                            $summary['archived_records'] += $result['records'];
+                        } catch (Throwable $exception) {
+                            $failed = true;
+                            $this->recordGoogleAdsFailure($summary, $store, 'Google 周报', $exception);
+                        }
+                    }
+
+                    if ($credentials->contains('advertising_goals_app_token')) {
+                        try {
+                            $result = $this->syncGoogleAdsSalesTarget($store);
+                            $summary['sources'] += (int) ($result['sources'] ?? 1);
+                            foreach (['fields', 'inserted', 'updated', 'deleted', 'skipped'] as $metric) {
+                                $summary[$metric] += (int) ($result[$metric] ?? 0);
+                            }
+                        } catch (Throwable $exception) {
+                            $failed = true;
+                            $this->recordGoogleAdsFailure($summary, $store, '销售目标', $exception);
+                        }
+                    }
+
+                    try {
+                        AdvertisingChannelSyncStatusChanged::dispatch(
+                            (int) $store->organization_id,
+                            (int) $store->id,
+                            'google',
+                            $failed ? 'failed' : 'completed',
+                            source: 'feishu_google_ads',
+                            views: ['weekly', 'goals'],
+                            progressPercent: $failed ? null : 100,
+                            message: $failed ? 'Google Ads 飞书数据同步失败。' : null,
+                        );
+                    } catch (Throwable $exception) {
+                        Log::warning('Feishu Google Ads sync status broadcast failed.', [
+                            'organization_id' => (int) $store->organization_id,
+                            'store_id' => (int) $store->id,
+                            'exception' => $exception::class,
+                        ]);
+                    }
+                }
+            });
+
+        return $summary;
+    }
+
+    /** @return array{sources: int, fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */
+    private function syncGoogleAdsSalesTarget(Store $store): array
+    {
+        $values = $this->dataLinks->valuesForSync($store, 'advertising_goals');
+        $token = trim((string) ($values['advertising_goals_app_token'] ?? ''));
+        if ($token === '') {
+            throw new RuntimeException('Google Ads 销售目标未配置飞书 App Token。');
+        }
+
+        try {
+            $tables = array_values(array_filter(
+                $this->client->tables($token),
+                fn (array $table): bool => str_contains(
+                    trim((string) ($table['name'] ?? '')),
+                    self::GOOGLE_SALES_TARGET_NAME,
+                ),
+            ));
+            if ($tables !== []) {
+                return $this->withArchives($this->syncGoogleBitableBoard($store, null, $token, $tables), []);
+            }
+        } catch (Throwable $bitableException) {
+            Log::info('Google Ads sales target token is not a readable Feishu Bitable app.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->id,
+                'error' => $this->safeError($bitableException),
+            ]);
+        }
+
+        try {
+            $sheets = array_values(array_filter(
+                $this->client->spreadsheetSheets($token),
+                fn (array $sheet): bool => str_contains(
+                    trim((string) ($sheet['title'] ?? $sheet['name'] ?? '')),
+                    self::GOOGLE_SALES_TARGET_NAME,
+                ),
+            ));
+            if ($sheets !== []) {
+                return $this->withArchives($this->syncGoogleSpreadsheetBoard($store, null, $token, $sheets), []);
+            }
+        } catch (Throwable $spreadsheetException) {
+            Log::info('Google Ads sales target token is not a readable Feishu spreadsheet.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->id,
+                'error' => $this->safeError($spreadsheetException),
+            ]);
+        }
+
+        throw new RuntimeException('飞书中未找到“销售目标”数据表。');
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function recordGoogleAdsFailure(array &$summary, Store $store, string $label, Throwable $exception): void
+    {
+        $summary['failed']++;
+        $error = $label.'：'.$this->safeError($exception);
+        $summary['failures'][] = [
+            'organization_id' => (int) $store->organization_id,
+            'store_id' => (int) $store->id,
+            'board_id' => null,
+            'error' => $error,
+        ];
+        Log::warning('Feishu Google Ads source sync failed.', [
+            'organization_id' => (int) $store->organization_id,
+            'store_id' => (int) $store->id,
+            'source' => $label,
+            'exception' => $exception::class,
+            'error' => $this->safeError($exception),
+        ]);
     }
 
     /** @return array{fields: int, inserted: int, updated: int, deleted: int, skipped: int, records: int, archived_tables: int, archived_fields: int, archived_records: int} */

@@ -2,6 +2,7 @@
 
 namespace App\Services\Advertising;
 
+use App\Events\AdvertisingChannelSyncStatusChanged;
 use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
@@ -20,6 +21,7 @@ use App\Models\TikTokAdsCampaignDailyMetric;
 use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -42,8 +44,8 @@ class AdvertisingChannelSyncService
     public function sync(Store $store, string $channel, string $mode, ?string $credentialVersion = null): void
     {
         $this->assertChannel($channel);
-        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile'], true)
-            || ($mode === 'reconcile' && $channel !== 'google')) {
+        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile', 'realtime'], true)
+            || (in_array($mode, ['reconcile', 'realtime'], true) && $channel !== 'google')) {
             throw new RuntimeException('广告渠道同步模式无效。');
         }
         if ($store->status !== 'active' || ! $this->configured($store, $channel)) {
@@ -59,6 +61,7 @@ class AdvertisingChannelSyncService
         [$since, $until] = $this->period($store, $mode, $channel);
         $chunks = $this->chunks($since, $until);
         $job = $this->startJob($store, $channel, $mode, $since, $until, count($chunks), $credentialVersion);
+        $this->broadcastStatus($store, $channel, 'started', $mode, 0);
         // Resume the saved reporting window, even if a long cooldown crosses midnight.
         $chunks = $this->chunks(CarbonImmutable::instance($job->since_at)->setTimezone($since->getTimezone()),
             CarbonImmutable::instance($job->until_at)->setTimezone($until->getTimezone()));
@@ -68,7 +71,9 @@ class AdvertisingChannelSyncService
             $records = max(0, (int) data_get($job->result, 'records_count', 0));
             foreach (array_slice($chunks, $processed) as [$chunkFrom, $chunkTo]) {
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
-                $payload = $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo);
+                $payload = $mode === 'realtime'
+                    ? $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo, true)
+                    : $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo);
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
                 $records += $this->persist($store, $channel, $payload);
                 $processed++;
@@ -76,9 +81,17 @@ class AdvertisingChannelSyncService
                     'processed_items' => $processed,
                     'result' => ['records_count' => $records, 'last_chunk' => [$chunkFrom, $chunkTo]],
                 ])->save();
+                $this->broadcastStatus(
+                    $store,
+                    $channel,
+                    'progress',
+                    $mode,
+                    count($chunks) > 0 ? round(($processed / count($chunks)) * 100, 1) : 100,
+                );
             }
 
             $this->completeJob($job, $mode, $records);
+            $this->broadcastStatus($store, $channel, 'completed', $mode, 100);
             if ($mode === 'priority') {
                 SyncAdvertisingChannelForStore::dispatch(
                     (int) $store->organization_id,
@@ -90,6 +103,7 @@ class AdvertisingChannelSyncService
             }
         } catch (Throwable $exception) {
             $this->failJob($job, $exception);
+            $this->broadcastStatus($store, $channel, 'failed', $mode, message: '广告数据同步失败。');
             throw $exception;
         }
     }
@@ -183,6 +197,7 @@ class AdvertisingChannelSyncService
         $rollingDays = max(1, (int) config('services.advertising_sync.rolling_days', 3));
 
         $range = match ($mode) {
+            'realtime' => [$now->startOfDay(), $now],
             'priority' => [$now->subDays($priorityDays - 1)->startOfDay(), $now],
             'backfill' => [
                 $now->subMonthsNoOverflow(max(1, (int) config('services.advertising_sync.history_months', 6)))->startOfDay(),
@@ -654,7 +669,7 @@ class AdvertisingChannelSyncService
             ];
             if ($mode === 'backfill') {
                 $attributes['last_full_sync_at'] = $finishedAt;
-            } elseif ($mode === 'incremental') {
+            } elseif (in_array($mode, ['incremental', 'realtime'], true)) {
                 $attributes['last_incremental_sync_at'] = $finishedAt;
                 if ($job->type !== $this->syncType('google')) {
                     $attributes['last_reconciled_at'] = $finishedAt;
@@ -667,6 +682,44 @@ class AdvertisingChannelSyncService
                 ->where('type', 'sync')->where('source_type', SyncJob::class)->where('source_id', $job->id)
                 ->whereIn('status', ['open', 'acknowledged'])->update(['status' => 'resolved', 'resolved_at' => $finishedAt]);
         });
+    }
+
+    /** @return list<string> */
+    private function updatedViews(string $mode): array
+    {
+        return $mode === 'realtime'
+            ? ['overview', 'trend']
+            : ['overview', 'trend', 'campaigns', 'search-terms', 'keywords'];
+    }
+
+    private function broadcastStatus(
+        Store $store,
+        string $channel,
+        string $state,
+        string $mode,
+        ?float $progressPercent = null,
+        ?string $message = null,
+    ): void {
+        try {
+            AdvertisingChannelSyncStatusChanged::dispatch(
+                (int) $store->organization_id,
+                (int) $store->getKey(),
+                $channel,
+                $state,
+                mode: $mode,
+                views: $this->updatedViews($mode),
+                progressPercent: $progressPercent,
+                message: $message,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('Advertising sync status broadcast failed.', [
+                'organization_id' => (int) $store->organization_id,
+                'store_id' => (int) $store->getKey(),
+                'channel' => $channel,
+                'state' => $state,
+                'exception' => $exception::class,
+            ]);
+        }
     }
 
     private function failJob(SyncJob $job, Throwable $exception): void

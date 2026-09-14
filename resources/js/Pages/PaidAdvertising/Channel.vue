@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import vReadableChart from '../../directives/readableChart';
-import { Head, Link } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import GoogleAdsGoalTemplate from '../../Components/PaidAdvertising/GoogleAdsGoalTemplate.vue';
 import GoogleAdsWeeklyReport from '../../Components/PaidAdvertising/GoogleAdsWeeklyReport.vue';
 import { useToast } from '../../composables/useToast';
 import GooglePerformanceTable from './GooglePerformanceTable.vue';
+import type { SharedProps } from '../../types';
 
 type ChannelState = 'not_configured' | 'pending' | 'syncing' | 'backfilling' | 'completed' | 'failed' | 'partial_failed';
 type ChannelStatus = {
@@ -14,6 +17,19 @@ type ChannelStatus = {
     settings_url: string; state: ChannelState; mode: string | null; data_ready: boolean;
     progress_percent: number; completed_chunks: number; total_chunks: number; last_metric_date: string | null;
     data_synced_at: string | null; last_success_at: string | null; message: string | null;
+};
+type AdvertisingSyncState = 'started' | 'progress' | 'completed' | 'failed';
+type AdvertisingSyncSource = 'google_ads' | 'feishu_google_ads';
+type AdvertisingSyncStatus = {
+    channel: string;
+    state: AdvertisingSyncState;
+    mode?: string;
+    source?: AdvertisingSyncSource;
+    views?: string[];
+    progress_percent?: number;
+    last_metric_date?: string | null;
+    data_synced_at?: string | null;
+    message?: string | null;
 };
 type GoogleSummary = {
     spend: number; revenue: number; roas: number; cpa: number; add_to_cart: number; checkout: number;
@@ -117,6 +133,7 @@ const props = defineProps<{
     googleGoalSummary: GoogleGoalSummary | null;
     canManageGoogleGoalFeishu: boolean;
 }>();
+const page = usePage<SharedProps>();
 const status = ref(props.channelStatus);
 const overview = ref(props.googleOverview);
 const filters = ref({
@@ -152,11 +169,16 @@ const googleGoalSummary = ref(props.googleGoalSummary);
 const googleGoalAppToken = ref('');
 const googleGoalSaving = ref(false);
 const googleGoalClearing = ref(false);
+const feishuViewsDirty = ref(false);
 const toast = useToast();
+const organizationId = computed(() => page.props.currentOrganization?.id ?? null);
+const syncChannel = computed(() => (organizationId.value ? `advertising-sync.${organizationId.value}.${props.store.id}` : null));
 let poller: ReturnType<typeof setInterval> | null = null;
+let heartbeatPoller: ReturnType<typeof setInterval> | null = null;
 let performanceSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let performanceRequestId = 0;
 let weeklyRequestId = 0;
+let syncEcho: Echo<'reverb'> | null = null;
 
 const isGoogle = computed(() => status.value.channel === 'google');
 const polling = computed(() => ['pending', 'syncing', 'backfilling'].includes(status.value.state));
@@ -471,8 +493,172 @@ function csrfToken(): string {
     return cookie ? decodeURIComponent(cookie.slice('XSRF-TOKEN='.length)) : '';
 }
 
+function broadcastCsrfToken(): string {
+    return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
+}
+
+function isAdvertisingSyncStatus(payload: unknown): payload is AdvertisingSyncStatus {
+    if (!payload || typeof payload !== 'object') return false;
+    const record = payload as Record<string, unknown>;
+    const state = record.state;
+    return typeof record.channel === 'string'
+        && (state === 'started' || state === 'progress' || state === 'completed' || state === 'failed')
+        && (!record.message || typeof record.message === 'string');
+}
+
+function readAdvertisingSyncPayload(value: unknown): AdvertisingSyncStatus | null {
+    if (!value || typeof value !== 'object') return null;
+    const maybePayload = 'payload' in value && value.payload && typeof value.payload === 'object'
+        ? value.payload as Record<string, unknown>
+        : 'data' in value && value.data && typeof value.data === 'object'
+            ? value.data as Record<string, unknown>
+            : value as Record<string, unknown>;
+    if (!isAdvertisingSyncStatus(maybePayload)) return null;
+    const state = maybePayload.state as AdvertisingSyncStatus['state'];
+    const views = Array.isArray(maybePayload.views) ? maybePayload.views.filter((item): item is string => typeof item === 'string') : undefined;
+    return {
+        channel: maybePayload.channel,
+        state,
+        mode: typeof maybePayload.mode === 'string' ? maybePayload.mode : undefined,
+        source: maybePayload.source === 'google_ads' || maybePayload.source === 'feishu_google_ads' ? maybePayload.source : undefined,
+        views,
+        progress_percent: typeof maybePayload.progress_percent === 'number' ? maybePayload.progress_percent : undefined,
+        last_metric_date: maybePayload.last_metric_date === null || typeof maybePayload.last_metric_date === 'string' ? maybePayload.last_metric_date : undefined,
+        data_synced_at: maybePayload.data_synced_at === null || typeof maybePayload.data_synced_at === 'string' ? maybePayload.data_synced_at : undefined,
+        message: maybePayload.message === null ? null : (typeof maybePayload.message === 'string' ? maybePayload.message : undefined),
+    };
+}
+
+const syncGoalStateFromProps = (): void => {
+    googleGoalFeishu.value = props.googleGoalFeishu;
+    googleGoalSummary.value = props.googleGoalSummary;
+};
+
+const refreshGoogleGoals = (): Promise<void> => new Promise((resolve) => {
+    router.reload({
+        only: ['googleGoalFeishu', 'googleGoalSummary'],
+        onSuccess: () => {
+            syncGoalStateFromProps();
+            resolve();
+        },
+        onError: () => {
+            resolve();
+        },
+    });
+});
+
+const handleSyncCompletion = async (payload: AdvertisingSyncStatus | null): Promise<void> => {
+    const views = payload?.views ?? [];
+    if (payload?.source === 'google_ads') {
+        await loadOverview(false);
+        if (isPerformanceView(activeTab.value) && (!views.length || views.includes(activeTab.value))) {
+            await loadPerformance(performanceTable.value?.pagination.page ?? 1);
+        }
+        return;
+    }
+    if (payload?.source === 'feishu_google_ads') {
+        if (activeTab.value === 'weekly') await loadWeeklyReport();
+        if (activeTab.value === 'goals') {
+            await refreshGoogleGoals();
+            feishuViewsDirty.value = false;
+        } else {
+            feishuViewsDirty.value = true;
+        }
+        return;
+    }
+    await loadOverview(false);
+    if (isPerformanceView(activeTab.value)) await loadPerformance(performanceTable.value?.pagination.page ?? 1);
+};
+
+const stopRealtime = (): void => {
+    if (syncEcho && syncChannel.value) syncEcho.leave(syncChannel.value);
+    syncEcho?.disconnect();
+    syncEcho = null;
+};
+
+const connectRealtime = (): void => {
+    stopRealtime();
+    if (!syncChannel.value || !page.props.realtime.enabled || !page.props.realtime.key) return;
+
+    window.Pusher = Pusher;
+    try {
+        syncEcho = new Echo({
+            broadcaster: 'reverb',
+            key: page.props.realtime.key,
+            wsHost: window.location.hostname,
+            wsPort: window.location.protocol === 'https:' ? 443 : Number(window.location.port || 80),
+            wssPort: 443,
+            forceTLS: window.location.protocol === 'https:',
+            enabledTransports: ['ws', 'wss'],
+            authEndpoint: '/broadcasting/auth',
+            auth: { headers: { 'X-CSRF-TOKEN': broadcastCsrfToken() } },
+        });
+        syncEcho.private(syncChannel.value).listen('.advertising-channel.sync-status', (payload: unknown) => {
+            const event = readAdvertisingSyncPayload(payload);
+            if (!event) return;
+            void syncStatusFromEvent(event);
+        });
+    } catch {
+        stopRealtime();
+    }
+};
+
 const stopPolling = () => { if (poller !== null) { clearInterval(poller); poller = null; } };
 const startPolling = () => { if (poller === null) poller = setInterval(refreshStatus, 4000); };
+const startHeartbeat = (): void => {
+    if (heartbeatPoller !== null) return;
+    heartbeatPoller = window.setInterval(() => {
+        if (!document.hidden) refreshStatus();
+    }, 60_000);
+};
+const stopHeartbeat = (): void => {
+    if (heartbeatPoller !== null) {
+        window.clearInterval(heartbeatPoller);
+        heartbeatPoller = null;
+    }
+};
+const syncStatusFromEvent = async (payload: AdvertisingSyncStatus): Promise<void> => {
+    if (payload.channel !== status.value.channel) return;
+    if (payload.source === 'feishu_google_ads') {
+        if (payload.state === 'completed' || payload.state === 'failed') await handleSyncCompletion(payload);
+        if (payload.state === 'failed' && (activeTab.value === 'weekly' || activeTab.value === 'goals')) {
+            toast.error(payload.message || 'Google Ads 飞书数据同步失败。');
+        }
+        return;
+    }
+    status.value = {
+        ...status.value,
+        state: payload.state === 'started' || payload.state === 'progress' ? 'syncing' : payload.state,
+        mode: payload.mode ?? status.value.mode,
+        progress_percent: payload.progress_percent ?? status.value.progress_percent,
+        last_metric_date: payload.last_metric_date ?? status.value.last_metric_date,
+        data_synced_at: payload.data_synced_at ?? status.value.data_synced_at,
+        message: payload.message ?? status.value.message,
+    };
+
+    if (manualSyncPending.value) manualSyncStarted.value = true;
+
+    const finished = payload.state === 'completed' || payload.state === 'failed';
+    if (finished) {
+        await handleSyncCompletion(payload);
+        await refreshStatus(true);
+        const shouldNotifyManual = manualSyncPending.value && manualSyncStarted.value;
+        if (shouldNotifyManual) {
+            manualSyncPending.value = false;
+            manualSyncStarted.value = false;
+            payload.state === 'failed'
+                ? toast.error('Google Ads 数据同步失败，请检查凭证。')
+                : toast.success('Google Ads 增量同步完成。');
+        }
+        if (!polling.value && !manualSyncPending.value) stopPolling();
+    }
+};
+const handleVisibilityChange = (): void => {
+    if (!document.hidden) {
+        connectRealtime();
+        void refreshStatus();
+    }
+};
 const applyFilters = () => {
     if (!filters.value.account || !filters.value.date_from || !filters.value.date_to) return;
     if (filters.value.date_from > filters.value.date_to) return;
@@ -484,6 +670,10 @@ const selectTab = (tab: string) => {
     activeTab.value = tab;
     if (tab === 'weekly') {
         if (!weeklyReport.value) loadWeeklyReport();
+        return;
+    }
+    if (tab === 'goals' && feishuViewsDirty.value) {
+        void refreshGoogleGoals().finally(() => { feishuViewsDirty.value = false; });
         return;
     }
     if (!isPerformanceView(tab)) return;
@@ -578,16 +768,23 @@ const loadOverview = async (showToast = false) => {
         loading.value = false;
     }
 };
-const refreshStatus = async () => {
+const refreshStatus = async (skipDataRefresh = false) => {
     if (checking.value) return;
     checking.value = true;
     const wasActive = polling.value;
+    const previousDataSyncedAt = status.value.data_synced_at;
     try {
         const response = await fetch(`/paid-advertising/${encodeURIComponent(status.value.channel)}/status`, {
             credentials: 'same-origin', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         });
         if (!response.ok) throw new Error('status failed');
         status.value = (await response.json() as { data: ChannelStatus }).data;
+        const backgroundSyncCompleted = !skipDataRefresh
+            && !wasActive
+            && !polling.value
+            && previousDataSyncedAt !== status.value.data_synced_at
+            && status.value.data_synced_at !== null;
+        if (backgroundSyncCompleted) await handleSyncCompletion({ channel: status.value.channel, state: 'completed', source: 'google_ads' });
         if (manualSyncPending.value && polling.value) manualSyncStarted.value = true;
         const finished = manualSyncPending.value && manualSyncStarted.value && !polling.value;
         if ((wasActive && !polling.value) || finished) {
@@ -624,7 +821,7 @@ const requestSync = async () => {
         manualSyncRequestedAt.value = Date.now();
         toast.info(payload?.message || 'Google Ads 增量同步任务已提交。');
         startPolling();
-        window.setTimeout(refreshStatus, 1200);
+        window.setTimeout(() => void refreshStatus(), 1200);
     } catch (error) {
         toast.error(error instanceof Error ? error.message : '同步任务提交失败。');
     } finally {
@@ -688,10 +885,32 @@ const clearGoogleGoalFeishu = async () => {
     }
 };
 
-onMounted(() => { if (polling.value) { refreshStatus(); startPolling(); } });
+onMounted(() => {
+    syncGoalStateFromProps();
+    connectRealtime();
+    startHeartbeat();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (polling.value) {
+        refreshStatus();
+        startPolling();
+    }
+});
 onBeforeUnmount(() => {
     stopPolling();
+    stopHeartbeat();
+    stopRealtime();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     if (performanceSearchTimer !== null) clearTimeout(performanceSearchTimer);
+});
+
+watch(() => props.googleGoalFeishu, () => {
+    syncGoalStateFromProps();
+});
+watch(() => props.googleGoalSummary, () => {
+    syncGoalStateFromProps();
+});
+watch(() => organizationId.value, () => {
+    if (!document.hidden) connectRealtime();
 });
 </script>
 

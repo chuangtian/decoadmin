@@ -106,6 +106,12 @@ if (config('services.meta_ads.sync_enabled', true)) {
 }
 
 if (config('services.advertising_sync.enabled', true)) {
+    Schedule::command('advertising-channels:sync google --mode=realtime')
+        ->name('advertising-channels:google:five-minute-core-sync')
+        ->everyFiveMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(10);
+
     Schedule::command('advertising-channels:sync google --mode=reconcile')
         ->name('advertising-channels:google:daily-attribution-reconciliation')
         ->dailyAt('04:47')
@@ -132,6 +138,12 @@ if (config('services.feishu_table.amazon_sync_enabled', true)) {
 }
 
 if (config('services.feishu_table.paid_advertising_goal_sync_enabled', true)) {
+    Schedule::command('feishu:sync-paid-advertising-goals --google-only')
+        ->name('feishu:google-ads-tables-five-minute-sync')
+        ->everyFiveMinutes()
+        ->onOneServer()
+        ->withoutOverlapping(10);
+
     Schedule::command('feishu:sync-paid-advertising-goals')
         ->name('feishu:paid-advertising-goals-and-all-tables-sync')
         ->dailyAt((string) config('services.feishu_table.paid_advertising_goal_sync_time', '03:40'))
