@@ -70,7 +70,7 @@ class AdvertisingChannelApiService
      *
      * @return array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>, campaign_daily_metrics: list<array<string, mixed>>, ad_daily_metrics: list<array<string, mixed>>, search_term_daily_metrics: list<array<string, mixed>>, keyword_daily_metrics: list<array<string, mixed>>}
      */
-    public function syncPayload(Store $store, string $key, string $from, string $to): array
+    public function syncPayload(Store $store, string $key, string $from, string $to, bool $coreOnly = false): array
     {
         if (! in_array($key, ['google', 'tiktok', 'bing', 'criteo'], true)) {
             throw new RuntimeException('Unsupported advertising history platform.');
@@ -80,7 +80,7 @@ class AdvertisingChannelApiService
         }
 
         $payload = match ($key) {
-            'google' => $this->google($store, $from, $to),
+            'google' => $this->google($store, $from, $to, $coreOnly),
             'tiktok' => $this->tiktok($store, $from, $to),
             'bing' => $this->bing($store, $from, $to),
             'criteo' => $this->criteo($store, $from, $to),
@@ -187,7 +187,7 @@ class AdvertisingChannelApiService
     }
 
     /** @return array{ad_spend: float, attributed_sales: float} */
-    private function google(Store $store, string $from, string $to): array
+    private function google(Store $store, string $from, string $to, bool $coreOnly = false): array
     {
         $clientId = $this->required($store, 'google_ads', 'client_id');
         $clientSecret = $this->required($store, 'google_ads', 'client_secret');
@@ -304,6 +304,17 @@ class AdvertisingChannelApiService
                 6,
             );
             $daily[$date]['raw_payload']['conversion_actions'][$actionName] = $row;
+        }
+
+        if ($coreOnly) {
+            return [
+                ...$this->totals($spend, $sales),
+                'accounts' => [$account],
+                'daily_metrics' => array_values($daily),
+                'campaign_daily_metrics' => [],
+                'search_term_daily_metrics' => [],
+                'keyword_daily_metrics' => [],
+            ];
         }
 
         $campaignQuery = "SELECT customer.id, campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.conversions_value_by_conversion_date, metrics.all_conversions, metrics.all_conversions_value, metrics.all_conversions_value_by_conversion_date FROM campaign WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.status = 'ENABLED' ORDER BY segments.date ASC";

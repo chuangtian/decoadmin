@@ -8,6 +8,8 @@ use App\Models\PaidAdvertisingGoalField;
 use App\Models\PaidAdvertisingGoalRecord;
 use App\Models\Store;
 use App\Models\StoreBusinessCredential;
+use App\Services\Advertising\GoogleAdsWeeklyReportService;
+use App\Services\Feishu\FeishuBitableClient;
 use App\Services\Feishu\PaidAdvertisingGoalSyncService;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,7 +34,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
                 'credential_value' => $value,
             ]);
         }
-        $client = \Mockery::mock(\App\Services\Feishu\FeishuBitableClient::class);
+        $client = \Mockery::mock(FeishuBitableClient::class);
         $client->shouldReceive('tables')->with('app_weekly')->twice()->andReturn([['table_id' => 'tbl_weekly', 'name' => 'Google周报已改名']]);
         $client->shouldReceive('fields')->with('app_weekly', 'tbl_weekly')->twice()->andReturn([]);
         $client->shouldReceive('records')->with('app_weekly', 'tbl_weekly', 'vew_weekly', true)->twice()->andReturn([
@@ -43,7 +45,7 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
                 '成交数' => 2, '单次转化成本' => 50,
             ]],
         ]);
-        $this->app->instance(\App\Services\Feishu\FeishuBitableClient::class, $client);
+        $this->app->instance(FeishuBitableClient::class, $client);
         $sync = app(PaidAdvertisingGoalSyncService::class);
         foreach ([1, 2] as $attempt) {
             $result = $sync->syncConfiguredSources($store->id);
@@ -51,11 +53,11 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
             $this->assertSame(1, $result['archived_records']);
         }
         $this->assertSame(0, PaidAdvertisingGoalBoard::query()->count());
-        $report = app(\App\Services\Advertising\GoogleAdsWeeklyReportService::class)->forStore($store);
+        $report = app(GoogleAdsWeeklyReportService::class)->forStore($store);
         $this->assertTrue($report['available']);
         $this->assertSame(800.0, $report['values']['revenue']);
         $this->assertCount(1, $report['weeks']);
-        $this->assertFalse(app(\App\Services\Advertising\GoogleAdsWeeklyReportService::class)->forStore($otherStore)['available']);
+        $this->assertFalse(app(GoogleAdsWeeklyReportService::class)->forStore($otherStore)['available']);
     }
 
     public function test_daily_sync_imports_total_and_custom_goal_sources_encrypted_and_idempotently(): void
@@ -532,14 +534,60 @@ class FeishuPaidAdvertisingGoalSyncTest extends TestCase
         $this->assertFalse(PaidAdvertisingGoalRecord::query()->forStore($otherStore)->exists());
     }
 
+    public function test_five_minute_google_ads_feishu_sync_only_reads_the_sales_target_sheet(): void
+    {
+        Config::set('services.feishu_table.app_id', 'paid_goal_test');
+        Config::set('services.feishu_table.app_secret', 'paid-goal-secret');
+        [$organization, $store] = $this->storeContext('google-only-spreadsheet');
+        $this->overallCredentials($store, 'google_only_token', '', '');
+        $requestedSheets = [];
+        $this->fakeFeishu(
+            fn (string $_appToken, string $_viewId): array => throw new \RuntimeException('不应读取多维表格记录。'),
+            null,
+            fn (string $token): array => throw new \RuntimeException("{$token} 不是多维表格 Token。"),
+            fn (string $token): array => [
+                ['sheet_id' => 'sales-target', 'title' => '销售目标'],
+                ['sheet_id' => 'brand-learning', 'title' => '品牌学习'],
+            ],
+            function (string $token, string $sheetId) use (&$requestedSheets): array {
+                $this->assertSame('google_only_token', $token);
+                $requestedSheets[] = $sheetId;
+
+                return [
+                    ['日期', '今日销售额($)', '本月销售额目标($)'],
+                    ['2026/08/23', 18478.09, 1500000],
+                ];
+            },
+        );
+
+        $result = app(PaidAdvertisingGoalSyncService::class)->syncGoogleAdsSources($store->id);
+
+        $this->assertSame(0, $result['failed']);
+        $this->assertSame(['sales-target'], $requestedSheets);
+        $this->assertDatabaseCount('paid_advertising_goal_records', 1);
+        $this->assertDatabaseHas('paid_advertising_goal_records', [
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'source_key' => 'overall:google:sheet:sales-target',
+        ]);
+        $this->assertDatabaseMissing('paid_advertising_goal_records', [
+            'source_key' => 'overall:google:sheet:brand-learning',
+        ]);
+    }
+
     public function test_paid_advertising_goal_sync_runs_daily_at_three_forty_in_beijing(): void
     {
         $event = collect(app(Schedule::class)->events())
-            ->first(fn ($event): bool => str_contains((string) $event->command, 'feishu:sync-paid-advertising-goals'));
+            ->first(fn ($event): bool => str_contains((string) $event->command, 'feishu:sync-paid-advertising-goals')
+                && ! str_contains((string) $event->command, '--google-only'));
+        $googleEvent = collect(app(Schedule::class)->events())
+            ->first(fn ($event): bool => str_contains((string) $event->command, 'feishu:sync-paid-advertising-goals --google-only'));
 
         $this->assertNotNull($event);
         $this->assertSame('40 3 * * *', $event->expression);
         $this->assertSame('Asia/Shanghai', $event->timezone);
+        $this->assertNotNull($googleEvent);
+        $this->assertSame('*/5 * * * *', $googleEvent->expression);
     }
 
     /**

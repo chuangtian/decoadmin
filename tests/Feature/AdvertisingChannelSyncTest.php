@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Events\AdvertisingChannelSyncStatusChanged;
 use App\Jobs\SyncAdvertisingChannelForStore;
 use App\Models\AdvertisingChannelAccount;
 use App\Models\AdvertisingChannelDailyMetric;
@@ -24,6 +25,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
@@ -40,6 +42,36 @@ class AdvertisingChannelSyncTest extends TestCase
 
         $this->assertNotNull($event);
         $this->assertSame('17 * * * *', $event->expression);
+    }
+
+    public function test_google_realtime_sync_runs_every_five_minutes_and_only_refreshes_core_daily_metrics(): void
+    {
+        Event::fake([AdvertisingChannelSyncStatusChanged::class]);
+        CarbonImmutable::setTestNow('2026-08-22 08:30:00 UTC');
+        [$store] = $this->googleStore();
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn ($event): bool => str_contains((string) $event->command, 'advertising-channels:sync google --mode=realtime'));
+
+        $this->assertNotNull($event);
+        $this->assertSame('*/5 * * * *', $event->expression);
+
+        $sync = app(AdvertisingChannelSyncService::class);
+        $sync->sync($store, 'google', 'realtime', $sync->credentialVersion($store, 'google'));
+
+        $this->assertDatabaseCount('advertising_channel_daily_metrics', 1);
+        $this->assertDatabaseCount('google_ads_campaign_daily_metrics', 0);
+        $this->assertDatabaseCount('google_ads_search_term_daily_metrics', 0);
+        $this->assertDatabaseCount('google_ads_keyword_daily_metrics', 0);
+        Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), "segments.date BETWEEN '2026-08-22' AND '2026-08-22'"));
+        Http::assertNotSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM search_term_view')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign_search_term_view')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view'));
+        Event::assertDispatched(AdvertisingChannelSyncStatusChanged::class, fn (AdvertisingChannelSyncStatusChanged $event): bool => $event->storeId === $store->id
+            && $event->channel === 'google'
+            && $event->state === 'completed'
+            && $event->mode === 'realtime'
+            && $event->views === ['overview', 'trend']);
     }
 
     public function test_google_reconciliation_refreshes_old_values_without_duplicates(): void
