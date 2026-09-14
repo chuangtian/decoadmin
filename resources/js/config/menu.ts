@@ -11,6 +11,7 @@ export interface MenuItem {
     dynamicChildren?: 'applications';
     comingSoon?: boolean;
     hidden?: boolean;
+    requiresStore?: boolean;
     requiresInstalledApp?: 'referral';
 }
 
@@ -132,6 +133,7 @@ export const menu: MenuItem[] = [
     {
         name: '店铺设置',
         icon: 'settings',
+        requiresStore: true,
         children: [
             { name: '店铺状态', route: '/store-settings/status', icon: 'status', permission: 'store.view' },
             // Instagram Feed 属于应用中心，入口挂在上面的「应用中心」分组，这里不重复挂。
