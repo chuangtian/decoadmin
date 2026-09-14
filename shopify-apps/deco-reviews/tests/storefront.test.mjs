@@ -29,6 +29,26 @@ const content = node => [node.textContent, ...node.children.map(content)].join('
 const source = fs.readFileSync(new URL('../frontend/storefront.js', import.meta.url), 'utf8');
 const widgetSource = source.split('/* DECO_REVIEWS_WIDGETS */')[1];
 const organicSource = fs.readFileSync(new URL('../frontend/organic.js', import.meta.url), 'utf8');
+const liquidSource = fs.readFileSync(new URL('../extensions/deco-reviews/blocks/deco_reviews.liquid', import.meta.url), 'utf8');
+
+test('theme block exposes isolated branding controls and complete supported locales', () => {
+  for (const setting of ['layout', 'corner_style', 'accent_color', 'accent_text_color', 'surface_color', 'text_color']) {
+    assert.match(liquidSource, new RegExp(`"id":"${setting}"`));
+    assert.match(liquidSource, new RegExp(`block\\.settings\\.${setting}`));
+  }
+
+  const localeRoot = new URL('../extensions/deco-reviews/locales/', import.meta.url);
+  const english = JSON.parse(fs.readFileSync(new URL('en.default.json', localeRoot), 'utf8')).deco_reviews;
+  const englishSchema = JSON.parse(fs.readFileSync(new URL('en.default.schema.json', localeRoot), 'utf8'));
+  for (const locale of ['de', 'es', 'fr', 'zh-CN']) {
+    const messages = JSON.parse(fs.readFileSync(new URL(`${locale}.json`, localeRoot), 'utf8')).deco_reviews;
+    const schema = JSON.parse(fs.readFileSync(new URL(`${locale}.schema.json`, localeRoot), 'utf8'));
+    assert.deepEqual(Object.keys(messages).sort(), Object.keys(english).sort(), `${locale} storefront messages must be complete`);
+    assert.deepEqual(Object.keys(schema.settings).sort(), Object.keys(englishSchema.settings).sort(), `${locale} setting labels must be complete`);
+    assert.deepEqual(Object.keys(schema.layouts).sort(), Object.keys(englishSchema.layouts).sort(), `${locale} layouts must be complete`);
+    assert.deepEqual(Object.keys(schema.corners).sort(), Object.keys(englishSchema.corners).sort(), `${locale} corners must be complete`);
+  }
+});
 
 test('organic form is shown only for an enabled same-origin product form', () => {
   const form = new Node(); form.hidden = true; form.action = '';
