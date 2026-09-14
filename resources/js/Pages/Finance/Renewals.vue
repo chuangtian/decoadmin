@@ -62,6 +62,17 @@ const filterLabels = computed(() => ({
     automatic: `自动续费 (${automaticCount.value})`,
 }));
 
+const billingCycleLabels: Record<string, string> = {
+    monthly: '月付',
+    bimonthly: '双月付',
+    quarterly: '季付',
+    annual: '年付',
+};
+
+function billingCycleLabel(cycle: string | null): string {
+    return cycle ? (billingCycleLabels[cycle] ?? cycle) : '未填写';
+}
+
 function setFilter(filter: typeof activeFilter.value): void {
     activeFilter.value = filter;
 }
@@ -193,7 +204,7 @@ function savePayment(): void {
                                 <span>付费方式：{{ item.software_payment_method || '未填写' }}</span>
                                 <span class="inline-flex items-center gap-1">账号：<strong class="font-mono text-slate-800">{{ item.software_account || '未填写' }}</strong><button v-if="canManage && item.software_account" type="button" class="font-semibold text-blue-600 hover:underline" @click="copyValue(item.software_account || '', `${item.uuid}-account`)">{{ copied === `${item.uuid}-account` ? '已复制' : '复制' }}</button></span>
                                 <span class="inline-flex items-center gap-1">密码：<strong class="font-mono text-slate-800">{{ revealedPasswords[item.uuid] ?? (item.software_password_set ? '••••••••' : '未填写') }}</strong><button v-if="canManage && item.software_password_set" type="button" :disabled="loadingPasswords[item.uuid]" class="font-semibold text-blue-600 hover:underline disabled:opacity-50" @click="togglePassword(item)">{{ loadingPasswords[item.uuid] ? '读取中' : item.uuid in revealedPasswords ? '隐藏' : '显示' }}</button><button v-if="item.uuid in revealedPasswords" type="button" class="font-semibold text-blue-600 hover:underline" @click="copyValue(revealedPasswords[item.uuid] || '', `${item.uuid}-password`)">{{ copied === `${item.uuid}-password` ? '已复制' : '复制' }}</button></span>
-                                <span>付费周期：{{ item.billing_cycle === 'monthly' ? '月付' : '年付' }}</span>
+                                <span>付费周期：{{ billingCycleLabel(item.billing_cycle) }}</span>
                             </div>
                         </div>
                         <dl class="grid grid-cols-2 gap-3 text-sm lg:grid-cols-1">
@@ -219,7 +230,7 @@ function savePayment(): void {
                         <div><p class="text-xs font-semibold text-emerald-700">{{ selected.reference_no }}</p><h2 class="mt-1 text-xl font-bold text-slate-950">{{ selected.payment_status === 'pending' ? '确认首次付款' : '记录本次续费' }}</h2><p class="mt-1 text-sm text-slate-500">{{ selected.title }} · {{ selected.currency }} {{ selected.amount }}</p></div>
                         <button type="button" class="text-2xl text-slate-400" @click="selected = null">×</button>
                     </div>
-                    <div v-if="selected.category === 'software'" class="mt-5 rounded-xl bg-orange-50 p-4 text-sm text-orange-900"><p>付费方式：{{ selected.software_payment_method || '未填写' }}</p><p class="mt-1">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }} · {{ selected.billing_cycle === 'monthly' ? '月付' : '年付' }}</p><p class="mt-1 text-xs text-orange-700">确认后系统会从本次付款日期起计算下一次续费日期。</p></div>
+                    <div v-if="selected.category === 'software'" class="mt-5 rounded-xl bg-orange-50 p-4 text-sm text-orange-900"><p>付费方式：{{ selected.software_payment_method || '未填写' }}</p><p class="mt-1">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }} · {{ billingCycleLabel(selected.billing_cycle) }}</p><p class="mt-1 text-xs text-orange-700">确认后系统会从本次付款日期起计算下一次续费日期。</p></div>
                     <label class="mt-5 block text-sm font-semibold text-slate-700">实际付款日期<input v-model="payment.paid_on" required type="date" class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label>
                     <label class="mt-4 block text-sm font-semibold text-slate-700">付款参考号（可选）<input v-model="payment.payment_reference" maxlength="180" class="mt-2 h-11 w-full rounded-xl border-slate-200" placeholder="银行流水、支付平台单号等" /></label>
                     <p v-if="payment.hasErrors" class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(payment.errors).join('；') }}</p>

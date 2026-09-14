@@ -43,6 +43,13 @@ const statusLabels: Record<string, string> = {
     approved: '已通过',
     rejected: '已驳回',
 };
+const billingCycleLabels: Record<string, string> = {
+    monthly: '月付',
+    bimonthly: '双月付',
+    quarterly: '季付',
+    annual: '年付',
+};
+const billingCycleLabel = (cycle: string | null): string => cycle ? (billingCycleLabels[cycle] ?? cycle) : '未填写';
 const filters = ref({ ...props.filters });
 const selected = ref<Row | null>(null);
 const reviewOpen = ref(false);
@@ -263,7 +270,7 @@ function review(action: 'approve' | 'reject'): void {
                         <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account || '未填写' }}</dd></div>
                         <div><dt class="text-xs text-slate-400">登录密码</dt><dd class="mt-1 text-slate-700">{{ selected.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
                         <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
-                        <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ selected.billing_cycle === 'monthly' ? '月付' : '年付' }}</dd></div>
+                        <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ billingCycleLabel(selected.billing_cycle) }}</dd></div>
                     </dl>
                     <label class="mt-5 block text-sm font-semibold text-slate-700">审批意见<textarea v-model="form.note" maxlength="2000" rows="4" class="mt-2 w-full rounded-xl border-slate-200" placeholder="通过时可选；驳回时必须填写原因"></textarea></label>
                     <p v-if="form.hasErrors" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(form.errors).join('；') }}</p>

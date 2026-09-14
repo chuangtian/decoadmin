@@ -576,6 +576,55 @@ class PersonalRequestWorkflowTest extends TestCase
                 ->where('paymentRequests.3.title', '稍后续费'));
     }
 
+    public function test_bimonthly_and_quarterly_billing_cycles_are_accepted_and_schedule_the_correct_renewal_date(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-14 10:00:00');
+        [$organization, $store] = $this->context();
+        $employee = $this->user($organization, $store, 'operator', '周期申请人');
+        $finance = $this->user($organization, $store, 'organization-admin', '财务人员');
+
+        foreach ([
+            'bimonthly' => '2026-11-14',
+            'quarterly' => '2026-12-14',
+        ] as $billingCycle => $expectedRenewalDate) {
+            $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
+                ->post(route('expense-requests.store'), [
+                    'title' => "{$billingCycle} 软件订阅",
+                    'category' => 'software',
+                    'amount' => '100.00',
+                    'currency' => 'CNY',
+                    'desired_date' => '2026-09-20',
+                    'description' => '验证新增付费周期。',
+                    'approval_required' => false,
+                    'software_payment_method' => '公司信用卡',
+                    'renewal_mode' => 'automatic',
+                    'billing_cycle' => $billingCycle,
+                ])->assertRedirect()->assertSessionHasNoErrors();
+
+            $item = PersonalRequest::query()->where('billing_cycle', $billingCycle)->sole();
+
+            $this->actingAs($finance)->withSession($this->contextSession($organization, $store))
+                ->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-09-14'])
+                ->assertRedirect()->assertSessionHasNoErrors();
+
+            $this->assertSame($expectedRenewalDate, $item->fresh()->next_renewal_on->toDateString());
+        }
+
+        $this->actingAs($employee)->withSession($this->contextSession($organization, $store))
+            ->post(route('expense-requests.store'), [
+                'title' => '非法周期软件订阅',
+                'category' => 'software',
+                'amount' => '100.00',
+                'currency' => 'CNY',
+                'desired_date' => '2026-09-20',
+                'description' => '验证非法付费周期被拒绝。',
+                'approval_required' => false,
+                'software_payment_method' => '公司信用卡',
+                'renewal_mode' => 'automatic',
+                'billing_cycle' => 'weekly',
+            ])->assertSessionHasErrors('billing_cycle');
+    }
+
     public function test_automatic_subscription_cancellation_records_due_cycle_and_excludes_future_finance_totals(): void
     {
         CarbonImmutable::setTestNow('2026-09-20 10:00:00');

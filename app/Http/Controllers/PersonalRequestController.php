@@ -253,7 +253,7 @@ class PersonalRequestController extends Controller
             'software_password' => ['exclude_unless:category,software', 'nullable', 'string', 'max:500'],
             'software_payment_method' => ['exclude_unless:category,software', 'required', 'string', 'max:255', 'regex:/\S/u'],
             'renewal_mode' => ['exclude_unless:category,software', 'required', Rule::in(['automatic', 'manual'])],
-            'billing_cycle' => ['exclude_unless:category,software', 'required', Rule::in(['monthly', 'annual'])],
+            'billing_cycle' => ['exclude_unless:category,software', 'required', Rule::in(['monthly', 'bimonthly', 'quarterly', 'annual'])],
             'images' => ['nullable', 'array', 'max:10'],
             'images.*' => ['file', 'image', 'mimes:jpg,jpeg,png,webp,gif', 'max:8192'],
         ]);
