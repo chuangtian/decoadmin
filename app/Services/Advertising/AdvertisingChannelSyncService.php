@@ -44,8 +44,8 @@ class AdvertisingChannelSyncService
     public function sync(Store $store, string $channel, string $mode, ?string $credentialVersion = null): void
     {
         $this->assertChannel($channel);
-        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'reconcile', 'realtime'], true)
-            || (in_array($mode, ['reconcile', 'realtime'], true) && $channel !== 'google')) {
+        if (! in_array($mode, ['priority', 'backfill', 'incremental', 'attribution', 'reconcile', 'realtime'], true)
+            || (in_array($mode, ['attribution', 'reconcile', 'realtime'], true) && $channel !== 'google')) {
             throw new RuntimeException('广告渠道同步模式无效。');
         }
         if ($store->status !== 'active' || ! $this->configured($store, $channel)) {
@@ -71,11 +71,19 @@ class AdvertisingChannelSyncService
             $records = max(0, (int) data_get($job->result, 'records_count', 0));
             foreach (array_slice($chunks, $processed) as [$chunkFrom, $chunkTo]) {
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
-                $payload = $mode === 'realtime'
+                $payload = in_array($mode, ['attribution', 'realtime'], true)
                     ? $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo, true)
                     : $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo);
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
-                $records += $this->persist($store, $channel, $payload);
+                $replaceGoogleDetails = $channel === 'google'
+                    && ! in_array($mode, ['attribution', 'realtime'], true);
+                $records += $this->persist(
+                    $store,
+                    $channel,
+                    $payload,
+                    $replaceGoogleDetails ? $chunkFrom : null,
+                    $replaceGoogleDetails ? $chunkTo : null,
+                );
                 $processed++;
                 $job->forceFill([
                     'processed_items' => $processed,
@@ -194,10 +202,19 @@ class AdvertisingChannelSyncService
         $timezone = $channel === 'criteo' ? 'UTC' : ($store->timezone ?: 'UTC');
         $now = CarbonImmutable::now($timezone)->startOfHour();
         $priorityDays = max(1, (int) config('services.advertising_sync.priority_days', 7));
-        $rollingDays = max(1, (int) config('services.advertising_sync.rolling_days', 3));
+        $rollingDays = max(1, (int) config(
+            $channel === 'google'
+                ? 'services.advertising_sync.google_rolling_days'
+                : 'services.advertising_sync.rolling_days',
+            $channel === 'google' ? 8 : 3,
+        ));
 
         $range = match ($mode) {
             'realtime' => [$now->startOfDay(), $now],
+            'attribution' => [
+                $now->subDays(max(1, (int) config('services.advertising_sync.google_attribution_days', 30)) - 1)->startOfDay(),
+                $now,
+            ],
             'priority' => [$now->subDays($priorityDays - 1)->startOfDay(), $now],
             'backfill' => [
                 $now->subMonthsNoOverflow(max(1, (int) config('services.advertising_sync.history_months', 6)))->startOfDay(),
@@ -241,9 +258,14 @@ class AdvertisingChannelSyncService
     }
 
     /** @param array{accounts: list<array<string, mixed>>, daily_metrics: list<array<string, mixed>>, campaign_daily_metrics?: list<array<string, mixed>>, ad_daily_metrics?: list<array<string, mixed>>, search_term_daily_metrics?: list<array<string, mixed>>, keyword_daily_metrics?: list<array<string, mixed>>} $payload */
-    private function persist(Store $store, string $channel, array $payload): int
-    {
-        return DB::transaction(function () use ($store, $channel, $payload): int {
+    private function persist(
+        Store $store,
+        string $channel,
+        array $payload,
+        ?string $replaceGoogleDetailsFrom = null,
+        ?string $replaceGoogleDetailsTo = null,
+    ): int {
+        return DB::transaction(function () use ($store, $channel, $payload, $replaceGoogleDetailsFrom, $replaceGoogleDetailsTo): int {
             $timestamp = now();
             $accounts = collect($payload['accounts'])
                 ->filter(fn (array $account): bool => filled($account['external_account_id'] ?? null))
@@ -301,6 +323,20 @@ class AdvertisingChannelSyncService
                 ->where('provider', $channel)
                 ->whereIn('external_account_id', $accounts->keys())
                 ->pluck('id', 'external_account_id');
+
+            if ($channel === 'google'
+                && $replaceGoogleDetailsFrom !== null
+                && $replaceGoogleDetailsTo !== null
+                && $accountIds->isNotEmpty()) {
+                foreach ([GoogleAdsCampaignDailyMetric::class, GoogleAdsSearchTermDailyMetric::class, GoogleAdsKeywordDailyMetric::class] as $model) {
+                    $model::query()
+                        ->where('organization_id', $store->organization_id)
+                        ->where('store_id', $store->getKey())
+                        ->whereIn('advertising_channel_account_id', $accountIds->values())
+                        ->whereBetween('metric_date', [$replaceGoogleDetailsFrom, $replaceGoogleDetailsTo])
+                        ->delete();
+                }
+            }
             $rows = collect($payload['daily_metrics'])->map(function (array $metric) use ($store, $channel, $accountIds, $timestamp): ?array {
                 $externalId = trim((string) ($metric['external_account_id'] ?? ''));
                 $date = trim((string) ($metric['date'] ?? ''));
@@ -674,7 +710,7 @@ class AdvertisingChannelSyncService
                 if ($job->type !== $this->syncType('google')) {
                     $attributes['last_reconciled_at'] = $finishedAt;
                 }
-            } elseif ($mode === 'reconcile') {
+            } elseif (in_array($mode, ['attribution', 'reconcile'], true)) {
                 $attributes['last_reconciled_at'] = $finishedAt;
             }
             $state->forceFill($attributes)->save();
@@ -687,7 +723,7 @@ class AdvertisingChannelSyncService
     /** @return list<string> */
     private function updatedViews(string $mode): array
     {
-        return $mode === 'realtime'
+        return in_array($mode, ['attribution', 'realtime'], true)
             ? ['overview', 'trend']
             : ['overview', 'trend', 'campaigns', 'search-terms', 'keywords'];
     }

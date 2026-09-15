@@ -75,6 +75,7 @@ class AdvertisingChannelStatusService
                 'message' => match ($job->mode) {
                     'backfill' => '最近 7 天数据已可使用，正在后台补齐最近半年的历史数据。',
                     'realtime' => '正在刷新今天的 Google Ads 核心指标。',
+                    'attribution' => '正在刷新最近 30 天的 Google Ads 延迟归因。',
                     'incremental', 'reconcile' => '正在刷新广告账户和历史指标。',
                     default => '正在优先同步账户信息和最近 7 天数据，完成后页面即可使用。',
                 },
