@@ -20,6 +20,7 @@ use App\Models\TikTokAdsAdDailyMetric;
 use App\Models\TikTokAdsCampaignDailyMetric;
 use App\Support\CurrentYearSyncWindow;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -442,7 +443,8 @@ class AdvertisingChannelSyncService
                 })->filter()->values()->all();
 
             if ($channel === 'google') {
-                GoogleAdsCampaignDailyMetric::query()->upsert(
+                $this->upsertGoogleMetricRows(
+                    GoogleAdsCampaignDailyMetric::class,
                     $campaignRows,
                     ['organization_id', 'store_id', 'external_account_id', 'campaign_id', 'metric_date'],
                     ['advertising_channel_account_id', 'campaign_name', 'campaign_status', 'advertising_channel_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversions_value', 'conversion_value_by_conversion_date', 'all_conversions', 'all_conversions_value', 'all_conversions_value_by_conversion_date', 'raw_payload', 'synced_at', 'updated_at'],
@@ -591,12 +593,14 @@ class AdvertisingChannelSyncService
                         ];
                     })->filter()->values()->all();
 
-                GoogleAdsSearchTermDailyMetric::query()->upsert(
+                $this->upsertGoogleMetricRows(
+                    GoogleAdsSearchTermDailyMetric::class,
                     $searchTermRows,
                     ['organization_id', 'store_id', 'external_account_id', 'metric_date', 'dimension_key'],
                     ['advertising_channel_account_id', 'source_type', 'search_term', 'normalized_search_term', 'status', 'matched_keyword', 'match_type', 'campaign_id', 'campaign_name', 'ad_group_id', 'ad_group_name', 'advertising_channel_type', 'spend', 'revenue', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
                 );
-                GoogleAdsKeywordDailyMetric::query()->upsert(
+                $this->upsertGoogleMetricRows(
+                    GoogleAdsKeywordDailyMetric::class,
                     $keywordRows,
                     ['organization_id', 'store_id', 'external_account_id', 'metric_date', 'dimension_key'],
                     ['advertising_channel_account_id', 'criterion_id', 'keyword', 'normalized_keyword', 'match_type', 'status', 'campaign_id', 'campaign_name', 'ad_group_id', 'ad_group_name', 'spend', 'revenue', 'impressions', 'clicks', 'conversions', 'raw_payload', 'synced_at', 'updated_at'],
@@ -605,6 +609,21 @@ class AdvertisingChannelSyncService
 
             return count($accounts) + count($rows) + count($campaignRows) + count($adRows) + count($searchTermRows) + count($keywordRows);
         });
+    }
+
+    /**
+     * @param  class-string<Model>  $model
+     * @param  list<array<string, mixed>>  $rows
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>  $update
+     */
+    private function upsertGoogleMetricRows(string $model, array $rows, array $uniqueBy, array $update): void
+    {
+        // Native MySQL statements allow at most 65,535 bound parameters.
+        // Keep each write small while retaining the outer snapshot transaction.
+        for ($offset = 0, $count = count($rows); $offset < $count; $offset += 500) {
+            $model::query()->upsert(array_slice($rows, $offset, 500), $uniqueBy, $update);
+        }
     }
 
     private function startJob(Store $store, string $channel, string $mode, CarbonImmutable $since, CarbonImmutable $until, int $chunks, ?string $credentialVersion): SyncJob
