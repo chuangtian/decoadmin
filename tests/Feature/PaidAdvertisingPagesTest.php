@@ -543,6 +543,11 @@ class PaidAdvertisingPagesTest extends TestCase
             ]);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'No Revenue', 5, 0, 50, 5, 0);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-19', 'macfox ebike', 4, 0, 150, 15, 0);
+        // Legacy keys did not include match type; a non-converting phrase on
+        // another day must not qualify merely because the exact type converted.
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-17', 'macfox ebike', 66.92907, 0, 113, 31, 0);
+        GoogleAdsSearchTermDailyMetric::query()->where('advertising_channel_account_id', $account->id)
+            ->whereDate('metric_date', '2026-08-17')->update(['match_type' => 'PHRASE']);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-18', 'macfox ebike', 50, 0, 900, 90, 0);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-16', 'macfox ebike', 5, 100, 50, 5, 1);
         GoogleAdsSearchTermDailyMetric::query()
@@ -615,6 +620,42 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.rows.0.ctr', 8)
             ->assertJsonPath('data.rows.0.cpc', 0.1)
             ->assertJsonPath('data.rows.0.conversions', 4);
+    }
+
+    public function test_google_table_rounds_full_precision_totals_once_to_display_precision(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $this->configureGoogle($organization, $store);
+        $account = AdvertisingChannelAccount::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $store->id,
+            'provider' => 'google',
+            'external_account_id' => '6442213333',
+            'name' => 'Rounding regression account',
+            'status' => 'active',
+            'currency' => 'USD',
+            'timezone' => 'America/Los_Angeles',
+            'raw_payload' => [],
+            'last_seen_at' => now(),
+            'synced_at' => now(),
+        ]);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-20', 'rounding boundary', 12.344986, 23.454986, 100, 3, 1.234986);
+        $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-20', 'rounding boundary', 12.344986, 23.454986, 100, 3, 1.234986);
+
+        foreach (['search-terms', 'keywords'] as $view) {
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->getJson(route('paid-advertising.google.data', [
+                    'account' => $account->external_account_id,
+                    'date_from' => '2026-08-17',
+                    'date_to' => '2026-08-23',
+                    'view' => $view,
+                ]))
+                ->assertOk()
+                ->assertJsonPath('data.rows.0.spend', 12.34)
+                ->assertJsonPath('data.rows.0.revenue', 23.45)
+                ->assertJsonPath('data.rows.0.cpc', 4.11)
+                ->assertJsonPath('data.rows.0.conversions', 1.23);
+        }
     }
 
     public function test_tiktok_ads_overview_reads_scoped_mysql_metrics_and_previous_period(): void

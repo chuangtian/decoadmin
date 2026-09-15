@@ -362,6 +362,17 @@ class AdvertisingChannelSyncTest extends TestCase
                             'conversionsValue' => 0,
                         ],
                     ],
+                    [
+                        'customer' => ['id' => '1234567890'],
+                        'campaign' => ['id' => 'search-campaign', 'name' => 'Search Bikes', 'advertisingChannelType' => 'SEARCH'],
+                        'adGroup' => ['id' => 'brand-ad-group', 'name' => 'Brand'],
+                        'searchTermView' => ['searchTerm' => 'macfox ebike', 'status' => 'ADDED'],
+                        'segments' => [
+                            'date' => '2026-08-22',
+                            'keyword' => ['info' => ['text' => 'macfox', 'matchType' => 'PHRASE']],
+                        ],
+                        'metrics' => ['costMicros' => '1250000', 'impressions' => 113, 'clicks' => 31, 'conversions' => 0, 'conversionsValue' => 0],
+                    ],
                 ]]);
             }
 
@@ -552,6 +563,7 @@ class AdvertisingChannelSyncTest extends TestCase
         $this->assertEquals(7.5, GoogleAdsCampaignDailyMetric::query()->sum('spend'));
         $standardSearchTerm = GoogleAdsSearchTermDailyMetric::query()
             ->where('source_type', 'STANDARD')
+            ->where('match_type', 'EXACT')
             ->whereDate('metric_date', '2026-08-22')
             ->sole();
         $this->assertSame('macfox ebike', $standardSearchTerm->search_term);
@@ -559,6 +571,12 @@ class AdvertisingChannelSyncTest extends TestCase
         $this->assertSame('EXACT', $standardSearchTerm->match_type);
         $this->assertSame('2.500000', $standardSearchTerm->spend);
         $this->assertSame('25.000000', $standardSearchTerm->revenue);
+        $phraseSearchTerm = GoogleAdsSearchTermDailyMetric::query()->where('source_type', 'STANDARD')
+            ->where('match_type', 'PHRASE')->whereDate('metric_date', '2026-08-22')->sole();
+        $this->assertNotSame($standardSearchTerm->dimension_key, $phraseSearchTerm->dimension_key);
+        $this->assertSame('1.250000', $phraseSearchTerm->spend);
+        $this->assertSame(113, $phraseSearchTerm->impressions);
+        $this->assertSame(31, $phraseSearchTerm->clicks);
         $zeroRevenueSearchTermDay = GoogleAdsSearchTermDailyMetric::query()
             ->where('source_type', 'STANDARD')
             ->whereDate('metric_date', '2026-08-21')

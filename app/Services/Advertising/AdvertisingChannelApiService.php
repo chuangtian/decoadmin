@@ -525,7 +525,7 @@ class AdvertisingChannelApiService
         return [
             'external_account_id' => trim((string) data_get($row, 'customer.id', $fallbackAccount)),
             'date' => $date,
-            'dimension_key' => hash('sha256', implode('|', [$pmax ? 'pmax' : 'standard', mb_strtolower($term), $campaignId, $adGroupId, (string) $matchedKeyword])),
+            'dimension_key' => hash('sha256', implode('|', [$pmax ? 'pmax' : 'standard', mb_strtolower($term), $campaignId, $adGroupId, (string) $matchedKeyword, strtoupper((string) $matchType)])),
             'source_type' => $pmax ? 'PERFORMANCE_MAX' : 'STANDARD',
             'search_term' => $term,
             'normalized_search_term' => mb_strtolower($term),

@@ -84,9 +84,15 @@ class GoogleAdsPerformanceTableService
         // resources. Keep every day of qualifying resources, but do not add
         // spend from another campaign that never converted in this period.
         $convertingDimensions = (clone $query)->select('dimension_key')
+            ->selectRaw("COALESCE(match_type, '') AS resource_match_type")
             ->groupBy('dimension_key')
+            ->groupByRaw("COALESCE(match_type, '')")
             ->havingRaw('SUM(revenue) > 0');
-        $query->whereIn('dimension_key', $convertingDimensions);
+        // Older daily records used a key without match type. Include the stored
+        // type in this join as well so those records remain correctly scoped.
+        $query->joinSub($convertingDimensions, 'converting_resources', fn ($join) => $join
+            ->on('google_ads_search_term_daily_metrics.dimension_key', '=', 'converting_resources.dimension_key')
+            ->whereRaw("COALESCE(google_ads_search_term_daily_metrics.match_type, '') = converting_resources.resource_match_type"));
         $search = trim((string) ($filters['search'] ?? ''));
         if ($search !== '') {
             $query->where(function ($nested) use ($search): void {
@@ -128,7 +134,10 @@ class GoogleAdsPerformanceTableService
     private function row(array $row): array
     {
         foreach (['spend', 'revenue', 'roas', 'ctr', 'cpc', 'conversions'] as $key) {
-            $row[$key] = round((float) ($row[$key] ?? 0), 4);
+            // SQL calculates ratios from full-precision sums. Round once to
+            // the table's display precision; an intermediate four-decimal
+            // round can move an amount such as 2287.524986 to the wrong cent.
+            $row[$key] = round((float) ($row[$key] ?? 0), 2);
         }
         foreach (['impressions', 'clicks'] as $key) {
             $row[$key] = (int) ($row[$key] ?? 0);
