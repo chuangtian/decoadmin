@@ -79,6 +79,14 @@ class GoogleAdsPerformanceTableService
             ->forStore((int) $store->getKey())
             ->where('external_account_id', $externalAccountId)
             ->whereBetween('metric_date', [$filters['date_from'], $filters['date_to']]);
+        // Google applies the period conversion-value filter to each resource
+        // (campaign/ad group/keyword), before Macfox merges the same term across
+        // resources. Keep every day of qualifying resources, but do not add
+        // spend from another campaign that never converted in this period.
+        $convertingDimensions = (clone $query)->select('dimension_key')
+            ->groupBy('dimension_key')
+            ->havingRaw('SUM(revenue) > 0');
+        $query->whereIn('dimension_key', $convertingDimensions);
         $search = trim((string) ($filters['search'] ?? ''));
         if ($search !== '') {
             $query->where(function ($nested) use ($search): void {

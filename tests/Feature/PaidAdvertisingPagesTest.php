@@ -543,6 +543,15 @@ class PaidAdvertisingPagesTest extends TestCase
             ]);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'No Revenue', 5, 0, 50, 5, 0);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-19', 'macfox ebike', 4, 0, 150, 15, 0);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-18', 'macfox ebike', 50, 0, 900, 90, 0);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-16', 'macfox ebike', 5, 100, 50, 5, 1);
+        GoogleAdsSearchTermDailyMetric::query()
+            ->where('advertising_channel_account_id', $account->id)
+            ->where(fn ($query) => $query->whereDate('metric_date', '2026-08-18')->orWhereDate('metric_date', '2026-08-16'))
+            ->update([
+                'dimension_key' => hash('sha256', 'other-campaign-same-term'),
+                'campaign_id' => 'other-campaign',
+            ]);
         $this->createGoogleSearchTermMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'Macfox Ebike', 100, 5000, 10000, 1000, 100);
         $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-20', 'macfox ebike', 4, 48, 400, 40, 4);
         $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-21', 'macfox ebike', 0, 0, 100, 0, 0);
@@ -3042,7 +3051,7 @@ class PaidAdvertisingPagesTest extends TestCase
             'advertising_channel_account_id' => $account->id,
             'external_account_id' => $account->external_account_id,
             'metric_date' => $date,
-            'dimension_key' => hash('sha256', $normalized.'|'.$date),
+            'dimension_key' => hash('sha256', $normalized.'|campaign-search|ad-group-search|macfox ebike'),
             'source_type' => 'standard',
             'search_term' => $searchTerm,
             'normalized_search_term' => $normalized,
