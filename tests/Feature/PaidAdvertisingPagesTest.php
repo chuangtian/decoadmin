@@ -71,6 +71,45 @@ class PaidAdvertisingPagesTest extends TestCase
         }
     }
 
+    public function test_google_date_filters_use_store_today_across_all_metric_tabs(): void
+    {
+        [$user, $organization, $store] = $this->context('store-admin');
+        $store->update(['timezone' => 'America/Los_Angeles']);
+        CarbonImmutable::setTestNow('2026-09-15T05:50:00Z');
+        try {
+            $account = AdvertisingChannelAccount::create([
+                'organization_id' => $organization->id, 'store_id' => $store->id,
+                'provider' => 'google', 'external_account_id' => '6442213333',
+                'timezone' => 'America/Los_Angeles', 'status' => 'active',
+                'raw_payload' => [],
+                'last_seen_at' => now(), 'synced_at' => now(),
+            ]);
+            $this->createGoogleMetric($organization, $store, $account, '2026-09-14', 100, 500, 10, 20, 15);
+            $this->createGoogleMetric($organization, $store, $account, '2026-09-15', 999, 999, 1, 1, 1);
+            // SQLite preserves Eloquent's midnight suffix; production uses a DATE column.
+            foreach (['2026-09-14', '2026-09-15'] as $date) {
+                DB::table('advertising_channel_daily_metrics')->where('advertising_channel_account_id', $account->id)
+                    ->whereDate('metric_date', $date)->update(['metric_date' => $date]);
+            }
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store));
+            foreach ([[], ['view' => 'search-terms'], ['view' => 'keywords']] as $view) {
+                $this->getJson(route('paid-advertising.google.data', [
+                    ...$view, 'account' => '6442213333', 'date_from' => '2026-09-01', 'date_to' => '2026-09-15',
+                ]))->assertOk()->assertJsonPath('data.filters.date_from', '2026-09-01')
+                    ->assertJsonPath('data.filters.date_to', '2026-09-14');
+                $this->getJson(route('paid-advertising.google.data', $view))->assertOk()
+                    ->assertJsonPath('data.filters.date_from', '2026-09-08')
+                    ->assertJsonPath('data.filters.date_to', '2026-09-14');
+            }
+            $this->getJson(route('paid-advertising.google.data'))
+                ->assertJsonPath('data.current.spend', 100)
+                ->assertJsonPath('data.store_today', '2026-09-14')
+                ->assertJsonPath('data.timezone', 'America/Los_Angeles');
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_google_ads_overview_reads_scoped_mysql_metrics_and_compares_previous_equal_period(): void
     {
         [$user, $organization, $store] = $this->context('store-admin');
