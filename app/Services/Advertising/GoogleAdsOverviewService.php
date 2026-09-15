@@ -11,19 +11,12 @@ use Illuminate\Database\Eloquent\Builder;
 
 class GoogleAdsOverviewService
 {
+    public function __construct(private GoogleAdsDateRangeService $dateRange) {}
+
     /** @param array{account?: string, date_from?: string, date_to?: string} $filters */
     public function forStore(Store $store, array $filters = []): array
     {
-        $timezone = $store->timezone ?: 'UTC';
-        $today = CarbonImmutable::now($timezone)->startOfDay();
-        $to = $this->date($filters['date_to'] ?? null, $today, $timezone);
-        $from = $this->date($filters['date_from'] ?? null, $to->subDays(6), $timezone);
-        if ($from->gt($to)) {
-            [$from, $to] = [$to, $from];
-        }
-        if ($from->diffInDays($to) > 365) {
-            $from = $to->subDays(365);
-        }
+        [$from, $to, $today] = $this->dateRange->resolve($store, $filters);
 
         $accounts = AdvertisingChannelAccount::query()
             ->forOrganization((int) $store->organization_id)
@@ -67,6 +60,8 @@ class GoogleAdsOverviewService
 
         return [
             'schema' => 'google-ads-overview-v2',
+            'store_today' => $today->toDateString(),
+            'timezone' => $today->timezoneName,
             'accounts' => $accounts->map(fn (AdvertisingChannelAccount $item): array => [
                 'id' => (string) $item->external_account_id,
                 'name' => $item->name ?: 'Google Ads '.$item->external_account_id,
@@ -97,19 +92,6 @@ class GoogleAdsOverviewService
                 fn (string $key): array => [$key => $this->delta((float) $current[$key], (float) $previous[$key])],
             )->all(),
         ];
-    }
-
-    private function date(mixed $value, CarbonImmutable $fallback, string $timezone): CarbonImmutable
-    {
-        if (! is_string($value) || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
-            return $fallback;
-        }
-
-        try {
-            return CarbonImmutable::createFromFormat('!Y-m-d', $value, $timezone)->startOfDay();
-        } catch (\Throwable) {
-            return $fallback;
-        }
     }
 
     /** @return array<string, float> */

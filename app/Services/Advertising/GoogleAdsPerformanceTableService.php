@@ -12,9 +12,13 @@ use Illuminate\Support\Facades\DB;
 
 class GoogleAdsPerformanceTableService
 {
+    public function __construct(private GoogleAdsDateRangeService $dateRange) {}
+
     /** @param array<string, mixed> $filters */
     public function forStore(Store $store, array $filters): array
     {
+        [$from, $to] = $this->dateRange->resolve($store, $filters);
+        $filters = [...$filters, 'date_from' => $from->toDateString(), 'date_to' => $to->toDateString()];
         $view = ($filters['view'] ?? '') === 'keywords' ? 'keywords' : 'search-terms';
         $accountId = (string) ($filters['account'] ?? '');
         $account = AdvertisingChannelAccount::query()
@@ -51,8 +55,8 @@ class GoogleAdsPerformanceTableService
             'view' => $view,
             'filters' => [
                 'account' => $account->external_account_id,
-                'date_from' => (string) ($filters['date_from'] ?? now()->subDays(6)->toDateString()),
-                'date_to' => (string) ($filters['date_to'] ?? now()->toDateString()),
+                'date_from' => $filters['date_from'],
+                'date_to' => $filters['date_to'],
                 'search' => trim((string) ($filters['search'] ?? '')),
                 'sort' => $sort,
                 'direction' => $direction,

@@ -8,6 +8,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import GoogleAdsGoalTemplate from '../../Components/PaidAdvertising/GoogleAdsGoalTemplate.vue';
 import GoogleAdsWeeklyReport from '../../Components/PaidAdvertising/GoogleAdsWeeklyReport.vue';
 import { useToast } from '../../composables/useToast';
+import { dateKeyInTimezone, useStoreDateTime } from '../../composables/useStoreDateTime';
 import GooglePerformanceTable from './GooglePerformanceTable.vue';
 import type { SharedProps } from '../../types';
 
@@ -134,6 +135,9 @@ const props = defineProps<{
     canManageGoogleGoalFeishu: boolean;
 }>();
 const page = usePage<SharedProps>();
+const { timezone: storeTimezone, now: storeNow } = useStoreDateTime();
+const storeToday = ref(dateKeyInTimezone(storeNow(), storeTimezone.value));
+const updateStoreToday = () => { storeToday.value = dateKeyInTimezone(storeNow(), storeTimezone.value); };
 const status = ref(props.channelStatus);
 const overview = ref(props.googleOverview);
 const filters = ref({
@@ -608,7 +612,10 @@ const startPolling = () => { if (poller === null) poller = setInterval(refreshSt
 const startHeartbeat = (): void => {
     if (heartbeatPoller !== null) return;
     heartbeatPoller = window.setInterval(() => {
-        if (!document.hidden) refreshStatus();
+        if (!document.hidden) {
+            updateStoreToday();
+            refreshStatus();
+        }
     }, 60_000);
 };
 const stopHeartbeat = (): void => {
@@ -655,13 +662,23 @@ const syncStatusFromEvent = async (payload: AdvertisingSyncStatus): Promise<void
 };
 const handleVisibilityChange = (): void => {
     if (!document.hidden) {
+        updateStoreToday();
         connectRealtime();
         void refreshStatus();
     }
 };
 const applyFilters = () => {
+    updateStoreToday();
     if (!filters.value.account || !filters.value.date_from || !filters.value.date_to) return;
-    if (filters.value.date_from > filters.value.date_to) return;
+    if (filters.value.date_to > storeToday.value || filters.value.date_from > storeToday.value) {
+        filters.value.date_to = filters.value.date_to > storeToday.value ? storeToday.value : filters.value.date_to;
+        filters.value.date_from = filters.value.date_from > storeToday.value ? storeToday.value : filters.value.date_from;
+        toast.error(`统计日期不能晚于店铺今天（${storeToday.value}）。`);
+    }
+    if (filters.value.date_from > filters.value.date_to) {
+        toast.error('开始日期不能晚于结束日期。');
+        return;
+    }
     loadOverview();
     if (activeTab.value === 'search-terms' || activeTab.value === 'keywords') loadPerformance(1);
 };
@@ -886,6 +903,7 @@ const clearGoogleGoalFeishu = async () => {
 };
 
 onMounted(() => {
+    updateStoreToday();
     syncGoalStateFromProps();
     connectRealtime();
     startHeartbeat();
@@ -911,6 +929,16 @@ watch(() => props.googleGoalSummary, () => {
 });
 watch(() => organizationId.value, () => {
     if (!document.hidden) connectRealtime();
+});
+watch([() => props.store.id, storeTimezone], () => {
+    updateStoreToday();
+    overview.value = props.googleOverview;
+    status.value = props.channelStatus;
+    filters.value = {
+        account: props.googleOverview?.filters.account ?? '',
+        date_from: props.googleOverview?.filters.date_from ?? '',
+        date_to: props.googleOverview?.filters.date_to ?? '',
+    };
 });
 </script>
 
@@ -953,12 +981,13 @@ watch(() => organizationId.value, () => {
                             </select>
                         </label>
                         <div>
-                            <span class="mb-2 block text-sm font-medium text-slate-500">统计日期</span>
+                            <span class="mb-2 block text-sm font-medium text-slate-500">统计日期 · 店铺时间</span>
                             <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
-                                <input v-model="filters.date_from" type="date" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none" @change="applyFilters" />
+                                <input v-model="filters.date_from" type="date" aria-label="统计开始日期" :max="filters.date_to && filters.date_to < storeToday ? filters.date_to : storeToday" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none" @change="applyFilters" />
                                 <span class="text-slate-300">—</span>
-                                <input v-model="filters.date_to" type="date" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none" @change="applyFilters" />
+                                <input v-model="filters.date_to" type="date" aria-label="统计结束日期" :min="filters.date_from || undefined" :max="storeToday" class="h-12 min-w-0 border-0 bg-transparent text-sm font-medium text-slate-800 outline-none" @change="applyFilters" />
                             </div>
+                            <p class="mt-2 text-xs text-slate-500">{{ storeTimezone }} · 店铺今天 {{ storeToday }}</p>
                         </div>
                         <button type="button" class="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50" :disabled="syncButtonBusy || !canSync" :title="canSync ? '同步最近增量数据' : '当前账号没有执行同步的权限'" @click="requestSync">
                             <span class="text-lg" :class="syncButtonBusy ? 'animate-spin' : ''">↻</span>
