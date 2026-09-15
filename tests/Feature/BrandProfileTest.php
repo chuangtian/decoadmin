@@ -89,6 +89,75 @@ class BrandProfileTest extends TestCase
         $this->getJson(str_replace($row, str_repeat('0', 64), $url))->assertNotFound();
     }
 
+    public function test_brand_profile_is_shared_with_sibling_stores_in_the_same_organization(): void
+    {
+        [$user, $organization, $sourceStore] = $this->context();
+        $siblingStore = $organization->stores()->create([
+            'name' => 'Example EU', 'shopify_domain' => 'example-eu.myshopify.com', 'status' => 'active',
+        ]);
+        $siblingStore->members()->attach($user, ['status' => 'active', 'joined_at' => now()]);
+        $this->sourceFixture($sourceStore);
+        $service = app(BrandProfileService::class);
+        $service->sync($sourceStore);
+
+        $profile = $service->page($siblingStore, 'login-emails');
+        $this->assertTrue($profile['configured']);
+        $this->assertTrue($profile['inherited']);
+        $this->assertCount(1, $profile['rows']);
+        $this->assertSame(0, FeishuBitableTable::query()->where('store_id', $siblingStore->id)->where('source_section', 'brand_profile')->count());
+
+        $licenseProfile = $service->page($siblingStore, 'business-licenses');
+        $this->assertTrue($licenseProfile['inherited']);
+        $this->assertCount(2, $licenseProfile['assets']);
+
+        $user->roles()->firstOrFail()->permissions()->attach(Permission::query()->where('slug', 'store.update')->firstOrFail());
+        $rowId = $profile['rows'][0]['id'];
+        $this->actingAs($user)->withSession([
+            'current_organization_id' => $organization->id,
+            'current_store_id' => $siblingStore->id,
+        ])->getJson("/brand-profile/{$siblingStore->id}/login-emails/rows/{$rowId}/password")
+            ->assertOk()
+            ->assertJsonPath('data.value', ' fixture-password ');
+        $this->get($licenseProfile['assets'][0]['url'])->assertOk()->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_brand_source_prefers_a_store_override_and_never_crosses_organizations(): void
+    {
+        [, $organization, $sourceStore] = $this->context();
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $sourceStore->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'brand_spreadsheet_token',
+            'credential_value' => 'shared-brand-source',
+        ]);
+        $siblingStore = $organization->stores()->create([
+            'name' => 'Example EU', 'shopify_domain' => 'example-eu.myshopify.com', 'status' => 'active',
+        ]);
+        $otherOrganization = Organization::query()->create(['name' => 'Other', 'code' => 'other-brand']);
+        $foreignStore = $otherOrganization->stores()->create([
+            'name' => 'Foreign', 'shopify_domain' => 'foreign.myshopify.com', 'status' => 'active',
+        ]);
+        $links = app(StoreFeishuDataLinkService::class);
+
+        $this->assertSame('shared-brand-source', $links->valuesForSync($siblingStore, 'brand')['brand_spreadsheet_token']);
+        $this->assertSame([], $links->valuesForSync($foreignStore, 'brand'));
+        $brandSettings = collect($links->catalogForFrontend($siblingStore, true))->firstWhere('key', 'brand');
+        $this->assertTrue($brandSettings['inherited']);
+        $this->assertTrue($brandSettings['fields'][0]['configured']);
+        $this->assertSame('', $brandSettings['fields'][0]['masked_value']);
+        $this->assertSame('', $links->reveal($siblingStore, 'brand', 'brand_spreadsheet_token'));
+
+        StoreBusinessCredential::query()->create([
+            'organization_id' => $organization->id,
+            'store_id' => $siblingStore->id,
+            'provider' => 'feishu_data_links',
+            'credential_key' => 'brand_spreadsheet_token',
+            'credential_value' => 'eu-brand-source',
+        ]);
+        $this->assertSame('eu-brand-source', $links->valuesForSync($siblingStore, 'brand')['brand_spreadsheet_token']);
+    }
+
     public function test_attachments_use_authorized_routes_and_reject_unknown_or_cross_store_assets(): void
     {
         [$user, $organization, $store] = $this->context();

@@ -54,6 +54,7 @@ class BrandProfileService
 
         return [
             'configured' => $source['configured'] || $replacement !== null,
+            'inherited' => $source['source_store_id'] !== (int) $store->id,
             'source_url' => $source['url'],
             'synced_at' => collect([$table?->synced_at, $replacement?->synced_at])->filter()->sortDesc()->first()?->toIso8601String(),
             'columns' => $definition['columns'],
@@ -67,8 +68,15 @@ class BrandProfileService
 
     public function sync(Store $store): array
     {
-        $result = Cache::lock('brand-profile-sync:'.$store->id, 180)->get(function () use ($store): array {
-            $source = $this->source($store);
+        $source = $this->source($store);
+        $sourceStore = (int) $source['source_store_id'] === (int) $store->id
+            ? $store
+            : Store::query()
+                ->where('organization_id', $store->organization_id)
+                ->where('status', 'active')
+                ->findOrFail($source['source_store_id']);
+
+        $result = Cache::lock('brand-profile-sync:'.$store->organization_id.':'.$sourceStore->id, 180)->get(function () use ($source, $sourceStore): array {
             if (! $source['configured']) {
                 throw new RuntimeException('请先在店铺飞书设置中配置品牌资料原表。');
             }
@@ -93,15 +101,15 @@ class BrandProfileService
                     throw new RuntimeException('品牌资料工作表超过 5000 行，请整理原表后再同步。');
                 }
                 $values = $this->client->spreadsheetValues($token, $sheet['sheet_id'], max(1, $rowCount), min(50, max(1, (int) data_get($sheet, 'grid_properties.column_count', 20))));
-                $incoming[$key] = $this->parse($store, $key, $values);
+                $incoming[$key] = $this->parse($sourceStore, $key, $values);
                 $incoming[$key]['source_fingerprint'] = $source['fingerprint'];
             }
 
-            return DB::transaction(function () use ($store, $incoming): array {
+            return DB::transaction(function () use ($sourceStore, $incoming): array {
                 $counts = [];
                 foreach ($incoming as $section => $data) {
                     FeishuBitableTable::query()->updateOrCreate([
-                        'organization_id' => $store->organization_id, 'store_id' => $store->id,
+                        'organization_id' => $sourceStore->organization_id, 'store_id' => $sourceStore->id,
                         'source_section' => self::SOURCE, 'source_table_id' => $section,
                     ], [
                         'name' => self::SECTIONS[$section]['title'],
@@ -135,9 +143,14 @@ class BrandProfileService
 
     public function file(Store $store, string $assetId): array
     {
-        $replacement = $this->licenseImage($store)?->metadata_encrypted;
+        $replacementTable = $this->licenseImage($store);
+        $replacement = $replacementTable?->metadata_encrypted;
         if ($replacement && hash_equals($replacement['id'], $assetId)) {
-            $path = $this->licenseImagePath($store, $replacement);
+            $path = $this->licenseImagePathForScope(
+                (int) $replacementTable->organization_id,
+                (int) $replacementTable->store_id,
+                $replacement,
+            );
             abort_unless(Storage::disk('local')->exists($path), 404);
 
             return ['contents' => Storage::disk('local')->get($path), 'mime' => $replacement['mime'], 'name' => $replacement['name']];
@@ -190,26 +203,53 @@ class BrandProfileService
 
     private function licenseImage(Store $store): ?FeishuBitableTable
     {
-        return FeishuBitableTable::query()->forOrganization($store->organization_id)->forStore($store->id)
+        $replacement = FeishuBitableTable::query()->forOrganization($store->organization_id)->forStore($store->id)
+            ->where('source_section', 'brand_profile_overrides')->where('source_table_id', 'business-license-image')->first();
+
+        if ($replacement) {
+            return $replacement;
+        }
+
+        $sourceStoreId = $this->links->sourceStoreIdForSection($store, 'brand');
+        if ($sourceStoreId === (int) $store->id) {
+            return null;
+        }
+
+        return FeishuBitableTable::query()->forOrganization($store->organization_id)->forStore($sourceStoreId)
             ->where('source_section', 'brand_profile_overrides')->where('source_table_id', 'business-license-image')->first();
     }
 
     private function licenseImagePath(Store $store, array $asset): string
     {
+        return $this->licenseImagePathForScope((int) $store->organization_id, (int) $store->id, $asset);
+    }
+
+    private function licenseImagePathForScope(int $organizationId, int $storeId, array $asset): string
+    {
         abort_unless(preg_match('/^[a-f0-9]{64}$/', $asset['id']) && in_array($asset['extension'], ['png', 'jpg', 'webp'], true), 404);
 
-        return 'brand-profile/'.$store->organization_id.'/'.$store->id.'/licenses/'.$asset['id'].'.'.$asset['extension'];
+        return 'brand-profile/'.$organizationId.'/'.$storeId.'/licenses/'.$asset['id'].'.'.$asset['extension'];
     }
 
     private function snapshot(Store $store, string $section): ?FeishuBitableTable
     {
+        $source = $this->source($store);
         $table = FeishuBitableTable::query()->forOrganization($store->organization_id)->forStore($store->id)
             ->where('source_section', self::SOURCE)->where('source_table_id', $section)->first();
-        if ($table && data_get($table->metadata_encrypted, 'source_fingerprint') !== $this->source($store)['fingerprint']) {
+        if ($table && data_get($table->metadata_encrypted, 'source_fingerprint') === $source['fingerprint']) {
+            return $table;
+        }
+
+        if ($source['source_store_id'] === (int) $store->id) {
             return null;
         }
 
-        return $table;
+        $shared = FeishuBitableTable::query()->forOrganization($store->organization_id)->forStore($source['source_store_id'])
+            ->where('source_section', self::SOURCE)->where('source_table_id', $section)->first();
+
+        return $shared && data_get($shared->metadata_encrypted, 'source_fingerprint') === $source['fingerprint']
+            ? $shared
+            : null;
     }
 
     private function source(Store $store): array
@@ -228,6 +268,7 @@ class BrandProfileService
         return [
             'token' => $token, 'wiki_node' => $wikiNode, 'url' => $trusted ? $url : null,
             'configured' => $token !== '' || $wikiNode !== '',
+            'source_store_id' => $this->links->sourceStoreIdForSection($store, 'brand'),
             'fingerprint' => hash('sha256', $token.'|'.$wikiNode.'|'.($trusted ? $url : '')),
         ];
     }

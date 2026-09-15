@@ -12,7 +12,7 @@ type Asset = { id: string; name: string; kind: 'image' | 'file'; url: string };
 const props = defineProps<{
     section: BrandProfileSection;
     store: { id: number; name: string; shopify_domain: string; currency: string | null; timezone: string | null } | null;
-    profile: { configured: boolean; source_url: string | null; synced_at: string | null; columns: string[]; rows: Row[]; assets: Asset[] } | null;
+    profile: { configured: boolean; inherited: boolean; source_url: string | null; synced_at: string | null; columns: string[]; rows: Row[]; assets: Asset[] } | null;
     canReveal: boolean;
 }>();
 const page = usePage();
@@ -97,7 +97,13 @@ const remainingText = (cell: Cell) => (cell.links ?? []).reduce((text, link) => 
                 <header class="flex flex-wrap items-center justify-between gap-4 px-6 py-5">
                     <div class="flex min-w-0 items-center gap-4">
                         <span class="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><AppIcon name="brand-profile" :size="25" /></span>
-                        <div><h1 class="text-2xl font-semibold text-slate-950">品牌资料</h1><p class="mt-1 text-sm text-slate-500">{{ store?.name ?? '请选择店铺' }} · 账号、密码与执照资料</p></div>
+                        <div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <h1 class="text-2xl font-semibold text-slate-950">品牌资料</h1>
+                                <span v-if="profile?.inherited" class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">公司共享</span>
+                            </div>
+                            <p class="mt-1 text-sm text-slate-500">{{ store?.name ?? '请选择店铺' }} · 账号、密码与执照资料</p>
+                        </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <a v-if="profile?.source_url" :href="profile.source_url" target="_blank" rel="noopener noreferrer" class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600">在飞书打开 ↗</a>
@@ -111,7 +117,7 @@ const remainingText = (cell: Cell) => (cell.links ?? []).reduce((text, link) => 
 
             <div v-if="error || page.props.errors.brand_profile" role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">{{ error || page.props.errors.brand_profile }}</div>
             <EmptyState v-if="!store" title="尚未选择店铺" description="请选择有权访问的店铺，再查看对应的品牌资料。" icon="stores" />
-            <EmptyState v-else-if="!profile?.configured" title="尚未配置品牌资料来源" description="请在当前店铺的飞书设置中填写品牌资料原表链接。" icon="brand-profile" action-label="打开飞书设置" action-href="/store-settings/feishu" />
+            <EmptyState v-else-if="!profile?.configured" title="尚未配置品牌资料来源" description="请在同一公司任一店铺的飞书设置中填写品牌资料原表链接。" icon="brand-profile" action-label="打开飞书设置" action-href="/store-settings/feishu" />
             <template v-else>
                 <div class="flex flex-wrap items-center justify-between gap-3 px-1 text-sm text-slate-500">
                     <p>密码默认隐藏，点击眼睛图标查看，30 秒后自动隐藏。敏感资料请勿外传。</p>
@@ -167,7 +173,7 @@ const remainingText = (cell: Cell) => (cell.links ?? []).reduce((text, link) => 
                     </div>
                     <a v-if="profile.source_url" :href="profile.source_url" target="_blank" rel="noopener noreferrer" class="inline-flex text-sm text-blue-600 hover:underline">在飞书查看原表 ↗</a>
                 </section>
-                <EmptyState v-else :title="`暂无${currentSection.name}资料`" description="点击刷新资料，从当前店铺的飞书原表获取最新内容。" :icon="currentSection.icon" />
+                <EmptyState v-else :title="`暂无${currentSection.name}资料`" description="点击刷新资料，从公司共享的飞书原表获取最新内容。" :icon="currentSection.icon" />
             </template>
         </div>
         <dialog ref="previewDialog" class="m-auto w-[min(1100px,94vw)] max-w-none rounded-2xl bg-white p-0 shadow-2xl backdrop:bg-slate-950/70" @click="event => { if (event.target === previewDialog) previewDialog?.close(); }">

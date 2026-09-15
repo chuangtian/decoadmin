@@ -161,11 +161,14 @@ class StoreFeishuDataLinkService
     /** @return array<int, array<string, mixed>> */
     public function catalogForFrontend(Store $store, bool $canReveal = false): array
     {
-        $credentials = $this->credentials($store);
+        $localCredentials = $this->credentials($store);
 
         return collect(self::SECTIONS)
-            ->map(function (array $section, string $sectionKey) use ($credentials, $canReveal): array {
-                $fields = collect($section['fields'])->map(function (array $field, string $fieldKey) use ($credentials, $canReveal): array {
+            ->map(function (array $section, string $sectionKey) use ($store, $canReveal, $localCredentials): array {
+                $resolved = $this->resolvedCredentials($store, $sectionKey, $localCredentials);
+                $credentials = $resolved['credentials'];
+                $inherited = $resolved['store_id'] !== (int) $store->id;
+                $fields = collect($section['fields'])->map(function (array $field, string $fieldKey) use ($credentials, $canReveal, $inherited): array {
                     $credential = $credentials->get($fieldKey);
 
                     return [
@@ -175,8 +178,8 @@ class StoreFeishuDataLinkService
                         'secret' => $field['secret'],
                         'placeholder' => $field['placeholder'],
                         'configured' => $credential !== null,
-                        'masked_value' => $credential && $canReveal ? $this->mask($credential->credential_value) : '',
-                        'current_value' => $credential && ! $field['secret'] ? $credential->credential_value : '',
+                        'masked_value' => $credential && $canReveal && ! $inherited ? $this->mask($credential->credential_value) : '',
+                        'current_value' => $credential && ! $field['secret'] && ! $inherited ? $credential->credential_value : '',
                     ];
                 })->values()->all();
 
@@ -185,6 +188,7 @@ class StoreFeishuDataLinkService
                     'title' => $section['title'],
                     'description' => $section['description'],
                     'configured' => collect($fields)->every(fn (array $field): bool => $field['configured']),
+                    'inherited' => $inherited,
                     'fields' => $fields,
                 ];
             })
@@ -196,7 +200,7 @@ class StoreFeishuDataLinkService
     {
         $this->fieldDefinition($sectionKey, $fieldKey);
 
-        return $this->credential($store, $fieldKey)?->credential_value ?? '';
+        return $this->credentials($store)->get($fieldKey)?->credential_value ?? '';
     }
 
     /**
@@ -210,10 +214,17 @@ class StoreFeishuDataLinkService
         $section = $this->sectionDefinition($sectionKey);
         $allowedKeys = array_keys($section['fields']);
 
-        return $this->credentials($store)
+        return $this->resolvedCredentials($store, $sectionKey)['credentials']
             ->filter(fn (StoreBusinessCredential $credential, string $key): bool => in_array($key, $allowedKeys, true))
             ->map(fn (StoreBusinessCredential $credential): string => $credential->credential_value)
             ->all();
+    }
+
+    public function sourceStoreIdForSection(Store $store, string $sectionKey): int
+    {
+        $this->sectionDefinition($sectionKey);
+
+        return $this->resolvedCredentials($store, $sectionKey)['store_id'];
     }
 
     /** @return array{schema: string, section: string, configured: bool, has_configuration: bool, missing_fields: list<string>} */
@@ -221,7 +232,7 @@ class StoreFeishuDataLinkService
     {
         $section = $this->sectionDefinition($sectionKey);
         $fieldKeys = array_keys($section['fields']);
-        $configuredKeys = $this->credentials($store)
+        $configuredKeys = $this->resolvedCredentials($store, $sectionKey)['credentials']
             ->filter(fn (StoreBusinessCredential $credential, string $key): bool => in_array($key, $fieldKeys, true)
                 && filled($credential->credential_value))
             ->keys()
@@ -361,22 +372,58 @@ class StoreFeishuDataLinkService
     /** @return Collection<string, StoreBusinessCredential> */
     private function credentials(Store $store): Collection
     {
-        return StoreBusinessCredential::query()
+        return $this->credentialsForStore((int) $store->organization_id, (int) $store->id);
+    }
+
+    /**
+     * Brand profile data belongs to the organization by default. A store may
+     * still override it by saving its own brand source configuration.
+     *
+     * @return array{store_id: int, credentials: Collection<string, StoreBusinessCredential>}
+     */
+    private function resolvedCredentials(Store $store, string $sectionKey, ?Collection $localCredentials = null): array
+    {
+        $credentials = $localCredentials ?? $this->credentials($store);
+        if ($sectionKey !== 'brand' || $this->hasBrandSource($credentials)) {
+            return ['store_id' => (int) $store->id, 'credentials' => $credentials];
+        }
+
+        $sourceStoreId = StoreBusinessCredential::query()
             ->where('organization_id', $store->organization_id)
-            ->where('store_id', $store->id)
+            ->where('store_id', '!=', $store->id)
+            ->where('provider', self::PROVIDER)
+            ->whereIn('credential_key', ['brand_spreadsheet_token', 'brand_wiki_url'])
+            ->whereHas('store', fn ($query) => $query
+                ->where('organization_id', $store->organization_id)
+                ->where('status', 'active'))
+            ->orderBy('store_id')
+            ->value('store_id');
+
+        if (! is_numeric($sourceStoreId)) {
+            return ['store_id' => (int) $store->id, 'credentials' => $credentials];
+        }
+
+        return [
+            'store_id' => (int) $sourceStoreId,
+            'credentials' => $this->credentialsForStore((int) $store->organization_id, (int) $sourceStoreId),
+        ];
+    }
+
+    /** @return Collection<string, StoreBusinessCredential> */
+    private function credentialsForStore(int $organizationId, int $storeId): Collection
+    {
+        return StoreBusinessCredential::query()
+            ->where('organization_id', $organizationId)
+            ->where('store_id', $storeId)
             ->where('provider', self::PROVIDER)
             ->get()
             ->keyBy('credential_key');
     }
 
-    private function credential(Store $store, string $fieldKey): ?StoreBusinessCredential
+    /** @param Collection<string, StoreBusinessCredential> $credentials */
+    private function hasBrandSource(Collection $credentials): bool
     {
-        return StoreBusinessCredential::query()
-            ->where('organization_id', $store->organization_id)
-            ->where('store_id', $store->id)
-            ->where('provider', self::PROVIDER)
-            ->where('credential_key', $fieldKey)
-            ->first();
+        return $credentials->has('brand_spreadsheet_token') || $credentials->has('brand_wiki_url');
     }
 
     private function mask(string $value): string
