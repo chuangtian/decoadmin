@@ -71,12 +71,14 @@ class AdvertisingChannelSyncService
             $records = max(0, (int) data_get($job->result, 'records_count', 0));
             foreach (array_slice($chunks, $processed) as [$chunkFrom, $chunkTo]) {
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
-                $payload = in_array($mode, ['attribution', 'realtime'], true)
+                // Historical attribution must publish core and detail metrics
+                // together. Only the five-minute, today-only poll stays light.
+                $payload = $mode === 'realtime'
                     ? $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo, true)
                     : $this->api->syncPayload($store, $channel, $chunkFrom, $chunkTo);
                 $this->assertCredentialVersion($store, $channel, $credentialVersion);
                 $replaceGoogleDetails = $channel === 'google'
-                    && ! in_array($mode, ['attribution', 'realtime'], true);
+                    && $mode !== 'realtime';
                 $records += $this->persist(
                     $store,
                     $channel,
@@ -723,7 +725,7 @@ class AdvertisingChannelSyncService
     /** @return list<string> */
     private function updatedViews(string $mode): array
     {
-        return in_array($mode, ['attribution', 'realtime'], true)
+        return $mode === 'realtime'
             ? ['overview', 'trend']
             : ['overview', 'trend', 'campaigns', 'search-terms', 'keywords'];
     }

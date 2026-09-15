@@ -11,6 +11,7 @@ import { useToast } from '../../composables/useToast';
 import { dateKeyInTimezone, useStoreDateTime } from '../../composables/useStoreDateTime';
 import GooglePerformanceTable from './GooglePerformanceTable.vue';
 import type { SharedProps } from '../../types';
+import { createGoogleAdsTrendChart, googleTrendSalesLabel } from '../../utils/googleAdsTrend';
 
 type ChannelState = 'not_configured' | 'pending' | 'syncing' | 'backfilling' | 'completed' | 'failed' | 'partial_failed';
 type ChannelStatus = {
@@ -241,44 +242,7 @@ const campaignColumns: Array<{ key: GoogleCampaignSortKey; label: string; format
     { key: 'status', label: '状态', format: 'text' },
 ];
 
-const trendChart = computed(() => {
-    const width = 760;
-    const height = 330;
-    const left = 128;
-    const right = 112;
-    const top = 72;
-    const bottom = 52;
-    const plotWidth = width - left - right;
-    const plotHeight = height - top - bottom;
-    const data = overview.value?.trend ?? [];
-    const amountMax = Math.max(1, ...data.flatMap((point) => [point.spend, point.revenue])) * 1.12;
-    const roiMax = Math.max(1, ...data.map((point) => point.roi)) * 1.15;
-    const step = data.length ? plotWidth / data.length : plotWidth;
-    const barWidth = Math.max(1.2, Math.min(18, step * 0.22));
-    const labelEvery = Math.max(1, Math.ceil(data.length / 7));
-    const points = data.map((point, index) => {
-        const x = left + step * (index + 0.5);
-        return {
-            ...point,
-            index,
-            x,
-            spendY: top + plotHeight - (point.spend / amountMax) * plotHeight,
-            revenueY: top + plotHeight - (point.revenue / amountMax) * plotHeight,
-            roiY: top + plotHeight - (point.roi / roiMax) * plotHeight,
-            dateLabel: point.date.slice(5),
-            showLabel: data.length <= 10 || index % labelEvery === 0 || index === data.length - 1,
-        };
-    });
-    return {
-        width, height, left, right, top, bottom, plotWidth, plotHeight, amountMax, roiMax, step, barWidth, points,
-        linePoints: points.map((point) => `${point.x},${point.roiY}`).join(' '),
-        ticks: [0, 1, 2, 3, 4].map((index) => ({
-            y: top + plotHeight - (index / 4) * plotHeight,
-            amount: amountMax * (index / 4),
-            roi: roiMax * (index / 4),
-        })),
-    };
-});
+const trendChart = computed(() => createGoogleAdsTrendChart(overview.value?.trend ?? []));
 const activeTrendPoint = computed(() => hoveredTrendIndex.value === null ? null : trendChart.value.points[hoveredTrendIndex.value] ?? null);
 const ctrChart = computed(() => {
     const width = 680;
@@ -1031,11 +995,11 @@ watch([() => props.store.id, storeTimezone], () => {
                             <div class="flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                     <h3 class="text-base font-semibold text-slate-900">花费 &amp; 销售额 &amp; ROI 趋势</h3>
-                                    <p class="mt-1 text-xs text-slate-400">按日期升序 · 每日 MySQL 汇总</p>
+                                    <p class="mt-1 text-xs text-slate-400">按日期升序 · 销售额与 ROI 均按转化日期口径</p>
                                 </div>
                                 <div class="flex flex-wrap gap-3 text-xs text-slate-500">
                                     <span class="inline-flex items-center gap-1.5"><i class="h-2.5 w-5 rounded bg-blue-500" />花费</span>
-                                    <span class="inline-flex items-center gap-1.5"><i class="h-2.5 w-5 rounded bg-emerald-500" />销售额</span>
+                                    <span class="inline-flex items-center gap-1.5"><i class="h-2.5 w-5 rounded bg-emerald-500" />{{ googleTrendSalesLabel }}</span>
                                     <span class="inline-flex items-center gap-1.5"><i class="h-0.5 w-5 bg-orange-500" />ROI</span>
                                 </div>
                             </div>
@@ -1050,7 +1014,7 @@ watch([() => props.store.id, storeTimezone], () => {
                                     <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                     <g v-for="point in trendChart.points" :key="point.date" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                         <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.9" />
-                                        <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.9" />
+                                        <rect :x="point.x + 1" :y="point.salesY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.salesY" rx="2" fill="#46a065" opacity="0.9" />
                                         <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" />
                                         <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="12">{{ point.dateLabel }}</text>
                                     </g>
@@ -1064,7 +1028,7 @@ watch([() => props.store.id, storeTimezone], () => {
                                     <p class="mb-3 text-sm font-semibold text-slate-900">{{ activeTrendPoint.date }}</p>
                                     <div class="space-y-2 text-slate-500">
                                         <p class="flex justify-between gap-5"><span>花费</span><strong class="text-slate-900">{{ money(activeTrendPoint.spend) }}</strong></p>
-                                        <p class="flex justify-between gap-5"><span>销售额</span><strong class="text-slate-900">{{ money(activeTrendPoint.revenue) }}</strong></p>
+                                        <p class="flex justify-between gap-5"><span>{{ googleTrendSalesLabel }}</span><strong class="text-slate-900">{{ money(activeTrendPoint.sales) }}</strong></p>
                                         <p class="flex justify-between gap-5"><span>ROI</span><strong class="text-orange-600">{{ activeTrendPoint.roi.toFixed(2) }}×</strong></p>
                                     </div>
                                 </div>
@@ -1116,11 +1080,11 @@ watch([() => props.store.id, storeTimezone], () => {
                         <div class="flex flex-wrap items-start justify-between gap-4">
                             <div>
                                 <h2 class="text-xl font-semibold text-slate-950">每日花费 &amp; 销售额 &amp; ROI</h2>
-                                <p class="mt-1 text-sm text-slate-500">{{ filters.date_from }} — {{ filters.date_to }} · 账户日粒度数据</p>
+                                <p class="mt-1 text-sm text-slate-500">{{ filters.date_from }} — {{ filters.date_to }} · 销售额与 ROI 均按转化日期口径</p>
                             </div>
                             <div class="flex flex-wrap gap-4 text-xs text-slate-500">
                                 <span class="inline-flex items-center gap-1.5"><i class="h-3 w-6 rounded bg-blue-500" />花费</span>
-                                <span class="inline-flex items-center gap-1.5"><i class="h-3 w-6 rounded bg-emerald-500" />销售额</span>
+                                <span class="inline-flex items-center gap-1.5"><i class="h-3 w-6 rounded bg-emerald-500" />{{ googleTrendSalesLabel }}</span>
                                 <span class="inline-flex items-center gap-1.5"><i class="h-0.5 w-6 bg-orange-500" />ROI</span>
                             </div>
                         </div>
@@ -1135,7 +1099,7 @@ watch([() => props.store.id, storeTimezone], () => {
                                 <text :x="trendChart.width - trendChart.right" y="40" text-anchor="end" fill="#94a3b8" font-size="12">ROI</text>
                                 <g v-for="point in trendChart.points" :key="`trend-${point.date}`" class="cursor-pointer" @mouseenter="hoveredTrendIndex = point.index">
                                     <rect :x="point.x - trendChart.barWidth - 1" :y="point.spendY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.spendY" rx="2" fill="#4f86ed" opacity="0.92" />
-                                    <rect :x="point.x + 1" :y="point.revenueY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.revenueY" rx="2" fill="#46a065" opacity="0.92" />
+                                    <rect :x="point.x + 1" :y="point.salesY" :width="trendChart.barWidth" :height="trendChart.top + trendChart.plotHeight - point.salesY" rx="2" fill="#46a065" opacity="0.92" />
                                     <rect :x="point.x - trendChart.step / 2" :y="trendChart.top" :width="trendChart.step" :height="trendChart.plotHeight" fill="transparent" />
                                     <text v-if="point.showLabel" :x="point.x" :y="trendChart.top + trendChart.plotHeight + 23" text-anchor="middle" fill="#64748b" font-size="12">{{ point.dateLabel }}</text>
                                 </g>
@@ -1147,7 +1111,7 @@ watch([() => props.store.id, storeTimezone], () => {
                                 <p class="mb-3 text-sm font-semibold text-slate-900">{{ activeTrendPoint.date }}</p>
                                 <div class="space-y-2 text-slate-500">
                                     <p class="flex justify-between gap-5"><span>花费</span><strong class="text-blue-600">{{ money(activeTrendPoint.spend) }}</strong></p>
-                                    <p class="flex justify-between gap-5"><span>销售额</span><strong class="text-emerald-600">{{ money(activeTrendPoint.revenue) }}</strong></p>
+                                    <p class="flex justify-between gap-5"><span>{{ googleTrendSalesLabel }}</span><strong class="text-emerald-600">{{ money(activeTrendPoint.sales) }}</strong></p>
                                     <p class="flex justify-between gap-5"><span>ROI</span><strong class="text-orange-600">{{ activeTrendPoint.roi.toFixed(2) }}×</strong></p>
                                 </div>
                             </div>

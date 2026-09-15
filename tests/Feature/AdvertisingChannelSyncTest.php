@@ -74,7 +74,7 @@ class AdvertisingChannelSyncTest extends TestCase
             && $event->views === ['overview', 'trend']);
     }
 
-    public function test_google_attribution_sync_runs_hourly_and_refreshes_thirty_days_of_core_metrics_only(): void
+    public function test_google_attribution_sync_runs_hourly_and_refreshes_thirty_days_of_core_and_detail_metrics(): void
     {
         Event::fake([AdvertisingChannelSyncStatusChanged::class]);
         [$store] = $this->googleStore();
@@ -88,19 +88,18 @@ class AdvertisingChannelSyncTest extends TestCase
         $sync->sync($store, 'google', 'attribution', $sync->credentialVersion($store, 'google'));
 
         $this->assertDatabaseCount('advertising_channel_daily_metrics', 1);
-        $this->assertDatabaseCount('google_ads_campaign_daily_metrics', 0);
-        $this->assertDatabaseCount('google_ads_search_term_daily_metrics', 0);
-        $this->assertDatabaseCount('google_ads_keyword_daily_metrics', 0);
+        $this->assertDatabaseCount('google_ads_campaign_daily_metrics', 60);
+        $this->assertDatabaseCount('google_ads_search_term_daily_metrics', 4);
+        $this->assertDatabaseCount('google_ads_keyword_daily_metrics', 2);
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), "segments.date BETWEEN '2026-07-25' AND '2026-08-23'"));
-        Http::assertNotSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign')
-            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM search_term_view')
-            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign_search_term_view')
-            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view'));
+        foreach (['campaign', 'search_term_view', 'campaign_search_term_view', 'keyword_view'] as $resource) {
+            Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), "FROM {$resource} WHERE"));
+        }
         Event::assertDispatched(AdvertisingChannelSyncStatusChanged::class, fn (AdvertisingChannelSyncStatusChanged $event): bool => $event->storeId === $store->id
             && $event->channel === 'google'
             && $event->state === 'completed'
             && $event->mode === 'attribution'
-            && $event->views === ['overview', 'trend']);
+            && $event->views === ['overview', 'trend', 'campaigns', 'search-terms', 'keywords']);
     }
 
     public function test_google_incremental_sync_replaces_stale_detail_rows_inside_its_eight_day_window(): void
