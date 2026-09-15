@@ -21,10 +21,10 @@ class PersonalizationGlobalSettingsService
             ->where('store_id', $store->id)->first();
 
         return [
-            'default_locale' => $setting?->default_locale ?? 'zh-CN',
+            'default_locale' => $setting?->default_locale ?? 'en',
             'copy' => $setting?->copy ?? [
-                'recommendation_heading' => '你可能还喜欢',
-                'add_button' => '加入购物车',
+                'recommendation_heading' => 'You may also like',
+                'add_button' => 'Add to cart',
                 'checkout_heading' => 'Great Value Bundles for You',
             ],
             'attribution' => $setting?->attribution ?? $this->attribution(),
@@ -35,21 +35,21 @@ class PersonalizationGlobalSettingsService
     public function save(Store $store, User $actor, array $input): array
     {
         $this->authorize($store, $actor, 'personalization.manage');
-        $locale = (string) ($input['default_locale'] ?? 'zh-CN');
+        $locale = (string) ($input['default_locale'] ?? 'en');
         if (! in_array($locale, ['zh-CN', 'en'], true)) {
-            throw new PersonalizationException('INVALID_DEFAULT_LOCALE', '默认语言无效。');
+            throw new PersonalizationException('INVALID_DEFAULT_LOCALE', 'The default language is invalid.');
         }
         $copy = $input['copy'] ?? [];
         if (! is_array($copy) || array_is_list($copy) || array_diff(array_keys($copy), [
             'recommendation_heading', 'add_button', 'checkout_heading',
         ]) !== []) {
-            throw new PersonalizationException('INVALID_GLOBAL_COPY', '默认文案格式无效。');
+            throw new PersonalizationException('INVALID_GLOBAL_COPY', 'The default copy format is invalid.');
         }
         $normalizedCopy = [];
         foreach (['recommendation_heading' => 120, 'add_button' => 60, 'checkout_heading' => 120] as $key => $maximum) {
             $value = trim((string) ($copy[$key] ?? ''));
             if ($value === '' || mb_strlen($value) > $maximum) {
-                throw new PersonalizationException('INVALID_GLOBAL_COPY', '默认文案不能为空或超过允许长度。');
+                throw new PersonalizationException('INVALID_GLOBAL_COPY', 'Default copy is required and must be within the allowed length.');
             }
             $normalizedCopy[$key] = $value;
         }
@@ -92,7 +92,7 @@ class PersonalizationGlobalSettingsService
         $organization = $store->organization;
         if (! $organization instanceof Organization || $store->status !== 'active' || $organization->status !== 'active'
             || ! $actor->canAccessStore($store) || ! $actor->hasPermission($permission, $organization, $store)) {
-            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', '无权访问当前店铺的个性化推荐设置。', 403);
+            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', 'You do not have permission to access personalization settings for this store.', 403);
         }
     }
 }

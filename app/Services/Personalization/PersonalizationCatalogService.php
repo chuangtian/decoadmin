@@ -52,11 +52,11 @@ class PersonalizationCatalogService
                     'status' => (string) $product->status,
                     'available_for_sale' => $available,
                     'availability_label' => match (true) {
-                        $product->status === 'archived' => '已归档',
-                        $product->status !== 'active' => '草稿',
-                        $product->published_at_shopify === null => '未发布',
-                        ! $available => '缺货或当前不可售',
-                        default => '已启用',
+                        $product->status === 'archived' => 'Archived',
+                        $product->status !== 'active' => 'Draft',
+                        $product->published_at_shopify === null => 'Unpublished',
+                        ! $available => 'Out of stock or unavailable',
+                        default => 'Enabled',
                     },
                 ];
             });
@@ -111,7 +111,7 @@ class PersonalizationCatalogService
         $inStockOnly = (bool) ($filters['in_stock_only'] ?? true);
 
         if ($minPrice !== null && $maxPrice !== null && $minPrice > $maxPrice) {
-            throw new InvalidArgumentException('最低价格不能高于最高价格。');
+            throw new InvalidArgumentException('The minimum price cannot exceed the maximum price.');
         }
 
         $variantFilter = function (Builder $query) use ($minPrice, $maxPrice, $inStockOnly): void {
@@ -218,7 +218,7 @@ class PersonalizationCatalogService
     private function strings(mixed $values): array
     {
         if (! is_array($values)) {
-            throw new InvalidArgumentException('标签过滤条件格式无效。');
+            throw new InvalidArgumentException('The tag filter is invalid.');
         }
 
         return collect($values)
@@ -233,14 +233,14 @@ class PersonalizationCatalogService
     private function numericIds(mixed $values): array
     {
         if (! is_array($values)) {
-            throw new InvalidArgumentException('Shopify ID 过滤条件格式无效。');
+            throw new InvalidArgumentException('The Shopify ID filter is invalid.');
         }
 
         return collect($values)->map(function ($value): string {
             $value = is_int($value) || is_string($value) ? (string) $value : '';
 
             if (preg_match('/^[0-9]+$/', $value) !== 1) {
-                throw new InvalidArgumentException('Shopify ID 过滤条件格式无效。');
+                throw new InvalidArgumentException('The Shopify ID filter is invalid.');
             }
 
             return $value;
@@ -254,7 +254,7 @@ class PersonalizationCatalogService
         }
 
         if (! is_scalar($value) || ! is_numeric((string) $value) || (float) $value < 0) {
-            throw new InvalidArgumentException("价格过滤条件 [{$field}] 格式无效。");
+            throw new InvalidArgumentException("The price filter [{$field}] is invalid.");
         }
 
         return (string) $value;

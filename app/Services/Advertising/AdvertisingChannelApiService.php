@@ -318,12 +318,10 @@ class AdvertisingChannelApiService
         }
 
         $campaignQuery = "SELECT customer.id, campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.conversions_value_by_conversion_date, metrics.all_conversions, metrics.all_conversions_value, metrics.all_conversions_value_by_conversion_date FROM campaign WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.status = 'ENABLED' ORDER BY segments.date ASC";
-        $campaignResponse = $this->http->withHeaders($headers)->acceptJson()->timeout(30)
-            ->post(self::GOOGLE_ADS_API."/customers/{$customerId}/googleAds:search", ['query' => $campaignQuery]);
-        $this->assertSuccessful($campaignResponse, 'Google Ads campaigns');
+        $campaignResults = $this->googleSearch($customerId, $headers, $campaignQuery, 'Google Ads campaigns');
 
         $campaignDaily = [];
-        foreach ((array) $campaignResponse->json('results', []) as $row) {
+        foreach ($campaignResults as $row) {
             $campaign = is_array($row) && is_array($row['campaign'] ?? null) ? $row['campaign'] : [];
             $metrics = is_array($row) && is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
             $segments = is_array($row) && is_array($row['segments'] ?? null) ? $row['segments'] : [];

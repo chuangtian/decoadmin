@@ -87,7 +87,7 @@ class GoogleAdsPerformanceTableService
             });
         }
 
-        return $query->selectRaw("normalized_search_term AS row_key, MAX(search_term) AS search_term, MAX(COALESCE(matched_keyword, '')) AS matched_keyword, MAX(COALESCE(match_type, '')) AS match_type, MAX(COALESCE(status, '')) AS status, SUM(spend) AS spend, SUM(revenue) AS revenue, CASE WHEN SUM(spend) > 0 THEN SUM(revenue) * 1.0 / SUM(spend) ELSE 0 END AS roas, SUM(impressions) AS impressions, SUM(clicks) AS clicks, CASE WHEN SUM(impressions) > 0 THEN SUM(clicks) * 100.0 / SUM(impressions) ELSE 0 END AS ctr, CASE WHEN SUM(clicks) > 0 THEN SUM(spend) * 1.0 / SUM(clicks) ELSE 0 END AS cpc, SUM(conversions) AS conversions")
+        return $query->selectRaw("normalized_search_term AS row_key, MAX(search_term) AS search_term, COALESCE(MAX(CASE WHEN UPPER(source_type) = 'STANDARD' THEN NULLIF(matched_keyword, '') END), MAX(COALESCE(matched_keyword, ''))) AS matched_keyword, COALESCE(MAX(CASE WHEN UPPER(source_type) = 'STANDARD' THEN NULLIF(match_type, '') END), MAX(COALESCE(match_type, ''))) AS match_type, COALESCE(MAX(CASE WHEN UPPER(source_type) = 'STANDARD' THEN NULLIF(status, '') END), MAX(COALESCE(status, ''))) AS status, SUM(spend) AS spend, SUM(revenue) AS revenue, CASE WHEN SUM(spend) > 0 THEN SUM(revenue) * 1.0 / SUM(spend) ELSE 0 END AS roas, SUM(impressions) AS impressions, SUM(clicks) AS clicks, CASE WHEN SUM(impressions) > 0 THEN SUM(clicks) * 100.0 / SUM(impressions) ELSE 0 END AS ctr, CASE WHEN SUM(clicks) > 0 THEN SUM(spend) * 1.0 / SUM(clicks) ELSE 0 END AS cpc, SUM(conversions) AS conversions")
             ->groupBy('normalized_search_term')
             ->havingRaw('SUM(revenue) > 0')
             ->toBase();

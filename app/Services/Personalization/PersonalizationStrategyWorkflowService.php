@@ -64,7 +64,7 @@ class PersonalizationStrategyWorkflowService
             $strategy = PersonalizationRecommendationStrategy::query()->create([
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->id,
-                'name' => '未命名策略',
+                'name' => 'Untitled strategy',
                 'algorithm' => PersonalizationAlgorithm::Manual,
                 'enabled' => false,
                 'status' => PersonalizationStrategyStatus::Draft,
@@ -177,7 +177,7 @@ class PersonalizationStrategyWorkflowService
                 );
             }
             if ($draft->lock_version !== $expectedLock) {
-                throw new PersonalizationException('DRAFT_VERSION_CONFLICT', '草稿已在其他窗口更新，请刷新后再试。', 409);
+                throw new PersonalizationException('DRAFT_VERSION_CONFLICT', 'The draft was updated in another window. Refresh and try again.', 409);
             }
             $draft->forceFill([
                 'name' => $normalized['name'],
@@ -248,10 +248,10 @@ class PersonalizationStrategyWorkflowService
                 ->lockForUpdate()
                 ->first();
             if (! $draft) {
-                throw new PersonalizationException('STRATEGY_DRAFT_REQUIRED', '没有可发布的策略草稿。', 409);
+                throw new PersonalizationException('STRATEGY_DRAFT_REQUIRED', 'There is no strategy draft to publish.', 409);
             }
             if ($draft->lock_version !== $expectedLock) {
-                throw new PersonalizationException('DRAFT_VERSION_CONFLICT', '草稿已更新，请刷新后再发布。', 409);
+                throw new PersonalizationException('DRAFT_VERSION_CONFLICT', 'The draft has changed. Refresh before publishing.', 409);
             }
             $payloadHash = hash('sha256', $draft->checksum.'|publish|'.($confirmReplacements ? '1' : '0'));
             if ($existing = $this->idempotentResult($store, $actor, 'publish_strategy', $idempotencyKey, $payloadHash)) {
@@ -261,10 +261,10 @@ class PersonalizationStrategyWorkflowService
             $configuration = $draft->configuration;
             $conflicts = $this->placementConflicts($store, $lockedStrategy, $configuration['placements'] ?? []);
             if ($conflicts !== [] && ! $confirmReplacements) {
-                $names = collect($conflicts)->pluck('name')->filter()->unique()->take(3)->implode('、');
+                $names = collect($conflicts)->pluck('name')->filter()->unique()->take(3)->implode(', ');
                 throw new PersonalizationException(
                     'PLACEMENT_REPLACEMENT_CONFIRMATION_REQUIRED',
-                    $names !== '' ? "目标场景当前由 {$names} 使用，请确认替换后再发布。" : '部分页面组件已使用其他策略，请确认替换后再发布。',
+                    $names !== '' ? "The target placement is currently used by {$names}. Confirm replacement before publishing." : 'Some page components use another strategy. Confirm replacement before publishing.',
                     409,
                 );
             }
@@ -319,7 +319,7 @@ class PersonalizationStrategyWorkflowService
             $copy = PersonalizationRecommendationStrategy::query()->create([
                 'organization_id' => $store->organization_id,
                 'store_id' => $store->id,
-                'name' => Str::limit($snapshot['name'].' - 副本', 80, ''),
+                'name' => Str::limit($snapshot['name'].' - Copy', 80, ''),
                 'algorithm' => $snapshot['algorithm'],
                 'enabled' => false,
                 'status' => PersonalizationStrategyStatus::Draft,
@@ -389,7 +389,7 @@ class PersonalizationStrategyWorkflowService
                 ->lockForUpdate()
                 ->first();
             if (! $strategy) {
-                throw new PersonalizationException('STRATEGY_NOT_FOUND', '找不到该推荐策略。', 404);
+                throw new PersonalizationException('STRATEGY_NOT_FOUND', 'The recommendation strategy was not found.', 404);
             }
 
             $components = PersonalizationRecommendationComponent::withTrashed()
@@ -523,7 +523,7 @@ class PersonalizationStrategyWorkflowService
         $version = $strategy->versions()->where('status', PersonalizationStrategyVersionStatus::Draft->value)->first()
             ?: $strategy->publishedVersion;
         if (! $version) {
-            throw new PersonalizationException('STRATEGY_VERSION_NOT_FOUND', '该策略没有可预览版本。', 409);
+            throw new PersonalizationException('STRATEGY_VERSION_NOT_FOUND', 'This strategy has no version available to preview.', 409);
         }
         $configuration = $version->configuration;
         $cartIds = $this->numericIds($context['cart_product_ids'] ?? [], 20, 'INVALID_PREVIEW_CONTEXT');
@@ -736,20 +736,20 @@ class PersonalizationStrategyWorkflowService
     private function normalizeDraft(Store $store, mixed $draft): array
     {
         if (! is_array($draft) || array_is_list($draft)) {
-            throw new PersonalizationException('INVALID_STRATEGY_DRAFT', '策略草稿格式无效。');
+            throw new PersonalizationException('INVALID_STRATEGY_DRAFT', 'The strategy draft format is invalid.');
         }
         if (array_diff(array_keys($draft), [
             'uuid', 'version_number', 'status', 'name', 'algorithm', 'item_limit', 'configuration',
             'lock_version', 'updated_at', 'published_at',
         ]) !== []) {
-            throw new PersonalizationException('INVALID_STRATEGY_DRAFT', '策略草稿包含不支持的字段。');
+            throw new PersonalizationException('INVALID_STRATEGY_DRAFT', 'The strategy draft contains unsupported fields.');
         }
         $name = $this->text($draft['name'] ?? null, 80, 'STRATEGY_NAME_REQUIRED');
         $itemLimit = 24;
         $configuration = $draft['configuration'] ?? null;
         if (! is_array($configuration) || array_is_list($configuration)
             || array_diff(array_keys($configuration), ['recommendation_rule', 'rules', 'products', 'discount', 'placements', 'checkout']) !== []) {
-            throw new PersonalizationException('INVALID_STRATEGY_CONFIGURATION', '策略配置格式无效。');
+            throw new PersonalizationException('INVALID_STRATEGY_CONFIGURATION', 'The strategy configuration is invalid.');
         }
         $recommendationRule = $this->normalizeRecommendationRule(
             $store,
@@ -766,7 +766,7 @@ class PersonalizationStrategyWorkflowService
                 ->merge(array_column($products['pinned'], 'shopify_product_id'))
                 ->unique();
             if ($candidateIds->count() > 24) {
-                throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', '自定义规则与置顶产品合计最多 24 种。');
+                throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', 'Custom-rule and pinned products are limited to 24 in total.');
             }
         }
 
@@ -790,15 +790,15 @@ class PersonalizationStrategyWorkflowService
     {
         if (! is_array($recommendationRule) || array_is_list($recommendationRule)
             || array_diff(array_keys($recommendationRule), ['mode', 'preset', 'custom']) !== []) {
-            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_SET', '推荐规则集格式无效。');
+            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_SET', 'The recommendation rule set is invalid.');
         }
         $mode = (string) ($recommendationRule['mode'] ?? 'preset');
         if (! in_array($mode, ['preset', 'custom'], true)) {
-            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_MODE', '推荐规则模式无效。');
+            throw new PersonalizationException('INVALID_RECOMMENDATION_RULE_MODE', 'The recommendation rule mode is invalid.');
         }
         $preset = PersonalizationAlgorithm::tryFrom((string) ($recommendationRule['preset'] ?? 'manual'));
         if (! $preset) {
-            throw new PersonalizationException('INVALID_PRESET_RECOMMENDATION_RULE', '预设推荐规则无效。');
+            throw new PersonalizationException('INVALID_PRESET_RECOMMENDATION_RULE', 'The preset recommendation rule is invalid.');
         }
         $custom = $recommendationRule['custom'] ?? [];
         if ($custom === []) {
@@ -806,27 +806,27 @@ class PersonalizationStrategyWorkflowService
         }
         if (! is_array($custom) || array_is_list($custom)
             || array_diff(array_keys($custom), ['rules', 'fallback']) !== []) {
-            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', '自定义规则集格式无效。');
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', 'The custom rule set is invalid.');
         }
         $rules = $custom['rules'] ?? [];
         if (! is_array($rules) || count($rules) > 20) {
-            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', '自定义规则最多可以添加 20 条。');
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_SET', 'You can add up to 20 custom rules.');
         }
         $normalizedRules = [];
         $seenRuleIds = [];
         foreach (array_values($rules) as $position => $rule) {
             if (! is_array($rule) || array_is_list($rule)
                 || array_diff(array_keys($rule), ['id', 'name', 'priority', 'match', 'conditions', 'exit_on_match', 'action']) !== []) {
-                throw new PersonalizationException('INVALID_CUSTOM_RULE', '自定义规则格式无效。');
+                throw new PersonalizationException('INVALID_CUSTOM_RULE', 'The custom rule format is invalid.');
             }
             $id = $this->uuid($rule['id'] ?? null, 'INVALID_CUSTOM_RULE_ID');
             if (isset($seenRuleIds[$id])) {
-                throw new PersonalizationException('DUPLICATE_CUSTOM_RULE_ID', '自定义规则 ID 不能重复。');
+                throw new PersonalizationException('DUPLICATE_CUSTOM_RULE_ID', 'Custom rule IDs must be unique.');
             }
             $seenRuleIds[$id] = true;
             $match = (string) ($rule['match'] ?? 'all');
             if (! in_array($match, ['all', 'any'], true)) {
-                throw new PersonalizationException('INVALID_CUSTOM_RULE_MATCH', '条件组合只能选择“和”或“或”。');
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_MATCH', 'Condition logic must be AND or OR.');
             }
             $normalizedRules[] = [
                 'id' => $id,
@@ -844,7 +844,7 @@ class PersonalizationStrategyWorkflowService
         }
         if (! is_array($fallback) || array_is_list($fallback)
             || array_diff(array_keys($fallback), ['enabled', 'action']) !== []) {
-            throw new PersonalizationException('INVALID_CUSTOM_FALLBACK', '备用规则格式无效。');
+            throw new PersonalizationException('INVALID_CUSTOM_FALLBACK', 'The fallback rule format is invalid.');
         }
         $normalizedFallbackAction = $this->normalizeCustomAction($store, $fallback['action'] ?? []);
         $candidateIds = collect($normalizedRules)
@@ -852,7 +852,7 @@ class PersonalizationStrategyWorkflowService
             ->merge(array_column($normalizedFallbackAction['products'], 'shopify_product_id'))
             ->unique()->values();
         if ($candidateIds->count() > 24) {
-            throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', '一份自定义策略最多可以配置 24 种推荐商品。');
+            throw new PersonalizationException('TOO_MANY_CUSTOM_RULE_PRODUCTS', 'A custom strategy can include up to 24 recommended products.');
         }
 
         return [
@@ -872,7 +872,7 @@ class PersonalizationStrategyWorkflowService
     private function normalizeCustomConditions(Store $store, mixed $conditions): array
     {
         if (! is_array($conditions) || count($conditions) > 10) {
-            throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITIONS', '每条规则最多可以添加 10 个条件。');
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITIONS', 'Each rule can include up to 10 conditions.');
         }
         $allowedFields = ['cart_product_ids', 'cart_collection_ids', 'cart_tags', 'cart_vendors'];
         $result = [];
@@ -880,18 +880,18 @@ class PersonalizationStrategyWorkflowService
         foreach (array_values($conditions) as $condition) {
             if (! is_array($condition) || array_is_list($condition)
                 || array_diff(array_keys($condition), ['id', 'field', 'operator', 'values']) !== []) {
-                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', '自定义规则条件格式无效。');
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', 'The custom rule condition format is invalid.');
             }
             $id = $this->uuid($condition['id'] ?? null, 'INVALID_CUSTOM_CONDITION_ID');
             if (isset($seen[$id])) {
-                throw new PersonalizationException('DUPLICATE_CUSTOM_CONDITION_ID', '条件 ID 不能重复。');
+                throw new PersonalizationException('DUPLICATE_CUSTOM_CONDITION_ID', 'Condition IDs must be unique.');
             }
             $seen[$id] = true;
             $field = (string) ($condition['field'] ?? 'cart_product_ids');
             $operator = (string) ($condition['operator'] ?? 'contains_any');
             if (! in_array($field, $allowedFields, true)
                 || ! in_array($operator, ['contains_any', 'contains_all', 'contains_none'], true)) {
-                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', '自定义规则字段或运算符无效。');
+                throw new PersonalizationException('INVALID_CUSTOM_RULE_CONDITION', 'The custom rule field or operator is invalid.');
             }
             $values = match ($field) {
                 'cart_product_ids' => $this->numericIds($condition['values'] ?? [], 24, 'INVALID_CUSTOM_CONDITION_PRODUCTS'),
@@ -913,27 +913,27 @@ class PersonalizationStrategyWorkflowService
         }
         if (! is_array($action) || array_is_list($action)
             || array_diff(array_keys($action), ['type', 'products', 'filters']) !== []) {
-            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', '自定义规则行动格式无效。');
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', 'The custom rule action is invalid.');
         }
         if (($action['type'] ?? 'manual') !== 'manual') {
-            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', '当前仅支持手动选择行动。');
+            throw new PersonalizationException('INVALID_CUSTOM_RULE_ACTION', 'Only manually selected actions are currently supported.');
         }
         $products = $this->productSelections($store, $action['products'] ?? [], 24);
         $filters = $action['filters'] ?? [];
         if (! is_array($filters) || count($filters) > 10) {
-            throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTERS', '每个行动最多可以添加 10 个筛选条件。');
+            throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTERS', 'Each action can include up to 10 filters.');
         }
         $normalizedFilters = [];
         foreach (array_values($filters) as $filter) {
             if (! is_array($filter) || array_is_list($filter)
                 || array_diff(array_keys($filter), ['id', 'field', 'operator', 'values']) !== []) {
-                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', '行动筛选条件格式无效。');
+                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', 'The action filter format is invalid.');
             }
             $field = (string) ($filter['field'] ?? 'product_tags');
             $operator = (string) ($filter['operator'] ?? 'contains_any');
             if (! in_array($field, ['product_tags', 'product_collections', 'product_vendors'], true)
                 || ! in_array($operator, ['contains_any', 'contains_all', 'contains_none'], true)) {
-                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', '行动筛选字段或运算符无效。');
+                throw new PersonalizationException('INVALID_CUSTOM_ACTION_FILTER', 'The action filter field or operator is invalid.');
             }
             $values = $field === 'product_collections'
                 ? $this->numericIds($filter['values'] ?? [], 100, 'INVALID_CUSTOM_ACTION_FILTER')
@@ -966,7 +966,7 @@ class PersonalizationStrategyWorkflowService
             ->where('store_id', $store->id)
             ->whereIn('shopify_collection_id', $values)
             ->count() !== count(array_unique($values))) {
-            throw new PersonalizationException('CUSTOM_COLLECTION_NOT_FOUND', '部分自定义规则集合不属于当前店铺或尚未同步。', 404);
+            throw new PersonalizationException('CUSTOM_COLLECTION_NOT_FOUND', 'Some custom-rule collections do not belong to this store or have not synced.', 404);
         }
     }
 
@@ -979,7 +979,7 @@ class PersonalizationStrategyWorkflowService
             ->where('store_id', $store->id)
             ->whereIn('shopify_product_id', $productIds)
             ->count() !== count($productIds)) {
-            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', '部分自定义规则商品不属于当前店铺或尚未同步。', 404);
+            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', 'Some custom-rule products do not belong to this store or have not synced.', 404);
         }
     }
 
@@ -987,11 +987,11 @@ class PersonalizationStrategyWorkflowService
     private function normalizeRules(mixed $rules): array
     {
         if (! is_array($rules) || array_is_list($rules)) {
-            throw new PersonalizationException('INVALID_STRATEGY_RULE', '推荐规则格式无效。');
+            throw new PersonalizationException('INVALID_STRATEGY_RULE', 'The recommendation rule format is invalid.');
         }
         $defaults = $this->defaultConfiguration()['rules'];
         if (array_diff(array_keys($rules), array_keys($defaults)) !== []) {
-            throw new PersonalizationException('INVALID_STRATEGY_RULE', '策略包含不支持的规则字段。');
+            throw new PersonalizationException('INVALID_STRATEGY_RULE', 'The strategy contains unsupported rule fields.');
         }
 
         return [
@@ -1022,7 +1022,7 @@ class PersonalizationStrategyWorkflowService
     {
         if (! is_array($products) || array_is_list($products)
             || array_diff(array_keys($products), ['manual', 'pinned', 'excluded']) !== []) {
-            throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置格式无效。');
+            throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', 'The recommended product configuration is invalid.');
         }
         $manual = $this->productSelections($store, $products['manual'] ?? [], 24);
         $pinned = $this->productSelections($store, $products['pinned'] ?? [], 24);
@@ -1034,7 +1034,7 @@ class PersonalizationStrategyWorkflowService
         foreach ($pinned as $selection) {
             if (! in_array($selection['shopify_product_id'], $manualIds, true)) {
                 if (count($manual) >= 24) {
-                    throw new PersonalizationException('TOO_MANY_MANUAL_PRODUCTS', '手动推荐商品最多可以选择 24 种。');
+                    throw new PersonalizationException('TOO_MANY_MANUAL_PRODUCTS', 'You can select up to 24 manual recommendation products.');
                 }
                 $manual[] = $selection;
                 $manualIds[] = $selection['shopify_product_id'];
@@ -1042,14 +1042,14 @@ class PersonalizationStrategyWorkflowService
         }
         $recommendedIds = array_values(array_unique([...$manualIds, ...array_column($pinned, 'shopify_product_id')]));
         if (array_intersect($recommendedIds, $excluded) !== []) {
-            throw new PersonalizationException('CONFLICTING_PRODUCT_OVERRIDE', '同一商品不能同时被推荐和排除。');
+            throw new PersonalizationException('CONFLICTING_PRODUCT_OVERRIDE', 'The same product cannot be both recommended and excluded.');
         }
         $seen = array_values(array_unique([...$recommendedIds, ...$excluded]));
         if ($seen !== []) {
             $owned = Product::query()->where('organization_id', $store->organization_id)->where('store_id', $store->id)
                 ->whereIn('shopify_product_id', $seen)->count();
             if ($owned !== count($seen)) {
-                throw new PersonalizationException('PRODUCT_OVERRIDE_NOT_FOUND', '部分商品不属于当前店铺或尚未同步。', 404);
+                throw new PersonalizationException('PRODUCT_OVERRIDE_NOT_FOUND', 'Some products do not belong to this store or have not synced.', 404);
             }
         }
 
@@ -1069,7 +1069,7 @@ class PersonalizationStrategyWorkflowService
     private function productSelections(Store $store, mixed $values, int $maximum): array
     {
         if (! is_array($values) || count($values) > $maximum) {
-            throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', "手动推荐商品最多可以选择 {$maximum} 种。");
+            throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', "You can select up to {$maximum} manual recommendation products.");
         }
         $rows = [];
         $seen = [];
@@ -1080,7 +1080,7 @@ class PersonalizationStrategyWorkflowService
             if (array_diff(array_keys($row), [
                 'shopify_product_id', 'product_gid', 'variant_gid', 'minimum_quantity', 'selected_at', 'position',
             ]) !== []) {
-                throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', '推荐商品配置包含不支持的字段。');
+                throw new PersonalizationException('INVALID_PRODUCT_OVERRIDE', 'The recommended product configuration contains unsupported fields.');
             }
             $productId = $this->numericProductId($row['shopify_product_id'] ?? null);
             if (isset($seen[$productId])) {
@@ -1097,7 +1097,7 @@ class PersonalizationStrategyWorkflowService
             ->with(['variants' => fn ($query) => $query->orderByDesc('available_for_sale')->orderBy('id')])
             ->get()->keyBy(fn (Product $product): string => (string) $product->shopify_product_id);
         if ($products->count() !== count($seen)) {
-            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', '部分推荐商品不属于当前店铺或尚未同步。', 404);
+            throw new PersonalizationException('CUSTOM_PRODUCT_NOT_FOUND', 'Some recommended products do not belong to this store or have not synced.', 404);
         }
 
         $result = [];
@@ -1105,7 +1105,7 @@ class PersonalizationStrategyWorkflowService
             $productId = (string) $row['shopify_product_id'];
             $product = $products->get($productId);
             if (! $product instanceof Product || $product->variants->isEmpty()) {
-                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', '推荐商品缺少可用的 Shopify 变体。', 409);
+                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', 'A recommended product has no available Shopify variant.', 409);
             }
             $variantGid = trim((string) ($row['variant_gid'] ?? ''));
             $variantId = preg_match('#^gid://shopify/ProductVariant/(\d+)$#', $variantGid, $matches) === 1
@@ -1115,7 +1115,7 @@ class PersonalizationStrategyWorkflowService
                 ? $product->variants->firstWhere('shopify_variant_id', $variantId)
                 : $product->variants->first();
             if (! $variant) {
-                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', '所选变体不属于当前店铺商品。', 404);
+                throw new PersonalizationException('PRODUCT_VARIANT_NOT_FOUND', 'The selected variant does not belong to a product in this store.', 404);
             }
             $selectedAt = trim((string) ($row['selected_at'] ?? ''));
             try {
@@ -1123,7 +1123,7 @@ class PersonalizationStrategyWorkflowService
                     ? now()->toIso8601String()
                     : CarbonImmutable::parse($selectedAt)->utc()->toIso8601String();
             } catch (\Throwable) {
-                throw new PersonalizationException('INVALID_PRODUCT_SELECTED_AT', '商品选择时间格式无效。');
+                throw new PersonalizationException('INVALID_PRODUCT_SELECTED_AT', 'The product selection timestamp is invalid.');
             }
             $result[] = [
                 'shopify_product_id' => $productId,
@@ -1143,12 +1143,12 @@ class PersonalizationStrategyWorkflowService
     {
         if (! is_array($discount) || array_is_list($discount)
             || array_diff(array_keys($discount), ['enabled', 'reference', 'title', 'summary', 'code', 'status', 'percentage', 'validated_at']) !== []) {
-            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '优惠关联配置无效。');
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', 'The discount reference is invalid.');
         }
         $enabled = (bool) ($discount['enabled'] ?? false);
         $reference = trim((string) ($discount['reference'] ?? ''));
         if (mb_strlen($reference) > 255 || ($enabled && $reference === '')) {
-            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '启用优惠时必须选择或填写已有折扣引用。');
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', 'Select an existing discount reference when promotions are enabled.');
         }
         $status = strtolower(trim((string) ($discount['status'] ?? 'unknown')));
         if (! in_array($status, ['active', 'scheduled', 'expired', 'unknown'], true)) {
@@ -1158,11 +1158,11 @@ class PersonalizationStrategyWorkflowService
         try {
             $validatedAt = $validatedAt === '' ? null : CarbonImmutable::parse($validatedAt)->utc()->toIso8601String();
         } catch (\Throwable) {
-            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '折扣校验时间格式无效。');
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', 'The discount validation timestamp is invalid.');
         }
         $percentage = $discount['percentage'] ?? null;
         if ($percentage !== null && (! is_numeric($percentage) || (float) $percentage <= 0 || (float) $percentage >= 100)) {
-            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', '折扣百分比必须大于 0 且小于 100。');
+            throw new PersonalizationException('INVALID_DISCOUNT_REFERENCE', 'The discount percentage must be greater than 0 and less than 100.');
         }
 
         return [
@@ -1181,17 +1181,17 @@ class PersonalizationStrategyWorkflowService
     private function normalizePlacements(mixed $placements): array
     {
         if (! is_array($placements) || count($placements) > count(PersonalizationPlacement::cases())) {
-            throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', '使用场景配置无效。');
+            throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', 'The placement configuration is invalid.');
         }
         $normalized = [];
         $seen = [];
         foreach ($placements as $placement) {
             if (! is_array($placement) || array_is_list($placement)) {
-                throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', '使用场景配置无效。');
+                throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', 'The placement configuration is invalid.');
             }
             $type = PersonalizationPlacement::tryFrom((string) ($placement['placement'] ?? ''));
             if (! $type || isset($seen[$type->value])) {
-                throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', '使用场景无效或重复。');
+                throw new PersonalizationException('INVALID_COMPONENT_PLACEMENT', 'The placement is invalid or duplicated.');
             }
             $seen[$type->value] = true;
             $style = is_array($placement['style'] ?? null) ? $placement['style'] : [];
@@ -1225,7 +1225,7 @@ class PersonalizationStrategyWorkflowService
     {
         if (! is_array($checkout) || array_is_list($checkout)
             || array_diff(array_keys($checkout), ['maximum_recommendations', 'collection_id']) !== []) {
-            throw new PersonalizationException('INVALID_CHECKOUT_STRATEGY', 'Checkout 推荐设置无效。');
+            throw new PersonalizationException('INVALID_CHECKOUT_STRATEGY', 'Checkout recommendation settings are invalid.');
         }
         $maximum = $checkout['maximum_recommendations'] ?? null;
 
@@ -1246,18 +1246,18 @@ class PersonalizationStrategyWorkflowService
             ->merge($recommendationRule['custom']['fallback']['action']['products'] ?? [])
             ->filter(fn ($selection): bool => is_array($selection) && filled($selection['shopify_product_id'] ?? null));
         if (($recommendationRule['mode'] ?? 'preset') === 'custom' && $customProducts->isEmpty()) {
-            throw new PersonalizationException('CUSTOM_RULE_PRODUCTS_REQUIRED', '自定义规则至少需要一个行动商品或备用商品。', 409);
+            throw new PersonalizationException('CUSTOM_RULE_PRODUCTS_REQUIRED', 'Custom rules require at least one action product or fallback product.', 409);
         }
         if (($recommendationRule['mode'] ?? 'preset') === 'preset'
             && $version->algorithm === PersonalizationAlgorithm::Manual
             && ($configuration['products']['manual'] ?? []) === []
             && ($configuration['rules']['include_collection_ids'] ?? []) === []) {
-            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要选择一个商品或集合。', 409);
+            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', 'A manual recommendation strategy requires at least one product or collection.', 409);
         }
         if (($configuration['rules']['minimum_price'] ?? null) !== null
             && ($configuration['rules']['maximum_price'] ?? null) !== null
             && (float) $configuration['rules']['minimum_price'] > (float) $configuration['rules']['maximum_price']) {
-            throw new PersonalizationException('INVALID_PRICE_RULE', '最低价格不能高于最高价格。', 409);
+            throw new PersonalizationException('INVALID_PRICE_RULE', 'The minimum price cannot exceed the maximum price.', 409);
         }
         $this->normalizeProducts($store, $configuration['products'] ?? []);
         $collectionIds = collect([
@@ -1269,7 +1269,7 @@ class PersonalizationStrategyWorkflowService
             ->where('store_id', $store->id)
             ->whereIn('shopify_collection_id', $collectionIds)
             ->count() !== count($collectionIds)) {
-            throw new PersonalizationException('COLLECTION_RULE_NOT_FOUND', '部分集合不属于当前店铺或尚未同步。', 404);
+            throw new PersonalizationException('COLLECTION_RULE_NOT_FOUND', 'Some collections do not belong to this store or have not synced.', 404);
         }
     }
 
@@ -1535,7 +1535,7 @@ class PersonalizationStrategyWorkflowService
                         : 'out_of_stock_or_market_unavailable'));
             $rows[] = [
                 'shopify_product_id' => $id,
-                'title' => $products->get($id)?->title ?? '已移除或未同步商品',
+                'title' => $products->get($id)?->title ?? 'Removed or unsynced product',
                 'reason' => $reason,
             ];
         }
@@ -1581,7 +1581,7 @@ class PersonalizationStrategyWorkflowService
             ->where('store_id', $store->id)->where('user_id', $actor->id)
             ->where('operation', $operation)->where('idempotency_key', $key)->lockForUpdate()->first();
         if ($row && ! hash_equals((string) $row->payload_hash, $payloadHash)) {
-            throw new PersonalizationException('IDEMPOTENCY_KEY_CONFLICT', '重复请求标识已用于其他内容。', 409);
+            throw new PersonalizationException('IDEMPOTENCY_KEY_CONFLICT', 'This idempotency key was already used for different content.', 409);
         }
 
         return $row;
@@ -1616,21 +1616,21 @@ class PersonalizationStrategyWorkflowService
         $organization = $store->organization;
         if (! $organization instanceof Organization || $store->status !== 'active' || $organization->status !== 'active'
             || ! $actor->canAccessStore($store) || ! $actor->hasPermission($permission, $organization, $store)) {
-            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', '无权访问当前店铺的个性化推荐策略。', 403);
+            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', 'You do not have permission to access personalization strategies for this store.', 403);
         }
     }
 
     private function assertStrategy(Store $store, PersonalizationRecommendationStrategy $strategy): void
     {
         if ((int) $strategy->organization_id !== (int) $store->organization_id || (int) $strategy->store_id !== (int) $store->id || $strategy->trashed()) {
-            throw new PersonalizationException('STRATEGY_NOT_FOUND', '找不到该推荐策略。', 404);
+            throw new PersonalizationException('STRATEGY_NOT_FOUND', 'The recommendation strategy was not found.', 404);
         }
     }
 
     private function assertVersion(PersonalizationRecommendationStrategy $strategy, PersonalizationStrategyVersion $version): void
     {
         if ((int) $version->strategy_id !== (int) $strategy->id || (int) $version->store_id !== (int) $strategy->store_id) {
-            throw new PersonalizationException('STRATEGY_VERSION_NOT_FOUND', '找不到该策略版本。', 404);
+            throw new PersonalizationException('STRATEGY_VERSION_NOT_FOUND', 'The strategy version was not found.', 404);
         }
     }
 
@@ -1643,7 +1643,7 @@ class PersonalizationStrategyWorkflowService
     {
         $value = is_string($value) ? trim($value) : '';
         if (! Str::isUuid($value)) {
-            throw new PersonalizationException($code, '请求标识格式无效。');
+            throw new PersonalizationException($code, 'The request identifier is invalid.');
         }
 
         return $value;
@@ -1652,7 +1652,7 @@ class PersonalizationStrategyWorkflowService
     private function integer(mixed $value, int $minimum, int $maximum, string $code): int
     {
         if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value < $minimum || (int) $value > $maximum) {
-            throw new PersonalizationException($code, '数值超出允许范围。');
+            throw new PersonalizationException($code, 'The value is outside the allowed range.');
         }
 
         return (int) $value;
@@ -1662,7 +1662,7 @@ class PersonalizationStrategyWorkflowService
     {
         $value = is_string($value) ? trim($value) : '';
         if ($value === '' || mb_strlen($value) > $maximum) {
-            throw new PersonalizationException($code, '名称不能为空或超过允许长度。');
+            throw new PersonalizationException($code, 'A name is required and must be within the allowed length.');
         }
 
         return $value;
@@ -1672,7 +1672,7 @@ class PersonalizationStrategyWorkflowService
     {
         $value = trim((string) ($value ?? ''));
         if (mb_strlen($value) > $maximum) {
-            throw new PersonalizationException('INVALID_COMPONENT_COPY', '展示文案超过允许长度。');
+            throw new PersonalizationException('INVALID_COMPONENT_COPY', 'The display copy exceeds the allowed length.');
         }
 
         return $value === '' ? null : $value;
@@ -1682,13 +1682,13 @@ class PersonalizationStrategyWorkflowService
     private function strings(mixed $values, int $maximum, int $length, string $code): array
     {
         if (! is_array($values) || count($values) > $maximum) {
-            throw new PersonalizationException($code, '规则列表超过允许数量。');
+            throw new PersonalizationException($code, 'The rule list exceeds the allowed size.');
         }
         $result = [];
         foreach ($values as $value) {
             $value = trim((string) $value);
             if ($value === '' || mb_strlen($value) > $length) {
-                throw new PersonalizationException($code, '规则列表包含无效内容。');
+                throw new PersonalizationException($code, 'The rule list contains invalid content.');
             }
             $result[] = $value;
         }
@@ -1700,7 +1700,7 @@ class PersonalizationStrategyWorkflowService
     private function numericIds(mixed $values, int $maximum, string $code): array
     {
         if (! is_array($values) || count($values) > $maximum) {
-            throw new PersonalizationException($code, 'Shopify ID 列表无效。');
+            throw new PersonalizationException($code, 'The Shopify ID list is invalid.');
         }
 
         return array_values(array_unique(array_map(fn ($value): string => $this->numericProductId($value), $values)));
@@ -1713,7 +1713,7 @@ class PersonalizationStrategyWorkflowService
             return $matches[1];
         }
         if (preg_match('/^\d+$/', $value) !== 1) {
-            throw new PersonalizationException('INVALID_SHOPIFY_RESOURCE_ID', 'Shopify 资源 ID 格式无效。');
+            throw new PersonalizationException('INVALID_SHOPIFY_RESOURCE_ID', 'The Shopify resource ID is invalid.');
         }
 
         return $value;
@@ -1725,7 +1725,7 @@ class PersonalizationStrategyWorkflowService
             return null;
         }
         if (! is_numeric($value) || (float) $value < 0 || (float) $value > 999_999_999) {
-            throw new PersonalizationException('INVALID_PRICE_RULE', '价格规则数值无效。');
+            throw new PersonalizationException('INVALID_PRICE_RULE', 'The price rule value is invalid.');
         }
 
         return number_format((float) $value, 2, '.', '');
@@ -1734,13 +1734,13 @@ class PersonalizationStrategyWorkflowService
     private function placementLabel(PersonalizationPlacement $placement): string
     {
         return match ($placement) {
-            PersonalizationPlacement::Homepage => '首页推荐',
-            PersonalizationPlacement::ProductPage => '商品页推荐',
-            PersonalizationPlacement::CartPage => '购物车推荐',
-            PersonalizationPlacement::SmartCart => 'Smart Cart 推荐',
-            PersonalizationPlacement::Checkout => 'Checkout 推荐',
-            PersonalizationPlacement::ThankYou => '感谢页面推荐',
-            PersonalizationPlacement::OrderStatus => '售后页面推荐',
+            PersonalizationPlacement::Homepage => 'Homepage recommendations',
+            PersonalizationPlacement::ProductPage => 'Product page recommendations',
+            PersonalizationPlacement::CartPage => 'Cart recommendations',
+            PersonalizationPlacement::SmartCart => 'Smart Cart recommendations',
+            PersonalizationPlacement::Checkout => 'Checkout recommendations',
+            PersonalizationPlacement::ThankYou => 'Thank you page recommendations',
+            PersonalizationPlacement::OrderStatus => 'Order status page recommendations',
         };
     }
 

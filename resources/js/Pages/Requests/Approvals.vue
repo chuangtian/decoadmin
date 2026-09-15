@@ -257,24 +257,34 @@ function review(action: 'approve' | 'reject'): void {
         </main>
 
         <Teleport to="body">
-            <dialog :open="reviewOpen" class="fixed inset-0 z-50 m-0 h-full w-full max-w-none bg-slate-950/45 p-4" @click.self="closeReview">
-                <form v-if="selected" class="mx-auto mt-[12vh] max-w-xl rounded-3xl bg-white p-7 shadow-2xl" @submit.prevent="review('approve')">
-                    <div class="flex justify-between">
+            <dialog
+                :open="reviewOpen"
+                class="fixed inset-0 z-50 m-0 h-full w-full max-w-none items-center justify-center overflow-hidden bg-slate-950/45 p-3 open:flex sm:p-6"
+                @click.self="closeReview"
+            >
+                <form
+                    v-if="selected"
+                    class="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
+                    @submit.prevent="review('approve')"
+                >
+                    <div class="flex shrink-0 justify-between border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">
                         <div><p class="text-xs font-semibold text-amber-600">{{ selected.reference_no }}</p><h2 class="mt-1 text-xl font-bold">审批：{{ selected.title }}</h2></div>
                         <button type="button" class="text-2xl text-slate-400" aria-label="关闭审批" @click="closeReview">×</button>
                     </div>
-                    <p class="mt-4 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{{ selected.description }}</p>
-                    <dl v-if="selected.kind === 'expense_request' && selected.category === 'software'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
-                        <div class="col-span-2"><dt class="text-xs text-slate-400">付费方式</dt><dd class="mt-1 text-slate-700">{{ selected.software_payment_method || '未填写' }}</dd></div>
-                        <div class="col-span-2"><dt class="text-xs text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a v-if="selected.software_url" :href="selected.software_url" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ selected.software_url }}</a><span v-else class="text-slate-400">未填写</span></dd></div>
-                        <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account || '未填写' }}</dd></div>
-                        <div><dt class="text-xs text-slate-400">登录密码</dt><dd class="mt-1 text-slate-700">{{ selected.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
-                        <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
-                        <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ billingCycleLabel(selected.billing_cycle) }}</dd></div>
-                    </dl>
-                    <label class="mt-5 block text-sm font-semibold text-slate-700">审批意见<textarea v-model="form.note" maxlength="2000" rows="4" class="mt-2 w-full rounded-xl border-slate-200" placeholder="通过时可选；驳回时必须填写原因"></textarea></label>
-                    <p v-if="form.hasErrors" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(form.errors).join('；') }}</p>
-                    <div class="mt-6 flex justify-end gap-3">
+                    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-7 sm:py-5">
+                        <p class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{{ selected.description }}</p>
+                        <dl v-if="selected.kind === 'expense_request' && selected.category === 'software'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
+                            <div class="col-span-2"><dt class="text-xs text-slate-400">付费方式</dt><dd class="mt-1 text-slate-700">{{ selected.software_payment_method || '未填写' }}</dd></div>
+                            <div class="col-span-2"><dt class="text-xs text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a v-if="selected.software_url" :href="selected.software_url" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ selected.software_url }}</a><span v-else class="text-slate-400">未填写</span></dd></div>
+                            <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account || '未填写' }}</dd></div>
+                            <div><dt class="text-xs text-slate-400">登录密码</dt><dd class="mt-1 text-slate-700">{{ selected.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
+                            <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
+                            <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ billingCycleLabel(selected.billing_cycle) }}</dd></div>
+                        </dl>
+                        <label class="mt-5 block text-sm font-semibold text-slate-700">审批意见<textarea v-model="form.note" maxlength="2000" rows="4" class="mt-2 w-full rounded-xl border-slate-200" placeholder="通过时可选；驳回时必须填写原因"></textarea></label>
+                        <p v-if="form.hasErrors" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(form.errors).join('；') }}</p>
+                    </div>
+                    <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
                         <button type="button" class="h-11 rounded-xl border border-rose-200 bg-rose-50 px-5 text-sm font-semibold text-rose-700 disabled:opacity-50" :disabled="form.processing" @click="review('reject')">驳回</button>
                         <button type="submit" class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white disabled:opacity-50" :disabled="form.processing">{{ form.processing ? '提交中…' : '审批通过' }}</button>
                     </div>

@@ -112,6 +112,12 @@ if (config('services.advertising_sync.enabled', true)) {
         ->onOneServer()
         ->withoutOverlapping(10);
 
+    Schedule::command('advertising-channels:sync google --mode=attribution')
+        ->name('advertising-channels:google:hourly-attribution-sync')
+        ->hourlyAt(37)
+        ->onOneServer()
+        ->withoutOverlapping(45);
+
     Schedule::command('advertising-channels:sync google --mode=reconcile')
         ->name('advertising-channels:google:daily-attribution-reconciliation')
         ->dailyAt('04:47')

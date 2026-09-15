@@ -31,7 +31,7 @@ class PersonalizationSmartCartService
         return [
             'enabled' => true,
             'fallback_mode' => 'native_cart',
-            'heading' => trim((string) data_get($setting->settings, 'heading', '购物车推荐')),
+            'heading' => trim((string) data_get($setting->settings, 'heading', 'Cart recommendations')),
             'recommendations' => $this->recommendations->recommend($store, $setting->strategy, [
                 ...$context,
                 'surface' => 'smart_cart',

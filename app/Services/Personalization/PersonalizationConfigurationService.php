@@ -481,7 +481,7 @@ class PersonalizationConfigurationService
                 ->merge(data_get($strategy->settings, 'recommendation_rule.custom.fallback.action.products', []))
                 ->filter(fn (mixed $product): bool => is_array($product) && filled($product['shopify_product_id'] ?? null));
             if ($products->isEmpty()) {
-                throw new PersonalizationException('CUSTOM_RULE_PRODUCTS_REQUIRED', '自定义规则至少需要一个行动商品或备用商品。', 409);
+                throw new PersonalizationException('CUSTOM_RULE_PRODUCTS_REQUIRED', 'Custom rules require at least one action product or fallback product.', 409);
             }
 
             return;
@@ -489,7 +489,7 @@ class PersonalizationConfigurationService
         if ($strategy->algorithm === PersonalizationAlgorithm::Manual
             && ! $strategy->productOverrides()->where('type', PersonalizationProductOverrideType::Manual->value)->exists()
             && ! $strategy->rules()->where('type', PersonalizationRuleType::IncludeCollections->value)->where('enabled', true)->exists()) {
-            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', '手动推荐策略至少需要一个商品或集合。', 409);
+            throw new PersonalizationException('MANUAL_PRODUCTS_REQUIRED', 'A manual recommendation strategy requires at least one product or collection.', 409);
         }
     }
 

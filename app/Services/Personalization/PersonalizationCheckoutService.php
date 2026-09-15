@@ -100,7 +100,7 @@ class PersonalizationCheckoutService
         $strategy = $this->strategy($store, $input['strategy_uuid'] ?? null);
         $heading = trim((string) ($input['heading'] ?? '')) ?: 'Great Value Bundles for You';
         if (mb_strlen($heading) > 120) {
-            throw new PersonalizationException('INVALID_THANK_YOU_HEADING', '感谢页面推荐标题最多 120 个字符。');
+            throw new PersonalizationException('INVALID_THANK_YOU_HEADING', 'The Thank you page heading cannot exceed 120 characters.');
         }
 
         $setting = DB::transaction(function () use ($store, $actor, $strategy, $heading): PersonalizationCheckoutSetting {
@@ -109,7 +109,7 @@ class PersonalizationCheckoutService
                 $actor,
                 $strategy,
                 PersonalizationPlacement::ThankYou,
-                '感谢页',
+                'Thank you page',
                 $heading,
             );
 
@@ -149,7 +149,7 @@ class PersonalizationCheckoutService
         $strategy = $this->strategy($store, $input['strategy_uuid'] ?? null);
         $heading = trim((string) ($input['heading'] ?? '')) ?: 'Great Value Bundles for You';
         if (mb_strlen($heading) > 120) {
-            throw new PersonalizationException('INVALID_ORDER_STATUS_HEADING', '售后页面推荐标题最多 120 个字符。');
+            throw new PersonalizationException('INVALID_ORDER_STATUS_HEADING', 'The Order status page heading cannot exceed 120 characters.');
         }
 
         $setting = DB::transaction(function () use ($store, $actor, $strategy, $heading): PersonalizationCheckoutSetting {
@@ -158,7 +158,7 @@ class PersonalizationCheckoutService
                 $actor,
                 $strategy,
                 PersonalizationPlacement::OrderStatus,
-                '售后页',
+                'Order status page',
                 $heading,
             );
 
@@ -326,14 +326,14 @@ class PersonalizationCheckoutService
     private function trustItems(mixed $items): array
     {
         if (! is_array($items) || count($items) > self::MAX_TRUST_ITEMS) {
-            throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'Checkout 信任信息最多配置 6 项。');
+            throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'You can configure up to 6 Checkout trust items.');
         }
 
         $normalized = [];
         $keys = [];
         foreach (array_values($items) as $position => $item) {
             if (! is_array($item) || array_is_list($item)) {
-                throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'Checkout 信任信息格式无效。');
+                throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'The Checkout trust item format is invalid.');
             }
             $key = strtolower(trim((string) ($item['key'] ?? '')));
             $icon = trim((string) ($item['icon'] ?? ''));
@@ -346,7 +346,7 @@ class PersonalizationCheckoutService
                 || mb_strlen($title) > 80
                 || mb_strlen($description) > 120
                 || ($enabled && $title === '')) {
-                throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'Checkout 信任信息字段无效或重复。');
+                throw new PersonalizationException('INVALID_CHECKOUT_TRUST_ITEMS', 'Checkout trust item fields are invalid or duplicated.');
             }
             $keys[$key] = true;
             $normalized[] = [
@@ -373,7 +373,7 @@ class PersonalizationCheckoutService
             ->with(['productOverrides', 'rules', 'versions', 'publishedVersion'])
             ->first();
         if (! $strategy) {
-            throw new PersonalizationException('CHECKOUT_STRATEGY_NOT_FOUND', '所选推荐策略不属于当前店铺或已被删除。', 404);
+            throw new PersonalizationException('CHECKOUT_STRATEGY_NOT_FOUND', 'The selected recommendation strategy does not belong to this store or has been deleted.', 404);
         }
 
         return $strategy;
@@ -492,7 +492,7 @@ class PersonalizationCheckoutService
         if (! $organization instanceof Organization
             || ! $actor->canAccessStore($store)
             || ! $actor->hasPermission($permission, $organization, $store)) {
-            throw new PersonalizationException('PERSONALIZATION_CHECKOUT_ACCESS_DENIED', '无权管理当前店铺的 Checkout 推荐。', 403);
+            throw new PersonalizationException('PERSONALIZATION_CHECKOUT_ACCESS_DENIED', 'You do not have permission to manage Checkout recommendations for this store.', 403);
         }
     }
 
@@ -504,7 +504,7 @@ class PersonalizationCheckoutService
             || (int) $organization->id !== (int) $store->organization_id
             || $organization->status !== 'active'
             || $store->status !== 'active') {
-            throw new PersonalizationException('STORE_NOT_AVAILABLE', '当前店铺未启用 Checkout 个性化推荐。', 404);
+            throw new PersonalizationException('STORE_NOT_AVAILABLE', 'Checkout personalization is not enabled for this store.', 404);
         }
     }
 }

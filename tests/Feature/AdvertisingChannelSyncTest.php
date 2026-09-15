@@ -74,6 +74,110 @@ class AdvertisingChannelSyncTest extends TestCase
             && $event->views === ['overview', 'trend']);
     }
 
+    public function test_google_attribution_sync_runs_hourly_and_refreshes_thirty_days_of_core_metrics_only(): void
+    {
+        Event::fake([AdvertisingChannelSyncStatusChanged::class]);
+        [$store] = $this->googleStore();
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn ($event): bool => str_contains((string) $event->command, 'advertising-channels:sync google --mode=attribution'));
+
+        $this->assertNotNull($event);
+        $this->assertSame('37 * * * *', $event->expression);
+
+        $sync = app(AdvertisingChannelSyncService::class);
+        $sync->sync($store, 'google', 'attribution', $sync->credentialVersion($store, 'google'));
+
+        $this->assertDatabaseCount('advertising_channel_daily_metrics', 1);
+        $this->assertDatabaseCount('google_ads_campaign_daily_metrics', 0);
+        $this->assertDatabaseCount('google_ads_search_term_daily_metrics', 0);
+        $this->assertDatabaseCount('google_ads_keyword_daily_metrics', 0);
+        Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), "segments.date BETWEEN '2026-07-25' AND '2026-08-23'"));
+        Http::assertNotSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM search_term_view')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign_search_term_view')
+            || str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view'));
+        Event::assertDispatched(AdvertisingChannelSyncStatusChanged::class, fn (AdvertisingChannelSyncStatusChanged $event): bool => $event->storeId === $store->id
+            && $event->channel === 'google'
+            && $event->state === 'completed'
+            && $event->mode === 'attribution'
+            && $event->views === ['overview', 'trend']);
+    }
+
+    public function test_google_incremental_sync_replaces_stale_detail_rows_inside_its_eight_day_window(): void
+    {
+        Queue::fake();
+        config()->set('services.advertising_sync.google_rolling_days', 8);
+        [$store] = $this->googleStore();
+        $sync = app(AdvertisingChannelSyncService::class);
+        $sync->sync($store, 'google', 'priority', $sync->credentialVersion($store, 'google'));
+        $account = AdvertisingChannelAccount::query()->where('store_id', $store->id)->where('provider', 'google')->sole();
+
+        foreach (['2026-08-15', '2026-08-22'] as $date) {
+            GoogleAdsCampaignDailyMetric::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'advertising_channel_account_id' => $account->id,
+                'external_account_id' => $account->external_account_id,
+                'campaign_id' => 'stale-campaign',
+                'campaign_name' => 'Stale Campaign',
+                'campaign_status' => 'ENABLED',
+                'advertising_channel_type' => 'SEARCH',
+                'metric_date' => $date,
+                'spend' => 10,
+                'raw_payload' => [],
+                'synced_at' => now(),
+            ]);
+            GoogleAdsSearchTermDailyMetric::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'advertising_channel_account_id' => $account->id,
+                'external_account_id' => $account->external_account_id,
+                'metric_date' => $date,
+                'dimension_key' => hash('sha256', 'stale-search-term|'.$date),
+                'source_type' => 'STANDARD',
+                'search_term' => 'stale search term',
+                'normalized_search_term' => 'stale search term',
+                'spend' => 10,
+                'revenue' => 20,
+                'raw_payload' => [],
+                'synced_at' => now(),
+            ]);
+            GoogleAdsKeywordDailyMetric::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'advertising_channel_account_id' => $account->id,
+                'external_account_id' => $account->external_account_id,
+                'metric_date' => $date,
+                'dimension_key' => hash('sha256', 'stale-keyword'),
+                'keyword' => 'stale keyword',
+                'normalized_keyword' => 'stale keyword',
+                'spend' => 10,
+                'revenue' => 20,
+                'raw_payload' => [],
+                'synced_at' => now(),
+            ]);
+        }
+
+        $sync->sync($store, 'google', 'incremental', $sync->credentialVersion($store, 'google'));
+
+        foreach (['google_ads_campaign_daily_metrics', 'google_ads_search_term_daily_metrics', 'google_ads_keyword_daily_metrics'] as $table) {
+            $this->assertDatabaseMissing($table, [
+                'store_id' => $store->id,
+                'metric_date' => '2026-08-22',
+                ...($table === 'google_ads_campaign_daily_metrics'
+                    ? ['campaign_id' => 'stale-campaign']
+                    : ($table === 'google_ads_search_term_daily_metrics'
+                        ? ['search_term' => 'stale search term']
+                        : ['keyword' => 'stale keyword'])),
+            ]);
+            $this->assertDatabaseHas($table, [
+                'store_id' => $store->id,
+                'metric_date' => '2026-08-15 00:00:00',
+            ]);
+        }
+        Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), "segments.date BETWEEN '2026-08-16' AND '2026-08-23'"));
+    }
+
     public function test_google_reconciliation_refreshes_old_values_without_duplicates(): void
     {
         Queue::fake();
@@ -112,6 +216,7 @@ class AdvertisingChannelSyncTest extends TestCase
     {
         Queue::fake();
         $this->artisan('advertising-channels:sync', ['channel' => 'bing', '--mode' => 'reconcile'])->assertExitCode(2);
+        $this->artisan('advertising-channels:sync', ['channel' => 'bing', '--mode' => 'attribution'])->assertExitCode(2);
         Queue::assertNothingPushed();
     }
 
@@ -122,6 +227,8 @@ class AdvertisingChannelSyncTest extends TestCase
         config()->set('services.advertising_sync.priority_days', 7);
         config()->set('services.advertising_sync.history_months', 6);
         config()->set('services.advertising_sync.rolling_days', 3);
+        config()->set('services.advertising_sync.google_rolling_days', 3);
+        config()->set('services.advertising_sync.google_attribution_days', 30);
         Http::fake(function (Request $request) {
             if (str_contains($request->url(), '/campaign/get/')) {
                 return Http::response([

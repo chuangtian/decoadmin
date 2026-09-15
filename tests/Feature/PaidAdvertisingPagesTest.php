@@ -531,6 +531,16 @@ class PaidAdvertisingPagesTest extends TestCase
 
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-20', 'Macfox Ebike', 2, 20, 100, 10, 2);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'macfox ebike', 3, 30, 200, 20, 3);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-22', 'macfox ebike', 1, 10, 50, 5, 1);
+        GoogleAdsSearchTermDailyMetric::query()
+            ->where('advertising_channel_account_id', $account->id)
+            ->whereDate('metric_date', '2026-08-22')
+            ->update([
+                'source_type' => 'PERFORMANCE_MAX',
+                'matched_keyword' => null,
+                'match_type' => 'PERFORMANCE_MAX',
+                'status' => 'PERFORMANCE_MAX',
+            ]);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'No Revenue', 5, 0, 50, 5, 0);
         $this->createGoogleSearchTermMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'Macfox Ebike', 100, 5000, 10000, 1000, 100);
         $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-20', 'macfox ebike', 4, 48, 400, 40, 4);
@@ -555,14 +565,16 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.view', 'search-terms')
             ->assertJsonPath('data.pagination.total', 1)
             ->assertJsonPath('data.rows.0.search_term', 'macfox ebike')
+            ->assertJsonPath('data.rows.0.matched_keyword', 'macfox ebike')
+            ->assertJsonPath('data.rows.0.match_type_label', '精确')
             ->assertJsonPath('data.rows.0.status_label', '已添加')
-            ->assertJsonPath('data.rows.0.spend', 5)
-            ->assertJsonPath('data.rows.0.revenue', 50)
+            ->assertJsonPath('data.rows.0.spend', 6)
+            ->assertJsonPath('data.rows.0.revenue', 60)
             ->assertJsonPath('data.rows.0.roas', 10)
-            ->assertJsonPath('data.rows.0.impressions', 300)
-            ->assertJsonPath('data.rows.0.clicks', 30)
+            ->assertJsonPath('data.rows.0.impressions', 350)
+            ->assertJsonPath('data.rows.0.clicks', 35)
             ->assertJsonPath('data.rows.0.ctr', 10)
-            ->assertJsonPath('data.rows.0.conversions', 5);
+            ->assertJsonPath('data.rows.0.conversions', 6);
 
         $this->actingAs($user)
             ->withSession($this->contextSession($organization, $store))

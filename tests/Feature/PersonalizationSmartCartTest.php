@@ -89,7 +89,7 @@ class PersonalizationSmartCartTest extends TestCase
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => $strategy->uuid,
             'heading' => 'Chosen with care',
-        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已保存，并用于原生购物车抽屉。');
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart strategy saved and assigned to the native cart drawer.');
 
         $setting = PersonalizationSmartCartSetting::query()->sole();
         $this->assertTrue($setting->enabled);
@@ -144,7 +144,7 @@ class PersonalizationSmartCartTest extends TestCase
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => null,
             'heading' => 'Recommended',
-        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已清除；原生购物车不显示推荐。');
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart strategy cleared. The native cart will not show recommendations.');
 
         $setting = PersonalizationSmartCartSetting::query()->sole();
         $this->assertFalse($setting->enabled);
@@ -176,7 +176,7 @@ class PersonalizationSmartCartTest extends TestCase
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => $emptyCustom->uuid,
             'heading' => 'Invalid',
-        ])->assertRedirect()->assertSessionHas('error', '自定义规则至少需要一个行动商品或备用商品。');
+        ])->assertRedirect()->assertSessionHas('error', 'Custom rules require at least one action product or fallback product.');
 
         [$operator, $operatorOrganization, $operatorStore] = $this->context('operator');
         $operatorBase = route('personalization.index', [$operatorOrganization, $operatorStore], false);

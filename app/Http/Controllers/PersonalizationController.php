@@ -46,9 +46,21 @@ class PersonalizationController extends Controller
         $products = $this->catalog->pickerProducts($store);
         $collections = $this->catalog->collections($store);
         $canViewAnalytics = $request->user()->hasPermission('personalization.analytics.read', $organization, $store);
+        $timezone = $store->timezone ?: 'UTC';
+        $today = now($timezone)->toDateString();
+        $earliest = now($timezone)->subDays(89)->toDateString();
+        $analyticsFilters = $request->validate([
+            'from' => ['nullable', 'required_with:to', 'date_format:Y-m-d', "after_or_equal:{$earliest}", "before_or_equal:{$today}"],
+            'to' => ['nullable', 'required_with:from', 'date_format:Y-m-d', 'after_or_equal:from', "before_or_equal:{$today}"],
+        ]);
         try {
             $analytics = $canViewAnalytics
-                ? $this->analytics->dashboard($store, $request->user())
+                ? $this->analytics->dashboard(
+                    $store,
+                    $request->user(),
+                    from: $analyticsFilters['from'] ?? null,
+                    to: $analyticsFilters['to'] ?? null,
+                )
                 : $this->emptyAnalytics($store);
         } catch (PersonalizationException $exception) {
             abort($exception->statusCode, $exception->getMessage());
@@ -199,7 +211,7 @@ class PersonalizationController extends Controller
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
         $values = $request->validate($this->strategyRules());
 
-        return $this->run(fn () => $this->configuration->createStrategy($store, $request->user(), $values), '推荐策略已创建。');
+        return $this->run(fn () => $this->configuration->createStrategy($store, $request->user(), $values), 'Recommendation strategy created.');
     }
 
     public function updateStrategy(
@@ -211,7 +223,7 @@ class PersonalizationController extends Controller
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
         $values = $request->validate($this->strategyRules());
 
-        return $this->run(fn () => $this->configuration->updateStrategy($store, $strategy, $request->user(), $values), '推荐策略已保存，相关组件已退回草稿。');
+        return $this->run(fn () => $this->configuration->updateStrategy($store, $strategy, $request->user(), $values), 'Recommendation strategy saved. Assigned components returned to draft.');
     }
 
     public function updateRules(
@@ -240,7 +252,7 @@ class PersonalizationController extends Controller
             ['type' => 'in_stock_only', 'value' => $values['in_stock_only']],
         ]));
 
-        return $this->run(fn () => $this->configuration->replaceRules($store, $strategy, $request->user(), $rules), '推荐规则已保存，相关组件已退回草稿。');
+        return $this->run(fn () => $this->configuration->replaceRules($store, $strategy, $request->user(), $rules), 'Recommendation rules saved. Assigned components returned to draft.');
     }
 
     public function updateProducts(
@@ -265,7 +277,7 @@ class PersonalizationController extends Controller
             }
         }
 
-        return $this->run(fn () => $this->configuration->replaceProductOverrides($store, $strategy, $request->user(), $overrides), '推荐商品已保存，相关组件已退回草稿。');
+        return $this->run(fn () => $this->configuration->replaceProductOverrides($store, $strategy, $request->user(), $overrides), 'Recommended products saved. Assigned components returned to draft.');
     }
 
     public function storeComponent(Request $request, Organization $organization, Store $store): RedirectResponse
@@ -274,7 +286,7 @@ class PersonalizationController extends Controller
         $values = $request->validate($this->componentRules());
         $strategy = $this->ownedStrategy($store, $values['strategy_uuid']);
 
-        return $this->run(fn () => $this->configuration->createComponent($store, $strategy, $request->user(), $values), '推荐组件草稿已创建。');
+        return $this->run(fn () => $this->configuration->createComponent($store, $strategy, $request->user(), $values), 'Recommendation component draft created.');
     }
 
     public function updateComponent(
@@ -287,7 +299,7 @@ class PersonalizationController extends Controller
         $values = $request->validate($this->componentRules());
         $strategy = $this->ownedStrategy($store, $values['strategy_uuid']);
 
-        return $this->run(fn () => $this->configuration->updateComponent($store, $component, $strategy, $request->user(), $values), '推荐组件已保存为草稿。');
+        return $this->run(fn () => $this->configuration->updateComponent($store, $component, $strategy, $request->user(), $values), 'Recommendation component saved as a draft.');
     }
 
     public function updateStyle(
@@ -315,7 +327,7 @@ class PersonalizationController extends Controller
             'tokens.gap' => ['nullable', 'integer', 'between:0,48'],
         ]);
 
-        return $this->run(fn () => $this->configuration->updateStyle($store, $component, $request->user(), $values), '组件样式已保存，启用前请重新预览。');
+        return $this->run(fn () => $this->configuration->updateStyle($store, $component, $request->user(), $values), 'Component style saved. Preview it again before enabling.');
     }
 
     public function activateComponent(
@@ -326,7 +338,7 @@ class PersonalizationController extends Controller
     ): RedirectResponse {
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
 
-        return $this->run(fn () => $this->configuration->activateComponent($store, $component, $request->user()), '组件后端配置已启用；主题区块仍需在后续 Test 联调中单独启用。');
+        return $this->run(fn () => $this->configuration->activateComponent($store, $component, $request->user()), 'Component configuration enabled. Enable the theme block separately during Test integration.');
     }
 
     public function disableComponent(
@@ -337,7 +349,7 @@ class PersonalizationController extends Controller
     ): RedirectResponse {
         $this->assertUserScope($request, $organization, $store, 'personalization.manage');
 
-        return $this->run(fn () => $this->configuration->disableComponent($store, $component, $request->user()), '组件后端配置已停用。');
+        return $this->run(fn () => $this->configuration->disableComponent($store, $component, $request->user()), 'Component configuration disabled.');
     }
 
     public function preview(
@@ -378,8 +390,8 @@ class PersonalizationController extends Controller
         return $this->run(fn () => $this->configuration->saveSmartCartDraft($store, $request->user(), $strategy, [
             'heading' => trim((string) ($values['heading'] ?? '')),
         ]), $strategy
-            ? 'Smart Cart 策略已保存，并用于原生购物车抽屉。'
-            : 'Smart Cart 策略已清除；原生购物车不显示推荐。');
+            ? 'Smart Cart strategy saved and assigned to the native cart drawer.'
+            : 'Smart Cart strategy cleared. The native cart will not show recommendations.');
     }
 
     public function saveCheckout(Request $request, Organization $organization, Store $store): RedirectResponse
@@ -397,7 +409,7 @@ class PersonalizationController extends Controller
 
         return $this->run(
             fn () => $this->checkout->save($store, $request->user(), $values),
-            'Checkout 策略已绑定。Shopify Checkout Editor 中添加区块后会自动使用该策略。',
+            'Checkout strategy assigned. The block will use it automatically after it is added in Shopify Checkout Editor.',
         );
     }
 
@@ -411,7 +423,7 @@ class PersonalizationController extends Controller
 
         return $this->run(
             fn () => $this->checkout->saveThankYou($store, $request->user(), $values),
-            '感谢页面推荐设置已保存。Shopify 感谢页面中的“Deco 推荐策略”区块会使用该策略。',
+            'Thank you page recommendation settings saved. The Deco recommendation block will use this strategy.',
         );
     }
 
@@ -425,7 +437,7 @@ class PersonalizationController extends Controller
 
         return $this->run(
             fn () => $this->checkout->saveOrderStatus($store, $request->user(), $values),
-            '售后页面推荐设置已保存。Shopify 订单状态页面中的“Deco 推荐策略”区块会使用该策略。',
+            'Order status page recommendation settings saved. The Deco recommendation block will use this strategy.',
         );
     }
 
@@ -451,6 +463,10 @@ class PersonalizationController extends Controller
             'orders' => 0,
             'attributed_revenue' => '0.00',
             'aov' => '0.00',
+            'quantity' => 0,
+            'sales' => '0.00',
+            'discounts' => '0.00',
+            'revenue' => '0.00',
             'click_through_rate' => 0.0,
             'add_to_cart_rate' => 0.0,
             'reversed_orders' => 0,
@@ -512,48 +528,48 @@ class PersonalizationController extends Controller
     private function algorithmLabel(PersonalizationAlgorithm $algorithm): string
     {
         return match ($algorithm) {
-            PersonalizationAlgorithm::Manual => '手动推荐',
-            PersonalizationAlgorithm::NextLlm => 'Next LLM（智能混合）',
-            PersonalizationAlgorithm::FreeShippingUpsell => '免费送货追加销售',
-            PersonalizationAlgorithm::SimilarProducts => '类似产品',
-            PersonalizationAlgorithm::SubstituteProducts => '替代产品',
-            PersonalizationAlgorithm::BestSeller => '畅销商品',
-            PersonalizationAlgorithm::NewArrivals => '新品上市',
-            PersonalizationAlgorithm::FrequentlyBoughtTogether => '经常一起购买',
-            PersonalizationAlgorithm::FrequentlyViewedTogether => '经常一起查看',
-            PersonalizationAlgorithm::ComplementaryProducts => '互补产品',
-            PersonalizationAlgorithm::RecentlyViewed => '最近浏览',
-            PersonalizationAlgorithm::CompleteTheLook => '完成造型',
-            PersonalizationAlgorithm::SameProductUpsell => '同款产品追加销售',
-            PersonalizationAlgorithm::AllProducts => '所有产品',
+            PersonalizationAlgorithm::Manual => 'Manual recommendations',
+            PersonalizationAlgorithm::NextLlm => 'Next LLM (intelligent blend)',
+            PersonalizationAlgorithm::FreeShippingUpsell => 'Free-shipping upsell',
+            PersonalizationAlgorithm::SimilarProducts => 'Similar products',
+            PersonalizationAlgorithm::SubstituteProducts => 'Substitute products',
+            PersonalizationAlgorithm::BestSeller => 'Best sellers',
+            PersonalizationAlgorithm::NewArrivals => 'New arrivals',
+            PersonalizationAlgorithm::FrequentlyBoughtTogether => 'Frequently bought together',
+            PersonalizationAlgorithm::FrequentlyViewedTogether => 'Frequently viewed together',
+            PersonalizationAlgorithm::ComplementaryProducts => 'Complementary products',
+            PersonalizationAlgorithm::RecentlyViewed => 'Recently viewed',
+            PersonalizationAlgorithm::CompleteTheLook => 'Complete the look',
+            PersonalizationAlgorithm::SameProductUpsell => 'Same-product upsell',
+            PersonalizationAlgorithm::AllProducts => 'All products',
         };
     }
 
     private function placementLabel(PersonalizationPlacement $placement): string
     {
         return match ($placement) {
-            PersonalizationPlacement::Homepage => '首页',
-            PersonalizationPlacement::ProductPage => '商品页',
-            PersonalizationPlacement::CartPage => '购物车页面',
+            PersonalizationPlacement::Homepage => 'Homepage',
+            PersonalizationPlacement::ProductPage => 'Product page',
+            PersonalizationPlacement::CartPage => 'Cart page',
             PersonalizationPlacement::SmartCart => 'Smart Cart',
             PersonalizationPlacement::Checkout => 'Checkout',
-            PersonalizationPlacement::ThankYou => '感谢页面',
-            PersonalizationPlacement::OrderStatus => '售后页面',
+            PersonalizationPlacement::ThankYou => 'Thank you page',
+            PersonalizationPlacement::OrderStatus => 'Order status page',
         };
     }
 
     private function checkoutIconLabel(string $icon): string
     {
         return match ($icon) {
-            'store' => '可信店铺',
-            'truck' => '配送',
-            'star' => '保障',
-            'check-circle' => '已验证',
-            'lock' => '安全',
-            'savings' => '优惠',
-            'delivered' => '已送达',
-            'return' => '退换',
-            default => '信息',
+            'store' => 'Trusted store',
+            'truck' => 'Delivery',
+            'star' => 'Guarantee',
+            'check-circle' => 'Verified',
+            'lock' => 'Secure',
+            'savings' => 'Savings',
+            'delivered' => 'Delivered',
+            'return' => 'Returns',
+            default => 'Information',
         };
     }
 }
