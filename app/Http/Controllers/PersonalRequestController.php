@@ -140,6 +140,7 @@ class PersonalRequestController extends Controller
             'options' => [
                 'categories' => self::EXPENSE_CATEGORIES,
                 'canChooseApplicant' => $canChooseApplicant,
+                'allowPastDates' => (bool) config('expense_requests.allow_past_dates'),
                 'currentApplicantId' => (int) $user->id,
                 'applicants' => $canChooseApplicant
                     ? $organization->users()
@@ -245,7 +246,9 @@ class PersonalRequestController extends Controller
             'category' => ['required', Rule::in(self::EXPENSE_CATEGORIES)],
             'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999999.99'],
             'currency' => ['required', Rule::in(['CNY', 'USD', 'EUR', 'GBP'])],
-            'desired_date' => ['required', 'date', 'after_or_equal:today'],
+            'desired_date' => config('expense_requests.allow_past_dates')
+                ? ['required', 'date_format:Y-m-d']
+                : ['required', 'date_format:Y-m-d', 'after_or_equal:today'],
             'description' => ['required', 'string', 'max:5000'],
             'approval_required' => ['sometimes', 'boolean'],
             'software_url' => ['exclude_unless:category,software', 'nullable', 'url:http,https', 'max:500'],
@@ -256,6 +259,10 @@ class PersonalRequestController extends Controller
             'billing_cycle' => ['exclude_unless:category,software', 'required', Rule::in(['monthly', 'bimonthly', 'quarterly', 'annual'])],
             'images' => ['nullable', 'array', 'max:10'],
             'images.*' => ['file', 'image', 'mimes:jpg,jpeg,png,webp,gif', 'max:8192'],
+        ], [
+            'desired_date.required' => '请选择计划使用日期。',
+            'desired_date.date_format' => '请输入有效的计划使用日期。',
+            'desired_date.after_or_equal' => '计划使用日期不能早于今天，请选择今天或以后的日期。',
         ]);
         $images = $validated['images'] ?? [];
         unset($validated['images']);
