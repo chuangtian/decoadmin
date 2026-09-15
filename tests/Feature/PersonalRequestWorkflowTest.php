@@ -509,7 +509,7 @@ class PersonalRequestWorkflowTest extends TestCase
             'category' => 'other',
             'amount' => '320.00',
             'currency' => 'CNY',
-            'desired_date' => '2026-09-20',
+            'desired_date' => '2026-08-26',
             'description' => '管理员根据已有申请资料代为补录。',
             'approval_required' => true,
         ];
@@ -520,8 +520,11 @@ class PersonalRequestWorkflowTest extends TestCase
 
         $item = PersonalRequest::query()->sole();
         $this->assertSame($employee->id, $item->submitter_id);
+        $this->assertSame('2026-08-26', $item->desired_date->toDateString());
+        $this->assertSame('2026-09-14', $item->created_at->toDateString());
         $audit = AuditLog::query()->where('subject_id', $item->id)->where('action', 'expense_request_created')->sole();
         $this->assertSame($superAdmin->id, $audit->user_id);
+        $this->assertSame('2026-09-14', $audit->created_at->toDateString());
         $this->assertSame($employee->id, $audit->metadata['submitter_id']);
         $this->assertTrue($audit->metadata['submitted_on_behalf']);
 
@@ -542,6 +545,55 @@ class PersonalRequestWorkflowTest extends TestCase
             ->post(route('expense-requests.store'), [...$payload, 'applicant_id' => $outsider->id])
             ->assertSessionHasErrors('applicant_id');
         $this->assertSame(1, PersonalRequest::query()->count());
+    }
+
+    public function test_cost_application_backfill_can_be_enabled_for_everyone_and_disabled_later(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-15 10:00:00');
+        config(['expense_requests.allow_past_dates' => true]);
+        [$organization, $store] = $this->context();
+        $employee = $this->user($organization, $store, 'operator', '员工');
+        $superAdmin = $this->user($organization, $store, 'super-admin', '代填管理员');
+        $payload = [
+            'title' => '费用日期回归测试',
+            'category' => 'other',
+            'amount' => '100.00',
+            'currency' => 'CNY',
+            'description' => '测试计划使用日期。',
+            'approval_required' => true,
+        ];
+
+        foreach ([$employee, $superAdmin] as $user) {
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->get(route('expense-requests.index'))->assertOk()
+                ->assertInertia(fn (Assert $page) => $page->where('options.allowPastDates', true));
+            foreach (['2026-08-26', '2026-09-15', '2026-09-16'] as $date) {
+                $this->post(route('expense-requests.store'), [...$payload, 'desired_date' => $date])
+                    ->assertRedirect()->assertSessionHasNoErrors();
+            }
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->post(route('expense-requests.store'), [...$payload, 'desired_date' => '2026-02-30'])
+                ->assertSessionHasErrors(['desired_date' => '请输入有效的计划使用日期。']);
+            $this->post(route('expense-requests.store'), $payload)
+                ->assertSessionHasErrors(['desired_date' => '请选择计划使用日期。']);
+        }
+        $this->assertDatabaseCount('personal_requests', 6);
+
+        config(['expense_requests.allow_past_dates' => false]);
+        foreach ([$employee, $superAdmin] as $user) {
+            $this->actingAs($user)->withSession($this->contextSession($organization, $store))
+                ->get(route('expense-requests.index'))->assertOk()
+                ->assertInertia(fn (Assert $page) => $page->where('options.allowPastDates', false));
+            $this->post(route('expense-requests.store'), [...$payload, 'desired_date' => '2026-08-26'])
+                ->assertSessionHasErrors([
+                    'desired_date' => '计划使用日期不能早于今天，请选择今天或以后的日期。',
+                ]);
+            foreach (['2026-09-15', '2026-09-16'] as $date) {
+                $this->post(route('expense-requests.store'), [...$payload, 'desired_date' => $date])
+                    ->assertRedirect()->assertSessionHasNoErrors();
+            }
+        }
+        $this->assertDatabaseCount('personal_requests', 10);
     }
 
     public function test_finance_renewals_are_sorted_by_payment_priority_and_nearest_relevant_date(): void

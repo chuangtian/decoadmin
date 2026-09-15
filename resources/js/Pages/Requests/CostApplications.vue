@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router, useForm } from "@inertiajs/vue3";
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import Pagination from "../../Components/Navigation/Pagination.vue";
 import AppLayout from "../../Layouts/AppLayout.vue";
 
@@ -52,6 +52,7 @@ const props = defineProps<{
     options: {
         categories: string[];
         canChooseApplicant?: boolean;
+        allowPastDates: boolean;
         currentApplicantId?: number;
         applicants?: Applicant[];
     };
@@ -128,6 +129,30 @@ const currentApplicantId = computed(() =>
     String(props.options.currentApplicantId ?? "")
 );
 const canChooseApplicant = computed(() => props.options.canChooseApplicant === true);
+const desiredDateInput = ref<HTMLInputElement | null>(null);
+const errorDialog = ref<HTMLDialogElement | null>(null);
+const errorMessages = ref<string[]>([]);
+let focusDateAfterError = false;
+
+async function showErrors(errors: Record<string, string>, focusDate = false): Promise<void> {
+    errorMessages.value = [...new Set(Object.values(errors).map((message) =>
+        message.startsWith("validation.") ? "填写内容有误，请检查必填项和输入格式。" : message
+    ))];
+    focusDateAfterError = focusDate;
+    await nextTick();
+    if (!errorDialog.value?.open) errorDialog.value?.showModal();
+}
+
+function closeErrorDialog(): void {
+    errorDialog.value?.close();
+}
+
+function restoreErrorFocus(): void {
+    if (focusDateAfterError) {
+        desiredDateInput.value?.focus();
+        desiredDateInput.value?.scrollIntoView({ block: "center" });
+    }
+}
 
 function formatApplicantOption(applicant: Applicant): string {
     return `${applicant.name}${applicant.job_title ? `（${applicant.job_title}）` : ""}`;
@@ -163,6 +188,9 @@ function submit(): void {
     }
     form.post("/expense-requests", {
         forceFormData: true,
+        onError: (errors) => {
+            void showErrors(errors, !!errors.desired_date);
+        },
         onSuccess: () => {
             createOpen.value = false;
             files.value = [];
@@ -218,6 +246,7 @@ function closeCancelRenewal(): void {
 function submitCancelRenewal(): void {
     if (!cancelRow.value) return;
     cancelForm.put(`/expense-requests/${cancelRow.value.uuid}/cancel-renewal`, {
+        onError: (errors) => { void showErrors(errors); },
         onSuccess: () => {
             closeCancelRenewal();
             cancelForm.reset();
@@ -512,12 +541,13 @@ function submitCancelRenewal(): void {
                 <form
                     class="mx-auto mt-[3vh] flex h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
                     @submit.prevent="submit"
+                    novalidate
                 >
                     <div class="flex shrink-0 justify-between p-7 pb-0">
                         <div>
                             <h2 class="text-xl font-bold">发起费用申请</h2>
                             <p class="mt-1 text-sm text-slate-500">
-                                费用发生前填写预算、用途和计划使用日期。
+                                {{ options.allowPastDates ? '填写预算、用途和计划使用日期，也可补录历史费用申请。' : '费用发生前填写预算、用途和计划使用日期。' }}
                             </p>
                         </div>
                         <button
@@ -570,10 +600,16 @@ function submitCancelRenewal(): void {
                             </select></label
                         ><label class="text-sm font-semibold text-slate-700"
                             >计划使用日期<input
+                                ref="desiredDateInput"
                                 v-model="form.desired_date"
                                 required
                                 type="date"
-                                class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label
+                                :aria-invalid="!!form.errors.desired_date"
+                                aria-describedby="expense-desired-date-hint"
+                                class="mt-2 h-11 w-full rounded-xl border-slate-200" />
+                            <span id="expense-desired-date-hint" class="mt-2 block text-sm font-normal text-slate-500">
+                                {{ options.allowPastDates ? '可填写过去或未来的计划使用日期。' : '请选择今天或以后的日期。' }}
+                            </span></label
                         ><label class="text-sm font-semibold text-slate-700"
                             >预计金额<input
                                 v-model="form.amount"
@@ -691,12 +727,6 @@ function submitCancelRenewal(): void {
                                 @change="selectFiles"
                         /></label>
                     </div>
-                    <p
-                        v-if="form.hasErrors"
-                        class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-                    >
-                        {{ Object.values(form.errors).join("；") }}
-                    </p>
                     </div>
                     <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
                         <button
@@ -766,12 +796,6 @@ function submitCancelRenewal(): void {
                                 class="mt-2 h-11 w-full rounded-xl border-slate-200"
                             />
                         </label>
-                        <p
-                            v-if="cancelForm.errors.cancelled_on"
-                            class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"
-                        >
-                            {{ cancelForm.errors.cancelled_on }}
-                        </p>
                     </div>
                     <div class="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-4">
                         <button
@@ -792,5 +816,16 @@ function submitCancelRenewal(): void {
                 </form>
             </dialog></Teleport
         >
+        <Teleport to="body">
+            <dialog ref="errorDialog" aria-labelledby="expense-error-title" aria-describedby="expense-error-messages" class="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-white p-6 shadow-2xl backdrop:bg-slate-950/50" @close="restoreErrorFocus">
+                <h2 id="expense-error-title" class="text-lg font-bold text-rose-700">提交失败</h2>
+                <ul id="expense-error-messages" class="mt-4 max-h-[50vh] list-disc space-y-2 overflow-y-auto pl-5 text-sm leading-6 text-slate-700">
+                    <li v-for="message in errorMessages" :key="message">{{ message }}</li>
+                </ul>
+                <div class="mt-6 flex justify-end">
+                    <button type="button" autofocus class="h-11 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white hover:bg-orange-700" @click="closeErrorDialog">返回修改</button>
+                </div>
+            </dialog>
+        </Teleport>
     </AppLayout>
 </template>
