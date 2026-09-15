@@ -72,7 +72,7 @@ class PersonalizationManagementTest extends TestCase
                     fn (array $row): bool => $row['uuid'] === $component->uuid && $row['status'] === 'draft',
                 ))
                 ->where('products.0.shopify_product_id', (string) $product->shopify_product_id)
-                ->where('products.0.availability_label', '已启用')
+                ->where('products.0.availability_label', 'Enabled')
                 ->where('products.0.available_for_sale', true)
                 ->where('permissions.manage', true)
                 ->where('permissions.manageSmartCart', false)
@@ -90,6 +90,16 @@ class PersonalizationManagementTest extends TestCase
             ->assertJsonPath('data.component.uuid', $component->uuid)
             ->assertJsonPath('data.items.0.shopify_product_id', '101')
             ->assertJsonMissingPath('data.items.0.description');
+
+        $from = now($store->timezone)->subDays(6)->toDateString();
+        $to = now($store->timezone)->toDateString();
+        $this->actingAs($operator)
+            ->get(route('personalization.index', [$organization, $store])."?from={$from}&to={$to}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('analytics.period.from', $from)
+                ->where('analytics.period.to', $to)
+                ->where('analytics.period.days', 7));
     }
 
     public function test_store_admin_can_manage_drafts_activation_style_reset_and_smart_cart_safety(): void
@@ -126,7 +136,7 @@ class PersonalizationManagementTest extends TestCase
 
         $this->actingAs($admin)->post("{$base}/components/{$component->uuid}/activate")
             ->assertRedirect()
-            ->assertSessionHas('error', '手动推荐策略至少需要一个商品或集合。');
+            ->assertSessionHas('error', 'A manual recommendation strategy requires at least one product or collection.');
         $this->assertSame(PersonalizationComponentStatus::Draft, $component->fresh()->status);
 
         $this->actingAs($admin)->put("{$base}/strategies/{$strategy->uuid}/products", [
@@ -164,7 +174,7 @@ class PersonalizationManagementTest extends TestCase
         $this->actingAs($admin)->put("{$base}/smart-cart", [
             'strategy_uuid' => $strategy->uuid,
             'heading' => 'Cart recommendations',
-        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart 策略已保存，并用于原生购物车抽屉。');
+        ])->assertRedirect()->assertSessionHas('success', 'Smart Cart strategy saved and assigned to the native cart drawer.');
         $smartCart = PersonalizationSmartCartSetting::query()->sole();
         $this->assertTrue($smartCart->enabled);
         $this->assertSame('unchecked', $smartCart->compatibility_status->value);

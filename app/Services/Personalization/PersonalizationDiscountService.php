@@ -74,7 +74,7 @@ class PersonalizationDiscountService
 
                 return [
                     'id' => (string) ($node['id'] ?? ''),
-                    'title' => (string) ($discount['title'] ?? '未命名折扣'),
+                    'title' => (string) ($discount['title'] ?? 'Untitled discount'),
                     'summary' => (string) ($discount['summary'] ?? ''),
                     'status' => strtolower((string) ($discount['status'] ?? 'unknown')),
                     'code' => (string) data_get($discount, 'codes.nodes.0.code', ''),
@@ -138,8 +138,8 @@ class PersonalizationDiscountService
         $errors = data_get($payload, "data.{$operation}.userErrors", []);
         $id = data_get($payload, "data.{$operation}.codeDiscountNode.id");
         if (! is_string($id) || $id === '') {
-            $message = collect(is_array($errors) ? $errors : [])->pluck('message')->filter()->take(3)->implode('；');
-            throw new PersonalizationException('SHOPIFY_DISCOUNT_WRITE_FAILED', $message ?: 'Shopify 未能保存折扣。', 502);
+            $message = collect(is_array($errors) ? $errors : [])->pluck('message')->filter()->take(3)->implode('; ');
+            throw new PersonalizationException('SHOPIFY_DISCOUNT_WRITE_FAILED', $message ?: 'Shopify could not save the discount.', 502);
         }
 
         return $id;
@@ -169,7 +169,7 @@ class PersonalizationDiscountService
                 apiVersion: '2026-07',
             );
         } catch (ShopifyApiException) {
-            throw new PersonalizationException('SHOPIFY_DISCOUNT_API_FAILED', 'Shopify 折扣服务暂时不可用，请稍后重试。', 502);
+            throw new PersonalizationException('SHOPIFY_DISCOUNT_API_FAILED', 'Shopify discounts are temporarily unavailable. Try again later.', 502);
         }
     }
 
@@ -178,7 +178,7 @@ class PersonalizationDiscountService
         $this->shopGuard->assertAllowed((string) $store->shopify_domain);
         if (! $actor->canAccessStore($store)
             || ! $actor->hasPermission('personalization.manage', $store->organization, $store)) {
-            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', '无权管理当前店铺的推荐折扣。', 403);
+            throw new PersonalizationException('PERSONALIZATION_ACCESS_DENIED', 'You do not have permission to manage recommendation discounts for this store.', 403);
         }
     }
 

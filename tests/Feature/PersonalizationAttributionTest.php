@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Organization;
 use App\Models\PersonalizationAttribution;
 use App\Models\PersonalizationEvent;
@@ -50,6 +51,18 @@ class PersonalizationAttributionTest extends TestCase
         $this->event($source, PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_CLICK, 'click-last', $clientHash, now()->subHour(), $lastComponent, $product, 11010);
         $this->event($source, PersonalizationEventIngestionService::CHECKOUT_RECOMMENDATION_ADD_SUCCESS, 'add-a', $clientHash, now()->subMinutes(30), $lastComponent, $product, 11010);
         $order = $this->order($organization, $store, 7001, 200, 25);
+        $order->forceFill(['discount_total' => 15])->save();
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'shopify_line_item_id' => 70011,
+            'product_id' => $product->id,
+            'shopify_product_id' => $product->shopify_product_id,
+            'title' => $product->title,
+            'quantity' => 2,
+            'current_quantity' => 2,
+            'price' => 90,
+            'attributed_sales' => 180,
+        ]);
         $checkout = $this->checkout($source, 'checkout-a', $clientHash, now(), $order->shopify_order_id);
 
         $result = app(PersonalizationAttributionService::class)->reconcileStore($store);
@@ -75,6 +88,10 @@ class PersonalizationAttributionTest extends TestCase
         $this->assertSame(1, $analytics['orders']);
         $this->assertSame('175.00', $analytics['attributed_revenue']);
         $this->assertSame('175.00', $analytics['aov']);
+        $this->assertSame(2, $analytics['quantity']);
+        $this->assertSame('180.00', $analytics['sales']);
+        $this->assertSame('15.00', $analytics['discounts']);
+        $this->assertSame('175.00', $analytics['revenue']);
         $this->assertSame(7, $analytics['attribution']['window_days']);
         $this->assertTrue($analytics['attribution']['click_only']);
         $this->assertSame('175.00', collect($analytics['placements'])->firstWhere('placement', 'checkout')['attributed_revenue']);
