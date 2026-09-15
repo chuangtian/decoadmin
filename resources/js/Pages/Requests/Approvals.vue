@@ -27,6 +27,9 @@ type Row = {
     software_payment_method: string | null;
     renewal_mode: string | null;
     billing_cycle: string | null;
+    renewal_status: string | null;
+    next_renewal_on: string | null;
+    cancelled_on: string | null;
     attachments: Array<{ uuid: string; name: string; url: string }>;
 };
 
@@ -43,6 +46,15 @@ const statusLabels: Record<string, string> = {
     approved: '已通过',
     rejected: '已驳回',
 };
+const categoryLabels: Record<string, string> = {
+    travel: '差旅预算',
+    advertising: '广告预算',
+    software: '软件采购',
+    office: '办公采购',
+    entertainment: '业务招待',
+    logistics: '物流费用',
+    other: '其他费用',
+};
 const billingCycleLabels: Record<string, string> = {
     monthly: '月付',
     bimonthly: '双月付',
@@ -50,6 +62,8 @@ const billingCycleLabels: Record<string, string> = {
     annual: '年付',
 };
 const billingCycleLabel = (cycle: string | null): string => cycle ? (billingCycleLabels[cycle] ?? cycle) : '未填写';
+const renewalModeLabel = (mode: string | null): string => mode === 'automatic' ? '自动续费' : mode === 'manual' ? '手动续费' : '未填写';
+const categoryLabel = (category: string): string => categoryLabels[category] ?? category ?? '未填写';
 const filters = ref({ ...props.filters });
 const selected = ref<Row | null>(null);
 const reviewOpen = ref(false);
@@ -169,13 +183,14 @@ function review(action: 'approve' | 'reject'): void {
 
             <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div class="overflow-x-auto">
-                    <table class="w-full min-w-[1080px] text-sm text-slate-700">
+                    <table class="w-full min-w-[1380px] text-sm text-slate-700">
                         <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500">
                             <tr>
                                 <th class="px-4 py-3 text-left font-semibold">编号/申请信息</th>
-                                <th class="px-4 py-3 text-left font-semibold">类型</th>
+                                <th class="px-4 py-3 text-left font-semibold">申请类型 / 费用类型</th>
                                 <th class="px-4 py-3 text-left font-semibold">提交人/时间</th>
                                 <th class="px-4 py-3 text-left font-semibold">金额或期望日期</th>
+                                <th class="w-64 px-4 py-3 text-left font-semibold">采购信息</th>
                                 <th class="px-4 py-3 text-left font-semibold">附件</th>
                                 <th class="px-4 py-3 text-left font-semibold">状态/审批意见</th>
                                 <th class="px-4 py-3 text-left font-semibold">操作</th>
@@ -189,10 +204,13 @@ function review(action: 'approve' | 'reject'): void {
                                         <p class="mt-1 font-semibold text-slate-900">{{ row.title }}</p>
                                         <p class="mt-1 line-clamp-2 max-w-[240px] text-slate-500">{{ row.description }}</p>
                                     </td>
-                                <td class="px-4 py-3 align-top">
+                                    <td class="px-4 py-3 align-top">
                                         <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="requestTypeClass(row.kind)">
                                             {{ requestTypeName(row.kind) }}
                                         </span>
+                                        <p v-if="row.kind === 'expense_request'" class="mt-2 font-semibold text-slate-700">
+                                            {{ categoryLabel(row.category) }}
+                                        </p>
                                     </td>
                                     <td class="px-4 py-3 align-top">
                                         <p class="font-semibold text-slate-700">{{ row.submitter }}</p>
@@ -200,6 +218,18 @@ function review(action: 'approve' | 'reject'): void {
                                     </td>
                                     <td class="px-4 py-3 align-top whitespace-nowrap">
                                         <p class="font-semibold text-slate-900">{{ displayAmountOrDate(row) }}</p>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <div v-if="row.kind === 'expense_request'" class="max-w-64 space-y-1 text-xs text-slate-600">
+                                            <a v-if="row.software_url" :href="row.software_url" target="_blank" rel="noreferrer" class="block truncate font-semibold text-blue-600 hover:underline">{{ row.software_url }}</a>
+                                            <p>付费方式：{{ row.software_payment_method || '未填写' }}</p>
+                                            <p class="truncate">账号：{{ row.software_account || '未填写' }}</p>
+                                            <p>密码：{{ row.software_password_set ? '已安全保存' : '未填写' }}</p>
+                                            <p class="font-semibold text-orange-700">{{ renewalModeLabel(row.renewal_mode) }} · {{ billingCycleLabel(row.billing_cycle) }}</p>
+                                            <p v-if="row.next_renewal_on" class="font-semibold text-orange-700">下次续费：{{ row.next_renewal_on }}</p>
+                                            <p v-if="row.renewal_status === 'cancelled'" class="font-semibold text-amber-700">已取消续费 · {{ row.cancelled_on || '日期未填写' }}</p>
+                                        </div>
+                                        <span v-else class="text-slate-400">—</span>
                                     </td>
                                     <td class="px-4 py-3 align-top">
                                         <div v-if="row.attachments.length" class="flex items-center gap-2">
@@ -232,7 +262,7 @@ function review(action: 'approve' | 'reject'): void {
                                 </tr>
                             </template>
                             <tr v-else>
-                                <td colspan="7" class="px-4 py-12 text-center text-slate-400">当前没有需要审批的申请</td>
+                                <td colspan="8" class="px-4 py-12 text-center text-slate-400">当前没有需要审批的申请</td>
                             </tr>
                         </tbody>
                     </table>
@@ -273,13 +303,16 @@ function review(action: 'approve' | 'reject'): void {
                     </div>
                     <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-7 sm:py-5">
                         <p class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{{ selected.description }}</p>
-                        <dl v-if="selected.kind === 'expense_request' && selected.category === 'software'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
+                        <dl v-if="selected.kind === 'expense_request'" class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-orange-100 bg-orange-50/60 p-4 text-sm">
+                            <div class="col-span-2"><dt class="font-semibold text-orange-800">采购信息</dt></div>
+                            <div class="col-span-2"><dt class="text-xs text-slate-400">费用类型</dt><dd class="mt-1 font-semibold text-slate-700">{{ categoryLabel(selected.category) }}</dd></div>
                             <div class="col-span-2"><dt class="text-xs text-slate-400">付费方式</dt><dd class="mt-1 text-slate-700">{{ selected.software_payment_method || '未填写' }}</dd></div>
                             <div class="col-span-2"><dt class="text-xs text-slate-400">软件网址</dt><dd class="mt-1 truncate"><a v-if="selected.software_url" :href="selected.software_url" target="_blank" rel="noreferrer" class="font-medium text-blue-600 hover:underline">{{ selected.software_url }}</a><span v-else class="text-slate-400">未填写</span></dd></div>
                             <div><dt class="text-xs text-slate-400">登录账号</dt><dd class="mt-1 truncate text-slate-700">{{ selected.software_account || '未填写' }}</dd></div>
                             <div><dt class="text-xs text-slate-400">登录密码</dt><dd class="mt-1 text-slate-700">{{ selected.software_password_set ? '已安全保存' : '未填写' }}</dd></div>
-                            <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }}</dd></div>
+                            <div><dt class="text-xs text-slate-400">续费操作</dt><dd class="mt-1 text-slate-700">{{ renewalModeLabel(selected.renewal_mode) }}</dd></div>
                             <div><dt class="text-xs text-slate-400">付费周期</dt><dd class="mt-1 text-slate-700">{{ billingCycleLabel(selected.billing_cycle) }}</dd></div>
+                            <div class="col-span-2"><dt class="text-xs text-slate-400">下次续费</dt><dd class="mt-1 text-slate-700">{{ selected.next_renewal_on || '尚未产生' }}</dd></div>
                         </dl>
                         <label class="mt-5 block text-sm font-semibold text-slate-700">审批意见<textarea v-model="form.note" maxlength="2000" rows="4" class="mt-2 w-full rounded-xl border-slate-200" placeholder="通过时可选；驳回时必须填写原因"></textarea></label>
                         <p v-if="form.hasErrors" class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(form.errors).join('；') }}</p>
