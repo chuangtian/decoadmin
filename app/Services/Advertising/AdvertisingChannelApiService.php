@@ -399,9 +399,9 @@ class AdvertisingChannelApiService
         // daily rows, preserving zero-revenue days for terms that converted on
         // another day in the range.
         $searchTermQuery = "SELECT customer.id, segments.date, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, campaign.id, campaign.name, campaign.advertising_channel_type, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
-        $searchTermRows = $this->googleSearch($customerId, $headers, $searchTermQuery, 'Google Ads search terms');
+        $searchTermRows = $this->googleConvertingSearchTermDays($customerId, $headers, $searchTermQuery, $from, $to, false);
         $pmaxSearchTermQuery = "SELECT customer.id, segments.date, campaign_search_term_view.search_term, campaign.id, campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign_search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.advertising_channel_type = 'PERFORMANCE_MAX' ORDER BY segments.date ASC";
-        $pmaxSearchTermRows = $this->googleSearch($customerId, $headers, $pmaxSearchTermQuery, 'Google Ads Performance Max search terms');
+        $pmaxSearchTermRows = $this->googleConvertingSearchTermDays($customerId, $headers, $pmaxSearchTermQuery, $from, $to, true);
 
         $searchTermDaily = collect($searchTermRows)->map(function (array $row) use ($account): ?array {
             return $this->googleSearchTermRow($row, (string) $account['external_account_id'], false);
@@ -451,6 +451,35 @@ class AdvertisingChannelApiService
             'search_term_daily_metrics' => $searchTermDaily,
             'keyword_daily_metrics' => $keywordDaily,
         ];
+    }
+
+    /**
+     * Select converting terms across the entire reporting window first, then
+     * retrieve every daily row for those terms. Downloading all non-converting
+     * PMax terms can exhaust a worker's memory even for a one-week window.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function googleConvertingSearchTermDays(string $customerId, array $headers, string $dailyQuery, string $from, string $to, bool $pmax): array
+    {
+        $resource = $pmax ? 'campaign_search_term_view' : 'search_term_view';
+        $responseKey = $pmax ? 'campaignSearchTermView' : 'searchTermView';
+        $channelFilter = $pmax ? " AND campaign.advertising_channel_type = 'PERFORMANCE_MAX'" : '';
+        // segments.date is only a filter here, not a selected dimension: the
+        // positive conversion-value test therefore applies to the whole period.
+        $selectorQuery = "SELECT {$resource}.search_term, metrics.conversions_value FROM {$resource} WHERE segments.date BETWEEN '{$from}' AND '{$to}'{$channelFilter} AND metrics.conversions_value > 0";
+        $candidates = $this->googleSearch($customerId, $headers, $selectorQuery, 'Google Ads converting search terms');
+        $terms = collect($candidates)->map(fn (array $row): string => trim((string) data_get($row, "{$responseKey}.searchTerm", '')))
+            ->filter(fn (string $term): bool => $term !== '')
+            ->unique()->values();
+        $rows = [];
+        foreach ($terms->chunk(100) as $chunk) {
+            $quotedTerms = $chunk->map(fn (string $term): string => "'".str_replace(['\\', "'"], ['\\\\', "\\'"], $term)."'")->implode(', ');
+            $query = str_replace(' ORDER BY segments.date ASC', " AND {$resource}.search_term IN ({$quotedTerms}) ORDER BY segments.date ASC", $dailyQuery);
+            array_push($rows, ...$this->googleSearch($customerId, $headers, $query, 'Google Ads search term days'));
+        }
+
+        return $rows;
     }
 
     /** @return list<array<string, mixed>> */
