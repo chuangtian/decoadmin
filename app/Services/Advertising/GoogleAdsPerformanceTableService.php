@@ -112,6 +112,7 @@ class GoogleAdsPerformanceTableService
 
         return $query->selectRaw("dimension_key AS row_key, MAX(keyword) AS keyword, MAX(COALESCE(match_type, '')) AS match_type, MAX(COALESCE(ad_group_name, '')) AS ad_group_name, MAX(COALESCE(campaign_name, '')) AS campaign_name, MAX(COALESCE(status, '')) AS status, SUM(spend) AS spend, SUM(revenue) AS revenue, CASE WHEN SUM(spend) > 0 THEN SUM(revenue) * 1.0 / SUM(spend) ELSE 0 END AS roas, SUM(impressions) AS impressions, SUM(clicks) AS clicks, CASE WHEN SUM(impressions) > 0 THEN SUM(clicks) * 100.0 / SUM(impressions) ELSE 0 END AS ctr, CASE WHEN SUM(clicks) > 0 THEN SUM(spend) * 1.0 / SUM(clicks) ELSE 0 END AS cpc, SUM(conversions) AS conversions")
             ->groupBy('dimension_key')
+            ->havingRaw('SUM(spend) > 0')
             ->toBase();
     }
 
