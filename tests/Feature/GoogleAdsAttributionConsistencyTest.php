@@ -19,6 +19,7 @@ use App\Services\Advertising\GoogleAdsOverviewService;
 use App\Services\Advertising\GoogleAdsPerformanceTableService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -122,6 +123,72 @@ class GoogleAdsAttributionConsistencyTest extends TestCase
             && $event->views === ['overview', 'trend', 'campaigns', 'search-terms', 'keywords']);
         Queue::assertNothingPushed();
         Http::assertNothingSent();
+    }
+
+    public function test_large_attribution_details_use_bounded_mysql_statements(): void
+    {
+        $store = $this->store();
+        $payload = $this->largePayload(3500);
+        $api = Mockery::mock(AdvertisingChannelApiService::class);
+        $api->shouldReceive('syncPayload')->once()->with($store, 'google', '2026-08-17', '2026-09-15')->andReturn($payload);
+        $this->app->instance(AdvertisingChannelApiService::class, $api);
+        $bindings = [];
+        DB::listen(function ($query) use (&$bindings) {
+            if (preg_match('/^insert into [`"](google_ads_(?:campaign|search_term|keyword)_daily_metrics)[`"]/', $query->sql, $match)) {
+                $bindings[$match[1]][] = count($query->bindings);
+            }
+        });
+        app(AdvertisingChannelSyncService::class)->sync($store, 'google', 'attribution');
+        foreach ([GoogleAdsCampaignDailyMetric::class, GoogleAdsSearchTermDailyMetric::class, GoogleAdsKeywordDailyMetric::class] as $model) {
+            $table = (new $model)->getTable();
+            $this->assertDatabaseCount($table, 3500);
+            $this->assertCount(7, $bindings[$table]);
+            $this->assertLessThanOrEqual(20000, max($bindings[$table]));
+        }
+    }
+
+    public function test_later_batch_failure_rolls_back_earlier_detail_batches_and_core(): void
+    {
+        $store = $this->store();
+        $api = Mockery::mock(AdvertisingChannelApiService::class);
+        $api->shouldReceive('syncPayload')->twice()->with($store, 'google', '2026-08-17', '2026-09-15')
+            ->andReturn($this->payload(100), $this->largePayload(601));
+        $this->app->instance(AdvertisingChannelApiService::class, $api);
+        $sync = app(AdvertisingChannelSyncService::class);
+        $sync->sync($store, 'google', 'attribution');
+        $before = $this->snapshot($store);
+        $batches = 0;
+        DB::listen(function ($query) use (&$batches) {
+            if (str_starts_with($query->sql, 'insert into `google_ads_search_term_daily_metrics`') && ++$batches === 2) {
+                throw new RuntimeException('Simulated later batch failure.');
+            }
+        });
+        try {
+            $sync->sync($store, 'google', 'attribution');
+            $this->fail('The second batch must fail.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Simulated later batch failure.', $exception->getMessage());
+            $this->assertSame(2, $batches);
+            $this->assertSame($before, $this->snapshot($store));
+        }
+    }
+
+    private function largePayload(int $count): array
+    {
+        $payload = $this->payload(1493.18);
+        foreach (['campaign_daily_metrics', 'search_term_daily_metrics', 'keyword_daily_metrics'] as $key) {
+            $sample = $payload[$key][0];
+            $payload[$key] = [];
+            for ($index = 0; $index < $count; $index++) {
+                $payload[$key][] = [...$sample, ...match ($key) {
+                    'campaign_daily_metrics' => ['campaign_id' => 'campaign-'.$index],
+                    'search_term_daily_metrics' => ['dimension_key' => 'term-'.$index, 'search_term' => 'term '.$index],
+                    default => ['dimension_key' => 'keyword-'.$index, 'keyword' => 'keyword '.$index],
+                }];
+            }
+        }
+
+        return $payload;
     }
 
     public function test_failed_detail_write_rolls_back_core_and_all_existing_details(): void
