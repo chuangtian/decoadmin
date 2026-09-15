@@ -312,6 +312,13 @@ class AdvertisingChannelSyncTest extends TestCase
             }
 
             if (str_contains($query, 'FROM search_term_view')) {
+                if (str_starts_with($query, 'SELECT search_term_view.search_term,')) {
+                    return Http::response(['results' => [[
+                        'searchTermView' => ['searchTerm' => 'macfox ebike'],
+                        'metrics' => ['conversionsValue' => 25],
+                    ]]]);
+                }
+
                 return Http::response(['results' => [
                     [
                         'customer' => ['id' => '1234567890'],
@@ -359,6 +366,13 @@ class AdvertisingChannelSyncTest extends TestCase
             }
 
             if (str_contains($query, 'FROM campaign_search_term_view')) {
+                if (str_starts_with($query, 'SELECT campaign_search_term_view.search_term,')) {
+                    return Http::response(['results' => [[
+                        'campaignSearchTermView' => ['searchTerm' => 'fat tire bike'],
+                        'metrics' => ['conversionsValue' => 10],
+                    ]]]);
+                }
+
                 return Http::response(['results' => [[
                     'customer' => ['id' => '1234567890'],
                     'campaign' => [
@@ -593,11 +607,18 @@ class AdvertisingChannelSyncTest extends TestCase
             && str_contains((string) $request['query'], "campaign.status = 'ENABLED'"));
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM search_term_view')
             && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.conversions_value > 0')
+            && str_contains((string) $request['query'], "search_term_view.search_term IN ('macfox ebike')")
             && ! array_key_exists('pageSize', $request->data()));
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign_search_term_view')
             && str_contains((string) ($request->data()['query'] ?? ''), "campaign.advertising_channel_type = 'PERFORMANCE_MAX'")
             && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.conversions_value > 0')
+            && str_contains((string) $request['query'], "campaign_search_term_view.search_term IN ('fat tire bike')")
             && ! array_key_exists('pageSize', $request->data()));
+        foreach (['search_term_view', 'campaign_search_term_view'] as $resource) {
+            Http::assertSent(fn (Request $request): bool => str_starts_with((string) ($request->data()['query'] ?? ''), "SELECT {$resource}.search_term, metrics.conversions_value FROM")
+                && str_contains((string) $request['query'], 'metrics.conversions_value > 0')
+                && str_contains((string) $request['query'], "segments.date BETWEEN '2026-08-17' AND '2026-08-23'"));
+        }
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view')
             && str_contains((string) ($request->data()['query'] ?? ''), "ad_group_criterion.status != 'REMOVED'")
             && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.cost_micros > 0')
