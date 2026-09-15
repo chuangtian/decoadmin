@@ -351,9 +351,56 @@ class AdvertisingChannelApiService
             ];
         }
 
-        $searchTermQuery = "SELECT customer.id, segments.date, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, campaign.id, campaign.name, campaign.advertising_channel_type, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND metrics.conversions_value > 0 ORDER BY segments.date ASC";
+        // A date-segmented metrics query omits enabled campaigns that had no
+        // activity in the requested range. Fetch the campaign catalogue as a
+        // separate resource query so the campaign table matches Google Ads and
+        // still includes those zero-metric campaigns.
+        $campaignCatalogQuery = "SELECT customer.id, campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign WHERE campaign.status = 'ENABLED' ORDER BY campaign.id ASC";
+        $campaignCatalogRows = $this->googleSearch($customerId, $headers, $campaignCatalogQuery, 'Google Ads campaign catalogue');
+        $campaignDatesWithMetrics = collect($campaignDaily)
+            ->mapWithKeys(fn (array $metric): array => [$metric['campaign_id'].'|'.$metric['date'] => true]);
+        foreach ($campaignCatalogRows as $row) {
+            $campaign = is_array($row['campaign'] ?? null) ? $row['campaign'] : [];
+            $campaignId = trim((string) ($campaign['id'] ?? ''));
+            if ($campaignId === '') {
+                continue;
+            }
+
+            $zeroMetric = [
+                'external_account_id' => trim((string) data_get($row, 'customer.id', $account['external_account_id'])),
+                'campaign_id' => $campaignId,
+                'campaign_name' => $campaign['name'] ?? null,
+                'campaign_status' => $campaign['status'] ?? null,
+                'advertising_channel_type' => $campaign['advertisingChannelType'] ?? null,
+                'spend' => 0.0,
+                'impressions' => 0,
+                'clicks' => 0,
+                'conversions' => 0.0,
+                'conversions_value' => 0.0,
+                'conversion_value_by_conversion_date' => 0.0,
+                'all_conversions' => 0.0,
+                'all_conversions_value' => 0.0,
+                'all_conversions_value_by_conversion_date' => 0.0,
+                'raw_payload' => $row,
+            ];
+            // A user may select any subrange of this sync window, including a
+            // range ending yesterday. A marker only on $to would disappear.
+            for ($date = CarbonImmutable::parse($from); $date->toDateString() <= $to; $date = $date->addDay()) {
+                $key = $campaignId.'|'.$date->toDateString();
+                if (! $campaignDatesWithMetrics->has($key)) {
+                    $campaignDaily[] = [...$zeroMetric, 'date' => $date->toDateString()];
+                    $campaignDatesWithMetrics->put($key, true);
+                }
+            }
+        }
+
+        // Do not filter a date-segmented query by that day's conversion value.
+        // The range-level report applies its revenue filter after aggregating all
+        // daily rows, preserving zero-revenue days for terms that converted on
+        // another day in the range.
+        $searchTermQuery = "SELECT customer.id, segments.date, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, campaign.id, campaign.name, campaign.advertising_channel_type, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' ORDER BY segments.date ASC";
         $searchTermRows = $this->googleSearch($customerId, $headers, $searchTermQuery, 'Google Ads search terms');
-        $pmaxSearchTermQuery = "SELECT customer.id, segments.date, campaign_search_term_view.search_term, campaign.id, campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign_search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.advertising_channel_type = 'PERFORMANCE_MAX' AND metrics.conversions_value > 0 ORDER BY segments.date ASC";
+        $pmaxSearchTermQuery = "SELECT customer.id, segments.date, campaign_search_term_view.search_term, campaign.id, campaign.name, campaign.advertising_channel_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign_search_term_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND campaign.advertising_channel_type = 'PERFORMANCE_MAX' ORDER BY segments.date ASC";
         $pmaxSearchTermRows = $this->googleSearch($customerId, $headers, $pmaxSearchTermQuery, 'Google Ads Performance Max search terms');
 
         $searchTermDaily = collect($searchTermRows)->map(function (array $row) use ($account): ?array {
@@ -362,7 +409,9 @@ class AdvertisingChannelApiService
             return $this->googleSearchTermRow($row, (string) $account['external_account_id'], true);
         }))->filter()->values()->all();
 
-        $keywordQuery = "SELECT customer.id, segments.date, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, campaign.id, campaign.name, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND ad_group_criterion.status != 'REMOVED' AND metrics.cost_micros > 0 ORDER BY segments.date ASC";
+        // Zero-cost days may still carry impressions and clicks. Keep them in
+        // the daily fact table and aggregate before deciding what to display.
+        $keywordQuery = "SELECT customer.id, segments.date, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, campaign.id, campaign.name, ad_group.id, ad_group.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date BETWEEN '{$from}' AND '{$to}' AND ad_group_criterion.status != 'REMOVED' ORDER BY segments.date ASC";
         $keywordRows = $this->googleSearch($customerId, $headers, $keywordQuery, 'Google Ads keywords');
         $keywordDaily = collect($keywordRows)->map(function (array $row) use ($account): ?array {
             $criterion = is_array($row['adGroupCriterion'] ?? null) ? $row['adGroupCriterion'] : [];

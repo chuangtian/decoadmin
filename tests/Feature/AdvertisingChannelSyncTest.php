@@ -312,27 +312,50 @@ class AdvertisingChannelSyncTest extends TestCase
             }
 
             if (str_contains($query, 'FROM search_term_view')) {
-                return Http::response(['results' => [[
-                    'customer' => ['id' => '1234567890'],
-                    'campaign' => [
-                        'id' => 'search-campaign',
-                        'name' => 'Search Bikes',
-                        'advertisingChannelType' => 'SEARCH',
+                return Http::response(['results' => [
+                    [
+                        'customer' => ['id' => '1234567890'],
+                        'campaign' => [
+                            'id' => 'search-campaign',
+                            'name' => 'Search Bikes',
+                            'advertisingChannelType' => 'SEARCH',
+                        ],
+                        'adGroup' => ['id' => 'brand-ad-group', 'name' => 'Brand'],
+                        'searchTermView' => ['searchTerm' => 'macfox ebike', 'status' => 'ADDED'],
+                        'segments' => [
+                            'date' => '2026-08-22',
+                            'keyword' => ['info' => ['text' => 'macfox', 'matchType' => 'EXACT']],
+                        ],
+                        'metrics' => [
+                            'costMicros' => '2500000',
+                            'impressions' => 100,
+                            'clicks' => 20,
+                            'conversions' => 2,
+                            'conversionsValue' => 25,
+                        ],
                     ],
-                    'adGroup' => ['id' => 'brand-ad-group', 'name' => 'Brand'],
-                    'searchTermView' => ['searchTerm' => 'macfox ebike', 'status' => 'ADDED'],
-                    'segments' => [
-                        'date' => '2026-08-22',
-                        'keyword' => ['info' => ['text' => 'macfox', 'matchType' => 'EXACT']],
+                    [
+                        'customer' => ['id' => '1234567890'],
+                        'campaign' => [
+                            'id' => 'search-campaign',
+                            'name' => 'Search Bikes',
+                            'advertisingChannelType' => 'SEARCH',
+                        ],
+                        'adGroup' => ['id' => 'brand-ad-group', 'name' => 'Brand'],
+                        'searchTermView' => ['searchTerm' => 'macfox ebike', 'status' => 'ADDED'],
+                        'segments' => [
+                            'date' => '2026-08-21',
+                            'keyword' => ['info' => ['text' => 'macfox', 'matchType' => 'EXACT']],
+                        ],
+                        'metrics' => [
+                            'costMicros' => '1500000',
+                            'impressions' => 50,
+                            'clicks' => 4,
+                            'conversions' => 0,
+                            'conversionsValue' => 0,
+                        ],
                     ],
-                    'metrics' => [
-                        'costMicros' => '2500000',
-                        'impressions' => 100,
-                        'clicks' => 20,
-                        'conversions' => 2,
-                        'conversionsValue' => 25,
-                    ],
-                ]]]);
+                ]]);
             }
 
             if (str_contains($query, 'FROM campaign_search_term_view')) {
@@ -356,7 +379,7 @@ class AdvertisingChannelSyncTest extends TestCase
             }
 
             if (str_contains($query, 'FROM keyword_view')) {
-                return Http::response(['results' => [[
+                $keyword = [
                     'customer' => ['id' => '1234567890'],
                     'campaign' => ['id' => 'search-campaign', 'name' => 'Search Bikes'],
                     'adGroup' => ['id' => 'brand-ad-group', 'name' => 'Brand'],
@@ -365,18 +388,58 @@ class AdvertisingChannelSyncTest extends TestCase
                         'keyword' => ['text' => 'macfox ebike', 'matchType' => 'EXACT'],
                         'status' => 'ENABLED',
                     ],
-                    'segments' => ['date' => '2026-08-22'],
-                    'metrics' => [
-                        'costMicros' => '3000000',
-                        'impressions' => 120,
-                        'clicks' => 24,
-                        'conversions' => 3,
-                        'conversionsValue' => 36,
+                ];
+
+                return Http::response(['results' => [
+                    [
+                        ...$keyword,
+                        'segments' => ['date' => '2026-08-22'],
+                        'metrics' => [
+                            'costMicros' => '3000000',
+                            'impressions' => 120,
+                            'clicks' => 24,
+                            'conversions' => 3,
+                            'conversionsValue' => 36,
+                        ],
                     ],
-                ]]]);
+                    [
+                        ...$keyword,
+                        'segments' => ['date' => '2026-08-21'],
+                        'metrics' => [
+                            'costMicros' => 0,
+                            'impressions' => 30,
+                            'clicks' => 2,
+                            'conversions' => 0,
+                            'conversionsValue' => 0,
+                        ],
+                    ],
+                ]]);
             }
 
             if (str_contains($query, 'FROM campaign')) {
+                if (! str_contains($query, 'segments.date')) {
+                    return Http::response(['results' => [
+                        [
+                            'customer' => ['id' => '1234567890'],
+                            'campaign' => [
+                                'id' => '99887766',
+                                'name' => 'PMax Bikes',
+                                'status' => 'ENABLED',
+                                'advertisingChannelType' => 'PERFORMANCE_MAX',
+                            ],
+                        ],
+                        [
+                            'customer' => ['id' => '1234567890'],
+                            'campaign' => [
+                                'id' => 'zero-campaign',
+                                'name' => 'Enabled Without Delivery',
+                                'status' => 'ENABLED',
+                                'advertisingChannelType' => 'SEARCH',
+                            ],
+                        ],
+                    ]]);
+                }
+
                 return Http::response(['results' => [[
                     'customer' => ['id' => '1234567890'],
                     'campaign' => [
@@ -462,27 +525,47 @@ class AdvertisingChannelSyncTest extends TestCase
         $this->assertSame('58.750000', $metric->all_conversions_value_by_conversion_date);
         $this->assertSame('16.000000', $metric->add_to_cart);
         $this->assertSame('9.000000', $metric->initiate_checkout);
-        $campaign = GoogleAdsCampaignDailyMetric::query()->sole();
+        $campaign = GoogleAdsCampaignDailyMetric::query()->where('campaign_id', '99887766')->whereDate('metric_date', '2026-08-22')->sole();
         $this->assertSame('99887766', $campaign->campaign_id);
         $this->assertSame('PMax Bikes', $campaign->campaign_name);
         $this->assertSame('7.500000', $campaign->spend);
         $this->assertSame('34.250000', $campaign->conversion_value_by_conversion_date);
-        $standardSearchTerm = GoogleAdsSearchTermDailyMetric::query()->where('source_type', 'STANDARD')->sole();
+        $zeroCampaign = GoogleAdsCampaignDailyMetric::query()->where('campaign_id', 'zero-campaign')->whereDate('metric_date', '2026-08-22')->sole();
+        $this->assertSame('Enabled Without Delivery', $zeroCampaign->campaign_name);
+        $this->assertSame('0.000000', $zeroCampaign->spend);
+        $this->assertSame(0, $zeroCampaign->impressions);
+        $this->assertSame(7, GoogleAdsCampaignDailyMetric::query()->where('campaign_id', 'zero-campaign')->count());
+        $this->assertEquals(7.5, GoogleAdsCampaignDailyMetric::query()->sum('spend'));
+        $standardSearchTerm = GoogleAdsSearchTermDailyMetric::query()
+            ->where('source_type', 'STANDARD')
+            ->whereDate('metric_date', '2026-08-22')
+            ->sole();
         $this->assertSame('macfox ebike', $standardSearchTerm->search_term);
         $this->assertSame('macfox', $standardSearchTerm->matched_keyword);
         $this->assertSame('EXACT', $standardSearchTerm->match_type);
         $this->assertSame('2.500000', $standardSearchTerm->spend);
         $this->assertSame('25.000000', $standardSearchTerm->revenue);
+        $zeroRevenueSearchTermDay = GoogleAdsSearchTermDailyMetric::query()
+            ->where('source_type', 'STANDARD')
+            ->whereDate('metric_date', '2026-08-21')
+            ->sole();
+        $this->assertSame('1.500000', $zeroRevenueSearchTermDay->spend);
+        $this->assertSame('0.000000', $zeroRevenueSearchTermDay->revenue);
+        $this->assertSame(50, $zeroRevenueSearchTermDay->impressions);
         $pmaxSearchTerm = GoogleAdsSearchTermDailyMetric::query()->where('source_type', 'PERFORMANCE_MAX')->sole();
         $this->assertSame('fat tire bike', $pmaxSearchTerm->search_term);
         $this->assertSame('PERFORMANCE_MAX', $pmaxSearchTerm->status);
         $this->assertSame('1.000000', $pmaxSearchTerm->spend);
-        $keyword = GoogleAdsKeywordDailyMetric::query()->sole();
+        $keyword = GoogleAdsKeywordDailyMetric::query()->whereDate('metric_date', '2026-08-22')->sole();
         $this->assertSame('keyword-1', $keyword->criterion_id);
         $this->assertSame('macfox ebike', $keyword->keyword);
         $this->assertSame('ENABLED', $keyword->status);
         $this->assertSame('3.000000', $keyword->spend);
         $this->assertSame('36.000000', $keyword->revenue);
+        $zeroCostKeywordDay = GoogleAdsKeywordDailyMetric::query()->whereDate('metric_date', '2026-08-21')->sole();
+        $this->assertSame('0.000000', $zeroCostKeywordDay->spend);
+        $this->assertSame(30, $zeroCostKeywordDay->impressions);
+        $this->assertSame(2, $zeroCostKeywordDay->clicks);
         $this->assertSame('ready', $store->syncStates()->where('sync_type', 'advertising_channel:google')->sole()->status);
         $this->assertSame('priority', $store->syncJobs()->where('type', 'advertising_channel:google')->sole()->mode);
         Queue::assertPushed(SyncAdvertisingChannelForStore::class, fn (SyncAdvertisingChannelForStore $job): bool => $job->channel === 'google'
@@ -502,15 +585,22 @@ class AdvertisingChannelSyncTest extends TestCase
             && str_contains((string) $request['query'], 'Google Shopping App Begin Checkout'));
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/customers/1234567890/googleAds:search')
             && str_contains((string) $request['query'], 'FROM campaign')
+            && str_contains((string) $request['query'], 'segments.date')
+            && str_contains((string) $request['query'], "campaign.status = 'ENABLED'"));
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/customers/1234567890/googleAds:search')
+            && str_contains((string) $request['query'], 'FROM campaign')
+            && ! str_contains((string) $request['query'], 'segments.date')
             && str_contains((string) $request['query'], "campaign.status = 'ENABLED'"));
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM search_term_view')
-            && str_contains((string) ($request->data()['query'] ?? ''), 'metrics.conversions_value > 0')
+            && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.conversions_value > 0')
             && ! array_key_exists('pageSize', $request->data()));
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM campaign_search_term_view')
             && str_contains((string) ($request->data()['query'] ?? ''), "campaign.advertising_channel_type = 'PERFORMANCE_MAX'")
+            && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.conversions_value > 0')
             && ! array_key_exists('pageSize', $request->data()));
         Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'FROM keyword_view')
             && str_contains((string) ($request->data()['query'] ?? ''), "ad_group_criterion.status != 'REMOVED'")
+            && ! str_contains((string) ($request->data()['query'] ?? ''), 'metrics.cost_micros > 0')
             && ! array_key_exists('pageSize', $request->data()));
     }
 

@@ -542,8 +542,11 @@ class PaidAdvertisingPagesTest extends TestCase
                 'status' => 'PERFORMANCE_MAX',
             ]);
         $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-21', 'No Revenue', 5, 0, 50, 5, 0);
+        $this->createGoogleSearchTermMetric($organization, $store, $account, '2026-08-19', 'macfox ebike', 4, 0, 150, 15, 0);
         $this->createGoogleSearchTermMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'Macfox Ebike', 100, 5000, 10000, 1000, 100);
         $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-20', 'macfox ebike', 4, 48, 400, 40, 4);
+        $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-21', 'macfox ebike', 0, 0, 100, 0, 0);
+        $this->createGoogleKeywordMetric($organization, $store, $account, '2026-08-21', 'no spend keyword', 0, 0, 20, 0, 0);
         $this->createGoogleKeywordMetric($organization, $otherStore, $otherAccount, '2026-08-20', 'macfox ebike', 999, 9999, 9999, 999, 99);
 
         $this->actingAs($user)
@@ -568,11 +571,11 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.rows.0.matched_keyword', 'macfox ebike')
             ->assertJsonPath('data.rows.0.match_type_label', '精确')
             ->assertJsonPath('data.rows.0.status_label', '已添加')
-            ->assertJsonPath('data.rows.0.spend', 6)
+            ->assertJsonPath('data.rows.0.spend', 10)
             ->assertJsonPath('data.rows.0.revenue', 60)
-            ->assertJsonPath('data.rows.0.roas', 10)
-            ->assertJsonPath('data.rows.0.impressions', 350)
-            ->assertJsonPath('data.rows.0.clicks', 35)
+            ->assertJsonPath('data.rows.0.roas', 6)
+            ->assertJsonPath('data.rows.0.impressions', 500)
+            ->assertJsonPath('data.rows.0.clicks', 50)
             ->assertJsonPath('data.rows.0.ctr', 10)
             ->assertJsonPath('data.rows.0.conversions', 6);
 
@@ -598,9 +601,9 @@ class PaidAdvertisingPagesTest extends TestCase
             ->assertJsonPath('data.rows.0.spend', 4)
             ->assertJsonPath('data.rows.0.revenue', 48)
             ->assertJsonPath('data.rows.0.roas', 12)
-            ->assertJsonPath('data.rows.0.impressions', 400)
+            ->assertJsonPath('data.rows.0.impressions', 500)
             ->assertJsonPath('data.rows.0.clicks', 40)
-            ->assertJsonPath('data.rows.0.ctr', 10)
+            ->assertJsonPath('data.rows.0.ctr', 8)
             ->assertJsonPath('data.rows.0.cpc', 0.1)
             ->assertJsonPath('data.rows.0.conversions', 4);
     }
