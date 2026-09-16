@@ -236,7 +236,19 @@ class PersonalizationController extends Controller
                     'tokens' => $component->style?->tokens ?? [],
                 ],
             ])->values(),
-            'products' => $this->catalog->pickerProducts($store)->take(3)->values(),
+            'products' => $this->catalog->pickerProducts($store)->take(3)->map(fn (array $product): array => [
+                'shopify_product_id' => $product['shopify_product_id'],
+                'title' => $product['title'],
+                'vendor' => $product['vendor'],
+                'image_url' => data_get($product, 'storefront.image.url'),
+                'price' => data_get($product, 'price.minimum'),
+                'currency' => data_get($product, 'price.currency', $store->currency),
+                'variants' => collect($product['variants'] ?? [])->map(fn (array $variant): array => [
+                    'title' => $variant['title'],
+                    'price' => $variant['price'],
+                    'available_for_sale' => $variant['available_for_sale'],
+                ])->values(),
+            ])->values(),
             'permissions' => ['manage' => $request->user()->hasPermission('personalization.manage', $organization, $store)],
         ]);
     }

@@ -236,6 +236,10 @@ class PersonalizationManagementTest extends TestCase
             ->component('Personalization/Editor')
             ->where('components.0.uuid', $component->uuid)
             ->where('components.0.strategy_name', 'Editor strategy')
+            ->where('products.0.title', 'Editor Bike')
+            ->where('products.0.image_url', 'https://cdn.shopify.com/701.jpg')
+            ->where('products.0.price', '100.0000')
+            ->where('products.0.currency', 'USD')
             ->where('permissions.manage', true));
 
         $this->actingAs($admin)->put(route('personalization.editor.update', [$organization, $store, $component]), [
