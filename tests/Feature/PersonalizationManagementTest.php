@@ -239,6 +239,7 @@ class PersonalizationManagementTest extends TestCase
             ->where('products.0.title', 'Editor Bike')
             ->where('products.0.image_url', 'https://cdn.shopify.com/701.jpg')
             ->where('products.0.price', '100.0000')
+            ->where('products.0.compare_at_price', null)
             ->where('products.0.currency', 'USD')
             ->where('permissions.manage', true));
 

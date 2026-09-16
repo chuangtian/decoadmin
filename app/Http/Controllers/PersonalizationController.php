@@ -242,6 +242,7 @@ class PersonalizationController extends Controller
                 'vendor' => $product['vendor'],
                 'image_url' => data_get($product, 'storefront.image.url'),
                 'price' => data_get($product, 'price.minimum'),
+                'compare_at_price' => data_get($product, 'variants.0.compare_at_price'),
                 'currency' => data_get($product, 'price.currency', $store->currency),
                 'variants' => collect($product['variants'] ?? [])->map(fn (array $variant): array => [
                     'title' => $variant['title'],
