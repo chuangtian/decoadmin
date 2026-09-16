@@ -220,6 +220,52 @@ class PersonalizationManagementTest extends TestCase
         $this->assertSame('Scoped strategy', $strategy->fresh()->name);
     }
 
+    public function test_widget_editor_is_store_scoped_and_persists_aftership_style_fields(): void
+    {
+        [$admin, $organization, $store] = $this->context('store-admin');
+        $this->product($organization, $store, 701, 'Editor Bike');
+        $service = app(PersonalizationConfigurationService::class);
+        $strategy = $service->createStrategy($store, $admin, ['name' => 'Editor strategy', 'algorithm' => 'best_seller']);
+        $component = $service->createComponent($store, $strategy, $admin, [
+            'name' => 'Cart drawer recommendations', 'placement' => 'cart_page',
+            'heading' => 'Exciting additions for you', 'button_label' => 'Add',
+        ]);
+
+        $this->actingAs($admin)->get(route('personalization.editor', [$organization, $store]))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Personalization/Editor')
+            ->where('components.0.uuid', $component->uuid)
+            ->where('components.0.strategy_name', 'Editor strategy')
+            ->where('products.0.title', 'Editor Bike')
+            ->where('products.0.image_url', 'https://cdn.shopify.com/701.jpg')
+            ->where('products.0.price', '100.0000')
+            ->where('products.0.compare_at_price', null)
+            ->where('products.0.currency', 'USD')
+            ->where('permissions.manage', true));
+
+        $this->actingAs($admin)->put(route('personalization.editor.update', [$organization, $store, $component]), [
+            'strategy_uuid' => $strategy->uuid, 'name' => $component->name, 'placement' => 'cart_page',
+            'heading' => 'Recommended for you', 'button_label' => 'Add to cart',
+            'enabled' => false,
+            'style' => [
+                'layout' => 'grid', 'desktop_columns' => 3, 'mobile_columns' => 1,
+                'show_image' => true, 'show_vendor' => false, 'show_price' => true,
+                'show_compare_at_price' => true, 'show_add_to_cart' => true,
+                'tokens' => [
+                    'show_product_name' => true, 'show_description' => true,
+                    'discount_text' => '(Save *|DISCOUNT|*)', 'comparison_source' => 'compare_at_price',
+                    'content_alignment' => 'center', 'variant_display' => 'dynamic',
+                    'title_font_size_desktop' => 16, 'button_font_weight' => 400,
+                    'custom_css' => 'letter-spacing: 0.01em;',
+                ],
+            ],
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->assertSame('Recommended for you', $component->fresh()->heading);
+        $this->assertSame('center', $component->style()->sole()->tokens['content_alignment']);
+        $this->assertSame('letter-spacing: 0.01em;', $component->style()->sole()->tokens['custom_css']);
+    }
+
     /** @return array{User, Organization, Store} */
     private function context(string $roleSlug): array
     {

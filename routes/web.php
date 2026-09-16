@@ -936,6 +936,12 @@ Route::prefix('/organizations/{organization}/stores/{store}/personalization')
         Route::get('/', [PersonalizationController::class, 'index'])
             ->middleware('permission:personalization.view')
             ->name('personalization.index');
+        Route::get('/editor', [PersonalizationController::class, 'editor'])
+            ->middleware('permission:personalization.view')
+            ->name('personalization.editor');
+        Route::put('/editor/{component}', [PersonalizationController::class, 'updateEditor'])
+            ->middleware(['permission:personalization.manage', 'throttle:30,1'])
+            ->name('personalization.editor.update');
         Route::post('/strategies', [PersonalizationController::class, 'storeStrategy'])
             ->middleware(['permission:personalization.manage', 'throttle:30,1'])
             ->name('personalization.strategies.store');

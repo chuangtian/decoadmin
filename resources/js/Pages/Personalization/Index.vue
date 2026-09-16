@@ -7,7 +7,8 @@ import PersonalizationRevenueChart from '../../Components/Personalization/Person
 type Algorithm = 'manual' | 'next_llm' | 'free_shipping_upsell' | 'similar_products' | 'substitute_products' | 'best_seller' | 'new_arrivals' | 'frequently_bought_together' | 'frequently_viewed_together' | 'complementary_products' | 'recently_viewed' | 'complete_the_look' | 'same_product_upsell' | 'all_products';
 type Placement = 'homepage' | 'product_page' | 'cart_page' | 'smart_cart' | 'checkout' | 'thank_you' | 'order_status';
 type StrategyStatus = 'draft' | 'enabled' | 'disabled' | 'configuration_error';
-type TopTab = 'overview' | 'strategies' | 'analytics';
+type TopTab = 'overview' | 'analytics' | 'strategies' | 'storefront_defaults' | 'checkout_badges';
+type OverviewPlacement = 'product_page' | 'smart_cart' | 'checkout' | 'thank_you' | 'order_status';
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 type PickerMode = 'manual' | 'pinned' | 'excluded' | 'custom-action' | 'custom-condition' | 'fallback-action';
 type RecommendationMode = 'preset' | 'custom';
@@ -90,11 +91,13 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
     return payload.data as T;
 }
 
-const activeTab = ref<TopTab>(props.permissions.viewAnalytics ? 'analytics' : 'overview');
+const activeTab = ref<TopTab>('overview');
 const tabs = [
+    { value: 'overview' as const, label: 'Overview', hint: 'Storefront status and placements' },
     { value: 'analytics' as const, label: 'Analytics', hint: 'Revenue and sales performance' },
     { value: 'strategies' as const, label: 'Strategies', hint: 'Create and manage recommendations' },
-    { value: 'overview' as const, label: 'Overview', hint: 'Launch status and global settings' },
+    { value: 'storefront_defaults' as const, label: 'Storefront defaults', hint: 'Language and fallback copy' },
+    { value: 'checkout_badges' as const, label: 'Checkout trust badges', hint: 'Trust content and preview' },
 ];
 const strategyRows = ref(props.strategyRows.map(row => cloneJson(row)));
 watch(() => props.strategyRows, rows => { strategyRows.value = rows.map(row => cloneJson(row)); }, { deep: true });
@@ -423,13 +426,31 @@ function onKeydown(event: KeyboardEvent) { if (event.key !== 'Escape') return; i
 onMounted(() => window.addEventListener('keydown', onKeydown));
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKeydown); if (autosaveTimer) clearTimeout(autosaveTimer); });
 
-const showGlobalSettings = ref(false); const globalForm = reactive(cloneJson(props.globalSettings)); const globalSaveState = ref<SaveState>('idle'); const globalError = ref('');
-async function saveGlobalSettings() { globalSaveState.value = 'saving'; globalError.value = ''; try { await requestJson(`${baseUrl}/global-settings`, { method: 'PUT', body: JSON.stringify({ default_locale: globalForm.default_locale, copy: globalForm.copy }) }); globalSaveState.value = 'saved'; } catch (error) { globalSaveState.value = 'failed'; globalError.value = error instanceof Error ? error.message : 'Save failed.'; } }
+const globalForm = reactive(cloneJson(props.globalSettings)); const globalSaveState = ref<SaveState>('idle'); const globalError = ref('');
+const fallbackCopy = {
+    en: { recommendation_heading: 'You may also like', add_button: 'Add to cart', checkout_heading: 'Great Value Bundles for You' },
+    'zh-CN': { recommendation_heading: '你可能还喜欢', add_button: '加入购物车', checkout_heading: '为你推荐超值组合' },
+};
+async function saveGlobalSettings() {
+    globalSaveState.value = 'saving'; globalError.value = '';
+    globalForm.copy = cloneJson(fallbackCopy[globalForm.default_locale]);
+    try { await requestJson(`${baseUrl}/global-settings`, { method: 'PUT', body: JSON.stringify({ default_locale: globalForm.default_locale, copy: globalForm.copy }) }); globalSaveState.value = 'saved'; }
+    catch (error) { globalSaveState.value = 'failed'; globalError.value = error instanceof Error ? error.message : 'Save failed.'; }
+}
 const checkoutForm = useForm({ strategy_uuid: props.checkout.strategy_uuid ?? '', trust_items: props.checkout.trust_items.map(item => ({ ...item })) });
 function addTrustItem() { if (checkoutForm.trust_items.length < 6) checkoutForm.trust_items.push({ key: `trust_${Date.now()}`, icon: 'check-circle', title: '', description: '', position: checkoutForm.trust_items.length + 1, enabled: true }); }
+function moveTrustItem(index: number, offset: number) {
+    const target = index + offset;
+    if (target < 0 || target >= checkoutForm.trust_items.length) return;
+    const [item] = checkoutForm.trust_items.splice(index, 1);
+    checkoutForm.trust_items.splice(target, 0, item);
+    checkoutForm.trust_items.forEach((row, position) => { row.position = position + 1; });
+}
+const iconGlyph = (icon: string) => ({ store: '▣', truck: '→', star: '★', 'check-circle': '✓', lock: '●', savings: '%', delivered: '✓', return: '↩', info: 'i' }[icon] ?? 'i');
+const enabledTrustItems = computed(() => checkoutForm.trust_items.filter(item => item.enabled && item.title.trim()).slice(0, 6));
 const checkoutSaveState = ref<SaveState>('idle');
 const checkoutMessage = ref('');
-function saveCheckout() {
+function saveCheckout(mode: 'binding' | 'badges' = 'binding') {
     checkoutSaveState.value = 'saving';
     checkoutMessage.value = '';
     const strategyName = strategyRows.value.find(strategy => strategy.uuid === checkoutForm.strategy_uuid)?.name ?? 'selected strategy';
@@ -445,7 +466,7 @@ function saveCheckout() {
                     return;
                 }
                 checkoutSaveState.value = 'saved';
-                checkoutMessage.value = `Bound to Checkout: ${strategyName}`;
+                checkoutMessage.value = mode === 'badges' ? 'Checkout trust badges saved.' : `Bound to Checkout: ${strategyName}`;
             },
             onError: errors => {
                 checkoutSaveState.value = 'failed';
@@ -462,8 +483,34 @@ const thankYouForm = useForm({ strategy_uuid: props.checkout.thank_you.strategy_
 function saveThankYou() { thankYouForm.put(`${baseUrl}/thank-you`, { preserveScroll: true }); }
 const orderStatusForm = useForm({ strategy_uuid: props.checkout.order_status.strategy_uuid ?? '', heading: props.checkout.order_status.heading || 'Great Value Bundles for You' });
 function saveOrderStatus() { orderStatusForm.put(`${baseUrl}/order-status`, { preserveScroll: true }); }
-const setupChecks = computed(() => [{ label: 'At least one recommendation strategy is configured', passed: strategyRows.value.length > 0 }, { label: 'At least one page or component is live', passed: strategyRows.value.some(row => row.used_in.some(usage => usage.status === 'live')) }, { label: 'A Checkout recommendation strategy is selected', passed: Boolean(props.checkout.strategy_uuid) }, { label: 'A Thank you page strategy is selected', passed: Boolean(props.checkout.thank_you.strategy_uuid) }, { label: 'An Order status page strategy is selected', passed: Boolean(props.checkout.order_status.strategy_uuid) }, { label: 'A native cart strategy is selected', passed: Boolean(props.smartCart?.strategy_uuid) }]);
 const configurationAlerts = computed(() => strategyRows.value.filter(row => row.status === 'configuration_error'));
+const selectedPlacement = ref<OverviewPlacement | null>(null);
+const productPageComponent = computed(() => props.components.find(component => component.placement === 'product_page' && component.status === 'active') ?? props.components.find(component => component.placement === 'product_page'));
+const placementHasActivity = (placement: OverviewPlacement) => props.analytics.dimensions.some(row => row.placement === placement && (row.impressions > 0 || row.clicks > 0 || row.add_to_carts > 0 || row.orders > 0));
+const placementRows = computed(() => [
+    { key: 'product_page' as const, label: 'Product page', delivery: 'Theme app block', strategy: productPageComponent.value?.strategy_name ?? 'Not assigned', configured: productPageComponent.value?.status === 'active', live: placementHasActivity('product_page') },
+    { key: 'smart_cart' as const, label: 'Cart', delivery: 'Native cart drawer', strategy: strategyRows.value.find(row => row.uuid === smartCartForm.strategy_uuid)?.name ?? 'Not assigned', configured: Boolean(props.smartCart?.enabled && smartCartForm.strategy_uuid), live: placementHasActivity('smart_cart') },
+    { key: 'checkout' as const, label: 'Checkout', delivery: 'Checkout extension', strategy: strategyRows.value.find(row => row.uuid === checkoutForm.strategy_uuid)?.name ?? 'Not assigned', configured: Boolean(checkoutForm.strategy_uuid), live: placementHasActivity('checkout') },
+    { key: 'thank_you' as const, label: 'Thank you page', delivery: 'Checkout extension', strategy: strategyRows.value.find(row => row.uuid === thankYouForm.strategy_uuid)?.name ?? 'Not assigned', configured: Boolean(thankYouForm.strategy_uuid && props.checkout.thank_you.enabled), live: placementHasActivity('thank_you') },
+    { key: 'order_status' as const, label: 'Order status', delivery: 'Customer account extension', strategy: strategyRows.value.find(row => row.uuid === orderStatusForm.strategy_uuid)?.name ?? 'Not assigned', configured: Boolean(orderStatusForm.strategy_uuid && props.checkout.order_status.enabled), live: placementHasActivity('order_status') },
+].map(row => ({ ...row, status: row.live ? 'Live' : (row.configured ? 'Configured' : 'Not configured') })));
+const livePlacementCount = computed(() => placementRows.value.filter(row => row.live).length);
+const configuredPlacementCount = computed(() => placementRows.value.filter(row => row.configured).length);
+const overviewIssues = computed(() => [
+    ...placementRows.value.filter(row => row.status === 'Not configured').map(row => ({ key: row.key, title: row.label, details: 'No recommendation strategy is assigned to this placement.' })),
+    ...(props.permissions.viewAnalytics && props.analytics.status === 'active' ? placementRows.value.filter(row => row.status === 'Configured').map(row => ({ key: row.key, title: row.label, details: 'Configured, but no storefront activity was observed during the selected analytics period. Confirm that the extension block is enabled.' })) : []),
+    ...configurationAlerts.value.map(row => ({ key: 'strategy' as const, title: row.name, details: 'This strategy has an invalid component assignment.' })),
+]);
+function editPlacement(key: OverviewPlacement) { selectedPlacement.value = key; }
+function fixOverviewIssue(issue: { key: OverviewPlacement | 'strategy' }) {
+    if (issue.key === 'strategy') activeTab.value = 'strategies';
+    else editPlacement(issue.key);
+}
+function openProductPageStrategy() {
+    const component = productPageComponent.value;
+    const strategy = component ? strategyRows.value.find(row => row.uuid === component.strategy_uuid) : null;
+    if (strategy) openEditor(strategy); else activeTab.value = 'strategies';
+}
 const analyticsStrategy = ref(''); const analyticsVersion = ref(''); const analyticsPlacement = ref('');
 const analyticsRows = computed(() => props.analytics.dimensions.filter(row => (row.quantity > 0 || Number(row.sales) > 0 || Number(row.discounts) > 0 || Number(row.revenue) > 0) && (!analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value) && (!analyticsVersion.value || row.strategy_version_uuid === analyticsVersion.value) && (!analyticsPlacement.value || row.placement === analyticsPlacement.value)));
 const analyticsVersions = computed(() => props.analytics.dimensions.filter(row => !analyticsStrategy.value || row.strategy_uuid === analyticsStrategy.value).filter((row, index, rows) => row.strategy_version_uuid && rows.findIndex(item => item.strategy_version_uuid === row.strategy_version_uuid) === index));
@@ -497,32 +544,105 @@ function applyAnalyticsDates() {
                     <div class="rounded-2xl bg-white/10 px-4 py-3 text-sm"><p class="font-semibold">{{ store.name }}</p><p class="mt-1 text-xs text-slate-300">{{ store.shopify_domain }}</p></div>
                 </div>
             </header>
-            <nav class="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="Personalization navigation">
+            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2 xl:grid-cols-5" aria-label="Personalization navigation">
                 <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-3 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value"><span class="block text-sm font-semibold">{{ tab.label }}</span><span class="mt-0.5 hidden text-xs opacity-70 sm:block">{{ tab.hint }}</span></button>
             </nav>
             <p v-if="pageNotice" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{{ pageNotice }}</p>
 
             <section v-if="activeTab === 'overview'" class="space-y-6">
-                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Strategy</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.length }}</p><p class="mt-2 text-xs text-slate-500">{{ strategyRows.filter(row => row.status === 'enabled').length }} in use</p></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Live placements</p><p class="mt-2 text-3xl font-semibold">{{ strategyRows.reduce((total, row) => total + row.used_in.filter(item => item.status === 'live').length, 0) }}</p><p class="mt-2 text-xs text-slate-500">Calculated from active component assignments</p></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Checkout</p><p class="mt-2 text-xl font-semibold">{{ checkout.strategy_uuid ? 'Strategy selected' : 'Strategy required' }}</p><p class="mt-2 text-xs text-slate-500">The block uses the selected strategy after it is added</p></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Thank you page recommendations</p><p class="mt-2 text-xl font-semibold">{{ checkout.thank_you.strategy_uuid ? 'Strategy selected' : 'Not configured' }}</p><p class="mt-2 text-xs text-slate-500">Appears below products in the order summary</p></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Order status recommendations</p><p class="mt-2 text-xl font-semibold">{{ checkout.order_status.strategy_uuid ? 'Strategy selected' : 'Not configured' }}</p><p class="mt-2 text-xs text-slate-500">Appears on the Order status page</p></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-xs font-medium text-slate-500">Native cart recommendations</p><p class="mt-2 text-xl font-semibold">{{ smartCart?.strategy_uuid ? 'Strategy selected' : 'Not configured' }}</p><p class="mt-2 text-xs text-slate-500">Uses the theme native cart drawer</p></div>
+                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <p class="text-sm font-medium text-slate-500">Personalization status</p>
+                        <p class="mt-2 text-2xl font-semibold">{{ livePlacementCount ? 'Live' : (configuredPlacementCount ? 'Configured' : 'Setup required') }}</p>
+                        <p class="mt-2 text-sm text-slate-500">{{ livePlacementCount }} live · {{ configuredPlacementCount }} configured</p>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <p class="text-sm font-medium text-slate-500">Active strategies</p>
+                        <p class="mt-2 text-2xl font-semibold">{{ strategyRows.filter(row => row.status === 'enabled').length }}</p>
+                        <p class="mt-2 text-sm text-slate-500">{{ strategyRows.length }} total strategies</p>
+                    </div>
+                    <button type="button" class="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-indigo-300" @click="permissions.viewAnalytics && (activeTab = 'analytics')">
+                        <p class="text-sm font-medium text-slate-500">Revenue · {{ analytics.period.days }} days</p>
+                        <p class="mt-2 text-2xl font-semibold">{{ money(analytics.revenue, analytics.currency) }}</p>
+                        <p class="mt-2 text-sm text-indigo-700">View in Analytics</p>
+                    </button>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <p class="text-sm font-medium text-slate-500">Needs attention</p>
+                        <p class="mt-2 text-2xl font-semibold">{{ overviewIssues.length }}</p>
+                        <p class="mt-2 text-sm text-slate-500">Unconfigured placements and invalid strategies</p>
+                    </div>
                 </div>
-                <div class="grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between"><div><h2 class="text-lg font-semibold">Launch checklist</h2><p class="mt-1 text-sm text-slate-500">Review strategy and storefront readiness.</p></div><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{{ setupChecks.filter(item => item.passed).length }}/{{ setupChecks.length }}</span></div><div class="mt-5 space-y-3"><div v-for="item in setupChecks" :key="item.label" class="flex items-center gap-3 rounded-xl border p-3" :class="item.passed ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-slate-50'"><span class="flex size-7 items-center justify-center rounded-full text-xs font-bold" :class="item.passed ? 'bg-emerald-600 text-white' : 'bg-white text-slate-400'">{{ item.passed ? '✓' : '·' }}</span><span class="text-sm font-medium text-slate-700">{{ item.label }}</span></div></div></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex items-start justify-between"><div><h2 class="text-lg font-semibold">Configuration alerts</h2><p class="mt-1 text-sm text-slate-500">Shows the current store status only.</p></div><span class="rounded-full px-3 py-1 text-xs font-semibold" :class="configurationAlerts.length ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'">{{ configurationAlerts.length ? `${configurationAlerts.length}` : 'Healthy' }}</span></div><div v-if="configurationAlerts.length" class="mt-5 space-y-2"><button v-for="strategy in configurationAlerts" :key="strategy.uuid" type="button" class="block w-full rounded-xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900" @click="openEditor(strategy)">{{ strategy.name }}: component assignment is invalid</button></div><p v-else class="mt-8 text-center text-sm text-slate-500">No configuration issues found.</p></div>
+
+                <div class="grid gap-6 xl:grid-cols-[1.35fr_.65fr]">
+                    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div class="border-b border-slate-100 p-5">
+                            <h2 class="text-lg font-semibold">Storefront placements</h2>
+                            <p class="mt-1 text-sm text-slate-500">See what customers can currently see and configure each placement directly.</p>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-left text-sm">
+                                <thead class="bg-slate-50 text-sm text-slate-500"><tr><th class="px-5 py-3">Placement</th><th class="px-5 py-3">Strategy</th><th class="px-5 py-3">Status</th><th class="px-5 py-3 text-right">Action</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="row in placementRows" :key="row.key" class="border-t border-slate-100">
+                                        <td class="px-5 py-4"><strong>{{ row.label }}</strong><p class="mt-1 text-sm text-slate-500">{{ row.delivery }}</p></td>
+                                        <td class="px-5 py-4">{{ row.strategy }}</td>
+                                        <td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-sm font-semibold" :class="row.live ? 'bg-emerald-100 text-emerald-800' : (row.status === 'Configured' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-800')">{{ row.status }}</span></td>
+                                        <td class="px-5 py-4 text-right"><button type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold hover:border-indigo-400 hover:text-indigo-700" @click="editPlacement(row.key)">{{ row.status === 'Not configured' ? 'Configure' : 'Edit' }}</button></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold">Setup and issues</h2><p class="mt-1 text-sm text-slate-500">Only unfinished or actionable items appear here.</p></div><span class="rounded-full px-3 py-1 text-sm font-semibold" :class="overviewIssues.length ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'">{{ overviewIssues.length || 'Healthy' }}</span></div>
+                        <div v-if="overviewIssues.length" class="mt-5 space-y-3">
+                            <div v-for="issue in overviewIssues" :key="`${issue.key}-${issue.title}`" class="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                <strong class="text-sm text-amber-950">{{ issue.title }}</strong>
+                                <p class="mt-1 text-sm leading-6 text-amber-900">{{ issue.details }}</p>
+                                <button type="button" class="mt-3 text-sm font-semibold text-indigo-700" @click="fixOverviewIssue(issue)">Fix now</button>
+                            </div>
+                        </div>
+                        <div v-else class="mt-6 rounded-xl bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">All configured placements are healthy. Product and order data remain scoped to this store.</div>
+                    </div>
                 </div>
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-lg font-semibold">Global settings</h2><p class="mt-1 text-sm text-slate-500">Manage default copy, Checkout, Thank you page, Order status page, Smart Cart, and attribution settings in one place.</p></div><button type="button" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" @click="showGlobalSettings = !showGlobalSettings">{{ showGlobalSettings ? 'Hide global settings' : 'Open global settings' }}</button></div></div>
-                <div v-if="showGlobalSettings" class="space-y-6">
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveGlobalSettings"><h2 class="text-lg font-semibold">Default language and copy</h2><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="text-sm font-medium">Default language<select v-model="globalForm.default_locale" class="mt-1 w-full rounded-xl border-slate-300"><option value="zh-CN">Simplified Chinese</option><option value="en">English</option></select></label><label class="text-sm font-medium">Recommendation heading<input v-model="globalForm.copy.recommendation_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label><label class="text-sm font-medium">Add-to-cart button<input v-model="globalForm.copy.add_button" class="mt-1 w-full rounded-xl border-slate-300" maxlength="60"></label><label class="text-sm font-medium">Checkout heading<input v-model="globalForm.copy.checkout_heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label></div><div class="mt-5 flex items-center gap-3"><button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" :disabled="globalSaveState === 'saving'">{{ globalSaveState === 'saving' ? 'Saving…' : 'Save defaults' }}</button><span class="text-sm" :class="globalSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ globalError || (globalSaveState === 'saved' ? 'Saved' : '') }}</span></div></form>
-                    <form class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" @submit.prevent="saveCheckout"><div><h2 class="text-lg font-semibold">Checkout</h2><p class="mt-1 text-sm text-slate-500">Choose and save a strategy. The Deco recommendation block in Shopify Checkout Editor will use it directly.</p></div><label class="mt-5 block text-sm font-medium">Recommendation strategy<select v-model="checkoutForm.strategy_uuid" required class="mt-1 w-full rounded-xl border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select><span class="mt-2 block text-xs text-slate-500">After saving, Checkout appears under Used in. One eligible product is shown at a time, followed by the next after it is added.</span></label><div class="mt-4 flex flex-wrap items-center gap-3"><button v-if="permissions.manage" type="submit" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="checkoutForm.processing || !checkoutForm.strategy_uuid">{{ checkoutForm.processing ? 'Saving…' : 'Bind to Checkout' }}</button><span v-if="checkoutMessage" class="text-sm" :class="checkoutSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ checkoutMessage }}</span></div><div class="mt-6"><div class="flex items-center justify-between"><h3 class="font-semibold">Checkout trust details</h3><button v-if="checkoutForm.trust_items.length < 6" type="button" class="text-sm font-semibold text-indigo-700" @click="addTrustItem">+ Add</button></div><div class="mt-3 grid gap-3 lg:grid-cols-2"><div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4"><div class="flex items-center justify-between"><label class="flex items-center gap-2 text-sm font-semibold"><input v-model="item.enabled" type="checkbox" class="rounded">Item {{ index + 1 }}</label><button type="button" class="text-xs text-rose-600" @click="checkoutForm.trust_items.splice(index, 1)">Remove</button></div><div class="mt-3 grid gap-3 sm:grid-cols-2"><label class="text-xs">Icon<select v-model="item.icon" class="mt-1 w-full rounded-lg border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></label><label class="text-xs">Heading<input v-model="item.title" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label><label class="text-xs sm:col-span-2">Description<input v-model="item.description" class="mt-1 w-full rounded-lg border-slate-300 text-sm"></label></div></div></div></div><p class="mt-5 text-xs text-slate-500">After editing trust details, select Bind to Checkout above to save them together.</p></form>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">Thank you page recommendations</h2><p class="mt-1 text-sm text-slate-500">Choose a separate strategy and heading for the Shopify Thank you page. Recommendations appear below products in the order summary.</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveThankYou"><label class="block text-sm">Strategy<select v-model="thankYouForm.strategy_uuid" required class="mt-1 w-full rounded-lg border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">Heading<input v-model="thankYouForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manage" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="thankYouForm.processing || !thankYouForm.strategy_uuid">{{ thankYouForm.processing ? 'Saving…' : 'Save settings' }}</button><p v-if="thankYouForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(thankYouForm.errors).join('; ') }}</p><p class="text-xs text-slate-500 md:col-span-3">Use the selected strategy first. If no order items match, fall back to other available products and exclude products already purchased in this order.</p></form></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">Order status recommendations</h2><p class="mt-1 text-sm text-slate-500">Choose a separate strategy and heading for the Shopify customer account Order status page.</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveOrderStatus"><label class="block text-sm">Strategy<select v-model="orderStatusForm.strategy_uuid" required class="mt-1 w-full rounded-lg border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">Heading<input v-model="orderStatusForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manage" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="orderStatusForm.processing || !orderStatusForm.strategy_uuid">{{ orderStatusForm.processing ? 'Saving…' : 'Save settings' }}</button><p v-if="orderStatusForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(orderStatusForm.errors).join('; ') }}</p><p class="text-xs text-slate-500 md:col-span-3">Use the selected strategy first. If nothing matches, fall back to other available products and always exclude products already purchased in this order.</p></form></div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h2 class="text-lg font-semibold">Native cart recommendations</h2><p class="mt-1 text-sm text-slate-500">Choose a strategy and heading. After saving, recommendations appear directly in the theme native cart drawer without another switch, compatibility check, or release.</p></div><form class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveSmartCartDraft"><label class="block text-sm">Strategy<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-lg border-slate-300"><option value="">None</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label><label class="block text-sm">Heading<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-lg border-slate-300" maxlength="120"></label><button v-if="permissions.manageSmartCart" class="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="smartCartForm.processing">{{ smartCartForm.processing ? 'Saving…' : 'Save settings' }}</button><p v-if="smartCartForm.hasErrors" class="text-sm text-rose-700 md:col-span-3">{{ Object.values(smartCartForm.errors).join('; ') }}</p><p class="text-xs text-slate-500 md:col-span-3">The storefront shows one eligible product at a time and recalculates after it is added. It hides when all products are added or none are eligible.</p></form></div>
-                    <div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 text-sm leading-6 text-indigo-950"><strong>Attribution:</strong> Last recommendation click within 7 days. Click-through attribution only; refunds and cancellations are reversed.</div>
+
+                <div v-if="selectedPlacement" class="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
+                    <div class="flex items-start justify-between gap-4">
+                        <div><p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">Placement settings</p><h2 class="mt-1 text-xl font-semibold">{{ placementRows.find(row => row.key === selectedPlacement)?.label }}</h2></div>
+                        <button type="button" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold" @click="selectedPlacement = null">Close</button>
+                    </div>
+
+                    <div v-if="selectedPlacement === 'product_page'" class="mt-5 rounded-xl bg-slate-50 p-5">
+                        <p class="text-sm leading-6 text-slate-600">Product page placement is managed inside a strategy so its product rules, heading, layout, and publishing state stay together.</p>
+                        <button type="button" class="mt-4 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white" @click="openProductPageStrategy">{{ productPageComponent ? 'Edit assigned strategy' : 'Open strategies' }}</button>
+                    </div>
+
+                    <form v-else-if="selectedPlacement === 'checkout'" class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveCheckout('binding')">
+                        <label class="text-sm font-medium">Recommendation strategy<select v-model="checkoutForm.strategy_uuid" required class="mt-1 w-full rounded-xl border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
+                        <button v-if="permissions.manage" type="submit" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="checkoutForm.processing || !checkoutForm.strategy_uuid">{{ checkoutForm.processing ? 'Saving…' : 'Save Checkout placement' }}</button>
+                        <p class="text-sm text-slate-500 md:col-span-2">The Checkout extension shows one eligible recommendation at a time and recalculates after an item is added.</p>
+                    </form>
+
+                    <form v-else-if="selectedPlacement === 'thank_you'" class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveThankYou">
+                        <label class="text-sm font-medium">Strategy<select v-model="thankYouForm.strategy_uuid" required class="mt-1 w-full rounded-xl border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
+                        <label class="text-sm font-medium">Header<input v-model="thankYouForm.heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label>
+                        <button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="thankYouForm.processing || !thankYouForm.strategy_uuid">{{ thankYouForm.processing ? 'Saving…' : 'Save placement' }}</button>
+                    </form>
+
+                    <form v-else-if="selectedPlacement === 'order_status'" class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveOrderStatus">
+                        <label class="text-sm font-medium">Strategy<select v-model="orderStatusForm.strategy_uuid" required class="mt-1 w-full rounded-xl border-slate-300"><option disabled value="">Select a strategy</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
+                        <label class="text-sm font-medium">Header<input v-model="orderStatusForm.heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label>
+                        <button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="orderStatusForm.processing || !orderStatusForm.strategy_uuid">{{ orderStatusForm.processing ? 'Saving…' : 'Save placement' }}</button>
+                    </form>
+
+                    <form v-else class="mt-5 grid gap-4 rounded-xl bg-slate-50 p-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end" @submit.prevent="saveSmartCartDraft">
+                        <label class="text-sm font-medium">Strategy<select v-model="smartCartForm.strategy_uuid" class="mt-1 w-full rounded-xl border-slate-300"><option value="">None</option><option v-for="strategy in strategyRows" :key="strategy.uuid" :value="strategy.uuid">{{ strategy.name }}</option></select></label>
+                        <label class="text-sm font-medium">Header<input v-model="smartCartForm.heading" class="mt-1 w-full rounded-xl border-slate-300" maxlength="120"></label>
+                        <button v-if="permissions.manageSmartCart" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="smartCartForm.processing">{{ smartCartForm.processing ? 'Saving…' : 'Save placement' }}</button>
+                    </form>
+
+                    <p v-if="checkoutMessage && selectedPlacement === 'checkout'" class="mt-3 text-sm" :class="checkoutSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ checkoutMessage }}</p>
                 </div>
             </section>
 
@@ -531,7 +651,7 @@ function applyAnalyticsDates() {
                 <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div v-if="!filteredStrategies.length" class="p-14 text-center"><p class="font-semibold text-slate-700">No matching strategies</p><p class="mt-1 text-sm text-slate-500">Select Create strategy to create your first recommendation strategy.</p></div><div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-5 py-3">Name</th><th class="px-5 py-3">Status</th><th class="px-5 py-3">Used in</th><th class="px-5 py-3">Created / last updated</th><th class="px-5 py-3 text-right">Actions</th></tr></thead><tbody><tr v-for="strategy in filteredStrategies" :key="strategy.uuid" class="border-t border-slate-100 align-top"><td class="px-5 py-4"><button type="button" class="font-semibold text-slate-950 hover:text-indigo-700" @click="openEditor(strategy)">{{ strategy.name }}</button><p class="mt-1 text-xs text-slate-500">{{ strategy.recommendation_mode === 'custom' ? `Custom rules (${strategy.custom_rule_count})` : (options.algorithms.find(option => option.value === strategy.algorithm)?.label ?? 'Preset rule') }}</p></td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-semibold" :class="statusClass(strategy.status)">{{ statusLabel(strategy.status) }}</span></td><td class="px-5 py-4"><span v-if="!strategy.used_in.length" class="text-slate-400">No placements</span><div v-else class="flex max-w-md flex-wrap gap-2"><span v-for="usage in strategy.used_in" :key="usage.component_uuid" class="rounded-lg border border-slate-200 px-2.5 py-1 text-xs"><strong>{{ placementLabel(usage.placement) }}</strong><span class="ml-1 text-slate-500">{{ usageLabel(usage.status) }}</span></span></div></td><td class="px-5 py-4 text-xs text-slate-500"><p>{{ formatDate(strategy.created_at) }}</p><p class="mt-2">{{ formatDate(strategy.updated_at) }}</p></td><td class="px-5 py-4"><div class="flex justify-end gap-2"><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="openEditor(strategy)">Edit</button><button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold" @click="duplicateStrategy(strategy)">Duplicate</button><button type="button" class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700" @click="askDelete(strategy)">Delete</button></div></td></tr></tbody></table></div></div>
             </section>
 
-            <section v-else class="space-y-5">
+            <section v-else-if="activeTab === 'analytics'" class="space-y-5">
                 <div v-if="!permissions.viewAnalytics" class="rounded-2xl border border-slate-200 bg-white p-14 text-center text-slate-500">Your account does not have permission to view personalization analytics.</div>
                 <template v-else>
                     <div class="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-950"><strong>Attribution:</strong> Last recommendation click within 7 days. Click-through attribution only; refunds and cancellations are reversed.</div>
@@ -563,6 +683,86 @@ function applyAnalyticsDates() {
                         <div v-else class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-sm text-slate-500"><tr><th class="px-4 py-3">Strategy / version</th><th class="px-4 py-3">Page / component</th><th class="px-4 py-3">Quantity</th><th class="px-4 py-3">Sales</th><th class="px-4 py-3">Discounts</th><th class="px-4 py-3">Revenue</th></tr></thead><tbody><tr v-for="row in analyticsRows" :key="`${row.strategy_version_uuid}-${row.component_uuid}-${row.placement}`" class="border-t border-slate-100"><td class="px-4 py-3"><strong>{{ row.strategy_name }}</strong><p class="text-sm text-slate-500">Version {{ row.strategy_version ?? 'Not recorded' }}</p></td><td class="px-4 py-3"><strong>{{ placementLabel(row.placement) }}</strong><p class="text-sm text-slate-500">{{ row.component_name }}</p></td><td class="px-4 py-3">{{ row.quantity.toLocaleString('en-US') }}</td><td class="px-4 py-3">{{ money(row.sales, analytics.currency) }}</td><td class="px-4 py-3">{{ money(row.discounts, analytics.currency) }}</td><td class="px-4 py-3 font-semibold">{{ money(row.revenue, analytics.currency) }}</td></tr></tbody></table></div>
                     </div>
                 </template>
+            </section>
+
+            <section v-else-if="activeTab === 'storefront_defaults'" class="space-y-5">
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="max-w-3xl">
+                        <h2 class="text-xl font-semibold">Storefront defaults</h2>
+                        <p class="mt-2 text-sm leading-6 text-slate-500">Choose the fallback language for storefront recommendation text. Headers remain configured separately for each placement, so there is only one global setting here.</p>
+                    </div>
+                    <form class="mt-6 max-w-xl" @submit.prevent="saveGlobalSettings">
+                        <label class="block text-sm font-medium">Default language
+                            <select v-model="globalForm.default_locale" class="mt-1 w-full rounded-xl border-slate-300">
+                                <option value="en">English</option>
+                                <option value="zh-CN">Simplified Chinese</option>
+                            </select>
+                            <span class="mt-2 block text-sm leading-6 text-slate-500">This supplies fallback button and recommendation text only when a placement does not provide its own copy. It does not translate strategy names, products, or the DecoAdmin interface.</span>
+                        </label>
+                        <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <p class="text-sm font-semibold">Automatic fallback copy</p>
+                            <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                                <div><dt class="text-slate-500">Recommendation</dt><dd class="mt-1 font-medium">{{ fallbackCopy[globalForm.default_locale].recommendation_heading }}</dd></div>
+                                <div><dt class="text-slate-500">Button</dt><dd class="mt-1 font-medium">{{ fallbackCopy[globalForm.default_locale].add_button }}</dd></div>
+                            </dl>
+                        </div>
+                        <div class="mt-5 flex items-center gap-3">
+                            <button v-if="permissions.manage" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="globalSaveState === 'saving'">{{ globalSaveState === 'saving' ? 'Saving…' : 'Save language' }}</button>
+                            <span class="text-sm" :class="globalSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ globalError || (globalSaveState === 'saved' ? 'Saved' : '') }}</span>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <section v-else class="space-y-5">
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div><h2 class="text-xl font-semibold">Checkout trust badges</h2><p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Choose Shopify Checkout icons manually, write the customer-facing text, arrange the order, and preview the three-column Checkout layout.</p></div>
+                        <button v-if="permissions.manage && checkoutForm.trust_items.length < 6" type="button" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold" @click="addTrustItem">Add badge</button>
+                    </div>
+
+                    <div class="mt-6 grid gap-6 xl:grid-cols-[1.35fr_.65fr]">
+                        <div class="space-y-3">
+                            <div v-for="(item, index) in checkoutForm.trust_items" :key="item.key" class="rounded-xl border border-slate-200 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <label class="flex items-center gap-2 text-sm font-semibold"><input v-model="item.enabled" type="checkbox" class="rounded">Badge {{ index + 1 }}</label>
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-30" :disabled="index === 0" @click="moveTrustItem(index, -1)">Move up</button>
+                                        <button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-30" :disabled="index === checkoutForm.trust_items.length - 1" @click="moveTrustItem(index, 1)">Move down</button>
+                                        <button type="button" class="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-700" @click="checkoutForm.trust_items.splice(index, 1)">Remove</button>
+                                    </div>
+                                </div>
+                                <div class="mt-4 grid gap-4 md:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)]">
+                                    <label class="text-sm font-medium">Shopify icon
+                                        <span class="mt-1 flex items-center gap-2"><span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-lg font-semibold text-slate-700" aria-hidden="true">{{ iconGlyph(item.icon) }}</span><select v-model="item.icon" class="min-w-0 flex-1 rounded-xl border-slate-300 text-sm"><option v-for="icon in checkout.icon_options" :key="icon.value" :value="icon.value">{{ icon.label }}</option></select></span>
+                                    </label>
+                                    <label class="text-sm font-medium">Heading<input v-model="item.title" class="mt-1 w-full rounded-xl border-slate-300 text-sm" maxlength="80"></label>
+                                    <label class="text-sm font-medium">Description<input v-model="item.description" class="mt-1 w-full rounded-xl border-slate-300 text-sm" maxlength="120"></label>
+                                </div>
+                            </div>
+                            <p v-if="!checkoutForm.trust_items.length" class="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">No badges configured. Add a badge to begin.</p>
+                            <div class="flex flex-wrap items-center gap-3 pt-2">
+                                <button v-if="permissions.manage" type="button" class="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="checkoutForm.processing || !checkoutForm.strategy_uuid" @click="saveCheckout('badges')">{{ checkoutForm.processing ? 'Saving…' : 'Save badges' }}</button>
+                                <span v-if="!checkoutForm.strategy_uuid" class="text-sm text-amber-700">Configure the Checkout placement before saving badges.</span>
+                                <span v-else-if="checkoutMessage" class="text-sm" :class="checkoutSaveState === 'failed' ? 'text-rose-700' : 'text-emerald-700'">{{ checkoutMessage }}</span>
+                            </div>
+                        </div>
+
+                        <aside class="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                            <p class="text-sm font-semibold">Checkout preview</p>
+                            <p class="mt-1 text-sm text-slate-500">Enabled badges appear in saved order, with up to three columns per row.</p>
+                            <div v-if="enabledTrustItems.length" class="mt-6 grid grid-cols-3 gap-3">
+                                <div v-for="item in enabledTrustItems" :key="item.key" class="min-w-0 text-center">
+                                    <span class="mx-auto flex size-10 items-center justify-center text-xl font-semibold text-slate-700" aria-hidden="true">{{ iconGlyph(item.icon) }}</span>
+                                    <p class="mt-2 break-words text-sm font-semibold text-slate-900">{{ item.title }}</p>
+                                    <p v-if="item.description" class="mt-1 break-words text-sm leading-5 text-slate-500">{{ item.description }}</p>
+                                </div>
+                            </div>
+                            <p v-else class="mt-6 text-sm text-slate-500">Enable a badge and add a heading to preview it.</p>
+                            <p class="mt-6 border-t border-slate-200 pt-4 text-sm leading-6 text-slate-500">These are Shopify Checkout component icons, not uploaded image files. The exact rendering follows the buyer's Checkout theme and Shopify's extension components.</p>
+                        </aside>
+                    </div>
+                </div>
             </section>
         </div>
 

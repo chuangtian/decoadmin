@@ -112,6 +112,7 @@ class PersonalizationController extends Controller
                 'name' => $component->name,
                 'placement' => $component->placement->value,
                 'status' => $component->status->value,
+                'enabled' => $component->status->value === 'active',
                 'heading' => $component->heading,
                 'button_label' => $component->button_label,
                 'published_at' => $component->published_at?->toIso8601String(),
@@ -204,6 +205,83 @@ class PersonalizationController extends Controller
             ],
             'analytics' => $analytics,
         ]);
+    }
+
+    public function editor(Request $request, Organization $organization, Store $store): Response
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.view');
+        $configuration = $this->configuration->configuration($store, $request->user());
+
+        return Inertia::render('Personalization/Editor', [
+            'organization' => ['id' => $organization->id, 'name' => $organization->name],
+            'store' => ['id' => $store->id, 'name' => $store->name, 'currency' => $store->currency],
+            'components' => $configuration['components']->map(fn ($component): array => [
+                'uuid' => $component->uuid,
+                'strategy_uuid' => $component->strategy?->uuid,
+                'strategy_name' => $component->strategy?->name,
+                'name' => $component->name,
+                'placement' => $component->placement->value,
+                'status' => $component->status->value,
+                'heading' => $component->heading ?: 'You may also like',
+                'button_label' => $component->button_label ?: 'Add to cart',
+                'style' => [
+                    'layout' => $component->style?->layout ?? 'carousel',
+                    'desktop_columns' => $component->style?->desktop_columns ?? 3,
+                    'mobile_columns' => $component->style?->mobile_columns ?? 1,
+                    'show_image' => $component->style?->show_image ?? true,
+                    'show_vendor' => $component->style?->show_vendor ?? false,
+                    'show_price' => $component->style?->show_price ?? true,
+                    'show_compare_at_price' => $component->style?->show_compare_at_price ?? true,
+                    'show_add_to_cart' => $component->style?->show_add_to_cart ?? true,
+                    'tokens' => $component->style?->tokens ?? [],
+                ],
+            ])->values(),
+            'products' => $this->catalog->pickerProducts($store)->take(3)->map(fn (array $product): array => [
+                'shopify_product_id' => $product['shopify_product_id'],
+                'title' => $product['title'],
+                'vendor' => $product['vendor'],
+                'image_url' => data_get($product, 'storefront.image.url'),
+                'price' => data_get($product, 'price.minimum'),
+                'compare_at_price' => data_get($product, 'variants.0.compare_at_price'),
+                'currency' => data_get($product, 'price.currency', $store->currency),
+                'variants' => collect($product['variants'] ?? [])->map(fn (array $variant): array => [
+                    'title' => $variant['title'],
+                    'price' => $variant['price'],
+                    'available_for_sale' => $variant['available_for_sale'],
+                ])->values(),
+            ])->values(),
+            'permissions' => ['manage' => $request->user()->hasPermission('personalization.manage', $organization, $store)],
+        ]);
+    }
+
+    public function updateEditor(Request $request, Organization $organization, Store $store, PersonalizationRecommendationComponent $component): RedirectResponse
+    {
+        $this->assertUserScope($request, $organization, $store, 'personalization.manage');
+        $values = $request->validate([
+            ...$this->componentRules(),
+            'style' => ['required', 'array'],
+            'style.layout' => ['required', Rule::in(['carousel', 'grid'])],
+            'style.desktop_columns' => ['required', 'integer', 'between:1,6'],
+            'style.mobile_columns' => ['required', 'integer', 'between:1,3'],
+            'style.show_image' => ['required', 'boolean'],
+            'style.show_vendor' => ['required', 'boolean'],
+            'style.show_price' => ['required', 'boolean'],
+            'style.show_compare_at_price' => ['required', 'boolean'],
+            'style.show_add_to_cart' => ['required', 'boolean'],
+            'style.tokens' => ['array'],
+            'enabled' => ['required', 'boolean'],
+        ]);
+        $strategy = $this->ownedStrategy($store, $values['strategy_uuid']);
+
+        return $this->run(function () use ($store, $component, $strategy, $request, $values): void {
+            $this->configuration->updateComponent($store, $component, $strategy, $request->user(), $values);
+            $this->configuration->updateStyle($store, $component, $request->user(), $values['style']);
+            if ($values['enabled']) {
+                $this->configuration->activateComponent($store, $component, $request->user());
+            } else {
+                $this->configuration->disableComponent($store, $component, $request->user());
+            }
+        }, 'Widget design and status saved.');
     }
 
     public function storeStrategy(Request $request, Organization $organization, Store $store): RedirectResponse

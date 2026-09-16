@@ -66,6 +66,8 @@ export const menu: MenuItem[] = [
         // 店铺还没装 App 时就没有任何入口，用户也就无从进去完成连接。
         dynamicChildren: 'applications',
         children: [
+            { name: '个性化推荐', route: '/personalization', icon: 'apps', permission: 'personalization.view' },
+            { name: '推荐组件编辑器', route: '/personalization/editor', icon: 'apps', permission: 'personalization.view' },
             { name: 'Instagram Feed', route: '/instagram-feed', icon: 'apps', permission: 'instagram_feed.view' },
             { name: '买家秀评价', route: '/community-reviews', icon: 'apps', permission: 'apps.view' },
             { name: 'Deco Reviews 评价管理', route: '/deco-reviews', icon: 'apps', permission: 'apps.view' },
