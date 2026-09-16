@@ -28,7 +28,7 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
     {
         $installation = AppInstallation::query()->find($this->appInstallationId);
 
-        if ($installation && $installation->status === 'active') {
+        if ($installation && $installation->status === 'active' && $subscriptions->supports($installation)) {
             $subscriptions->reconcile($installation);
         }
     }
