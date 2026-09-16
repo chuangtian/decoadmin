@@ -214,6 +214,16 @@ The Cart Drawer display editor exposed:
 
 The style editor exposed automatic Shopify-theme synchronization, per-device title typography, product typography and colors, variant/quantity selector colors, action-button typography and colors, and custom CSS. The observed defaults used 16 px title and product text and 14 px action-button text.
 
+### Widget editor parity requirement
+
+The Deco widget editor must reproduce the observed AfterShip editor information architecture and behavior instead of introducing a Deco-specific control model. It is a dedicated navigation entry and uses the same three sections:
+
+1. **Settings**: status, recommendation strategy, installation instructions, copy/install action, and A/B test entry.
+2. **Display**: widget border; separate mobile and desktop top/bottom and left/right padding; widget title, title padding and alignment; mobile and desktop product count and layout; desktop columns; product padding; product-content alignment and unified alignment; content radius; image source, aspect ratio, border and radius; product name, description, reviews, price, compare-at price and discount value; discount text; variant-selector display, layout, preselection, Smart variant match, subscription options, quantity editing and radius; select-variant label, primary action, primary label, success message and button radius.
+3. **Styles**: automatic Shopify-theme synchronization and reset; widget background; separate mobile and desktop widget-title font, size, weight and color; product font, size, weight, background, name, description, price, compare-at-price and discount colors; selector background, border and text; action-button font, size, weight, background, border and text; custom CSS; A/B test entry.
+
+Controls, defaults, validation ranges, responsive behavior, preview behavior, save/draft lifecycle and storefront rendering must be derived from the authorized AfterShip test workspace. Do not add substitute presets or remove observed controls. Deco branding may wrap the page, but the editor's hierarchy and interaction model remain equivalent.
+
 Environment constraints observed during onboarding:
 
 - The test shop is not Shopify Plus, so the AfterShip Checkout offer UI is disabled even though onboarding generated a reusable Checkout strategy.
