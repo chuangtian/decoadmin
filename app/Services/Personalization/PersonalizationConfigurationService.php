@@ -699,19 +699,83 @@ class PersonalizationConfigurationService
     private function styleTokens(mixed $value): array
     {
         $tokens = $this->boundedArray($value, 'INVALID_STYLE_TOKENS');
-        $allowed = ['text_color', 'background_color', 'button_color', 'button_text_color', 'border_radius', 'gap'];
+        $allowed = [
+            'text_color', 'background_color', 'button_color', 'button_text_color', 'border_color',
+            'title_color', 'product_background_color', 'product_name_color', 'description_color',
+            'price_color', 'compare_at_color', 'discount_color', 'selector_background_color',
+            'selector_border_color', 'selector_text_color', 'button_border_color',
+            'border_radius', 'gap', 'mobile_padding_y', 'mobile_padding_x', 'desktop_padding_y',
+            'desktop_padding_x', 'title_padding', 'product_padding', 'content_radius', 'image_radius',
+            'selector_radius', 'button_radius', 'title_font_size_mobile', 'title_font_size_desktop',
+            'product_font_size', 'button_font_size', 'title_font_weight_mobile',
+            'title_font_weight_desktop', 'product_font_weight', 'button_font_weight', 'title_alignment',
+            'content_alignment', 'unified_alignment', 'mobile_layout', 'desktop_layout', 'image_source',
+            'image_aspect_ratio', 'image_border', 'widget_border', 'show_product_name',
+            'show_description', 'show_reviews', 'show_discount_value', 'discount_text',
+            'comparison_source', 'variant_display', 'variant_layout', 'variant_preselection',
+            'show_subscription_options', 'allow_quantity', 'select_variant_text', 'primary_action',
+            'success_message', 'auto_sync_theme', 'custom_css',
+        ];
         if (array_diff(array_keys($tokens), $allowed) !== []) {
             throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式包含不支持的字段。');
         }
-        foreach (['text_color', 'background_color', 'button_color', 'button_text_color'] as $colorKey) {
+        foreach ([
+            'text_color', 'background_color', 'button_color', 'button_text_color', 'border_color',
+            'title_color', 'product_background_color', 'product_name_color', 'description_color',
+            'price_color', 'compare_at_color', 'discount_color', 'selector_background_color',
+            'selector_border_color', 'selector_text_color', 'button_border_color',
+        ] as $colorKey) {
             if (isset($tokens[$colorKey])
                 && (! is_string($tokens[$colorKey]) || preg_match('/^#[0-9a-fA-F]{6}$/', $tokens[$colorKey]) !== 1)) {
                 throw new PersonalizationException('INVALID_STYLE_TOKENS', '颜色值格式无效。');
             }
         }
-        foreach (['border_radius', 'gap'] as $sizeKey) {
+        foreach ([
+            'border_radius', 'gap', 'mobile_padding_y', 'mobile_padding_x', 'desktop_padding_y',
+            'desktop_padding_x', 'title_padding', 'product_padding', 'content_radius', 'image_radius',
+            'selector_radius', 'button_radius',
+        ] as $sizeKey) {
             if (isset($tokens[$sizeKey])) {
                 $tokens[$sizeKey] = $this->integer($tokens[$sizeKey], 0, 48, 'INVALID_STYLE_TOKENS');
+            }
+        }
+        foreach (['title_font_size_mobile', 'title_font_size_desktop', 'product_font_size', 'button_font_size'] as $sizeKey) {
+            if (isset($tokens[$sizeKey])) {
+                $tokens[$sizeKey] = $this->integer($tokens[$sizeKey], 12, 40, 'INVALID_STYLE_TOKENS');
+            }
+        }
+        foreach (['title_font_weight_mobile', 'title_font_weight_desktop', 'product_font_weight', 'button_font_weight'] as $weightKey) {
+            if (isset($tokens[$weightKey])) {
+                $tokens[$weightKey] = $this->integer($tokens[$weightKey], 400, 800, 'INVALID_STYLE_TOKENS');
+            }
+        }
+        foreach ([
+            'title_alignment' => ['left', 'center', 'right'], 'content_alignment' => ['left', 'center', 'right'],
+            'mobile_layout' => ['list', 'grid', 'carousel'], 'desktop_layout' => ['list', 'grid', 'carousel'],
+            'image_source' => ['product', 'variant'], 'image_aspect_ratio' => ['1:1', '4:5', '4:3'],
+            'image_border' => ['none', 'solid'], 'widget_border' => ['none', 'solid'],
+            'comparison_source' => ['compare_at_price', 'product_price'], 'variant_display' => ['dynamic', 'always', 'hidden'],
+            'variant_layout' => ['dropdown', 'buttons'], 'variant_preselection' => ['smart_match', 'first_available'],
+            'primary_action' => ['stay', 'cart', 'checkout'],
+        ] as $key => $choices) {
+            if (isset($tokens[$key]) && (! is_string($tokens[$key]) || ! in_array($tokens[$key], $choices, true))) {
+                throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式选项无效。');
+            }
+        }
+        foreach (['unified_alignment', 'show_product_name', 'show_description', 'show_reviews', 'show_discount_value', 'show_subscription_options', 'allow_quantity', 'auto_sync_theme'] as $booleanKey) {
+            if (isset($tokens[$booleanKey]) && ! is_bool($tokens[$booleanKey])) {
+                throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式开关无效。');
+            }
+        }
+        foreach (['discount_text', 'select_variant_text', 'success_message'] as $textKey) {
+            if (isset($tokens[$textKey]) && (! is_string($tokens[$textKey]) || mb_strlen($tokens[$textKey]) > 200)) {
+                throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式文案无效。');
+            }
+        }
+        if (isset($tokens['custom_css'])) {
+            if (! is_string($tokens['custom_css']) || strlen($tokens['custom_css']) > 2000
+                || preg_match('/[{}@]|url\s*\(|expression\s*\(/i', $tokens['custom_css']) === 1) {
+                throw new PersonalizationException('INVALID_STYLE_TOKENS', '自定义 CSS 仅支持安全的属性声明。');
             }
         }
 

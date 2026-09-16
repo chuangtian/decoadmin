@@ -73,10 +73,39 @@
     element.style.setProperty('--deco-rec-background', safeColor(tokens.background_color, '#ffffff'));
     element.style.setProperty('--deco-rec-button', safeColor(tokens.button_color, '#111827'));
     element.style.setProperty('--deco-rec-button-text', safeColor(tokens.button_text_color, '#ffffff'));
+    element.style.setProperty('--deco-rec-title', safeColor(tokens.title_color, tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-product-background', safeColor(tokens.product_background_color, '#ffffff'));
+    element.style.setProperty('--deco-rec-product-name', safeColor(tokens.product_name_color, tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-description', safeColor(tokens.description_color, '#64748b'));
+    element.style.setProperty('--deco-rec-price', safeColor(tokens.price_color, tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-compare', safeColor(tokens.compare_at_color, '#94a3b8'));
+    element.style.setProperty('--deco-rec-discount', safeColor(tokens.discount_color, '#166534'));
     element.style.setProperty('--deco-rec-radius', `${boundedNumber(tokens.border_radius, 0, 48, 12)}px`);
     element.style.setProperty('--deco-rec-gap', `${boundedNumber(tokens.gap, 0, 48, 16)}px`);
+    element.style.setProperty('--deco-rec-padding-y', `${boundedNumber(tokens.desktop_padding_y, 0, 48, 20)}px`);
+    element.style.setProperty('--deco-rec-padding-x', `${boundedNumber(tokens.desktop_padding_x, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-mobile-padding-y', `${boundedNumber(tokens.mobile_padding_y, 0, 48, 20)}px`);
+    element.style.setProperty('--deco-rec-mobile-padding-x', `${boundedNumber(tokens.mobile_padding_x, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-title-padding', `${boundedNumber(tokens.title_padding, 0, 48, 20)}px`);
+    element.style.setProperty('--deco-rec-product-padding', `${boundedNumber(tokens.product_padding, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-content-radius', `${boundedNumber(tokens.content_radius, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-image-radius', `${boundedNumber(tokens.image_radius, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-button-radius', `${boundedNumber(tokens.button_radius, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-title-size', `${boundedNumber(tokens.title_font_size_desktop, 12, 40, 16)}px`);
+    element.style.setProperty('--deco-rec-title-size-mobile', `${boundedNumber(tokens.title_font_size_mobile, 12, 40, 16)}px`);
+    element.style.setProperty('--deco-rec-title-weight', String(boundedNumber(tokens.title_font_weight_desktop, 400, 800, 500)));
+    element.style.setProperty('--deco-rec-product-size', `${boundedNumber(tokens.product_font_size, 12, 40, 16)}px`);
+    element.style.setProperty('--deco-rec-product-weight', String(boundedNumber(tokens.product_font_weight, 400, 800, 400)));
+    element.style.setProperty('--deco-rec-button-size', `${boundedNumber(tokens.button_font_size, 12, 40, 14)}px`);
+    element.style.setProperty('--deco-rec-button-weight', String(boundedNumber(tokens.button_font_weight, 400, 800, 400)));
+    element.style.setProperty('--deco-rec-align', ['left','center','right'].includes(tokens.content_alignment) ? tokens.content_alignment : 'center');
+    element.style.setProperty('--deco-rec-title-align', ['left','center','right'].includes(tokens.title_alignment) ? tokens.title_alignment : 'left');
+    element.style.setProperty('--deco-rec-image-aspect', ({'1:1':'1 / 1','4:5':'4 / 5','4:3':'4 / 3'})[tokens.image_aspect_ratio] || '1 / 1');
     element.style.setProperty('--deco-rec-desktop-columns', String(boundedNumber(style.desktop_columns, 1, 6, 4)));
     element.style.setProperty('--deco-rec-mobile-columns', String(boundedNumber(style.mobile_columns, 1, 3, 2)));
+    if (typeof tokens.custom_css === 'string' && !/[{}@]|url\s*\(|expression\s*\(/i.test(tokens.custom_css)) {
+      element.style.cssText += `;${tokens.custom_css.slice(0, 2000)}`;
+    }
 
     const heading = document.createElement('h2');
     heading.className = 'deco-recommendations__heading';
@@ -98,6 +127,7 @@
   }
 
   function createProductCard(element, product, component, strategy, style, discount) {
+    const tokens = style?.tokens || {};
     const card = document.createElement('article');
     card.className = 'deco-recommendations__card';
 
@@ -132,10 +162,18 @@
       link.append(vendor);
     }
 
-    const title = document.createElement('h3');
-    title.className = 'deco-recommendations__title';
-    title.textContent = String(product?.title || 'Product');
-    link.append(title);
+    if (tokens.show_product_name !== false) {
+      const title = document.createElement('h3');
+      title.className = 'deco-recommendations__title';
+      title.textContent = String(product?.title || 'Product');
+      link.append(title);
+    }
+    if (tokens.show_description === true && product?.description) {
+      const description = document.createElement('p');
+      description.className = 'deco-recommendations__description';
+      description.textContent = String(product.description).slice(0, 180);
+      link.append(description);
+    }
 
     if (style.show_price !== false) {
       const price = document.createElement('p');
