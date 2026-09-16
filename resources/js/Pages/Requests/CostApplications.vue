@@ -79,6 +79,13 @@ const billingCycleLabels: Record<string, string> = {
     quarterly: "季付",
     annual: "年付",
 };
+const paymentMethodOptions = [
+    "信用卡2671(Meggie)",
+    "信用卡9946(李总)",
+    "信用卡7133(Meggie)",
+    "Abby代付",
+    "Meggie代付",
+] as const;
 const billingCycleLabel = (cycle: string | null): string =>
     cycle ? (billingCycleLabels[cycle] ?? cycle) : "未填写";
 const requestStatusLabel = (row: Row): string => {
@@ -107,6 +114,7 @@ const createOpen = ref(false);
 const cancelDialogOpen = ref(false);
 const filters = ref({ ...props.filters });
 const files = ref<File[]>([]);
+const paymentMethodChoice = ref("");
 const form = useForm({
     title: "",
     category: "software",
@@ -200,9 +208,17 @@ function submit(): void {
             form.approval_required = true;
             form.renewal_mode = "manual";
             form.billing_cycle = "annual";
+            paymentMethodChoice.value = "";
             form.applicant_id = canChooseApplicant.value ? currentApplicantId.value : "";
         },
     });
+}
+
+function selectPaymentMethod(choice: string): void {
+    paymentMethodChoice.value = choice;
+    form.software_payment_method = choice === "other"
+        ? ""
+        : choice;
 }
 function openCreateDialog(): void {
     syncApplicantDefaults();
@@ -677,15 +693,53 @@ function submitCancelRenewal(): void {
                                     autocomplete="new-password"
                                     class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
                                     placeholder="输入登录密码" /></label
-                            ><label
-                                class="text-sm font-semibold text-slate-700 sm:col-span-2"
-                                >付费方式（必填）<input
-                                    v-model="form.software_payment_method"
-                                    required
-                                    maxlength="255"
-                                    class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
-                                    placeholder="例如：公司信用卡、PayPal、对公转账" /></label
-                            ><label class="text-sm font-semibold text-slate-700"
+                            ><fieldset class="sm:col-span-2">
+                                <legend class="text-sm font-semibold text-slate-700">付费方式（必填）</legend>
+                                <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                    <label
+                                        v-for="option in paymentMethodOptions"
+                                        :key="option"
+                                        class="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition"
+                                        :class="paymentMethodChoice === option ? 'border-orange-400 bg-white text-orange-800 shadow-sm' : 'border-orange-200 bg-white/70 text-slate-700 hover:border-orange-300'"
+                                    >
+                                        <input
+                                            v-model="paymentMethodChoice"
+                                            type="radio"
+                                            name="software_payment_method_choice"
+                                            :value="option"
+                                            required
+                                            class="border-orange-300 text-orange-600 focus:ring-orange-500"
+                                            @change="selectPaymentMethod(option)"
+                                        />
+                                        <span>{{ option }}</span>
+                                    </label>
+                                    <label
+                                        class="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition"
+                                        :class="paymentMethodChoice === 'other' ? 'border-orange-400 bg-white text-orange-800 shadow-sm' : 'border-orange-200 bg-white/70 text-slate-700 hover:border-orange-300'"
+                                    >
+                                        <input
+                                            v-model="paymentMethodChoice"
+                                            type="radio"
+                                            name="software_payment_method_choice"
+                                            value="other"
+                                            required
+                                            class="border-orange-300 text-orange-600 focus:ring-orange-500"
+                                            @change="selectPaymentMethod('other')"
+                                        />
+                                        <span>其他</span>
+                                    </label>
+                                </div>
+                                <label v-if="paymentMethodChoice === 'other'" class="mt-3 block text-sm font-semibold text-slate-700">
+                                    填写付费方式
+                                    <input
+                                        v-model="form.software_payment_method"
+                                        required
+                                        maxlength="255"
+                                        class="mt-2 h-11 w-full rounded-xl border-orange-200 bg-white"
+                                        placeholder="例如：PayPal、对公转账"
+                                    />
+                                </label>
+                            </fieldset><label class="text-sm font-semibold text-slate-700"
                                 >续费操作<select
                                     v-model="form.renewal_mode"
                                     required
