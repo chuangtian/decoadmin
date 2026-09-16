@@ -159,7 +159,11 @@
 
 @media (max-width: 749px) {
   .deco-recommendations__content { padding: var(--deco-rec-mobile-padding-y, 20px) var(--deco-rec-mobile-padding-x, 0); }
-  .deco-recommendations__heading { font-size: var(--deco-rec-title-size-mobile, 16px); }
+  .deco-recommendations__heading {
+    color: var(--deco-rec-title-mobile, var(--deco-rec-title, inherit));
+    font-size: var(--deco-rec-title-size-mobile, 16px);
+    font-weight: var(--deco-rec-title-weight-mobile, 500);
+  }
   .deco-recommendations__list--grid {
     grid-template-columns: repeat(var(--deco-rec-mobile-columns), minmax(0, 1fr));
   }

@@ -247,6 +247,10 @@ class PersonalizationManagementTest extends TestCase
             'strategy_uuid' => $strategy->uuid, 'name' => $component->name, 'placement' => 'cart_page',
             'heading' => 'Recommended for you', 'button_label' => 'Add to cart',
             'enabled' => false,
+            'experiment' => [
+                'name' => 'Cart design test', 'status' => 'draft', 'primary_metric' => 'revenue',
+                'variant_name' => 'Variant B', 'variant_traffic_percentage' => 50,
+            ],
             'style' => [
                 'layout' => 'grid', 'desktop_columns' => 3, 'mobile_columns' => 1,
                 'show_image' => true, 'show_vendor' => false, 'show_price' => true,
@@ -255,14 +259,17 @@ class PersonalizationManagementTest extends TestCase
                     'show_product_name' => true, 'show_description' => true,
                     'discount_text' => '(Save *|DISCOUNT|*)', 'comparison_source' => 'compare_at_price',
                     'content_alignment' => 'center', 'variant_display' => 'dynamic',
-                    'title_font_size_desktop' => 16, 'button_font_weight' => 400,
+                    'title_font_size_desktop' => 16, 'title_color_mobile' => '#111827',
+                    'title_color_desktop' => '#111827', 'button_font_weight' => 400,
                     'custom_css' => 'letter-spacing: 0.01em;',
                 ],
             ],
         ])->assertRedirect()->assertSessionHas('success');
 
         $this->assertSame('Recommended for you', $component->fresh()->heading);
+        $this->assertSame('Cart design test', $component->fresh()->settings['editor_experiment']['name']);
         $this->assertSame('center', $component->style()->sole()->tokens['content_alignment']);
+        $this->assertSame('#111827', $component->style()->sole()->tokens['title_color_mobile']);
         $this->assertSame('letter-spacing: 0.01em;', $component->style()->sole()->tokens['custom_css']);
     }
 

@@ -73,7 +73,8 @@
     element.style.setProperty('--deco-rec-background', safeColor(tokens.background_color, '#ffffff'));
     element.style.setProperty('--deco-rec-button', safeColor(tokens.button_color, '#111827'));
     element.style.setProperty('--deco-rec-button-text', safeColor(tokens.button_text_color, '#ffffff'));
-    element.style.setProperty('--deco-rec-title', safeColor(tokens.title_color, tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-title', safeColor(tokens.title_color_desktop, tokens.title_color || tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-title-mobile', safeColor(tokens.title_color_mobile, tokens.title_color || tokens.text_color || '#111827'));
     element.style.setProperty('--deco-rec-product-background', safeColor(tokens.product_background_color, '#ffffff'));
     element.style.setProperty('--deco-rec-product-name', safeColor(tokens.product_name_color, tokens.text_color || '#111827'));
     element.style.setProperty('--deco-rec-description', safeColor(tokens.description_color, '#64748b'));
@@ -94,6 +95,7 @@
     element.style.setProperty('--deco-rec-title-size', `${boundedNumber(tokens.title_font_size_desktop, 12, 40, 16)}px`);
     element.style.setProperty('--deco-rec-title-size-mobile', `${boundedNumber(tokens.title_font_size_mobile, 12, 40, 16)}px`);
     element.style.setProperty('--deco-rec-title-weight', String(boundedNumber(tokens.title_font_weight_desktop, 400, 800, 500)));
+    element.style.setProperty('--deco-rec-title-weight-mobile', String(boundedNumber(tokens.title_font_weight_mobile, 400, 800, 500)));
     element.style.setProperty('--deco-rec-product-size', `${boundedNumber(tokens.product_font_size, 12, 40, 16)}px`);
     element.style.setProperty('--deco-rec-product-weight', String(boundedNumber(tokens.product_font_weight, 400, 800, 400)));
     element.style.setProperty('--deco-rec-button-size', `${boundedNumber(tokens.button_font_size, 12, 40, 14)}px`);

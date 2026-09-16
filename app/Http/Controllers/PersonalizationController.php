@@ -224,6 +224,7 @@ class PersonalizationController extends Controller
                 'status' => $component->status->value,
                 'heading' => $component->heading ?: 'You may also like',
                 'button_label' => $component->button_label ?: 'Add to cart',
+                'experiment' => data_get($component->settings, 'editor_experiment'),
                 'style' => [
                     'layout' => $component->style?->layout ?? 'carousel',
                     'desktop_columns' => $component->style?->desktop_columns ?? 3,
@@ -270,6 +271,12 @@ class PersonalizationController extends Controller
             'style.show_add_to_cart' => ['required', 'boolean'],
             'style.tokens' => ['array'],
             'enabled' => ['required', 'boolean'],
+            'experiment' => ['nullable', 'array'],
+            'experiment.name' => ['required_with:experiment', 'string', 'max:80', 'regex:/\S/u'],
+            'experiment.status' => ['required_with:experiment', Rule::in(['draft'])],
+            'experiment.primary_metric' => ['required_with:experiment', Rule::in(['revenue', 'conversion_rate', 'average_order_value'])],
+            'experiment.variant_name' => ['required_with:experiment', 'string', 'max:80', 'regex:/\S/u'],
+            'experiment.variant_traffic_percentage' => ['required_with:experiment', 'integer', 'between:1,99'],
         ]);
         $strategy = $this->ownedStrategy($store, $values['strategy_uuid']);
 

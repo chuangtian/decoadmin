@@ -289,6 +289,9 @@ class PersonalizationConfigurationService
             'placement' => $placement,
             'heading' => $this->optionalText($input['heading'] ?? null, 120, 'INVALID_COMPONENT_HEADING'),
             'button_label' => $this->optionalText($input['button_label'] ?? null, 60, 'INVALID_COMPONENT_BUTTON_LABEL'),
+            'settings' => array_key_exists('experiment', $input)
+                ? array_replace($component->settings ?? [], ['editor_experiment' => $input['experiment']])
+                : $component->settings,
             'status' => PersonalizationComponentStatus::Draft,
             'published_at' => null,
             'updated_by' => $actor->id,
@@ -701,7 +704,7 @@ class PersonalizationConfigurationService
         $tokens = $this->boundedArray($value, 'INVALID_STYLE_TOKENS');
         $allowed = [
             'text_color', 'background_color', 'button_color', 'button_text_color', 'border_color',
-            'title_color', 'product_background_color', 'product_name_color', 'description_color',
+            'title_color', 'title_color_mobile', 'title_color_desktop', 'product_background_color', 'product_name_color', 'description_color',
             'price_color', 'compare_at_color', 'discount_color', 'selector_background_color',
             'selector_border_color', 'selector_text_color', 'button_border_color',
             'border_radius', 'gap', 'mobile_padding_y', 'mobile_padding_x', 'desktop_padding_y',
@@ -721,7 +724,7 @@ class PersonalizationConfigurationService
         }
         foreach ([
             'text_color', 'background_color', 'button_color', 'button_text_color', 'border_color',
-            'title_color', 'product_background_color', 'product_name_color', 'description_color',
+            'title_color', 'title_color_mobile', 'title_color_desktop', 'product_background_color', 'product_name_color', 'description_color',
             'price_color', 'compare_at_color', 'discount_color', 'selector_background_color',
             'selector_border_color', 'selector_text_color', 'button_border_color',
         ] as $colorKey) {
