@@ -15,10 +15,19 @@ class RegisterShopifyWebhooks extends Command
 
     public function handle(ShopifyWebhookSubscriptionService $subscriptions): int
     {
+        if (! filled(config('shopify.client_id'))) {
+            $this->error('后台主应用尚未配置，未修改 Webhook 订阅。');
+
+            return self::FAILURE;
+        }
+
         $query = AppInstallation::query()
             ->where('status', 'active')
+            ->whereHas('app', fn ($query) => $query
+                ->where('handle', config('shopify.app_handle', 'shopify-commerce-hub'))
+                ->where('client_id', config('shopify.client_id')))
             ->whereHas('shopifyConnection', fn ($query) => $query->whereIn('status', ['connected', 'warning']))
-            ->with(['store:id,name,shopify_domain', 'app:id,name,handle', 'shopifyConnection']);
+            ->with(['store.organization', 'app', 'shopifyConnection']);
 
         if ($this->option('store')) {
             $query->where('store_id', (int) $this->option('store'));

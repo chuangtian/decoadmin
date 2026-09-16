@@ -4,6 +4,7 @@ namespace App\Services\Shopify\Webhooks;
 
 use App\Exceptions\ShopifyApiException;
 use App\Models\AppInstallation;
+use App\Models\AuditLog;
 use App\Models\ShopifyConnection;
 use App\Services\Shopify\ShopifyGraphQLClient;
 
@@ -11,8 +12,10 @@ class ShopifyWebhookSubscriptionService
 {
     private const LIST_QUERY = <<<'GRAPHQL'
         query RegisteredWebhookSubscriptions($first: Int!) {
+          currentAppInstallation { app { apiKey } }
           webhookSubscriptions(first: $first) {
             nodes { id topic uri }
+            pageInfo { hasNextPage }
           }
         }
         GRAPHQL;
@@ -52,25 +55,61 @@ class ShopifyWebhookSubscriptionService
 
     public function __construct(private ShopifyGraphQLClient $client) {}
 
+    public function supports(AppInstallation $installation): bool
+    {
+        $installation->loadMissing('app');
+
+        return filled(config('shopify.client_id'))
+            && $installation->app?->handle === config('shopify.app_handle', 'shopify-commerce-hub')
+            && $installation->app?->client_id === config('shopify.client_id');
+    }
+
     /**
      * @return array{created: int, updated: int, unchanged: int, endpoint: string, topics: list<string>}
      */
     public function reconcile(AppInstallation $installation): array
     {
-        $installation->loadMissing(['app', 'shopifyConnection']);
+        $installation->loadMissing(['app', 'shopifyConnection', 'store.organization']);
         $connection = $installation->shopifyConnection;
         $app = $installation->app;
+        $store = $installation->store;
 
-        if (! $connection || ! $app || $installation->status !== 'active') {
+        // This registrar owns Commerce Hub data topics only. Independent apps
+        // manage their own credentials, topics and webhook handlers.
+        if (! $this->supports($installation)) {
+            throw new ShopifyApiException('当前安装不属于后台主应用，禁止使用共享连接注册其 Webhook。');
+        }
+
+        if (! $connection || ! $app || ! $store || ! $store->organization
+            || $installation->status !== 'active' || $store->status !== 'active' || $app->status !== 'active'
+            || ! in_array($connection->status, ['connected', 'warning'], true) || $connection->uninstalled_at
+            || (int) $connection->store_id !== (int) $store->getKey()
+            || $connection->shop_domain !== $store->shopify_domain
+            || ($app->organization_id !== null && (int) $app->organization_id !== (int) $store->organization_id)) {
             throw new ShopifyApiException('应用安装记录没有可用的 Shopify 连接。');
+        }
+        if (! filled($app->client_secret_encrypted) || ! filled($connection->access_token_encrypted)) {
+            throw new ShopifyApiException('后台主应用缺少 Webhook 验签密钥或访问令牌，未修改订阅。');
         }
 
         $endpoint = rtrim((string) config('shopify.app_url'), '/')
             .route('shopify.webhooks.receive', ['app' => $app->handle], false);
         $payload = $this->client->executeSyncQuery($connection, self::LIST_QUERY, ['first' => 250]);
+        if (data_get($payload, 'data.currentAppInstallation.app.apiKey') !== $app->client_id) {
+            throw new ShopifyApiException('Shopify 访问令牌所属应用与 Webhook 接收应用不一致，未修改订阅。');
+        }
+        if (data_get($payload, 'data.webhookSubscriptions.pageInfo.hasNextPage') !== false
+            || ! is_array(data_get($payload, 'data.webhookSubscriptions.nodes'))) {
+            throw new ShopifyApiException('Webhook 订阅列表不完整或超过安全核对上限，未修改订阅。');
+        }
         $registered = collect(data_get($payload, 'data.webhookSubscriptions.nodes', []))
-            ->filter(fn ($node) => is_array($node) && is_string($node['topic'] ?? null))
-            ->keyBy('topic');
+            ->filter(fn ($node) => is_array($node) && is_string($node['topic'] ?? null));
+        foreach ($registered->groupBy('topic') as $topic => $subscriptions) {
+            if (in_array($topic, self::TOPICS, true) && $subscriptions->count() > 1) {
+                throw new ShopifyApiException('同一数据主题存在多个 Webhook 订阅，未修改订阅。');
+            }
+        }
+        $registered = $registered->keyBy('topic');
         $created = 0;
         $updated = 0;
         $unchanged = 0;
@@ -107,7 +146,20 @@ class ShopifyWebhookSubscriptionService
             $updated++;
         }
 
-        return compact('created', 'updated', 'unchanged', 'endpoint') + ['topics' => self::TOPICS];
+        $result = compact('created', 'updated', 'unchanged', 'endpoint') + ['topics' => self::TOPICS];
+        if ($created + $updated > 0) {
+            AuditLog::query()->create([
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->getKey(),
+                'action' => 'shopify.webhook_subscriptions.reconciled',
+                'subject_type' => AppInstallation::class,
+                'subject_id' => $installation->getKey(),
+                'new_values' => $result,
+                'metadata' => ['app_id' => $app->getKey(), 'app_handle' => $app->handle, 'owner_verified' => true],
+            ]);
+        }
+
+        return $result;
     }
 
     /**

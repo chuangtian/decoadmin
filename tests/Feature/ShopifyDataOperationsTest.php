@@ -272,14 +272,17 @@ class ShopifyDataOperationsTest extends TestCase
     public function test_webhook_subscriptions_are_registered_idempotently(): void
     {
         [, , $store, , , $installation] = $this->installedContext();
-        config(['shopify.app_url' => 'https://testadmin.example.com']);
+        config(['shopify.app_url' => 'https://testadmin.example.com', 'shopify.client_id' => 'client']);
         $requests = 0;
         Http::fake(function ($request) use (&$requests) {
             $requests++;
             $query = (string) $request['query'];
 
             if (str_contains($query, 'RegisteredWebhookSubscriptions')) {
-                return Http::response(['data' => ['webhookSubscriptions' => ['nodes' => []]]]);
+                return Http::response(['data' => [
+                    'currentAppInstallation' => ['app' => ['apiKey' => 'client']],
+                    'webhookSubscriptions' => ['nodes' => [], 'pageInfo' => ['hasNextPage' => false]],
+                ]]);
             }
 
             $topic = (string) data_get($request->data(), 'variables.topic');
