@@ -73,40 +73,44 @@
     element.style.setProperty('--deco-rec-background', safeColor(tokens.background_color, '#ffffff'));
     element.style.setProperty('--deco-rec-button', safeColor(tokens.button_color, '#111827'));
     element.style.setProperty('--deco-rec-button-text', safeColor(tokens.button_text_color, '#ffffff'));
-    element.style.setProperty('--deco-rec-title', safeColor(tokens.title_color_desktop, tokens.title_color || tokens.text_color || '#111827'));
-    element.style.setProperty('--deco-rec-title-mobile', safeColor(tokens.title_color_mobile, tokens.title_color || tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-title', semanticColor(tokens.title_color_role, safeColor(tokens.title_color_desktop, tokens.title_color || tokens.text_color || '#111827')));
+    element.style.setProperty('--deco-rec-title-mobile', semanticColor(tokens.title_color_role, safeColor(tokens.title_color_mobile, tokens.title_color || tokens.text_color || '#111827')));
     element.style.setProperty('--deco-rec-product-background', safeColor(tokens.product_background_color, '#ffffff'));
-    element.style.setProperty('--deco-rec-product-name', safeColor(tokens.product_name_color, tokens.text_color || '#111827'));
+    element.style.setProperty('--deco-rec-product-name', semanticColor(tokens.product_name_color_role, safeColor(tokens.product_name_color, tokens.text_color || '#111827')));
     element.style.setProperty('--deco-rec-description', safeColor(tokens.description_color, '#64748b'));
-    element.style.setProperty('--deco-rec-price', safeColor(tokens.price_color, tokens.text_color || '#111827'));
-    element.style.setProperty('--deco-rec-compare', safeColor(tokens.compare_at_color, '#94a3b8'));
-    element.style.setProperty('--deco-rec-discount', safeColor(tokens.discount_color, '#166534'));
+    element.style.setProperty('--deco-rec-price', semanticColor(tokens.price_color_role, safeColor(tokens.price_color, tokens.text_color || '#111827')));
+    element.style.setProperty('--deco-rec-compare', semanticColor(tokens.compare_at_color_role, safeColor(tokens.compare_at_color, '#94a3b8')));
+    element.style.setProperty('--deco-rec-discount', semanticColor(tokens.discount_color_role, safeColor(tokens.discount_color, '#166534')));
     element.style.setProperty('--deco-rec-radius', `${boundedNumber(tokens.border_radius, 0, 48, 12)}px`);
     element.style.setProperty('--deco-rec-gap', `${boundedNumber(tokens.gap, 0, 48, 16)}px`);
-    element.style.setProperty('--deco-rec-padding-y', `${boundedNumber(tokens.desktop_padding_y, 0, 48, 20)}px`);
-    element.style.setProperty('--deco-rec-padding-x', `${boundedNumber(tokens.desktop_padding_x, 0, 48, 0)}px`);
-    element.style.setProperty('--deco-rec-mobile-padding-y', `${boundedNumber(tokens.mobile_padding_y, 0, 48, 20)}px`);
-    element.style.setProperty('--deco-rec-mobile-padding-x', `${boundedNumber(tokens.mobile_padding_x, 0, 48, 0)}px`);
-    element.style.setProperty('--deco-rec-title-padding', `${boundedNumber(tokens.title_padding, 0, 48, 20)}px`);
+    element.style.setProperty('--deco-rec-padding-y', `${presetSpace(tokens.offer_padding_y, boundedNumber(tokens.desktop_padding_y, 0, 48, 20))}px`);
+    element.style.setProperty('--deco-rec-padding-x', `${presetSpace(tokens.offer_padding_x, boundedNumber(tokens.desktop_padding_x, 0, 48, 0))}px`);
+    element.style.setProperty('--deco-rec-mobile-padding-y', `${presetSpace(tokens.offer_padding_y, boundedNumber(tokens.mobile_padding_y, 0, 48, 20))}px`);
+    element.style.setProperty('--deco-rec-mobile-padding-x', `${presetSpace(tokens.offer_padding_x, boundedNumber(tokens.mobile_padding_x, 0, 48, 0))}px`);
+    element.style.setProperty('--deco-rec-title-padding', `${presetSpace(tokens.title_padding_preset, boundedNumber(tokens.title_padding, 0, 48, 20))}px`);
+    element.style.setProperty('--deco-rec-offer-radius', `${presetRadius(tokens.widget_radius, boundedNumber(tokens.content_radius, 0, 48, 0))}px`);
+    element.style.setProperty('--deco-rec-offer-border', ['solid','dashed'].includes(tokens.widget_border) ? `1px ${tokens.widget_border} rgba(148,163,184,.45)` : 'none');
     element.style.setProperty('--deco-rec-product-padding', `${boundedNumber(tokens.product_padding, 0, 48, 0)}px`);
     element.style.setProperty('--deco-rec-content-radius', `${boundedNumber(tokens.content_radius, 0, 48, 0)}px`);
-    element.style.setProperty('--deco-rec-image-radius', `${boundedNumber(tokens.image_radius, 0, 48, 0)}px`);
+    element.style.setProperty('--deco-rec-image-radius', `${presetRadius(tokens.image_radius_preset, boundedNumber(tokens.image_radius, 0, 48, 0))}px`);
+    element.style.setProperty('--deco-rec-image-border', ['solid','dashed'].includes(tokens.image_border) ? `1px ${tokens.image_border} rgba(148,163,184,.45)` : 'none');
     element.style.setProperty('--deco-rec-button-radius', `${boundedNumber(tokens.button_radius, 0, 48, 0)}px`);
-    element.style.setProperty('--deco-rec-title-size', `${boundedNumber(tokens.title_font_size_desktop, 12, 40, 16)}px`);
-    element.style.setProperty('--deco-rec-title-size-mobile', `${boundedNumber(tokens.title_font_size_mobile, 12, 40, 16)}px`);
-    element.style.setProperty('--deco-rec-title-weight', String(boundedNumber(tokens.title_font_weight_desktop, 400, 800, 500)));
-    element.style.setProperty('--deco-rec-title-weight-mobile', String(boundedNumber(tokens.title_font_weight_mobile, 400, 800, 500)));
+    element.style.setProperty('--deco-rec-title-size', `${presetFontSize(tokens.title_size_role, boundedNumber(tokens.title_font_size_desktop, 12, 40, 16))}px`);
+    element.style.setProperty('--deco-rec-title-size-mobile', `${presetFontSize(tokens.title_size_role, boundedNumber(tokens.title_font_size_mobile, 12, 40, 16))}px`);
+    element.style.setProperty('--deco-rec-title-weight', tokens.title_weight_role === 'bold' ? '700' : tokens.title_weight_role === 'regular' ? '400' : String(boundedNumber(tokens.title_font_weight_desktop, 400, 800, 500)));
+    element.style.setProperty('--deco-rec-title-weight-mobile', tokens.title_weight_role === 'bold' ? '700' : tokens.title_weight_role === 'regular' ? '400' : String(boundedNumber(tokens.title_font_weight_mobile, 400, 800, 500)));
     element.style.setProperty('--deco-rec-title-font', safeFont(tokens.title_font_family_desktop));
     element.style.setProperty('--deco-rec-title-font-mobile', safeFont(tokens.title_font_family_mobile));
     element.style.setProperty('--deco-rec-product-font', safeFont(tokens.product_font_family));
     element.style.setProperty('--deco-rec-button-font', safeFont(tokens.button_font_family));
-    element.style.setProperty('--deco-rec-product-size', `${boundedNumber(tokens.product_font_size, 12, 40, 16)}px`);
-    element.style.setProperty('--deco-rec-product-weight', String(boundedNumber(tokens.product_font_weight, 400, 800, 400)));
-    element.style.setProperty('--deco-rec-button-size', `${boundedNumber(tokens.button_font_size, 12, 40, 14)}px`);
-    element.style.setProperty('--deco-rec-button-weight', String(boundedNumber(tokens.button_font_weight, 400, 800, 400)));
+    element.style.setProperty('--deco-rec-product-size', `${presetFontSize(tokens.product_size_role, boundedNumber(tokens.product_font_size, 12, 40, 16))}px`);
+    element.style.setProperty('--deco-rec-product-weight', tokens.product_weight_role === 'bold' ? '700' : tokens.product_weight_role === 'regular' ? '400' : String(boundedNumber(tokens.product_font_weight, 400, 800, 400)));
+    element.style.setProperty('--deco-rec-button-size', `${presetFontSize(tokens.button_size_role, boundedNumber(tokens.button_font_size, 12, 40, 14))}px`);
+    element.style.setProperty('--deco-rec-button-weight', tokens.button_weight_role === 'bold' ? '700' : tokens.button_weight_role === 'regular' ? '400' : String(boundedNumber(tokens.button_font_weight, 400, 800, 400)));
     element.style.setProperty('--deco-rec-align', ['left','center','right'].includes(tokens.content_alignment) ? tokens.content_alignment : 'center');
     element.style.setProperty('--deco-rec-title-align', ['left','center','right'].includes(tokens.title_alignment) ? tokens.title_alignment : 'left');
-    element.style.setProperty('--deco-rec-image-aspect', ({'1:1':'1 / 1','4:5':'4 / 5','4:3':'4 / 3'})[tokens.image_aspect_ratio] || '1 / 1');
+    element.style.setProperty('--deco-rec-image-aspect', ({'1:1':'1 / 1','3:4':'3 / 4','2:3':'2 / 3','4:5':'4 / 5','4:3':'4 / 3','3:2':'3 / 2'})[tokens.image_aspect_ratio] || '1 / 1');
+    element.dataset.buttonType = ['primary','secondary','plain'].includes(tokens.button_type) ? tokens.button_type : 'primary';
     element.style.setProperty('--deco-rec-desktop-columns', String(boundedNumber(style.desktop_columns, 1, 6, 4)));
     element.style.setProperty('--deco-rec-mobile-columns', String(boundedNumber(style.mobile_columns, 1, 3, 2)));
     if (typeof tokens.custom_css === 'string' && !/[{}@]|url\s*\(|expression\s*\(/i.test(tokens.custom_css)) {
@@ -118,7 +122,9 @@
     heading.textContent = String(element.dataset.headingOverride || component.heading || 'Recommended for you').trim();
 
     const list = document.createElement('div');
-    list.className = `deco-recommendations__list deco-recommendations__list--${style.layout === 'grid' ? 'grid' : 'carousel'}`;
+    const desktopLayout = tokens.desktop_layout === 'carousel' ? 'carousel' : 'list';
+    const mobileLayout = tokens.mobile_layout === 'carousel' ? 'carousel' : 'list';
+    list.className = `deco-recommendations__list deco-recommendations__list--desktop-${desktopLayout} deco-recommendations__list--mobile-${mobileLayout}`;
     items.forEach((product) => list.append(createProductCard(element, product, component, data.strategy, style, data.discount)));
 
     content.replaceChildren(heading, list);
@@ -342,6 +348,25 @@
   function safeColor(value, fallback) {
     const color = String(value || '');
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+  }
+
+  function semanticColor(value, fallback) {
+    return ({
+      default: '#111827', accent: '#2563eb', critical: '#b91c1c', info: '#1d4ed8',
+      subdued: '#6b7280', success: '#15803d', warning: '#a16207',
+    })[String(value || '')] || fallback;
+  }
+
+  function presetSpace(value, fallback) {
+    return ({none: 0, extra_tight: 4, tight: 8, regular: 16, loose: 24, extra_loose: 32})[String(value || '')] ?? fallback;
+  }
+
+  function presetRadius(value, fallback) {
+    return ({none: 0, small: 4, regular: 8, large: 12, fully_rounded: 999})[String(value || '')] ?? fallback;
+  }
+
+  function presetFontSize(value, fallback) {
+    return ({extra_small: 11, small: 12, regular: 14, medium: 16, large: 20, extra_large: 24})[String(value || '')] ?? fallback;
   }
 
   function safeFont(value) {

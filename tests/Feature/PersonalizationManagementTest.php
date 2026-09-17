@@ -236,6 +236,8 @@ class PersonalizationManagementTest extends TestCase
             ->component('Personalization/Editor')
             ->where('components.0.uuid', $component->uuid)
             ->where('components.0.strategy_name', 'Editor strategy')
+            ->where('strategies.0.uuid', $strategy->uuid)
+            ->where('strategies.0.name', 'Editor strategy')
             ->where('products.0.title', 'Editor Bike')
             ->where('products.0.image_url', 'https://cdn.shopify.com/701.jpg')
             ->where('products.0.price', '100.0000')
@@ -263,6 +265,17 @@ class PersonalizationManagementTest extends TestCase
                     'title_font_family_desktop' => 'Montserrat', 'product_font_family' => 'Lato',
                     'button_font_family' => 'Arial', 'title_color_mobile' => '#111827',
                     'title_color_desktop' => '#111827', 'button_font_weight' => 400,
+                    'widget_border' => 'dashed', 'widget_radius' => 'fully_rounded',
+                    'offer_padding_y' => 'loose', 'offer_padding_x' => 'tight',
+                    'title_padding_preset' => 'regular', 'image_radius_preset' => 'large',
+                    'image_aspect_ratio' => '3:4', 'image_border' => 'dashed',
+                    'title_size_role' => 'large', 'title_weight_role' => 'bold',
+                    'title_color_role' => 'accent', 'product_size_role' => 'regular',
+                    'product_weight_role' => 'regular', 'product_name_color_role' => 'default',
+                    'price_color_role' => 'default', 'compare_at_color_role' => 'subdued',
+                    'discount_color_role' => 'success', 'button_size_role' => 'regular',
+                    'button_weight_role' => 'bold', 'button_type' => 'secondary',
+                    'variant_layout' => 'window',
                     'custom_css' => 'letter-spacing: 0.01em;',
                 ],
             ],
@@ -273,6 +286,9 @@ class PersonalizationManagementTest extends TestCase
         $this->assertSame('center', $component->style()->sole()->tokens['content_alignment']);
         $this->assertSame('#111827', $component->style()->sole()->tokens['title_color_mobile']);
         $this->assertSame('Montserrat', $component->style()->sole()->tokens['title_font_family_desktop']);
+        $this->assertSame('fully_rounded', $component->style()->sole()->tokens['widget_radius']);
+        $this->assertSame('secondary', $component->style()->sole()->tokens['button_type']);
+        $this->assertSame('window', $component->style()->sole()->tokens['variant_layout']);
         $this->assertSame('letter-spacing: 0.01em;', $component->style()->sole()->tokens['custom_css']);
     }
 

@@ -379,7 +379,7 @@ class PersonalizationConfigurationService
         $style->fill([
             'layout' => $layout,
             'desktop_columns' => $this->integer($input['desktop_columns'] ?? $style->desktop_columns, 1, 6, 'INVALID_DESKTOP_COLUMNS'),
-            'mobile_columns' => $this->integer($input['mobile_columns'] ?? $style->mobile_columns, 1, 3, 'INVALID_MOBILE_COLUMNS'),
+            'mobile_columns' => $this->integer($input['mobile_columns'] ?? $style->mobile_columns, 1, 6, 'INVALID_MOBILE_COLUMNS'),
             'show_image' => (bool) ($input['show_image'] ?? $style->show_image),
             'show_vendor' => (bool) ($input['show_vendor'] ?? $style->show_vendor),
             'show_price' => (bool) ($input['show_price'] ?? $style->show_price),
@@ -719,6 +719,11 @@ class PersonalizationConfigurationService
             'comparison_source', 'variant_display', 'variant_layout', 'variant_preselection',
             'show_subscription_options', 'allow_quantity', 'select_variant_text', 'primary_action',
             'success_message', 'auto_sync_theme', 'custom_css',
+            'widget_radius', 'offer_padding_y', 'offer_padding_x', 'title_padding_preset',
+            'image_radius_preset', 'title_size_role', 'title_weight_role', 'title_color_role',
+            'product_size_role', 'product_weight_role', 'product_name_color_role',
+            'price_color_role', 'compare_at_color_role', 'discount_color_role',
+            'button_size_role', 'button_weight_role', 'button_type',
         ];
         if (array_diff(array_keys($tokens), $allowed) !== []) {
             throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式包含不支持的字段。');
@@ -768,11 +773,27 @@ class PersonalizationConfigurationService
         foreach ([
             'title_alignment' => ['left', 'center', 'right'], 'content_alignment' => ['left', 'center', 'right'],
             'mobile_layout' => ['list', 'grid', 'carousel'], 'desktop_layout' => ['list', 'grid', 'carousel'],
-            'image_source' => ['product', 'variant'], 'image_aspect_ratio' => ['1:1', '4:5', '4:3'],
-            'image_border' => ['none', 'solid'], 'widget_border' => ['none', 'solid'],
+            'image_source' => ['product', 'variant'], 'image_aspect_ratio' => ['1:1', '3:4', '2:3', '4:5', '4:3', '3:2'],
+            'image_border' => ['none', 'solid', 'dashed'], 'widget_border' => ['none', 'solid', 'dashed'],
             'comparison_source' => ['compare_at_price', 'product_price'], 'variant_display' => ['dynamic', 'always', 'hidden'],
-            'variant_layout' => ['dropdown', 'buttons'], 'variant_preselection' => ['smart_match', 'first_available'],
+            'variant_layout' => ['dropdown', 'window', 'buttons'], 'variant_preselection' => ['smart_match', 'first_available'],
             'primary_action' => ['stay', 'cart', 'checkout'],
+            'widget_radius' => ['none', 'small', 'regular', 'large', 'fully_rounded'],
+            'offer_padding_y' => ['none', 'extra_tight', 'tight', 'regular', 'loose', 'extra_loose'],
+            'offer_padding_x' => ['none', 'extra_tight', 'tight', 'regular', 'loose', 'extra_loose'],
+            'title_padding_preset' => ['none', 'extra_tight', 'tight', 'regular', 'loose', 'extra_loose'],
+            'image_radius_preset' => ['none', 'small', 'regular', 'large', 'fully_rounded'],
+            'title_size_role' => ['extra_small', 'small', 'regular', 'medium', 'large', 'extra_large'],
+            'product_size_role' => ['extra_small', 'small', 'regular', 'medium', 'large', 'extra_large'],
+            'button_size_role' => ['extra_small', 'small', 'regular', 'medium', 'large', 'extra_large'],
+            'title_weight_role' => ['bold', 'regular'], 'product_weight_role' => ['bold', 'regular'],
+            'button_weight_role' => ['bold', 'regular'],
+            'title_color_role' => ['default', 'accent', 'critical', 'info', 'subdued', 'success', 'warning'],
+            'product_name_color_role' => ['default', 'accent', 'critical', 'info', 'subdued', 'success', 'warning'],
+            'price_color_role' => ['default', 'accent', 'critical', 'info', 'subdued', 'success', 'warning'],
+            'compare_at_color_role' => ['default', 'accent', 'critical', 'info', 'subdued', 'success', 'warning'],
+            'discount_color_role' => ['default', 'accent', 'critical', 'info', 'subdued', 'success', 'warning'],
+            'button_type' => ['primary', 'secondary', 'plain'],
         ] as $key => $choices) {
             if (isset($tokens[$key]) && (! is_string($tokens[$key]) || ! in_array($tokens[$key], $choices, true))) {
                 throw new PersonalizationException('INVALID_STYLE_TOKENS', '样式选项无效。');
