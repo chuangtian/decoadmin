@@ -711,7 +711,8 @@ class PersonalizationConfigurationService
             'desktop_padding_x', 'title_padding', 'product_padding', 'content_radius', 'image_radius',
             'selector_radius', 'button_radius', 'title_font_size_mobile', 'title_font_size_desktop',
             'product_font_size', 'button_font_size', 'title_font_weight_mobile',
-            'title_font_weight_desktop', 'product_font_weight', 'button_font_weight', 'title_alignment',
+            'title_font_weight_desktop', 'product_font_weight', 'button_font_weight',
+            'title_font_family_mobile', 'title_font_family_desktop', 'product_font_family', 'button_font_family', 'title_alignment',
             'content_alignment', 'unified_alignment', 'mobile_layout', 'desktop_layout', 'image_source',
             'image_aspect_ratio', 'image_border', 'widget_border', 'show_product_name',
             'show_description', 'show_reviews', 'show_discount_value', 'discount_text',
@@ -750,6 +751,18 @@ class PersonalizationConfigurationService
         foreach (['title_font_weight_mobile', 'title_font_weight_desktop', 'product_font_weight', 'button_font_weight'] as $weightKey) {
             if (isset($tokens[$weightKey])) {
                 $tokens[$weightKey] = $this->integer($tokens[$weightKey], 400, 800, 'INVALID_STYLE_TOKENS');
+            }
+        }
+        $fontChoices = [
+            'theme', 'Arial', 'Abril Fatface', 'Anton', 'Arvo', 'Bangers', 'Bitter', 'Caveat',
+            'Cousine', 'Cutive Mono', 'Delius', 'Gravitas One', 'Josefin Slab', 'Lato', 'Lora',
+            'Montserrat', 'Old Standard TT', 'Open Sans', 'Oswald', 'Source Sans Pro', 'Tangerine',
+            'Raleway', 'Courier New', 'Arial Black', 'Comic Sans MS', 'Georgia', 'Impact', 'Tahoma',
+            'Times New Roman', 'Trebuchet MS', 'Verdana', 'Microsoft Sans Serif',
+        ];
+        foreach (['title_font_family_mobile', 'title_font_family_desktop', 'product_font_family', 'button_font_family'] as $fontKey) {
+            if (isset($tokens[$fontKey]) && (! is_string($tokens[$fontKey]) || ! in_array($tokens[$fontKey], $fontChoices, true))) {
+                throw new PersonalizationException('INVALID_STYLE_TOKENS', '字体选项无效。');
             }
         }
         foreach ([

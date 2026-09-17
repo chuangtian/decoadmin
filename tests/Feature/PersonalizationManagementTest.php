@@ -259,7 +259,9 @@ class PersonalizationManagementTest extends TestCase
                     'show_product_name' => true, 'show_description' => true,
                     'discount_text' => '(Save *|DISCOUNT|*)', 'comparison_source' => 'compare_at_price',
                     'content_alignment' => 'center', 'variant_display' => 'dynamic',
-                    'title_font_size_desktop' => 16, 'title_color_mobile' => '#111827',
+                    'title_font_size_desktop' => 16, 'title_font_family_mobile' => 'theme',
+                    'title_font_family_desktop' => 'Montserrat', 'product_font_family' => 'Lato',
+                    'button_font_family' => 'Arial', 'title_color_mobile' => '#111827',
                     'title_color_desktop' => '#111827', 'button_font_weight' => 400,
                     'custom_css' => 'letter-spacing: 0.01em;',
                 ],
@@ -270,6 +272,7 @@ class PersonalizationManagementTest extends TestCase
         $this->assertSame('Cart design test', $component->fresh()->settings['editor_experiment']['name']);
         $this->assertSame('center', $component->style()->sole()->tokens['content_alignment']);
         $this->assertSame('#111827', $component->style()->sole()->tokens['title_color_mobile']);
+        $this->assertSame('Montserrat', $component->style()->sole()->tokens['title_font_family_desktop']);
         $this->assertSame('letter-spacing: 0.01em;', $component->style()->sole()->tokens['custom_css']);
     }
 

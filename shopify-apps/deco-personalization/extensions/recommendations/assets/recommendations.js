@@ -96,6 +96,10 @@
     element.style.setProperty('--deco-rec-title-size-mobile', `${boundedNumber(tokens.title_font_size_mobile, 12, 40, 16)}px`);
     element.style.setProperty('--deco-rec-title-weight', String(boundedNumber(tokens.title_font_weight_desktop, 400, 800, 500)));
     element.style.setProperty('--deco-rec-title-weight-mobile', String(boundedNumber(tokens.title_font_weight_mobile, 400, 800, 500)));
+    element.style.setProperty('--deco-rec-title-font', safeFont(tokens.title_font_family_desktop));
+    element.style.setProperty('--deco-rec-title-font-mobile', safeFont(tokens.title_font_family_mobile));
+    element.style.setProperty('--deco-rec-product-font', safeFont(tokens.product_font_family));
+    element.style.setProperty('--deco-rec-button-font', safeFont(tokens.button_font_family));
     element.style.setProperty('--deco-rec-product-size', `${boundedNumber(tokens.product_font_size, 12, 40, 16)}px`);
     element.style.setProperty('--deco-rec-product-weight', String(boundedNumber(tokens.product_font_weight, 400, 800, 400)));
     element.style.setProperty('--deco-rec-button-size', `${boundedNumber(tokens.button_font_size, 12, 40, 14)}px`);
@@ -338,6 +342,12 @@
   function safeColor(value, fallback) {
     const color = String(value || '');
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+  }
+
+  function safeFont(value) {
+    const font = String(value || 'theme');
+    const allowed = ['Arial','Abril Fatface','Anton','Arvo','Bangers','Bitter','Caveat','Cousine','Cutive Mono','Delius','Gravitas One','Josefin Slab','Lato','Lora','Montserrat','Old Standard TT','Open Sans','Oswald','Source Sans Pro','Tangerine','Raleway','Courier New','Arial Black','Comic Sans MS','Georgia','Impact','Tahoma','Times New Roman','Trebuchet MS','Verdana','Microsoft Sans Serif'];
+    return allowed.includes(font) ? JSON.stringify(font) : 'inherit';
   }
 
   function boundedNumber(value, minimum, maximum, fallback) {
