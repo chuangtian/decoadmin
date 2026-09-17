@@ -32,6 +32,7 @@ class TrustpilotReviewEnrichmentService
             'mentions_processed' => 0,
             'reviewer_matches' => 0,
             'reviewer_updates' => 0,
+            'model_updates' => 0,
             'mentions_with_product_matches' => 0,
             'product_matches' => 0,
             'dry_run' => $dryRun,
@@ -56,6 +57,7 @@ class TrustpilotReviewEnrichmentService
                         $stats['mentions_processed']++;
                         $review = $this->matchedReview($mention, $reviewsById, $reviewsByFingerprint);
                         $title = trim((string) ($review['title'] ?? $mention->title));
+                        $reviewerDirty = false;
 
                         if ($review !== null) {
                             $stats['reviewer_matches']++;
@@ -65,8 +67,24 @@ class TrustpilotReviewEnrichmentService
                                 'url' => $review['url'],
                                 'url_hash' => hash('sha256', $review['url']),
                             ]);
-                            if ($mention->isDirty()) {
-                                $mention->save();
+                            $reviewerDirty = $mention->isDirty();
+                        }
+
+                        $modelMentions = $this->extractModelMentions($title.' '.(string) $mention->content);
+                        if ($modelMentions !== []) {
+                            $modelName = implode(' | ', $modelMentions);
+                            $mention->forceFill([
+                                'model_name' => mb_strlen($modelName) <= 120 ? $modelName : $modelMentions[0],
+                                'metrics' => [...($mention->metrics ?? []), 'detected_models' => $modelMentions],
+                            ]);
+                            if ($mention->isDirty('model_name') || $mention->isDirty('metrics')) {
+                                $stats['model_updates']++;
+                            }
+                        }
+
+                        if ($mention->isDirty()) {
+                            $mention->save();
+                            if ($reviewerDirty) {
                                 $stats['reviewer_updates']++;
                             }
                         }
@@ -255,9 +273,7 @@ class TrustpilotReviewEnrichmentService
      */
     private function matchProducts(Collection $products, string $title, string $content): array
     {
-        $normalizedTitle = $this->normalizedText($title);
-        $normalizedContent = $this->normalizedText($content);
-        $combined = trim($normalizedTitle.' '.$normalizedContent);
+        $combined = $this->matchingText($title.' '.$content);
         if ($combined === '') {
             return [];
         }
@@ -268,14 +284,14 @@ class TrustpilotReviewEnrichmentService
         foreach ($descriptors as $descriptor) {
             $best = null;
             foreach ($descriptor['aliases'] as $alias) {
-                $position = $this->aliasPosition($combined, $alias);
-                if ($position === null) {
+                $candidate = $this->aliasMatch($combined, $alias);
+                if ($candidate === null) {
                     continue;
                 }
                 if ($best === null
-                    || $position < $best['position']
-                    || ($position === $best['position'] && mb_strlen($alias) > mb_strlen($best['alias']))) {
-                    $best = ['alias' => $alias, 'position' => $position];
+                    || $candidate['position'] < $best['position']
+                    || ($candidate['position'] === $best['position'] && mb_strlen($candidate['alias']) > mb_strlen($best['alias']))) {
+                    $best = $candidate;
                 }
             }
             if ($best !== null) {
@@ -295,7 +311,7 @@ class TrustpilotReviewEnrichmentService
         }
         $matches = array_values($matches);
 
-        preg_match_all('/(?<![a-z0-9])(?:x|m)\d+[a-z]?(?![a-z0-9])/u', $combined, $modelTokens, PREG_OFFSET_CAPTURE);
+        preg_match_all('/(?<![A-Za-z0-9])[XxMm]\d+[A-Za-z]?(?![A-Za-z0-9])/u', $combined, $modelTokens, PREG_OFFSET_CAPTURE);
         $earliestModelPosition = collect($modelTokens[0] ?? [])->min(fn (array $token): int => (int) $token[1]);
         usort($matches, fn (array $left, array $right): int => $left['position'] <=> $right['position']);
         $primaryAssigned = false;
@@ -319,38 +335,77 @@ class TrustpilotReviewEnrichmentService
     /** @return array{product: Product, aliases: list<string>, model_code: string, collaboration: bool} */
     private function productDescriptor(Product $product): array
     {
-        $source = $this->normalizedText("{$product->title} {$product->handle}");
-        preg_match('/(?<![a-z0-9])((?:x|m)\d+[a-z]?)(?![a-z0-9])/u', $source, $model);
+        $source = $this->matchingText((string) $product->title);
+        preg_match('/(?<![A-Za-z0-9])([XxMm]\d+[A-Za-z]?)(?![A-Za-z0-9])/u', $source, $model);
         $modelCode = (string) ($model[1] ?? '');
-        $collaboration = str_contains($source, 'bs zay');
+        $collaboration = preg_match('/(?<![A-Za-z0-9])Bs(?:[.\s-]*)zay(?![A-Za-z0-9])/u', $source) === 1;
         $aliases = [];
 
         if ($collaboration && $modelCode !== '') {
-            $aliases = ["{$modelCode} x bs zay", "{$modelCode} bs zay", 'bs zay'];
+            $aliases = ["{$modelCode} x Bs.zay", "{$modelCode} Bs.zay", 'Bs.zay'];
         } elseif ($modelCode !== '') {
-            $aliases = [$modelCode, "macfox {$modelCode}"];
-            if ($modelCode === 'x2') {
-                $aliases[] = 'x2 pro';
+            $aliases = [$modelCode, "Macfox {$modelCode}"];
+            if ($modelCode === 'X2') {
+                $aliases[] = 'X2 Pro';
             }
         }
 
         return [
             'product' => $product,
-            'aliases' => collect($aliases)->map(fn (string $alias): string => $this->normalizedText($alias))->filter()->unique()->values()->all(),
+            'aliases' => collect($aliases)->filter()->unique()->values()->all(),
             'model_code' => $modelCode,
             'collaboration' => $collaboration,
         ];
     }
 
-    private function aliasPosition(string $text, string $alias): ?int
+    /** @return array{alias: string, position: int}|null */
+    private function aliasMatch(string $text, string $alias): ?array
     {
         if ($alias === '') {
             return null;
         }
 
-        $position = strpos(" {$text} ", " {$alias} ");
+        if (str_ends_with($alias, ' x Bs.zay')) {
+            $model = preg_quote(substr($alias, 0, -strlen(' x Bs.zay')), '/');
+            $pattern = '/(?<![A-Za-z0-9])'.$model.'\s*(?:x|×|\*)\s*Bs(?:[.\s-]*)zay(?![A-Za-z0-9])/u';
+        } elseif ($alias === 'Bs.zay') {
+            $pattern = '/(?<![A-Za-z0-9])Bs(?:[.\s-]*)zay(?![A-Za-z0-9])/u';
+        } else {
+            $quoted = preg_quote($alias, '/');
+            $pattern = '/(?<![A-Za-z0-9])'.str_replace('\\ ', '\\s+', $quoted).'(?![A-Za-z0-9])/u';
+        }
 
-        return $position === false ? null : $position;
+        if (preg_match($pattern, $text, $matches, PREG_OFFSET_CAPTURE) !== 1) {
+            return null;
+        }
+
+        return ['alias' => $matches[0][0], 'position' => (int) $matches[0][1]];
+    }
+
+    /** @return list<string> */
+    private function extractModelMentions(string $value): array
+    {
+        $text = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        preg_match_all(
+            '/(?<![A-Za-z0-9])(?:\d+\s*[*×x]\s*)?[XxMm]\d+[A-Za-z]?(?:\s*(?:[*×x]\s*)Bs(?:[.\s-]*zay))?(?:欧版)?(?![A-Za-z0-9])/u',
+            $text,
+            $matches,
+        );
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $match): string => trim($match))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function matchingText(string $value): string
+    {
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = str_replace(['’', '‘', '´', '`'], "'", $value);
+
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
     }
 
     private function normalizedText(string $value): string

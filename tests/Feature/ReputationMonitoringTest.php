@@ -247,9 +247,10 @@ class ReputationMonitoringTest extends TestCase
         $withoutComparison = app(ReputationDashboardService::class)->overview($store, [...$baseFilters, 'comparison' => 'none']);
         $this->assertNull($withoutComparison['comparison']);
         $this->assertSame([
-            'macfox-x1',
+            'MACFOX-X1',
             'another-product',
             'macfox-m16-ebike',
+            'macfox-x1',
             'macfox-x2',
             'macfox-x7',
             'shipping-protection',
@@ -257,10 +258,10 @@ class ReputationMonitoringTest extends TestCase
         ], collect($withoutComparison['models'])->pluck('key')->all());
         $this->assertSame(8, collect($withoutComparison['models'])->sum('count'));
         $this->assertSame([
-            'model' => 'macfox-x1',
-            'key' => 'macfox-x1',
-            'count' => 2,
-            'average_rating' => 4.0,
+            'model' => 'MACFOX-X1',
+            'key' => 'MACFOX-X1',
+            'count' => 1,
+            'average_rating' => 3.0,
         ], $withoutComparison['models'][0]);
         $this->assertTrue(collect($withoutComparison['models'])->every(fn (array $model): bool => ! array_key_exists('change_percent', $model)
             && ! array_key_exists('previous_count', $model)
@@ -279,9 +280,9 @@ class ReputationMonitoringTest extends TestCase
             ->assertOk()
             ->assertDontSee('must-never-classify-model')
             ->assertInertia(fn (Assert $page) => $page
-                ->where('dashboard.models.0.key', 'macfox-x1')
-                ->where('dashboard.models.0.count', 2)
-                ->where('dashboard.models.6.key', 'x1s-x-bs-zay')
+                ->where('dashboard.models.0.key', 'MACFOX-X1')
+                ->where('dashboard.models.0.count', 1)
+                ->where('dashboard.models.7.key', 'x1s-x-bs-zay')
                 ->missing('dashboard.models.0.change_percent'));
     }
 

@@ -39,7 +39,7 @@ class TrustpilotReviewEnrichmentTest extends TestCase
         $this->product($organization, $store, 103, 'Macfox M19 Electric Bike for Teenager', 'macfox-m19', 'draft');
         $this->electricBikes($organization, $store, [$x1s, $collaboration]);
 
-        $content = 'Purchased a Macfox M19 electric bike for my child. We have two other Macfox bikes (x1s models) and wanted one to match ours.';
+        $content = 'Purchased a Macfox M19 electric bike for my child. We have two other Macfox bikes (X1S models) and wanted one to match ours.';
         $mention = $this->mention($organization, $store, 'example-review', $content);
         $collaborationMention = $this->mention(
             $organization,
@@ -60,6 +60,8 @@ class TrustpilotReviewEnrichmentTest extends TestCase
         $this->assertSame('Jimmy Cazares', $mention->refresh()->reviewer_name);
         $this->assertSame('https://www.trustpilot.com/reviews/aaaaaaaaaaaaaaaaaaaaaaaa', $mention->url);
         $this->assertSame('Purchased a Macfox M19 electric bike…', $mention->title);
+        $this->assertSame('M19 | X1S', $mention->model_name);
+        $this->assertSame(['M19', 'X1S'], $mention->metrics['detected_models']);
         $this->assertNull($otherMention->refresh()->reviewer_name);
 
         $exampleMatches = ReputationMentionProductMatch::query()->where('reputation_mention_id', $mention->id)->get();
@@ -71,6 +73,7 @@ class TrustpilotReviewEnrichmentTest extends TestCase
         $this->assertCount(1, $collaborationMatches);
         $this->assertSame($collaboration->id, $collaborationMatches->sole()->product_id);
         $this->assertSame('primary', $collaborationMatches->sole()->match_role);
+        $this->assertSame('X1S x Bs.zay', $collaborationMention->refresh()->model_name);
 
         $dashboard = app(ReputationDashboardService::class)->overview($store, [
             'date_from' => '2026-07-01',
@@ -84,6 +87,58 @@ class TrustpilotReviewEnrichmentTest extends TestCase
             'handle' => 'macfox-x1',
             'role' => 'mentioned',
         ]], $record['matched_products']);
+    }
+
+    public function test_model_capture_preserves_case_longest_suffix_locale_and_collaboration_text(): void
+    {
+        $organization = Organization::query()->create(['name' => 'Macfox', 'code' => 'macfox-model-integrity']);
+        $store = $organization->stores()->create([
+            'name' => 'Macfox Bike', 'shopify_domain' => 'macfoxebike.myshopify.com',
+            'status' => 'active', 'timezone' => 'UTC',
+        ]);
+        $x7 = $this->product($organization, $store, 301, 'Macfox X7', 'macfox-x7');
+        $x7l = $this->product($organization, $store, 302, 'Macfox X7L', 'macfox-x7l');
+        $x1s = $this->product($organization, $store, 303, 'Macfox X1s', 'macfox-x1s');
+        $collaboration = $this->product($organization, $store, 304, 'Macfox X1s x Bs.zay', 'x1s-x-bs-zay');
+        $this->electricBikes($organization, $store, [$x7, $x7l, $x1s, $collaboration]);
+
+        $cases = [
+            'x7l' => 'X7L',
+            'x7l-eu' => 'X7L欧版',
+            'mixedcase' => 'X1s',
+            'lowercase' => 'x1s',
+            'collaboration' => '1*X1sxBs.zay',
+        ];
+        $reviews = [];
+        foreach ($cases as $key => $content) {
+            $this->mention($organization, $store, $key, "Riding {$content} every day.");
+            $reviews[] = $this->review(substr(hash('sha256', $key), 0, 24), "Reviewer {$key}", $content, "Riding {$content} every day.");
+        }
+
+        app(TrustpilotReviewEnrichmentService::class)->enrich($store, $this->snapshot($reviews));
+
+        foreach ($cases as $key => $expected) {
+            $mention = ReputationMention::query()->where('canonical_key', hash('sha256', $key))->sole();
+            $this->assertSame($expected, $mention->model_name);
+            $this->assertSame([$expected], $mention->metrics['detected_models']);
+        }
+
+        $x7lMention = ReputationMention::query()->where('canonical_key', hash('sha256', 'x7l'))->sole();
+        $this->assertSame($x7l->id, $x7lMention->productMatches()->sole()->product_id);
+        $this->assertNotSame($x7->id, $x7lMention->productMatches()->sole()->product_id);
+
+        $euMention = ReputationMention::query()->where('canonical_key', hash('sha256', 'x7l-eu'))->sole();
+        $this->assertSame($x7l->id, $euMention->productMatches()->sole()->product_id);
+
+        $mixedcaseMention = ReputationMention::query()->where('canonical_key', hash('sha256', 'mixedcase'))->sole();
+        $this->assertSame($x1s->id, $mixedcaseMention->productMatches()->sole()->product_id);
+
+        $lowercaseMention = ReputationMention::query()->where('canonical_key', hash('sha256', 'lowercase'))->sole();
+        $this->assertCount(0, $lowercaseMention->productMatches);
+
+        $collaborationMention = ReputationMention::query()->where('canonical_key', hash('sha256', 'collaboration'))->sole();
+        $this->assertSame($collaboration->id, $collaborationMention->productMatches()->sole()->product_id);
+        $this->assertSame('X1sxBs.zay', $collaborationMention->productMatches()->sole()->matched_alias);
     }
 
     public function test_ambiguous_content_matches_do_not_write_a_reviewer_name_and_dry_run_rolls_back(): void

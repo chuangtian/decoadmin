@@ -58,6 +58,7 @@ class EnrichTrustpilotReviews extends Command
             ['数据库评论', $result['mentions_processed']],
             ['姓名唯一匹配', $result['reviewer_matches']],
             ['姓名/链接更新', $result['reviewer_updates']],
+            ['车型原文更新', $result['model_updates']],
             ['识别到车型的评论', $result['mentions_with_product_matches']],
             ['车型关联数', $result['product_matches']],
         ]);
