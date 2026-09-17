@@ -36,6 +36,7 @@ const props = defineProps<{
     organization: { id: number; name: string };
     canManage: boolean;
     today: string;
+    windowDays: number;
     windowEnd: string;
     timezone: string;
     paymentRequests: PaymentRequest[];
@@ -200,7 +201,7 @@ function savePayment(): void {
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="border-b border-slate-100 px-6 py-5">
                     <h2 class="font-semibold text-slate-900">付款与续费项目</h2>
-                    <p class="mt-1 text-sm text-slate-500">首次待付款全部显示；手动和自动续费仅显示已逾期或未来 30 天内到期的项目（截至 {{ props.windowEnd }}，{{ props.timezone }}）。</p>
+                    <p class="mt-1 text-sm text-slate-500">首次待付款全部显示；手动和自动续费仅显示已逾期或未来 {{ props.windowDays }} 天内到期的项目（截至 {{ props.windowEnd }}，{{ props.timezone }}）。</p>
                     <div class="mt-3 flex flex-wrap gap-2">
                         <button type="button" class="rounded-full px-3 py-2 text-sm font-semibold transition" :class="activeFilter === 'pending' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'" @click="setFilter('pending')">{{ filterLabels.pending }}</button>
                         <button type="button" class="rounded-full px-3 py-2 text-sm font-semibold transition" :class="activeFilter === 'manual' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'" @click="setFilter('manual')">{{ filterLabels.manual }}</button>

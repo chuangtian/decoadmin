@@ -18,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class FinanceService
 {
+    public const RENEWAL_WINDOW_DAYS = 15;
+
     public function __construct(private readonly AnalyticsQueryService $analytics) {}
 
     /** @param array<string, mixed> $filters */
@@ -51,7 +53,7 @@ class FinanceService
     public function paymentRequests(Organization $organization, ?CarbonImmutable $today = null): array
     {
         $today ??= CarbonImmutable::today();
-        $windowEnd = $today->addDays(30);
+        $windowEnd = $today->addDays(self::RENEWAL_WINDOW_DAYS);
 
         return PersonalRequest::query()
             ->where('organization_id', $organization->id)

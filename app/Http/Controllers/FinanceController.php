@@ -42,7 +42,8 @@ class FinanceController extends Controller
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
             'canManage' => $request->user()->hasPermission('finance.manage', $organization),
             'today' => $today->toDateString(),
-            'windowEnd' => $today->addDays(30)->toDateString(),
+            'windowDays' => FinanceService::RENEWAL_WINDOW_DAYS,
+            'windowEnd' => $today->addDays(FinanceService::RENEWAL_WINDOW_DAYS)->toDateString(),
             'timezone' => $timezone,
             'paymentRequests' => $finance->paymentRequests($organization, $today),
         ]);

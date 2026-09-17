@@ -615,10 +615,10 @@ class PersonalRequestWorkflowTest extends TestCase
         ];
         PersonalRequest::query()->create([...$base, 'title' => '稍后付款', 'desired_date' => '2026-09-20', 'payment_status' => 'pending']);
         PersonalRequest::query()->create([...$base, 'title' => '优先付款', 'desired_date' => '2026-09-12', 'payment_status' => 'pending']);
-        PersonalRequest::query()->create([...$base, 'title' => '稍后续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-08-30', 'next_renewal_on' => '2026-09-30']);
+        PersonalRequest::query()->create([...$base, 'title' => '稍后续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-08-30', 'next_renewal_on' => '2026-09-25']);
         PersonalRequest::query()->create([...$base, 'title' => '优先续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-08-12', 'next_renewal_on' => '2026-09-12']);
-        PersonalRequest::query()->create([...$base, 'title' => '三十天边界自动续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-09-11', 'next_renewal_on' => '2026-10-11', 'renewal_mode' => 'automatic']);
-        PersonalRequest::query()->create([...$base, 'title' => '三十一天后续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-09-11', 'next_renewal_on' => '2026-10-12']);
+        PersonalRequest::query()->create([...$base, 'title' => '十五天边界自动续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-09-11', 'next_renewal_on' => '2026-09-26', 'renewal_mode' => 'automatic']);
+        PersonalRequest::query()->create([...$base, 'title' => '十六天后续费', 'desired_date' => '2026-08-01', 'payment_status' => 'paid', 'paid_on' => '2026-09-11', 'next_renewal_on' => '2026-09-27']);
 
         $this->actingAs($finance)->withSession($this->contextSession($organization, $store))
             ->get(route('finance.renewals'))
@@ -628,10 +628,11 @@ class PersonalRequestWorkflowTest extends TestCase
                 ->where('paymentRequests.1.title', '稍后付款')
                 ->where('paymentRequests.2.title', '优先续费')
                 ->where('paymentRequests.3.title', '稍后续费')
-                ->where('paymentRequests.4.title', '三十天边界自动续费')
-                ->where('paymentRequests.4.days_until_renewal', 30)
+                ->where('paymentRequests.4.title', '十五天边界自动续费')
+                ->where('paymentRequests.4.days_until_renewal', 15)
                 ->where('paymentRequests.4.can_record_renewal', false)
-                ->where('windowEnd', '2026-10-11')
+                ->where('windowDays', 15)
+                ->where('windowEnd', '2026-09-26')
                 ->has('paymentRequests', 5));
     }
 
@@ -654,11 +655,11 @@ class PersonalRequestWorkflowTest extends TestCase
             'renewal_status' => 'active',
             'renewal_mode' => 'manual',
             'billing_cycle' => 'monthly',
-            'renewal_anchor_day' => 17,
+            'renewal_anchor_day' => 2,
             'renewal_anchor_month_end' => false,
             'payment_status' => 'paid',
-            'paid_on' => '2026-09-17',
-            'next_renewal_on' => '2026-10-17',
+            'paid_on' => '2026-09-02',
+            'next_renewal_on' => '2026-10-02',
         ]);
         PersonalRequestPayment::query()->create([
             'organization_id' => $organization->id,
@@ -667,7 +668,7 @@ class PersonalRequestWorkflowTest extends TestCase
             'type' => 'initial_payment',
             'amount' => '16.90',
             'currency' => 'USD',
-            'paid_on' => '2026-09-17',
+            'paid_on' => '2026-09-02',
         ]);
 
         $this->actingAs($finance)->withSession($this->contextSession($organization, $store))
@@ -675,32 +676,32 @@ class PersonalRequestWorkflowTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('today', '2026-09-17')
-                ->where('paymentRequests.0.next_renewal_on', '2026-10-17')
-                ->where('paymentRequests.0.following_renewal_on', '2026-11-17')
-                ->where('paymentRequests.0.days_until_renewal', 30)
+                ->where('paymentRequests.0.next_renewal_on', '2026-10-02')
+                ->where('paymentRequests.0.following_renewal_on', '2026-11-02')
+                ->where('paymentRequests.0.days_until_renewal', 15)
                 ->where('paymentRequests.0.can_record_renewal', false));
 
         $this->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-09-17'])
             ->assertRedirect()
             ->assertSessionHasErrors([
-                'paid_on' => '本周期将在 2026-10-17 到期，当前无需记录续费。',
+                'paid_on' => '本周期将在 2026-10-02 到期，当前无需记录续费。',
             ]);
         $this->assertSame(1, PersonalRequestPayment::query()->where('personal_request_id', $item->id)->count());
 
-        CarbonImmutable::setTestNow('2026-10-20 10:00:00');
-        $this->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-10-20'])
+        CarbonImmutable::setTestNow('2026-10-05 10:00:00');
+        $this->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-10-05'])
             ->assertRedirect()
             ->assertSessionHasNoErrors()
-            ->assertSessionHas('success', '续费已记录：本周期 2026-10-17，下次续费 2026-11-17。');
+            ->assertSessionHas('success', '续费已记录：本周期 2026-10-02，下次续费 2026-11-02。');
 
         $item->refresh();
-        $this->assertSame('2026-10-20', $item->paid_on->toDateString());
-        $this->assertSame('2026-11-17', $item->next_renewal_on->toDateString());
+        $this->assertSame('2026-10-05', $item->paid_on->toDateString());
+        $this->assertSame('2026-11-02', $item->next_renewal_on->toDateString());
         $renewal = PersonalRequestPayment::query()->where('type', 'manual_renewal')->sole();
-        $this->assertSame('2026-10-17', $renewal->renewal_due_on->toDateString());
-        $this->assertSame('2026-10-20', $renewal->paid_on->toDateString());
+        $this->assertSame('2026-10-02', $renewal->renewal_due_on->toDateString());
+        $this->assertSame('2026-10-05', $renewal->paid_on->toDateString());
 
-        $this->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-10-20'])
+        $this->post(route('finance.expense-requests.payment', $item), ['paid_on' => '2026-10-05'])
             ->assertRedirect()
             ->assertSessionHasErrors('paid_on');
         $this->assertSame(2, PersonalRequestPayment::query()->where('personal_request_id', $item->id)->count());
