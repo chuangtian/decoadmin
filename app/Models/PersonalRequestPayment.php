@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-#[Fillable(['uuid', 'organization_id', 'personal_request_id', 'paid_by', 'type', 'amount', 'currency', 'paid_on', 'reference'])]
+#[Fillable(['uuid', 'organization_id', 'personal_request_id', 'paid_by', 'type', 'amount', 'currency', 'paid_on', 'renewal_due_on', 'reference'])]
 class PersonalRequestPayment extends Model
 {
     protected static function booted(): void
@@ -29,6 +29,6 @@ class PersonalRequestPayment extends Model
 
     protected function casts(): array
     {
-        return ['amount' => 'decimal:2', 'paid_on' => 'date'];
+        return ['amount' => 'decimal:2', 'paid_on' => 'date', 'renewal_due_on' => 'date'];
     }
 }

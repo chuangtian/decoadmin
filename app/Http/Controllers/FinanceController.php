@@ -9,6 +9,8 @@ use App\Models\PersonalRequest;
 use App\Services\BusinessNotificationService;
 use App\Services\FinanceService;
 use App\Support\CurrentOrganization;
+use App\Support\CurrentStore;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,14 +30,21 @@ class FinanceController extends Controller
         ]);
     }
 
-    public function renewals(Request $request, CurrentOrganization $currentOrganization, FinanceService $finance): Response
+    public function renewals(Request $request, CurrentOrganization $currentOrganization, CurrentStore $currentStore, FinanceService $finance): Response
     {
         $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        $timezone = $store->timezone ?: 'UTC';
+        $today = CarbonImmutable::today($timezone);
 
         return Inertia::render('Finance/Renewals', [
             'organization' => ['id' => $organization->id, 'name' => $organization->name],
             'canManage' => $request->user()->hasPermission('finance.manage', $organization),
-            'paymentRequests' => $finance->paymentRequests($organization),
+            'today' => $today->toDateString(),
+            'windowEnd' => $today->addDays(30)->toDateString(),
+            'timezone' => $timezone,
+            'paymentRequests' => $finance->paymentRequests($organization, $today),
         ]);
     }
 
@@ -101,17 +110,22 @@ class FinanceController extends Controller
         return back()->with('success', '收支记录已删除。');
     }
 
-    public function recordExpenseRequestPayment(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance, BusinessNotificationService $notifications): RedirectResponse
+    public function recordExpenseRequestPayment(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, CurrentStore $currentStore, FinanceService $finance, BusinessNotificationService $notifications): RedirectResponse
     {
+        $organization = $currentOrganization->require();
+        $store = $currentStore->require();
+        abort_unless((int) $store->organization_id === (int) $organization->id, 404);
+        $today = CarbonImmutable::today($store->timezone ?: 'UTC')->toDateString();
         $validated = $request->validate([
-            'paid_on' => ['required', 'date', 'before_or_equal:today'],
+            'paid_on' => ['required', 'date', "before_or_equal:{$today}"],
             'payment_reference' => ['nullable', 'string', 'max:180'],
         ]);
         $renewal = $personalRequest->payment_status === 'paid';
-        $organization = $currentOrganization->require();
+        $renewalDueOn = $renewal ? $personalRequest->next_renewal_on?->toDateString() : null;
         $user = $request->user();
         $finance->recordExpenseRequestPayment($organization, $user, $personalRequest, $validated);
         $personalRequest->refresh();
+        $nextRenewalOn = $personalRequest->next_renewal_on?->toDateString();
         $paymentId = (int) $personalRequest->payments()->latest('id')->value('id');
         $notifications->notify(
             $organization,
@@ -119,13 +133,20 @@ class FinanceController extends Controller
             $user,
             $renewal ? 'expense_request.renewed' : 'expense_request.paid',
             $renewal ? '软件续费已完成' : '费用申请已付款',
-            "{$personalRequest->reference_no}：{$personalRequest->title}",
+            $renewal
+                ? "{$personalRequest->reference_no}：{$personalRequest->title}，本周期 {$renewalDueOn}，下次续费 {$nextRenewalOn}"
+                : "{$personalRequest->reference_no}：{$personalRequest->title}",
             route('expense-requests.index', [], false),
             $personalRequest,
             "personal-request:{$personalRequest->uuid}:payment:{$paymentId}",
         );
 
-        return back()->with('success', $renewal ? '续费记录已保存，下次续费日期已顺延。' : '付款已确认。');
+        return back()->with(
+            'success',
+            $renewal
+                ? "续费已记录：本周期 {$renewalDueOn}，下次续费 {$nextRenewalOn}。"
+                : '付款已确认。',
+        );
     }
 
     public function recordExpenseReimbursement(Request $request, PersonalRequest $personalRequest, CurrentOrganization $currentOrganization, FinanceService $finance, BusinessNotificationService $notifications): RedirectResponse

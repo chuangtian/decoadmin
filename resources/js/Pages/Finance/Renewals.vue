@@ -3,6 +3,7 @@ import { Head, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import EmptyState from '../../Components/Feedback/EmptyState.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import { useToast } from '../../composables/useToast';
 
 interface PaymentRequest {
     uuid: string;
@@ -26,11 +27,17 @@ interface PaymentRequest {
     payer: string | null;
     paid_on: string | null;
     next_renewal_on: string | null;
+    following_renewal_on: string | null;
+    days_until_renewal: number | null;
+    can_record_renewal: boolean;
     payment_reference: string | null;
 }
 const props = defineProps<{
     organization: { id: number; name: string };
     canManage: boolean;
+    today: string;
+    windowEnd: string;
+    timezone: string;
     paymentRequests: PaymentRequest[];
 }>();
 
@@ -40,13 +47,13 @@ const loadingPasswords = ref<Record<string, boolean>>({});
 const copied = ref('');
 const revealError = ref('');
 const activeFilter = ref<'pending' | 'manual' | 'automatic'>('pending');
-const payment = useForm({ paid_on: new Date().toISOString().slice(0, 10), payment_reference: '' });
+const payment = useForm({ paid_on: props.today, payment_reference: '' });
+const toast = useToast();
 const passwordTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const today = new Date().toISOString().slice(0, 10);
 const pendingCount = computed(() => props.paymentRequests.filter((item) => item.payment_status === 'pending').length);
 const manualCount = computed(() => props.paymentRequests.filter((item) => item.payment_status === 'paid' && item.renewal_mode === 'manual').length);
 const automaticCount = computed(() => props.paymentRequests.filter((item) => item.payment_status === 'paid' && item.renewal_mode === 'automatic').length);
-const overdueCount = computed(() => props.paymentRequests.filter((item) => item.next_renewal_on && item.next_renewal_on < today).length);
+const overdueCount = computed(() => props.paymentRequests.filter((item) => item.days_until_renewal !== null && item.days_until_renewal <= 0).length);
 const filteredRequests = computed(() => {
     return props.paymentRequests.filter((item) => {
         if (activeFilter.value === 'pending') return item.payment_status === 'pending';
@@ -83,6 +90,13 @@ function isManualRenewal(item: PaymentRequest): boolean {
 
 function isAutomaticRenewal(item: PaymentRequest): boolean {
     return item.renewal_mode === 'automatic';
+}
+
+function renewalTimingLabel(item: PaymentRequest): string {
+    if (item.days_until_renewal === null) return '';
+    if (item.days_until_renewal < 0) return `已逾期 ${Math.abs(item.days_until_renewal)} 天`;
+    if (item.days_until_renewal === 0) return '今天到期';
+    return `还有 ${item.days_until_renewal} 天`;
 }
 
 function clearPasswords(): void {
@@ -143,9 +157,14 @@ async function copyValue(value: string, key: string): Promise<void> {
 }
 
 function openPayment(item: PaymentRequest): void {
+    if (item.payment_status === 'paid' && !item.can_record_renewal) {
+        toast.info(`本周期将在 ${item.next_renewal_on} 到期，当前无需记录续费。`, renewalTimingLabel(item));
+        return;
+    }
     selected.value = item;
     payment.reset();
-    payment.paid_on = today;
+    payment.clearErrors();
+    payment.paid_on = props.today;
 }
 
 function savePayment(): void {
@@ -153,6 +172,10 @@ function savePayment(): void {
     payment.post(`/finance/expense-requests/${selected.value.uuid}/payment`, {
         preserveScroll: true,
         onSuccess: () => { selected.value = null; },
+        onError: (errors) => {
+            const message = Object.values(errors)[0];
+            if (message) toast.warning(String(message), '续费未记录');
+        },
     });
 }
 
@@ -171,13 +194,13 @@ function savePayment(): void {
             <section class="grid gap-4 sm:grid-cols-3">
                 <article class="rounded-2xl border border-orange-100 bg-orange-50 p-5"><p class="text-sm font-semibold text-orange-700">手动续费</p><p class="mt-3 text-3xl font-bold text-orange-950">{{ manualCount }}</p></article>
                 <article class="rounded-2xl border border-blue-100 bg-blue-50 p-5"><p class="text-sm font-semibold text-blue-700">自动续费</p><p class="mt-3 text-3xl font-bold text-blue-950">{{ automaticCount }}</p></article>
-                <article class="rounded-2xl border border-rose-100 bg-rose-50 p-5"><p class="text-sm font-semibold text-rose-700">已到续费日期</p><p class="mt-3 text-3xl font-bold text-rose-950">{{ overdueCount }}</p></article>
+                <article class="rounded-2xl border border-rose-100 bg-rose-50 p-5"><p class="text-sm font-semibold text-rose-700">今天到期或已逾期</p><p class="mt-3 text-3xl font-bold text-rose-950">{{ overdueCount }}</p></article>
             </section>
 
             <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div class="border-b border-slate-100 px-6 py-5">
                     <h2 class="font-semibold text-slate-900">付款与续费项目</h2>
-                    <p class="mt-1 text-sm text-slate-500">首次付款优先显示但不计入续费统计；续费项目按方式和下一续费日期管理。</p>
+                    <p class="mt-1 text-sm text-slate-500">首次待付款全部显示；手动和自动续费仅显示已逾期或未来 30 天内到期的项目（截至 {{ props.windowEnd }}，{{ props.timezone }}）。</p>
                     <div class="mt-3 flex flex-wrap gap-2">
                         <button type="button" class="rounded-full px-3 py-2 text-sm font-semibold transition" :class="activeFilter === 'pending' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'" @click="setFilter('pending')">{{ filterLabels.pending }}</button>
                         <button type="button" class="rounded-full px-3 py-2 text-sm font-semibold transition" :class="activeFilter === 'manual' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'" @click="setFilter('manual')">{{ filterLabels.manual }}</button>
@@ -186,7 +209,7 @@ function savePayment(): void {
                 </div>
                 <p v-if="revealError" class="mx-6 mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ revealError }}</p>
                 <div v-if="filteredRequests.length" class="divide-y divide-slate-100">
-                    <article v-for="item in filteredRequests" :key="item.uuid" class="grid gap-5 px-6 py-5 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-center" :class="item.is_new_application ? 'bg-rose-50' : item.next_renewal_on && item.next_renewal_on < today ? 'bg-rose-50/50' : ''">
+                    <article v-for="item in filteredRequests" :key="item.uuid" class="grid gap-5 px-6 py-5 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-center" :class="item.is_new_application ? 'bg-rose-50' : item.days_until_renewal !== null && item.days_until_renewal <= 0 ? 'bg-rose-50/50' : ''">
                         <div class="min-w-0">
                             <div class="flex flex-wrap items-center gap-2">
                                 <strong class="text-sm text-slate-900">{{ item.title }}</strong>
@@ -209,13 +232,13 @@ function savePayment(): void {
                         </div>
                         <dl class="grid grid-cols-2 gap-3 text-sm lg:grid-cols-1">
                             <div><dt class="text-xs text-slate-400">本期金额</dt><dd class="mt-1 font-bold text-slate-900">{{ item.currency }} {{ item.amount }}</dd></div>
-                            <div v-if="item.next_renewal_on"><dt class="text-xs text-slate-400">下次续费</dt><dd class="mt-1 font-semibold" :class="item.next_renewal_on < today ? 'text-rose-700' : 'text-orange-700'">{{ item.next_renewal_on }}</dd></div>
+                            <div v-if="item.next_renewal_on"><dt class="text-xs text-slate-400">本次应续费</dt><dd class="mt-1 font-semibold" :class="item.can_record_renewal ? 'text-rose-700' : 'text-orange-700'">{{ item.next_renewal_on }}</dd><dd class="mt-1 text-xs" :class="item.can_record_renewal ? 'text-rose-600' : 'text-slate-500'">{{ renewalTimingLabel(item) }}</dd></div>
                             <div v-else><dt class="text-xs text-slate-400">计划使用</dt><dd class="mt-1 text-slate-600">{{ item.desired_date }}</dd></div>
                             <div v-if="item.paid_on"><dt class="text-xs text-slate-400">最近付款</dt><dd class="mt-1 text-slate-600">{{ item.paid_on }} · {{ item.payer }}</dd></div>
                         </dl>
                         <button v-if="canManage && item.payment_status === 'pending'" class="h-11 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white" @click="openPayment(item)">确认首次付款</button>
-                        <button v-else-if="canManage && isManualRenewal(item)" class="h-11 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white" @click="openPayment(item)">记录续费</button>
-                        <span v-else-if="isAutomaticRenewal(item)" class="rounded-xl bg-blue-50 px-4 py-3 text-center text-xs font-semibold text-blue-700">到期自动确认（无需财务手动操作）</span>
+                        <button v-else-if="canManage && isManualRenewal(item)" class="h-11 rounded-xl px-5 text-sm font-semibold" :class="item.can_record_renewal ? 'bg-slate-950 text-white' : 'bg-orange-50 text-orange-700 ring-1 ring-orange-200'" @click="openPayment(item)">{{ item.can_record_renewal ? (item.days_until_renewal === 0 ? '记录续费' : '补记续费') : renewalTimingLabel(item) }}</button>
+                        <span v-else-if="isAutomaticRenewal(item)" class="rounded-xl bg-blue-50 px-4 py-3 text-center text-xs font-semibold text-blue-700">{{ item.can_record_renewal ? '等待系统自动确认' : `${renewalTimingLabel(item)}自动续费` }}</span>
                     </article>
                 </div>
                 <EmptyState v-else title="当前分类暂无项目" :description="activeFilter === 'pending' ? '当前没有首次待付款项目。' : activeFilter === 'manual' ? '当前没有手动续费项目。' : '当前没有自动续费项目。'" icon="finance" />
@@ -230,8 +253,8 @@ function savePayment(): void {
                         <div><p class="text-xs font-semibold text-emerald-700">{{ selected.reference_no }}</p><h2 class="mt-1 text-xl font-bold text-slate-950">{{ selected.payment_status === 'pending' ? '确认首次付款' : '记录本次续费' }}</h2><p class="mt-1 text-sm text-slate-500">{{ selected.title }} · {{ selected.currency }} {{ selected.amount }}</p></div>
                         <button type="button" class="text-2xl text-slate-400" @click="selected = null">×</button>
                     </div>
-                    <div v-if="selected.category === 'software'" class="mt-5 rounded-xl bg-orange-50 p-4 text-sm text-orange-900"><p>付费方式：{{ selected.software_payment_method || '未填写' }}</p><p class="mt-1">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }} · {{ billingCycleLabel(selected.billing_cycle) }}</p><p class="mt-1 text-xs text-orange-700">确认后系统会从本次付款日期起计算下一次续费日期。</p></div>
-                    <label class="mt-5 block text-sm font-semibold text-slate-700">实际付款日期<input v-model="payment.paid_on" required type="date" class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label>
+                    <div v-if="selected.category === 'software'" class="mt-5 rounded-xl bg-orange-50 p-4 text-sm text-orange-900"><p>付费方式：{{ selected.software_payment_method || '未填写' }}</p><p class="mt-1">{{ selected.renewal_mode === 'automatic' ? '自动续费' : '手动续费' }} · {{ billingCycleLabel(selected.billing_cycle) }}</p><template v-if="selected.payment_status === 'paid'"><p class="mt-2">本次应续费：<strong>{{ selected.next_renewal_on }}</strong></p><p class="mt-1">确认后下次续费：<strong>{{ selected.following_renewal_on }}</strong></p><p class="mt-1 text-xs text-orange-700">系统按原定续费周期顺延，不会因为晚几天付款而改变周期。</p></template><p v-else class="mt-1 text-xs text-orange-700">首次付款后，系统会按付款周期自动计算下一次续费日期。</p></div>
+                    <label class="mt-5 block text-sm font-semibold text-slate-700">实际付款日期<input v-model="payment.paid_on" required type="date" :min="selected.payment_status === 'paid' ? selected.next_renewal_on || undefined : undefined" :max="props.today" class="mt-2 h-11 w-full rounded-xl border-slate-200" /></label>
                     <label class="mt-4 block text-sm font-semibold text-slate-700">付款参考号（可选）<input v-model="payment.payment_reference" maxlength="180" class="mt-2 h-11 w-full rounded-xl border-slate-200" placeholder="银行流水、支付平台单号等" /></label>
                     <p v-if="payment.hasErrors" class="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ Object.values(payment.errors).join('；') }}</p>
                     <div class="mt-6 flex justify-end gap-3"><button type="button" class="h-11 rounded-xl border px-5 text-sm font-semibold" @click="selected = null">取消</button><button :disabled="payment.processing" class="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white">确认并保存</button></div>
