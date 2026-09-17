@@ -544,8 +544,9 @@ function applyAnalyticsDates() {
                     <div class="rounded-2xl bg-white/10 px-4 py-3 text-sm"><p class="font-semibold">{{ store.name }}</p><p class="mt-1 text-xs text-slate-300">{{ store.shopify_domain }}</p></div>
                 </div>
             </header>
-            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2 xl:grid-cols-5" aria-label="Personalization navigation">
+            <nav class="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2 xl:grid-cols-6" aria-label="Personalization navigation">
                 <button v-for="tab in tabs" :key="tab.value" type="button" class="rounded-xl px-3 py-3 text-left transition" :class="activeTab === tab.value ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'" @click="activeTab = tab.value"><span class="block text-sm font-semibold">{{ tab.label }}</span><span class="mt-0.5 hidden text-xs opacity-70 sm:block">{{ tab.hint }}</span></button>
+                <a :href="`${baseUrl}/editor`" class="rounded-xl px-3 py-3 text-left text-slate-600 transition hover:bg-slate-50"><span class="block text-sm font-semibold">Widget editor</span><span class="mt-0.5 hidden text-xs opacity-70 sm:block">Display, styles and live preview</span></a>
             </nav>
             <p v-if="pageNotice" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{{ pageNotice }}</p>
 
