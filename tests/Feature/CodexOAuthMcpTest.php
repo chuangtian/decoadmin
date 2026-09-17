@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CodexApiToken;
+use App\Models\CodexOAuthRefreshToken;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\Store;
@@ -183,7 +184,7 @@ class CodexOAuthMcpTest extends TestCase
         $this->withToken($newAccessToken)->postJson('/mcp/decoadmin', [
             'jsonrpc' => '2.0', 'id' => 3, 'method' => 'ping',
         ])->assertUnauthorized();
-        $this->assertDatabaseHas('codex_oauth_refresh_tokens', ['revoked_at' => now()]);
+        $this->assertNotNull(CodexOAuthRefreshToken::query()->latest('id')->firstOrFail()->revoked_at);
     }
 
     public function test_remote_mcp_challenges_unauthenticated_clients_and_rechecks_rbac(): void

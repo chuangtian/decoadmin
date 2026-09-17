@@ -36,7 +36,8 @@ class MfDailyReportSyncTest extends TestCase
     public function test_existing_nightly_sync_is_unchanged_and_mf_report_runs_at_three_thirty_pm_in_beijing(): void
     {
         $events = collect(app(Schedule::class)->events());
-        $nightly = $events->first(fn ($event): bool => str_contains($event->command, 'feishu:sync-paid-advertising-goals'));
+        $nightly = $events->first(fn ($event): bool => str_contains($event->command, 'feishu:sync-paid-advertising-goals')
+            && ! str_contains($event->command, '--google-only'));
         $dailyReport = $events->first(fn ($event): bool => str_contains($event->command, 'feishu:sync-mf-daily-reports'));
 
         $this->assertNotNull($nightly);
