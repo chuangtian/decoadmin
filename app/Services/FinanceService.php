@@ -18,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class FinanceService
 {
+    public const RENEWAL_WINDOW_DAYS = 15;
+
     public function __construct(private readonly AnalyticsQueryService $analytics) {}
 
     /** @param array<string, mixed> $filters */
@@ -48,16 +50,23 @@ class FinanceService
     }
 
     /** @return list<array<string, mixed>> */
-    public function paymentRequests(Organization $organization): array
+    public function paymentRequests(Organization $organization, ?CarbonImmutable $today = null): array
     {
+        $today ??= CarbonImmutable::today();
+        $windowEnd = $today->addDays(self::RENEWAL_WINDOW_DAYS);
+
         return PersonalRequest::query()
             ->where('organization_id', $organization->id)
             ->where('kind', 'expense_request')
             ->where('status', 'approved')
             ->where('renewal_status', 'active')
-            ->where(function (Builder $query): void {
+            ->where(function (Builder $query) use ($windowEnd): void {
                 $query->where('payment_status', 'pending')
-                    ->orWhere(fn (Builder $query) => $query->where('payment_status', 'paid')->where('category', 'software'));
+                    ->orWhere(fn (Builder $query) => $query
+                        ->where('payment_status', 'paid')
+                        ->where('category', 'software')
+                        ->whereNotNull('next_renewal_on')
+                        ->whereDate('next_renewal_on', '<=', $windowEnd));
             })
             ->with(['submitter:id,name', 'payer:id,name'])
             ->orderByRaw("case when payment_status = 'pending' then 0 else 1 end")
@@ -65,7 +74,7 @@ class FinanceService
             ->latest('id')
             ->limit(100)
             ->get()
-            ->map(fn (PersonalRequest $item): array => $this->paymentRequestResource($item))
+            ->map(fn (PersonalRequest $item): array => $this->paymentRequestResource($item, $today))
             ->all();
     }
 
@@ -134,17 +143,45 @@ class FinanceService
         return DB::transaction(function () use ($actor, $organization, $request, $values): PersonalRequest {
             $item = PersonalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
             $renewal = $item->payment_status === 'paid';
-            abort_unless(
-                $item->status === 'approved'
-                    && $item->renewal_status === 'active'
-                    && ($item->payment_status === 'pending' || ($renewal && $item->category === 'software' && $item->renewal_mode === 'manual')),
-                409,
-                '该费用申请当前不能付款。'
-            );
+            if (
+                $item->status !== 'approved'
+                || $item->renewal_status !== 'active'
+                || ! ($item->payment_status === 'pending' || ($renewal && $item->category === 'software' && $item->renewal_mode === 'manual'))
+            ) {
+                throw ValidationException::withMessages([
+                    'paid_on' => $item->renewal_mode === 'automatic'
+                        ? '该项目为自动续费，无需手动记录。'
+                        : '该项目当前不能记录付款或续费，请刷新页面后重试。',
+                ]);
+            }
             $paidOn = CarbonImmutable::parse($values['paid_on'])->startOfDay();
-            abort_unless(! $renewal || ! $item->paid_on || $paidOn->isAfter($item->paid_on), 422, '续费日期必须晚于上次付款日期。');
+            $renewalDueOn = $renewal && $item->next_renewal_on
+                ? CarbonImmutable::parse($item->next_renewal_on)->startOfDay()
+                : null;
+            if ($renewal && ! $renewalDueOn) {
+                throw ValidationException::withMessages(['paid_on' => '当前缺少本次应续费日期，请刷新页面后重试。']);
+            }
+            if ($renewalDueOn && $paidOn->isBefore($renewalDueOn)) {
+                throw ValidationException::withMessages([
+                    'paid_on' => "本周期将在 {$renewalDueOn->toDateString()} 到期，当前无需记录续费。",
+                ]);
+            }
+            if ($renewalDueOn && $item->payments()->whereDate('renewal_due_on', $renewalDueOn)->exists()) {
+                throw ValidationException::withMessages([
+                    'paid_on' => "{$renewalDueOn->toDateString()} 这一续费周期已经记录，无需重复操作。",
+                ]);
+            }
+            if (! $renewal && $item->category === 'software') {
+                $item->renewal_anchor_day = $paidOn->day;
+                $item->renewal_anchor_month_end = $paidOn->isLastOfMonth();
+            }
             $nextRenewalOn = $item->category === 'software'
-                ? $this->nextRenewalDate($paidOn, (string) $item->billing_cycle)
+                ? $this->nextRenewalDate(
+                    $renewalDueOn ?? $paidOn,
+                    (string) $item->billing_cycle,
+                    $item->renewal_anchor_day,
+                    $item->renewal_anchor_month_end,
+                )
                 : null;
 
             $item->forceFill([
@@ -162,6 +199,7 @@ class FinanceService
                 'amount' => $item->amount,
                 'currency' => $item->currency,
                 'paid_on' => $paidOn->toDateString(),
+                'renewal_due_on' => $renewalDueOn?->toDateString(),
                 'reference' => $item->payment_reference,
             ]);
             $item->progressLogs()->create([
@@ -425,8 +463,10 @@ class FinanceService
         ];
     }
 
-    private function paymentRequestResource(PersonalRequest $item): array
+    private function paymentRequestResource(PersonalRequest $item, CarbonImmutable $today): array
     {
+        $renewalDueOn = $item->next_renewal_on ? CarbonImmutable::parse($item->next_renewal_on) : null;
+
         return [
             'uuid' => $item->uuid,
             'reference_no' => $item->reference_no,
@@ -450,6 +490,16 @@ class FinanceService
             'payer' => $item->payer?->name,
             'paid_on' => $item->paid_on?->toDateString(),
             'next_renewal_on' => $item->next_renewal_on?->toDateString(),
+            'following_renewal_on' => $renewalDueOn
+                ? $this->nextRenewalDate(
+                    $renewalDueOn,
+                    (string) $item->billing_cycle,
+                    $item->renewal_anchor_day,
+                    $item->renewal_anchor_month_end,
+                )->toDateString()
+                : null,
+            'days_until_renewal' => $renewalDueOn ? (int) $today->diffInDays($renewalDueOn, false) : null,
+            'can_record_renewal' => $renewalDueOn?->lte($today) ?? false,
             'payment_reference' => $item->payment_reference,
         ];
     }
@@ -489,6 +539,7 @@ class FinanceService
             'amount' => (string) $payment->amount,
             'currency' => $payment->currency,
             'paid_on' => $payment->paid_on?->toDateString(),
+            'renewal_due_on' => $payment->renewal_due_on?->toDateString(),
             'reference' => $payment->reference,
             'payer' => $payment->payer?->name ?? '系统自动续费',
             'request' => [
@@ -518,7 +569,12 @@ class FinanceService
         $nextRenewalOn = CarbonImmutable::parse($item->next_renewal_on);
         while ($nextRenewalOn->lte($through)) {
             $paymentDates[] = $nextRenewalOn;
-            $nextRenewalOn = $this->nextRenewalDate($nextRenewalOn, (string) $item->billing_cycle);
+            $nextRenewalOn = $this->nextRenewalDate(
+                $nextRenewalOn,
+                (string) $item->billing_cycle,
+                $item->renewal_anchor_day,
+                $item->renewal_anchor_month_end,
+            );
         }
 
         $paidOn = $paymentDates[array_key_last($paymentDates)];
@@ -531,13 +587,14 @@ class FinanceService
 
         foreach ($paymentDates as $paymentDate) {
             PersonalRequestPayment::query()->firstOrCreate(
-                ['personal_request_id' => $item->id, 'paid_on' => $paymentDate->toDateString()],
+                ['personal_request_id' => $item->id, 'renewal_due_on' => $paymentDate->toDateString()],
                 [
                     'organization_id' => $item->organization_id,
                     'paid_by' => null,
                     'type' => 'automatic_renewal',
                     'amount' => $item->amount,
                     'currency' => $item->currency,
+                    'paid_on' => $paymentDate->toDateString(),
                     'reference' => 'AUTO-RENEWAL',
                 ]
             );
@@ -559,15 +616,25 @@ class FinanceService
         return $cycles;
     }
 
-    private function nextRenewalDate(CarbonImmutable $paidOn, string $billingCycle): CarbonImmutable
-    {
-        return match ($billingCycle) {
-            'monthly' => $paidOn->addMonthNoOverflow(),
-            'bimonthly' => $paidOn->addMonthsNoOverflow(2),
-            'quarterly' => $paidOn->addMonthsNoOverflow(3),
-            'annual' => $paidOn->addYearNoOverflow(),
+    private function nextRenewalDate(
+        CarbonImmutable $from,
+        string $billingCycle,
+        ?int $anchorDay = null,
+        ?bool $anchorMonthEnd = null,
+    ): CarbonImmutable {
+        $months = match ($billingCycle) {
+            'monthly' => 1,
+            'bimonthly' => 2,
+            'quarterly' => 3,
+            'annual' => 12,
             default => throw new \InvalidArgumentException("Unsupported billing cycle: {$billingCycle}"),
         };
+        $targetMonth = $from->startOfMonth()->addMonths($months);
+        $day = $anchorMonthEnd === true
+            ? $targetMonth->daysInMonth
+            : min($anchorDay ?? $from->day, $targetMonth->daysInMonth);
+
+        return $targetMonth->day($day);
     }
 
     private function audit(Organization $organization, ?User $actor, string $action, object $subject, array $values): void

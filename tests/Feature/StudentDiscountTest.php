@@ -27,6 +27,7 @@ use App\Services\StudentDiscount\StudentDiscountCodeService;
 use App\Services\StudentDiscount\StudentDiscountEmailTemplateService;
 use App\Services\StudentDiscount\StudentDiscountEvidenceCleanupService;
 use App\Services\StudentDiscount\StudentDiscountMailDeliveryService;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -1384,6 +1385,7 @@ class StudentDiscountTest extends TestCase
 
     public function test_claim_list_combines_filters_usage_states_and_store_scope_without_n_plus_one_syncs(): void
     {
+        CarbonImmutable::setTestNow('2026-09-10 12:00:00 UTC');
         [$admin, $organization, $store] = $this->context('store-admin');
         $otherStore = $organization->stores()->create([
             'name' => 'Other Filter Store',

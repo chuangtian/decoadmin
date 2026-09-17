@@ -159,7 +159,7 @@ class GoogleAdsAttributionConsistencyTest extends TestCase
         $before = $this->snapshot($store);
         $batches = 0;
         DB::listen(function ($query) use (&$batches) {
-            if (str_starts_with($query->sql, 'insert into `google_ads_search_term_daily_metrics`') && ++$batches === 2) {
+            if (preg_match('/^insert into [`"]google_ads_search_term_daily_metrics[`"]/', $query->sql) && ++$batches === 2) {
                 throw new RuntimeException('Simulated later batch failure.');
             }
         });

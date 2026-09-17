@@ -12,7 +12,8 @@ use Illuminate\Support\Str;
 #[Fillable([
     'uuid', 'organization_id', 'kind', 'reference_no', 'submitter_id', 'assignee_id', 'reviewer_id',
     'title', 'description', 'category', 'priority', 'desired_date', 'amount', 'currency', 'expense_date',
-    'software_url', 'software_account', 'software_password', 'software_payment_method', 'renewal_mode', 'billing_cycle', 'renewal_status',
+    'software_url', 'software_account', 'software_password', 'software_payment_method', 'renewal_mode', 'billing_cycle',
+    'renewal_anchor_day', 'renewal_anchor_month_end', 'renewal_status',
     'payment_status', 'paid_by', 'paid_on', 'next_renewal_on', 'payment_reference',
     'cancelled_on', 'cancelled_by', 'status', 'approval_required', 'review_note', 'reviewed_at', 'accepted_at', 'completed_at',
 ])]
@@ -89,6 +90,7 @@ class PersonalRequest extends Model
             'desired_date' => 'date', 'expense_date' => 'date', 'paid_on' => 'date', 'next_renewal_on' => 'date',
             'cancelled_on' => 'date', 'amount' => 'decimal:2',
             'software_account' => 'encrypted', 'software_password' => 'encrypted',
+            'renewal_anchor_day' => 'integer', 'renewal_anchor_month_end' => 'boolean',
             'approval_required' => 'boolean', 'reviewed_at' => 'datetime', 'accepted_at' => 'datetime', 'completed_at' => 'datetime',
         ];
     }

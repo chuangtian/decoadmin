@@ -12,6 +12,7 @@ use App\Services\StoreFeishuDataLinkService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class ReputationDashboardService
 {
@@ -607,17 +608,21 @@ class ReputationDashboardService
             ->whereNotNull('rating')
             ->whereNotNull('model_name')
             ->whereRaw("TRIM(model_name) <> ''")
-            ->selectRaw('LOWER(TRIM(model_name)) as model_key, COUNT(*) as total, AVG(rating) as average_rating')
-            ->groupByRaw('LOWER(TRIM(model_name))')
-            ->orderByDesc('total')
-            ->orderBy('model_key')
-            ->get()
-            ->map(fn (ReputationMention $row): array => [
-                'model' => (string) $row->getAttribute('model_key'),
-                'key' => (string) $row->getAttribute('model_key'),
-                'count' => (int) $row->getAttribute('total'),
-                'average_rating' => round((float) ($row->getAttribute('average_rating') ?? 0), 2),
-            ])->all();
+            ->get(['model_name', 'rating'])
+            ->groupBy(fn (ReputationMention $row): string => trim((string) $row->model_name))
+            ->map(function (Collection $rows, string $model): array {
+                return [
+                    'model' => $model,
+                    'key' => $model,
+                    'count' => $rows->count(),
+                    'average_rating' => round((float) $rows->avg('rating'), 2),
+                ];
+            })
+            ->sort(function (array $left, array $right): int {
+                return $right['count'] <=> $left['count'] ?: strcmp($left['key'], $right['key']);
+            })
+            ->values()
+            ->all();
     }
 
     /** @return array<string, float> */

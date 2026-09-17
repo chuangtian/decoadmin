@@ -222,8 +222,10 @@ class PersonalizationController extends Controller
                 'name' => $component->name,
                 'placement' => $component->placement->value,
                 'status' => $component->status->value,
+                'enabled' => $component->status->value === 'active',
                 'heading' => $component->heading ?: 'You may also like',
                 'button_label' => $component->button_label ?: 'Add to cart',
+                'experiment' => data_get($component->settings, 'editor_experiment'),
                 'style' => [
                     'layout' => $component->style?->layout ?? 'carousel',
                     'desktop_columns' => $component->style?->desktop_columns ?? 3,
@@ -235,6 +237,13 @@ class PersonalizationController extends Controller
                     'show_add_to_cart' => $component->style?->show_add_to_cart ?? true,
                     'tokens' => $component->style?->tokens ?? [],
                 ],
+            ])->values(),
+            'strategies' => $configuration['strategies']->map(fn ($strategy): array => [
+                'uuid' => $strategy->uuid,
+                'id' => $strategy->id,
+                'name' => $strategy->name,
+                'algorithm' => $strategy->algorithm->value,
+                'status' => $strategy->enabled ? 'enabled' : 'disabled',
             ])->values(),
             'products' => $this->catalog->pickerProducts($store)->take(3)->map(fn (array $product): array => [
                 'shopify_product_id' => $product['shopify_product_id'],
@@ -262,7 +271,7 @@ class PersonalizationController extends Controller
             'style' => ['required', 'array'],
             'style.layout' => ['required', Rule::in(['carousel', 'grid'])],
             'style.desktop_columns' => ['required', 'integer', 'between:1,6'],
-            'style.mobile_columns' => ['required', 'integer', 'between:1,3'],
+            'style.mobile_columns' => ['required', 'integer', 'between:1,6'],
             'style.show_image' => ['required', 'boolean'],
             'style.show_vendor' => ['required', 'boolean'],
             'style.show_price' => ['required', 'boolean'],
@@ -270,6 +279,12 @@ class PersonalizationController extends Controller
             'style.show_add_to_cart' => ['required', 'boolean'],
             'style.tokens' => ['array'],
             'enabled' => ['required', 'boolean'],
+            'experiment' => ['nullable', 'array'],
+            'experiment.name' => ['required_with:experiment', 'string', 'max:80', 'regex:/\S/u'],
+            'experiment.status' => ['required_with:experiment', Rule::in(['draft'])],
+            'experiment.primary_metric' => ['required_with:experiment', Rule::in(['revenue', 'conversion_rate', 'average_order_value'])],
+            'experiment.variant_name' => ['required_with:experiment', 'string', 'max:80', 'regex:/\S/u'],
+            'experiment.variant_traffic_percentage' => ['required_with:experiment', 'integer', 'between:1,99'],
         ]);
         $strategy = $this->ownedStrategy($store, $values['strategy_uuid']);
 
